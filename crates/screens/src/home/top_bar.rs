@@ -2,7 +2,7 @@
 //! right. Its measures are the screen's own, not the rows': nothing here is multiplied by ROW_SCALE.
 use ui::{Color, Ease, Rect, Ui};
 
-use crate::theme::{self, glyph, BODY, BODY_SEMIBOLD, MARGIN};
+use crate::theme::{self, glyph, BODY, MARGIN};
 
 const MIDDLE: f32 = 114.0;
 const BUTTON: f32 = 60.0;
@@ -69,22 +69,31 @@ impl TopButton {
     }
 }
 
-/// The profile's picture: until Profiles have pictures, the green disc with the contact glyph, or where there is
-/// no icon font the gamertag's initial.
-pub fn profile_picture(ui: &mut Ui, rect: Rect, user: &str) {
-    ui.fill(rect, theme::ACCENT, 999.0);
+/// The profile's picture. Until Profiles have pictures it is what the Bundle shows for a Windows account with no
+/// picture of its own, Windows' default: a grey figure, head and shoulders, on a pale disc.
+pub fn profile_picture(ui: &mut Ui, rect: Rect) {
+    const DISC: Color = Color::rgb(0xF2F2F2);
+    const FIGURE: Color = Color::rgb(0x9B9B9B);
+    // Drawn for a picture 56 across, and in proportion for any other.
+    let unit = rect.w / 56.0;
     let (cx, cy) = rect.center();
-    if ui.has_font(ui::Font::Icons) {
-        ui.icon(cx, cy, glyph::CONTACT, 26.0, Color::WHITE);
-    } else {
-        let initial: String = user.chars().take(1).flat_map(char::to_uppercase).collect();
-        ui.label_centered(cx, cy - 1.0, &initial, &BODY_SEMIBOLD);
-    }
+    ui.fill(rect, DISC, 999.0);
+    ui.fill(Rect::new(cx - 8.0 * unit, cy - 16.0 * unit, 16.0 * unit, 16.0 * unit), FIGURE, 999.0);
+    ui.fill(Rect::new(cx - 14.0 * unit, cy + 3.0 * unit, 28.0 * unit, 14.0 * unit), FIGURE, 999.0);
 }
 
-pub fn draw(ui: &mut Ui, user: &str, clock: &str, focused: Option<TopButton>) {
+/// What the top bar shows that is not a button.
+pub struct Status<'a> {
+    pub user: &'a str,
+    pub clock: &'a str,
+    /// Whether a pad is connected: its glyph stands left of the clock.
+    pub pad: bool,
+}
+
+pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
+    let Status { user, clock, pad } = *status;
     let picture = TopButton::Profile.rect();
-    profile_picture(ui, picture, user);
+    profile_picture(ui, picture);
     if focused == Some(TopButton::Profile) {
         // The ring stands 4 clear of the picture.
         theme::focus_ring_round(ui, picture, 4.0);
@@ -110,5 +119,9 @@ pub fn draw(ui: &mut Ui, user: &str, clock: &str, focused: Option<TopButton>) {
         }
         ui.icon(cx, cy, if has_focus { glyph_focused } else { glyph }, 26.0 * scale, Color::WHITE);
     }
-    ui.label_right(1725.0, MIDDLE + 2.0, clock, &theme::CLOCK);
+    // The status area ends 20 left of Notifications: the clock, and 16 left of it the pad.
+    let clock = ui.label_right(1725.0, MIDDLE + 2.0, clock, &theme::CLOCK);
+    if pad {
+        ui.icon(1725.0 - clock.width - 16.0 - 12.0, MIDDLE, glyph::GAMEPAD, 24.0, Color::WHITE);
+    }
 }

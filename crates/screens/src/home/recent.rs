@@ -73,7 +73,7 @@ pub fn draw(ui: &mut Ui, row: &Row, focused: Option<usize>) {
     for (i, &rect) in rects.iter().enumerate() {
         let title = match row.games.get(i) {
             Some(game) => {
-                tile::game(ui, rect, game, TILE * S);
+                tile::game(ui, rect, game, TILE * S, focused == Some(i));
                 game.name.as_str()
             }
             None => {

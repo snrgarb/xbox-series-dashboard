@@ -31,6 +31,8 @@ pub struct Dashboard {
     user: String,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
     clock: Option<String>,
+    /// Whether a pad is connected, which the top bar shows.
+    pad: bool,
     home: Home,
     guide: Guide,
     launch: LaunchScreen,
@@ -46,6 +48,7 @@ impl Dashboard {
             library,
             user,
             clock: None,
+            pad: false,
             home: Home::default(),
             guide: Guide::default(),
             launch: LaunchScreen::default(),
@@ -60,6 +63,11 @@ impl Dashboard {
 
     pub fn set_clock(&mut self, text: Option<String>) {
         self.clock = text;
+    }
+
+    /// A pad was connected, or the last one went.
+    pub fn set_pad_connected(&mut self, connected: bool) {
+        self.pad = connected;
     }
 
     /// What the shell is asked to do since the last call.
@@ -168,7 +176,8 @@ impl Dashboard {
 
     pub fn draw(&mut self, ui: &mut Ui) {
         let clock = self.clock.clone().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string());
-        self.home.draw(ui, &self.library, &self.user, &clock);
+        let status = home::Status { user: &self.user, clock: &clock, pad: self.pad };
+        self.home.draw(ui, &self.library, &status);
         self.launch.draw(ui);
         self.guide.draw(ui, &self.library, &self.user);
     }

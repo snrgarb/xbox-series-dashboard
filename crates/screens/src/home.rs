@@ -19,7 +19,7 @@ use self::background::Background;
 use self::groups::Group;
 use self::recent::Row;
 pub use self::tile::cover_art;
-pub use self::top_bar::{profile_picture, TopButton};
+pub use self::top_bar::{profile_picture, Status, TopButton};
 use crate::theme::ROW_SCALE as S;
 
 /// How many games the Recent row holds, before its Play history tile.
@@ -97,7 +97,8 @@ pub struct Home {
 impl Default for Home {
     fn default() -> Self {
         Self {
-            focus: Focus::Recent(0),
+            // Home starts on the profile, as the Bundle's does once Start-up has gone; Down is the Recent row.
+            focus: Focus::TopBar(TopButton::Profile),
             last_game: 0,
             left_recent: None,
             last_wide: 0,
@@ -226,7 +227,7 @@ impl Home {
         }
     }
 
-    pub fn draw(&mut self, ui: &mut Ui, library: &Library, user: &str, clock: &str) {
+    pub fn draw(&mut self, ui: &mut Ui, library: &Library, status: &Status) {
         let row = Row::of(library);
         let groups = groups::of(library);
         self.keep_focus_in(&row, &groups);
@@ -248,7 +249,7 @@ impl Home {
         let bar = ui.slide("home top bar", rest.top_bar, SLIDE_SECONDS, Ease::CubicOut);
         let rows = ui.tween("home rows", if on_group.is_some() { 0.0 } else { 1.0 }, SLIDE_SECONDS, Ease::CubicOut);
 
-        ui.with_offset(0.0, -bar, |ui| top_bar::draw(ui, user, clock, on_bar));
+        ui.with_offset(0.0, -bar, |ui| top_bar::draw(ui, status, on_bar));
         ui.with_offset(0.0, -page, |ui| {
             if rows > 0.0 {
                 ui.with_alpha(rows, |ui| {

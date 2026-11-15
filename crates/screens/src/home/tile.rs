@@ -16,9 +16,34 @@ pub fn cover_art(game: &Game, px: f32) -> Option<ArtKey> {
     Some(ArtKey { path: path.clone(), kind: Kind::Thumb(width) })
 }
 
+/// Where a game comes from: the store whose mark its tile carries.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Source {
+    Steam,
+}
+
+/// The game's source. Every game is Steam's until the library has other sources and says which.
+pub fn source(_game: &Game) -> Option<Source> {
+    Some(Source::Steam)
+}
+
+/// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow. The marks are the stores'
+/// own logos, which are not this project's to ship: until they are loaded from somewhere they may be, a plain
+/// white disc stands in for the mark. This is the one place to draw the real thing.
+pub fn source_badge(ui: &mut Ui, tile: Rect, source: Source) {
+    let Source::Steam = source;
+    let side = 20.0 * S;
+    let mark = Rect::new(tile.x + 10.0 * S, tile.bottom() - 10.0 * S - side, side, side);
+    // The theme's shadow: 0.8 black, blurred by 6, straight under the mark.
+    let shadow = mark.grow(3.0 * S);
+    ui.glow(shadow, Color::BLACK.fade(0.8), 999.0, shadow.w / 2.0, 6.0 * S);
+    ui.fill(mark, Color::WHITE, 999.0);
+}
+
 /// A game's face: its cover filling the tile from the top, or for want of one its name on the dark tile, set
-/// `name_width` wide so that it doesn't reflow as a tile grows.
-pub fn game(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32) {
+/// `name_width` wide so that it doesn't reflow as a tile grows; and its source's badge, which a focused tile
+/// hides for its title.
+pub fn game(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: bool) {
     let radius = RADIUS * S;
     ui.fill(rect, theme::TILE, radius);
     let has_cover = cover_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, radius));
@@ -26,6 +51,9 @@ pub fn game(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32) {
         let width = name_width - 20.0 * S;
         let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * S, width, rect.h - 20.0 * S);
         ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0);
+    }
+    if let Some(source) = source(game).filter(|_| !focused) {
+        source_badge(ui, rect, source);
     }
 }
 

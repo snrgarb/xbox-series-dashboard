@@ -19,8 +19,10 @@ pub fn run(args: &Args, library: Library) {
     let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(args.clock.clone());
     let press = |dashboard: &mut Dashboard, button| dashboard.press(Press { button, repeat: false });
-    for _ in 0..args.focus {
-        press(&mut dashboard, Button::Right);
+    // Home starts with focus on the profile: a game to launch or a row to walk is on the Recent row.
+    let on_row = args.focus.or((args.launch_screen || args.bench).then_some(0));
+    for button in crate::focus_presses(on_row) {
+        press(&mut dashboard, button);
     }
     for &button in &args.press {
         press(&mut dashboard, button);

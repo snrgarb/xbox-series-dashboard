@@ -100,6 +100,14 @@ impl Stage {
         Self { gpu, host, target, dashboard, _drawing: drawing }
     }
 
+    /// Home starts with focus on the profile; most pictures are of it once Down has put focus on the Recent row's
+    /// first tile.
+    fn on_row(library: Library, size: (u32, u32)) -> Self {
+        let mut stage = Self::new(library, size);
+        stage.press(&[Button::Down]);
+        stage
+    }
+
     fn press(&mut self, buttons: &[Button]) {
         for &button in buttons {
             self.dashboard.press(Press { button, repeat: false });
@@ -126,65 +134,67 @@ const HD: (u32, u32) = (1920, 1080);
 
 #[test]
 fn home() {
-    Stage::new(screens::fake_library(), HD).check("home");
+    Stage::on_row(screens::fake_library(), HD).check("home");
 }
 
 #[test]
 fn home_with_art() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right]);
     stage.check("home-art");
 }
 
 #[test]
 fn home_blurred_cover_behind_a_game_with_no_background() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right, Button::Right, Button::Right]);
     stage.check("home-blurred-cover");
 }
 
 #[test]
 fn home_wide_tile_focused() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right, Button::Right, Button::Down]);
     stage.check("home-wide-tile");
 }
 
 #[test]
 fn home_720p() {
-    Stage::new(library_with_art(), (1280, 720)).check("home-720p");
+    Stage::on_row(library_with_art(), (1280, 720)).check("home-720p");
 }
 
 /// Taller than 16:9: the canvas at the top, the background to the foot.
 #[test]
 fn home_16_10() {
-    Stage::new(library_with_art(), (1280, 800)).check("home-16-10");
+    Stage::on_row(library_with_art(), (1280, 800)).check("home-16-10");
 }
 
 #[test]
 fn home_ultrawide() {
     // Wider than 16:9: the canvas centred, the background to both edges.
-    Stage::new(library_with_art(), (2560, 1080)).check("home-ultrawide");
+    Stage::on_row(library_with_art(), (2560, 1080)).check("home-ultrawide");
 }
 
+/// Home as it starts: focus on the profile, no Recent tile grown, the base behind. With a pad connected, its glyph
+/// by the clock.
 #[test]
-fn home_profile_focused() {
+fn home_as_it_starts() {
     let mut stage = Stage::new(library_with_art(), HD);
-    stage.press(&[Button::Up]);
-    stage.check("home-profile");
+    stage.dashboard.set_pad_connected(true);
+    stage.check("home-start");
 }
 
 /// A round button with focus: its ring, its label under it, its icon larger.
 #[test]
 fn home_top_bar_button_focused() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Up, Button::Right, Button::Right]);
     stage.check("home-top-bar-button");
 }
 
 #[test]
 fn home_play_history_focused() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right; 7]);
     stage.check("home-play-history");
 }
@@ -192,7 +202,7 @@ fn home_play_history_focused() {
 /// The page at rest on the first Group: a game's card with focus.
 #[test]
 fn home_group_card_focused() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Down, Button::Down, Button::Right]);
     stage.check("home-group");
 }
@@ -200,7 +210,7 @@ fn home_group_card_focused() {
 /// The page at rest on the last Group: its See all card with focus.
 #[test]
 fn home_see_all_focused() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Down, Button::Down, Button::Down]);
     stage.press(&[Button::Right; 6]);
     stage.check("home-see-all");
@@ -209,21 +219,21 @@ fn home_see_all_focused() {
 /// The scrolled rests on a taller screen: there is more of the page under the wide tiles, so it rises less.
 #[test]
 fn home_wide_tile_focused_16_10() {
-    let mut stage = Stage::new(library_with_art(), (1280, 800));
+    let mut stage = Stage::on_row(library_with_art(), (1280, 800));
     stage.press(&[Button::Down]);
     stage.check("home-wide-tile-16-10");
 }
 
 #[test]
 fn home_group_card_focused_16_10() {
-    let mut stage = Stage::new(library_with_art(), (1280, 800));
+    let mut stage = Stage::on_row(library_with_art(), (1280, 800));
     stage.press(&[Button::Down, Button::Down, Button::Right, Button::Right, Button::Right]);
     stage.check("home-group-16-10");
 }
 
 #[test]
 fn guide() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.open_guide();
     stage.press(&[Button::Down]);
     stage.check("guide");
@@ -231,7 +241,7 @@ fn guide() {
 
 #[test]
 fn launch_screen() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.launch_started(0);
     stage.check("launch-screen");
 }
@@ -239,7 +249,7 @@ fn launch_screen() {
 /// The focused tile's title band is the theme's 90% black: over a white-edged cover its top edge is nearly black.
 #[test]
 fn the_title_band_is_nearly_opaque() {
-    let mut stage = Stage::new(library_with_art(), HD);
+    let mut stage = Stage::on_row(library_with_art(), HD);
     let image = stage.still();
     // The first tile, focused: 105..377 across, standing on 805.9. Its cover's edge is white for 6 of its pixels.
     let in_band = image.get_pixel(108, 790).0;
@@ -255,9 +265,16 @@ use screens::Effect;
 use Button::{Down, Left, Right, Up, A, B};
 
 /// A Dashboard on the fake library: seven games in the Recent row and the Play history tile; two Groups, Installed
-/// and Most played, each six games and See all.
+/// and Most played, each six games and See all. Focus is on the Recent row's first tile.
 fn core() -> Dashboard {
-    Dashboard::new(screens::fake_library())
+    on_row(screens::fake_library())
+}
+
+/// A Dashboard with focus brought down from the profile, where Home starts, to the Recent row's first tile.
+fn on_row(library: Library) -> Dashboard {
+    let mut dashboard = Dashboard::new(library);
+    press(&mut dashboard, &[Down]);
+    dashboard
 }
 
 fn press(dashboard: &mut Dashboard, buttons: &[Button]) {
@@ -274,6 +291,14 @@ fn after(dashboard: &mut Dashboard, buttons: &[Button]) -> Focus {
 
 fn card(group: usize, card: usize) -> Focus {
     Focus::Group { group, card }
+}
+
+#[test]
+fn home_starts_on_the_profile_and_down_is_the_recent_rows_first_tile() {
+    let mut home = Dashboard::new(screens::fake_library());
+    assert_eq!(home.home_focus(), Focus::TopBar(TopButton::Profile));
+    assert_eq!(home.focused_game(), None);
+    assert_eq!(after(&mut home, &[Down]), Focus::Recent(0));
 }
 
 #[test]
@@ -374,7 +399,7 @@ fn short_library() -> Library {
 
 #[test]
 fn a_shorter_group_takes_focus_on_its_last_card() {
-    let mut home = Dashboard::new(short_library());
+    let mut home = on_row(short_library());
     // Installed: four games and See all. Most played: two and See all.
     assert_eq!(after(&mut home, &[Down, Down, Right, Right, Right, Right]), card(0, 4));
     assert_eq!(after(&mut home, &[Right]), card(0, 4));
@@ -388,7 +413,7 @@ fn with_no_groups_down_from_the_wide_tiles_does_nothing() {
     for game in &mut library.games {
         (game.installed, game.playtime_minutes) = (false, 0);
     }
-    let mut home = Dashboard::new(library);
+    let mut home = on_row(library);
     assert_eq!(after(&mut home, &[Down, Down]), Focus::Wide(0));
 }
 
@@ -448,7 +473,7 @@ fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
 
 #[test]
 fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
-    let mut stage = Stage::new(screens::fake_library(), HD);
+    let mut stage = Stage::on_row(screens::fake_library(), HD);
     stage.press(&[Button::Right, Button::Right, Button::A]);
     assert_eq!(stage.dashboard.take_effects(), [Effect::Launch(2)]);
     stage.dashboard.launch_started(2);

@@ -53,8 +53,8 @@ pub fn run(args: &Args, library: Library) {
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(args.clock.clone());
-    for _ in 0..args.focus {
-        dashboard.press(Press { button: Button::Right, repeat: false });
+    for button in args.focus_presses() {
+        dashboard.press(Press { button, repeat: false });
     }
     let mut app = App {
         windowed: args.windowed,

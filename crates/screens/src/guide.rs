@@ -112,7 +112,7 @@ impl Guide {
 
             // The profile, as on Home's top bar.
             let picture = Rect::new(42.0, 64.0, 56.0, 56.0);
-            crate::home::profile_picture(ui, picture, user);
+            crate::home::profile_picture(ui, picture);
             let (_, cy) = picture.center();
             ui.label_middle(picture.right() + 18.0, cy - 2.0, user, &BODY_SEMIBOLD);
             ui.fill(Rect::new(30.0, 144.0, WIDTH - 60.0, 1.0), Color::WHITE.fade(0.2), 0.0);

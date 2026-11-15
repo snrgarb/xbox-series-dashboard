@@ -98,7 +98,7 @@ pub fn draw(ui: &mut Ui, library: &Library, groups: &[Group], focused: Option<(u
             let has_focus = focused == Some((g, card));
             let title = match group.games.get(card).and_then(|&i| library.games.get(i)) {
                 Some(game) => {
-                    tile::game(ui, rect, game, rect.w);
+                    tile::game(ui, rect, game, rect.w, has_focus);
                     game.name.as_str()
                 }
                 None => {

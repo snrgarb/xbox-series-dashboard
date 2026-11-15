@@ -46,7 +46,8 @@ try {
         if (-not $taken) { $failures += "the Dashboard could not be put in front: $(Front)" }
     }
 
-    # Focus moves.
+    # Focus moves: Home starts on the profile, and Down is the Recent row's first tile.
+    Push-Button Down; Start-Sleep -Milliseconds 400
     1..$moves | ForEach-Object { Push-Button Right; Start-Sleep -Milliseconds 400 }
     Start-Sleep -Milliseconds 600
     Save-Screen 'home-moved'
