@@ -1,0 +1,8 @@
+[package]
+name = "shots"
+version = "0.0.0"
+edition = "2021"
+description = "Test support: compares a rendered screenshot with its committed reference image."
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }

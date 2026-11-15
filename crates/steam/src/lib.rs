@@ -49,9 +49,8 @@ pub fn load(steam_root: &Path) -> Result<Library> {
             let manifest = installed.get(&appid);
             let manifest_played = manifest.map(|m| m.0);
             let art = art_root.as_deref().and_then(|r| child(r, &appid.to_string())).map(|d| ArtDir::scan(&d));
-            let find = |asset: &str, legacy: Option<&str>, names: &[&str]| {
-                art.as_ref()?.find(common, asset, legacy, names)
-            };
+            let find =
+                |asset: &str, legacy: Option<&str>, names: &[&str]| art.as_ref()?.find(common, asset, legacy, names);
             Some(Game {
                 appid,
                 name,
@@ -97,9 +96,7 @@ fn load_localconfig(steam_root: &Path) -> LocalConfig {
         .filter(|e| e.file_name().to_string_lossy().parse::<u64>().is_ok_and(|id| id != 0))
         .filter_map(|e| child(&child(&e.path(), "config")?, "localconfig.vdf"))
         .max_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
-    let parsed = newest
-        .and_then(|p| fs::read(p).ok())
-        .and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
+    let parsed = newest.and_then(|p| fs::read(p).ok()).and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
     match parsed {
         Some(v) => parse_localconfig(&v),
         None => LocalConfig::default(),
@@ -147,9 +144,7 @@ fn installed_apps(steam_root: &Path) -> HashMap<u32, (u64, Option<PathBuf>)> {
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             let id = name.strip_prefix("appmanifest_").and_then(|s| s.strip_suffix(".acf"));
             let Some(Ok(id)) = id.map(str::parse::<u32>) else { continue };
-            let manifest = fs::read(entry.path())
-                .ok()
-                .and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
+            let manifest = fs::read(entry.path()).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
             let played = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "LastPlayed"])).unwrap_or(0);
             let folder = manifest
                 .as_ref()
@@ -211,10 +206,7 @@ impl ArtDir {
     /// then fall back to the well-known file names anywhere in the folder.
     fn find(&self, common: &Value, asset: &str, legacy: Option<&str>, names: &[&str]) -> Option<PathBuf> {
         let mut wanted: Vec<&str> = Vec::new();
-        let by_lang = [
-            common.path(&["library_assets_full", asset, "image"]),
-            legacy.and_then(|k| common.get(k)),
-        ];
+        let by_lang = [common.path(&["library_assets_full", asset, "image"]), legacy.and_then(|k| common.get(k))];
         for langs in by_lang.into_iter().flatten() {
             wanted.extend(langs.str_at(&["english"]));
             wanted.extend(langs.entries().iter().filter_map(|(_, v)| v.as_str()));

@@ -62,7 +62,9 @@ pub fn run(args: &Args, library: &Library) {
             size.0,
             size.1
         );
-        while home.scene.focus() != args.focus && home.scene.move_focus(if home.scene.focus() > args.focus { -1 } else { 1 }) {}
+        while home.scene.focus() != args.focus
+            && home.scene.move_focus(if home.scene.focus() > args.focus { -1 } else { 1 })
+        {}
     }
 
     // `--launch-screen`: the screenshot is of the focused game's Launch screen.

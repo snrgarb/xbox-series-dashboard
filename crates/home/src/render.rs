@@ -41,7 +41,11 @@ pub type Rgba = [f32; 4];
 pub fn rgba(hex: u32, a: f32) -> Rgba {
     let lin = |c: u32| {
         let c = (c & 0xff) as f32 / 255.0;
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     };
     [lin(hex >> 16), lin(hex >> 8), lin(hex), a]
 }
@@ -392,7 +396,10 @@ impl Renderer {
                     view: target,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,

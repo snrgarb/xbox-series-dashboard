@@ -83,8 +83,20 @@ impl Pad {
                         continue;
                     }
                     buttons |= state.buttons;
-                    buttons |= if state.left_x > STICK { RIGHT } else if state.left_x < -STICK { LEFT } else { 0 };
-                    buttons |= if state.left_y > STICK { UP } else if state.left_y < -STICK { DOWN } else { 0 };
+                    buttons |= if state.left_x > STICK {
+                        RIGHT
+                    } else if state.left_x < -STICK {
+                        LEFT
+                    } else {
+                        0
+                    };
+                    buttons |= if state.left_y > STICK {
+                        UP
+                    } else if state.left_y < -STICK {
+                        DOWN
+                    } else {
+                        0
+                    };
                 }
             }
             let down = |key: i32| GetAsyncKeyState(key) < 0;

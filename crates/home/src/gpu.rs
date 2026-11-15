@@ -60,10 +60,9 @@ pub fn init(instance: Instance, surface: Option<&wgpu::Surface<'_>>) -> Gpu {
         "adapter: {} ({:?}, {:?}, driver {} {})",
         info.name, info.backend, info.device_type, info.driver, info.driver_info
     );
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("home"),
-        ..Default::default()
-    }))
+    let (device, queue) = pollster::block_on(
+        adapter.request_device(&wgpu::DeviceDescriptor { label: Some("home"), ..Default::default() }),
+    )
     .expect("request device");
     Gpu { instance, adapter, device, queue }
 }

@@ -1,11 +1,11 @@
 //! Home, rendered natively: wgpu for the GPU, winit for the window, glyphon for text.
 mod art;
 mod gpu;
+mod launch;
 mod offscreen;
 mod pad;
 mod render;
 mod scene;
-mod launch;
 mod window;
 
 use std::path::PathBuf;
@@ -20,6 +20,12 @@ use crate::render::Renderer;
 use crate::scene::Scene;
 
 static START: OnceLock<Instant> = OnceLock::new();
+static CLOCK: OnceLock<String> = OnceLock::new();
+
+/// What the top bar's clock reads: `--clock`'s text, else the time.
+pub fn clock() -> String {
+    CLOCK.get().cloned().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string())
+}
 
 /// Milliseconds since the process started (since `main` was entered).
 pub fn since_start() -> f64 {
@@ -37,10 +43,12 @@ pub struct Args {
     focus: usize,
     bench: bool,
     windowed: bool,
+    /// What the clock reads, in place of the time: a screenshot test's is the same every run.
+    clock: Option<String>,
 }
 
 const USAGE: &str = "usage: home [--steam <steam root> | --library <file.json>] [--windowed]
-       home --screenshot <out.png> [--size WxH] [--focus N] [--bench] [--library <file.json>]";
+       home --screenshot <out.png> [--size WxH] [--focus N] [--bench] [--clock <text>] [--library <file.json>]";
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args::default();
@@ -61,6 +69,7 @@ fn parse_args() -> Result<Args, String> {
             "--focus" => args.focus = value()?.parse().map_err(|e| format!("bad --focus: {e}"))?,
             "--bench" => args.bench = true,
             "--windowed" => args.windowed = true,
+            "--clock" => args.clock = Some(value()?),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -169,6 +178,9 @@ impl Home {
 fn main() {
     since_start();
     let args = parse_args().unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    if let Some(clock) = &args.clock {
+        let _ = CLOCK.set(clock.clone());
+    }
     let library = load_library(&args);
     if args.screenshot.is_some() {
         offscreen::run(&args, &library);
