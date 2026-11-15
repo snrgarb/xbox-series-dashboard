@@ -26,6 +26,7 @@ use crate::guide::{Around, DialogFocus, Face, Guide, GuideAction, PowerChoice, S
 use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
+pub use crate::settings::{Options, Setting};
 
 /// What the Dashboard asks of the shell.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,6 +44,9 @@ pub enum Effect {
     /// Turn the machine off, restart it or put it to sleep: chosen in Power (docs/spec/guide.md, 6.2). Whoever
     /// carries effects out decides whether that is for real; nothing in this crate can do it.
     Power(PowerCommand),
+    /// Settings changed an option. The Dashboard has taken the change already: this is for whoever keeps the
+    /// settings to save it.
+    Set(settings::Change),
 }
 
 /// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
@@ -74,8 +78,9 @@ pub struct Dashboard {
     pad: PadStatus,
     /// What the Guide's Status area shows beyond those.
     status: Status,
-    /// The Guide setting: off, the Guide button does nothing.
-    guide_enabled: bool,
+    /// Settings' options (docs/spec/settings.md, section 7). Use the Guide among them: off, the Guide button does
+    /// nothing.
+    options: Options,
     /// The Guide button's press has done what it does, so what is still to come of it (its release after a hold,
     /// its tap after the release that closed the Guide) does nothing more.
     guide_button_spent: bool,
@@ -109,7 +114,7 @@ impl Dashboard {
             clock: None,
             pad: PadStatus::default(),
             status: Status::default(),
-            guide_enabled: true,
+            options: Options::default(),
             guide_button_spent: false,
             home: Home::default(),
             pages: pages::Stack::default(),
@@ -143,7 +148,7 @@ impl Dashboard {
         self.user = library.user.clone().unwrap_or_else(|| "Player".into());
         self.library = library;
         // A focused game that has left the Recent row leaves focus on the tile where it was, or the row's last.
-        let last = self.library.recent(home::RECENT_GAMES).len().saturating_sub(1);
+        let last = self.library.recent(self.home.recent_games()).len().saturating_sub(1);
         if let Some(was) = was {
             let game = focused.filter(|&game| game <= last).unwrap_or(was.min(last));
             self.home.focus_recent(game, &self.library);
@@ -191,7 +196,31 @@ impl Dashboard {
     /// The Guide setting. Off, the Guide button does nothing, a hold too, and nor does the profile on Home's top
     /// bar. A Guide that is open stays open until it is closed.
     pub fn set_guide_enabled(&mut self, enabled: bool) {
-        self.guide_enabled = enabled;
+        self.options.use_guide = enabled;
+    }
+
+    /// Settings' options, as they are now.
+    pub fn options(&self) -> Options {
+        self.options
+    }
+
+    /// Every option at once, as the settings table has them at start-up. In force from the next press and frame.
+    pub fn set_options(&mut self, options: Options) {
+        self.options = options;
+        self.home.set_background_delay(options.background_delay);
+        self.home.set_play_history(options.show_play_history, &self.library);
+    }
+
+    /// Settings turned an option over: it is in force at once, and whoever keeps the settings is asked to save it.
+    fn set(&mut self, change: settings::Change) {
+        let mut options = self.options;
+        options.set(change.setting, change.on);
+        self.set_options(options);
+        self.effects.push(Effect::Set(change));
+    }
+
+    fn around(&self) -> pages::Around<'_> {
+        pages::Around { library: &self.library, playing: self.playing, options: self.options }
     }
 
     /// How a held direction repeats now, for whoever times the pad.
@@ -243,6 +272,7 @@ impl Dashboard {
 
     /// Settings' Background delay. See [`Home::set_background_delay`].
     pub fn set_background_delay(&mut self, on: bool) {
+        self.options.background_delay = on;
         self.home.set_background_delay(on);
     }
 
@@ -303,7 +333,7 @@ impl Dashboard {
     /// over a game with no Overlay to show it on.
     fn open_power(&mut self) {
         let nowhere = self.playing.is_some() && !self.has_overlay;
-        if !self.guide_enabled || nowhere || (self.launch.up() && !self.guide.is_open()) {
+        if !self.options.use_guide || nowhere || (self.launch.up() && !self.guide.is_open()) {
             return;
         }
         if !self.guide.is_open() {
@@ -331,7 +361,7 @@ impl Dashboard {
             return false;
         }
         if press.button == Button::Guide {
-            if !press.repeat && self.guide_enabled {
+            if !press.repeat && self.options.use_guide {
                 self.open_guide();
             }
             return false;
@@ -341,10 +371,11 @@ impl Dashboard {
             return false;
         }
         if !self.pages.is_empty() {
-            let around = pages::Around { library: &self.library, playing: self.playing };
+            let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
             match self.pages.press(press, around) {
                 Some(PageAction::Close) => self.close_page(),
                 Some(PageAction::Open(open)) => self.pages.open_over(open),
+                Some(PageAction::Effect(Effect::Set(change))) => self.set(change),
                 Some(PageAction::Effect(effect)) => self.effects.push(effect),
                 None => return false,
             }
@@ -353,7 +384,7 @@ impl Dashboard {
         match self.home.press(press.button, &self.library) {
             Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
             // The profile opens the Guide where the profile is.
-            Some(HomeAction::OpenGuide) if !press.repeat && self.guide_enabled => {
+            Some(HomeAction::OpenGuide) if !press.repeat && self.options.use_guide => {
                 self.open_guide_on(Tab::ProfileAndSystem);
             }
             Some(HomeAction::Open(open)) if !press.repeat => {
@@ -364,7 +395,7 @@ impl Dashboard {
             // The Guide on its Discord tab while Discord is connected (M6); with no such tab, or the Guide off,
             // Settings on Discord.
             Some(HomeAction::Discord) if !press.repeat => {
-                if self.status.discord && self.guide_enabled {
+                if self.status.discord && self.options.use_guide {
                     self.open_guide_on(Tab::Discord);
                 } else {
                     self.open_page(Open::Settings(settings::Entry::Discord));
@@ -409,7 +440,7 @@ impl Dashboard {
     }
 
     /// What is on top of Home's window, the Guide aside, and where its focus is: Home's focus as it is written
-    /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail`). This is `--log-focus`'s
+    /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail: Theme settings`). This is `--log-focus`'s
     /// line, which tests on the VM judge by.
     pub fn focus_line(&self) -> String {
         match self.pages.top() {
@@ -440,7 +471,7 @@ impl Dashboard {
         } else if self.pages.is_empty() {
             self.home.hints(&self.library)
         } else {
-            self.pages.hints(pages::Around { library: &self.library, playing: self.playing })
+            self.pages.hints(self.around())
         }
     }
 
@@ -627,7 +658,8 @@ impl Dashboard {
             Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),
             _ => None,
         };
-        let status = Status { pad_battery: self.status.pad_battery.or(charge), ..self.status.clone() };
+        let show_percent = self.status.show_percent && self.options.show_battery_percent;
+        let status = Status { pad_battery: self.status.pad_battery.or(charge), show_percent, ..self.status.clone() };
         let face = Face { user: &self.user, clock: &clock, pad: self.pad.connected, status: &status };
         self.guide.draw(ui, around, &face);
     }
@@ -635,14 +667,26 @@ impl Dashboard {
     /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to
     /// draw it on.
     pub fn draw(&mut self, ui: &mut Ui) {
+        ui.store.reduce_motion = self.options.reduce_motion;
         let clock = self.clock();
-        let status = home::Status { user: &self.user, clock: &clock, pad: self.pad.connected };
+        // A wireless pad's charge, as the Guide's Status area has it; one on a cable shows its glyph.
+        let pad_battery = self.status.pad_battery.or(match self.pad.battery {
+            Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),
+            _ => None,
+        });
+        let status = home::Status {
+            user: &self.user,
+            clock: &clock,
+            pad: self.pad.connected,
+            pad_battery,
+            show_percent: self.status.show_percent && self.options.show_battery_percent,
+        };
         // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn.
         if !self.pages.hides_home() {
             self.home.set_in_front(!self.guide.is_open() && self.pages.is_empty());
             self.home.draw(ui, &self.library, &status);
         }
-        self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing });
+        self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing, options: self.options });
         // The hint bar, once for whatever has the pad, over all of it.
         hint_bar::draw(ui, self.hints());
         if !self.guide_overlaid {
@@ -653,6 +697,7 @@ impl Dashboard {
     /// The Overlay: the Launch screen, and the Guide. Drawn over nothing, so where it draws nothing the game shows,
     /// or Home.
     pub fn draw_overlay(&mut self, ui: &mut Ui) {
+        ui.store.reduce_motion = self.options.reduce_motion;
         self.launch.draw(ui);
         if self.guide_overlaid {
             self.draw_guide(ui);

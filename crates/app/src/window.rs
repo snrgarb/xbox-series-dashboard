@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use input::Pad;
 use model::{Library, Sound};
 use render::gpu::{self, Gpu};
-use screens::{Dashboard, Effect, OverlayShows};
+use screens::{Dashboard, Effect, OverlayShows, Setting};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step};
 use ui::{Button, Host, Press};
@@ -35,9 +35,6 @@ const SLOW_FRAME: Duration = Duration::from_millis(50);
 /// What a slow renderer is held to while only the Spinner turns: a frame, then this many frames' time left to the
 /// game that is starting.
 const SLOW_FRAME_REST: u32 = 3;
-
-/// The Guide setting, on unless it says otherwise, in the library database's settings.
-const GUIDE_ENABLED: &str = "guide.enabled";
 
 struct State {
     host: Host,
@@ -119,11 +116,12 @@ pub fn run(args: &Args, library: Library, store: Store) {
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(args.clock.clone());
-    let guide = store.flag(GUIDE_ENABLED, true);
-    if !guide {
-        eprintln!("guide: off ({GUIDE_ENABLED}): the Guide button does nothing");
+    // Settings' options, as they were left (docs/spec/settings.md, section 7).
+    let options = store.options();
+    if !options.use_guide {
+        eprintln!("guide: off ({}): the Guide button does nothing", Setting::UseGuide.key());
     }
-    dashboard.set_guide_enabled(guide);
+    dashboard.set_options(options);
     // A Dashboard that was killed with the Guide open over a game left the game frozen: it is let go first of all.
     let data_dir = args.data_dir.clone().or_else(library::data_dir);
     let mut freezer = Freezer::new(data_dir.as_deref());
@@ -316,6 +314,8 @@ impl App {
                     }
                 }
                 Effect::Power(command) => self.power.carry_out(command),
+                // In force already: saved, so that it is still so the next time.
+                Effect::Set(change) => self.store.set(change),
             }
         }
     }

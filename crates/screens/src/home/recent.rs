@@ -6,7 +6,8 @@ use ui::{Rect, Ui};
 use super::tile;
 use crate::theme::{self, glyph, MARGIN, ROW_SCALE as S};
 
-/// How many games the row holds, before the Play history tile.
+/// How many games the row holds, before the Play history tile. With Settings' Show Play history off the tile's
+/// place goes to one game more.
 pub const GAMES: usize = 7;
 /// How many covers the Play history tile shows.
 const HISTORY: usize = 4;
@@ -27,18 +28,33 @@ pub struct Row<'a> {
     pub games: &'a [Game],
     /// The next games played after those: the Play history tile's covers.
     pub history: &'a [Game],
+    /// Whether the row ends with the Play history tile.
+    pub history_tile: bool,
 }
 
 impl<'a> Row<'a> {
-    pub fn of(library: &'a Library) -> Self {
-        let (games, rest) = library.games.split_at(library.games.len().min(GAMES));
+    /// The row of this library: with `play_history`, Settings' Show Play history, seven games and the Play
+    /// history tile; without, eight games. A library with no game has the tile whatever the setting says, so
+    /// that the row is never empty.
+    pub fn of(library: &'a Library, play_history: bool) -> Self {
+        let history_tile = play_history || library.games.is_empty();
+        let (games, rest) = library.games.split_at(library.games.len().min(games(history_tile)));
         let played = rest.iter().take_while(|g| g.last_played > 0).count();
-        Self { games, history: &rest[..played.min(HISTORY)] }
+        Self { games, history: &rest[..played.min(HISTORY)], history_tile }
     }
 
-    /// Every tile: the games', then Play history's.
+    /// Every tile: the games', then Play history's if it is there.
     pub fn tiles(&self) -> usize {
-        self.games.len() + 1
+        self.games.len() + usize::from(self.history_tile)
+    }
+}
+
+/// How many games the row holds with the Play history tile, and without it.
+pub fn games(history_tile: bool) -> usize {
+    if history_tile {
+        GAMES
+    } else {
+        GAMES + 1
     }
 }
 

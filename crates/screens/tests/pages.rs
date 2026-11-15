@@ -1,6 +1,7 @@
 //! The pages over Home: every way into one, and where B on it leaves focus (docs/spec/home.md, 7.4;
-//! docs/spec/my-games.md, 3; docs/spec/search.md, 4; docs/spec/settings.md, 8). The pages are stand-ins that open
-//! and close and no more, which is all these tests press. No picture, so no GPU; what the hint bar looks like is
+//! docs/spec/my-games.md, 3; docs/spec/search.md, 4; docs/spec/settings.md, 8). My games & apps and Search are
+//! stand-ins that open and close and no more, which is all these tests press; what Settings does once it is open is
+//! tests/settings.rs. No picture, so no GPU; what the hint bar looks like is
 //! tests/shots.rs.
 use model::Library;
 use screens::home::{rest, Focus, TopButton};
@@ -63,6 +64,24 @@ fn there_and_back(dashboard: &mut Dashboard, open: Button, line: &str, back: Foc
     assert!(asked(dashboard).is_empty(), "nothing is asked of the shell");
 }
 
+/// Presses A on Home as it is, expects Settings with focus where `line` says and Home unchanged under it; then B
+/// `levels` times, one level each, and Home again with focus on `back`.
+#[track_caller]
+fn settings_and_back(dashboard: &mut Dashboard, line: &str, levels: usize, back: Focus) {
+    let before = dashboard.home_focus();
+    press(dashboard, &[A]);
+    assert_eq!(dashboard.focus_line(), line);
+    assert_eq!((dashboard.pages_up(), dashboard.home_focus()), (1, before));
+    for level in 1..levels {
+        press(dashboard, &[B]);
+        assert_eq!(dashboard.page(), Some("Settings"), "B climbs a level at a time: {level} of {levels}");
+    }
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings", "the last level is the rail");
+    press(dashboard, &[B]);
+    assert_eq!((dashboard.page(), dashboard.home_focus()), (None, back));
+    assert!(asked(dashboard).is_empty(), "nothing is asked of the shell");
+}
+
 #[test]
 fn the_top_bars_my_games_button_opens_games_and_b_comes_back_on_the_recent_row() {
     let mut home = home();
@@ -79,7 +98,7 @@ fn the_top_bars_search_and_settings_buttons_open_their_pages_and_get_focus_back(
     press(&mut home, &[Right, Right, Up, Right]);
     there_and_back(&mut home, A, "Search: Open", Focus::TopBar(TopButton::Search));
     press(&mut home, &[Right]);
-    there_and_back(&mut home, A, "Settings: Rail", Focus::TopBar(TopButton::Settings));
+    settings_and_back(&mut home, "Settings: Rail: Theme settings", 1, Focus::TopBar(TopButton::Settings));
     // Notifications has no page.
     press(&mut home, &[Right, A]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::TopBar(TopButton::Notifications)));
@@ -152,10 +171,11 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[Down]);
     assert_eq!(home.home_focus(), Focus::Wide(0));
     let at_rest = rests(&home);
-    // Discord, with no Discord tab in the Guide: Settings on Discord.
-    there_and_back(&mut home, A, "Settings: Discord", Focus::Wide(0));
+    // Discord, with no Discord tab in the Guide: Settings, on Theme settings' first box until Discord has a page
+    // (M6). B is the rail, then the tile.
+    settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(0));
     press(&mut home, &[Right]);
-    there_and_back(&mut home, A, "Settings: Tile", Focus::Wide(1));
+    settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(1));
     press(&mut home, &[Right, Right]);
     there_and_back(&mut home, A, "MyGames: Queue", Focus::Wide(3));
     assert_eq!(rests(&home), at_rest);
@@ -173,7 +193,7 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     // Nor Discord's Guide: its tile opens Settings then, connected or not.
     home.set_status(screens::guide::Status { discord: true, ..Default::default() });
     press(&mut home, &[Left, Left]);
-    there_and_back(&mut home, A, "Settings: Discord", Focus::Wide(0));
+    settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(0));
     home.set_guide_enabled(true);
     press(&mut home, &[A]);
     assert!(home.guide_open() && home.page().is_none(), "with a Discord tab the tile opens the Guide");
@@ -202,7 +222,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     let mut home = guide_open();
     press(&mut home, &[RightBumper, Down, Down, A]);
     assert_eq!(asked(&mut home), [Effect::GuideClosed]);
-    assert_eq!(home.focus_line(), "Settings: Rail");
+    assert_eq!(home.focus_line(), "Settings: Rail: Theme settings");
     press(&mut home, &[B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
 
@@ -219,7 +239,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
 fn a_page_opened_from_the_guide_takes_the_place_of_the_one_that_was_up() {
     let mut home = home();
     press(&mut home, &[Up, Right, Right, Right, A]);
-    assert_eq!(home.focus_line(), "Settings: Rail");
+    assert_eq!(home.focus_line(), "Settings: Rail: Theme settings");
     // The Guide opens over the page, and its My games & apps closes Settings for it.
     press(&mut home, &[Guide, Down, A]);
     assert_eq!((home.focus_line().as_str(), home.pages_up()), ("MyGames: Games", 1));
@@ -232,7 +252,7 @@ fn a_page_opened_from_the_guide_takes_the_place_of_the_one_that_was_up() {
 fn the_guides_home_closes_the_page_that_is_up() {
     let mut home = home();
     press(&mut home, &[Down, Right, A]);
-    assert_eq!(home.focus_line(), "Settings: Tile");
+    assert_eq!(home.focus_line(), "Settings: Theme settings: Personalisation");
     press(&mut home, &[Guide, A]);
     assert!(!home.guide_open());
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Wide(1)));

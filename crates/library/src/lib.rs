@@ -695,6 +695,25 @@ mod tests {
         assert_eq!(db.setting("reduce motion").unwrap().as_deref(), Some("off"));
     }
 
+    /// Settings' options are rows of the settings table (docs/spec/settings.md, 16.4): one is there for the next
+    /// Dashboard that opens the file, and a sync, which keeps the source's own rows there, leaves it alone.
+    #[test]
+    fn a_setting_outlives_the_connection_and_a_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        {
+            let mut db = Database::open(&path).unwrap();
+            db.set_setting("motion.reduce", "true").unwrap();
+            let found =
+                Library { user: Some("Player One".into()), collections: Some(Vec::new()), ..Library::default() };
+            db.sync(STEAM, &found, 1_780_000_000).unwrap();
+        }
+        let db = Database::open(&path).unwrap();
+        assert_eq!(db.setting("motion.reduce").unwrap().as_deref(), Some("true"));
+        assert_eq!(db.setting("home.background_delay").unwrap(), None, "one never set has no row");
+        assert_eq!(db.setting("steam.user").unwrap().as_deref(), Some("Player One"));
+    }
+
     #[test]
     fn a_database_file_is_made_with_its_folder_and_read_again() {
         let dir = tempfile::tempdir().unwrap();

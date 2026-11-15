@@ -78,7 +78,7 @@ pub fn draw(ui: &mut Ui, status: &Status, clock: &str, pad: bool) {
 
 /// The pad's battery ending at `right`: its charge as a cell on its side, or the pad's glyph for one whose charge
 /// is not known. Returns where it starts.
-fn pad_battery(ui: &mut Ui, right: f32, middle: f32, status: &Status) -> f32 {
+pub(crate) fn pad_battery(ui: &mut Ui, right: f32, middle: f32, status: &Status) -> f32 {
     let Some(percent) = status.pad_battery else {
         ui.icon(right - 12.0, middle, glyph::GAMEPAD, 24.0, Color::WHITE);
         return right - 24.0;

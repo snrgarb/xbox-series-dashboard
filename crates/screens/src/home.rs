@@ -99,6 +99,8 @@ pub struct Home {
     last_wide: usize,
     /// When A last chose a tile, and which.
     chosen: Option<(Instant, Focus)>,
+    /// Settings' Show Play history: whether the Recent row ends with the Play history tile.
+    play_history: bool,
     background: Background,
 }
 
@@ -111,6 +113,7 @@ impl Default for Home {
             left_recent: None,
             last_wide: 0,
             chosen: None,
+            play_history: true,
             background: Background::default(),
         }
     }
@@ -127,6 +130,22 @@ impl Home {
         self.background.delay = on;
     }
 
+    /// Settings' Show Play history: on, as it starts, the Recent row is seven games and the Play history tile;
+    /// off, eight games. The row is made again at once: focus that was on the tile is on the game in its place.
+    pub fn set_play_history(&mut self, on: bool, library: &Library) {
+        if std::mem::replace(&mut self.play_history, on) != on {
+            let row = Row::of(library, on);
+            self.keep_focus_in(&row, &groups::of(library));
+            self.last_game = self.last_game_tile(&row);
+            self.left_recent = self.left_recent.filter(|&tile| tile < row.tiles());
+        }
+    }
+
+    /// How many games the Recent row holds at most.
+    pub fn recent_games(&self) -> usize {
+        recent::games(self.play_history)
+    }
+
     /// Whether Home is what the player is looking at, or lies under the Guide: the swirl moves only in front.
     pub fn set_in_front(&mut self, in_front: bool) {
         self.background.in_front = in_front;
@@ -134,8 +153,8 @@ impl Home {
 
     /// Puts focus on the Recent row's tile for the game at this place in the library, if it has one.
     pub fn focus_recent(&mut self, game: usize, library: &Library) {
-        if game < Row::of(library).games.len() {
-            self.go_recent(game, &Row::of(library));
+        if game < Row::of(library, self.play_history).games.len() {
+            self.go_recent(game, &Row::of(library, self.play_history));
         }
     }
 
@@ -145,7 +164,7 @@ impl Home {
     /// gives the top bar focus back, nor the Play history tile. But Search and Settings give it back to the button
     /// that opened them, which `to_button` says this was (docs/spec/search.md, 4.2; docs/spec/settings.md, 8.2).
     pub fn uncovered(&mut self, to_button: bool, library: &Library) {
-        let row = Row::of(library);
+        let row = Row::of(library, self.play_history);
         self.keep_focus_in(&row, &groups::of(library));
         let before = self.focus;
         match self.focus {
@@ -172,7 +191,7 @@ impl Home {
     /// The game focus is on, by its place in the library.
     pub fn focused_game(&self, library: &Library) -> Option<usize> {
         match self.focus {
-            Focus::Recent(i) => (i < Row::of(library).games.len()).then_some(i),
+            Focus::Recent(i) => (i < Row::of(library, self.play_history).games.len()).then_some(i),
             Focus::Group { group, card } => place(library, groups::of(library).get(group)?.games.get(card)?),
             Focus::TopBar(_) | Focus::Wide(_) => None,
         }
@@ -188,7 +207,7 @@ impl Home {
     }
 
     fn pressed(&mut self, button: Button, library: &Library) -> Option<HomeAction> {
-        let row = Row::of(library);
+        let row = Row::of(library, self.play_history);
         let groups = groups::of(library);
         self.keep_focus_in(&row, &groups);
         let open = |page: Open| Some(HomeAction::Open(page));
@@ -305,7 +324,7 @@ impl Home {
     }
 
     pub fn draw(&mut self, ui: &mut Ui, library: &Library, status: &Status) {
-        let row = Row::of(library);
+        let row = Row::of(library, self.play_history);
         let groups = groups::of(library);
         self.keep_focus_in(&row, &groups);
         let (mut on_bar, mut on_recent, mut on_wide, mut on_group) = (None, None, None, None);

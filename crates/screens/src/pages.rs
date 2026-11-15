@@ -19,6 +19,8 @@ pub struct Around<'a> {
     pub library: &'a Library,
     /// The game being launched or running, by its place in the library.
     pub playing: Option<usize>,
+    /// Settings' options as they are now.
+    pub options: settings::Options,
 }
 
 /// A page to open, and how: each page's own `Entry` says where on it to open and where focus lands.
@@ -194,7 +196,8 @@ mod tests {
 
     fn press(stack: &mut Stack, button: Button) -> Option<PageAction> {
         let library = Library::default();
-        stack.press(Press { button, repeat: false }, Around { library: &library, playing: None })
+        let around = Around { library: &library, playing: None, options: settings::Options::default() };
+        stack.press(Press { button, repeat: false }, around)
     }
 
     fn focus(stack: &Stack) -> Option<(&'static str, String)> {
@@ -225,7 +228,7 @@ mod tests {
         stack.open(Open::MyGames(my_games::Entry::Games));
         stack.open_over(Open::Search);
         stack.open(Open::Settings(settings::Entry::Rail));
-        assert_eq!((stack.depth(), focus(&stack)), (1, Some(("Settings", "Rail".into()))));
+        assert_eq!((stack.depth(), focus(&stack)), (1, Some(("Settings", "Rail: Theme settings".into()))));
         assert!(stack.clear() && stack.is_empty() && !stack.clear());
     }
 
