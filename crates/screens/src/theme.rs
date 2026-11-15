@@ -24,7 +24,7 @@ pub const BODY_SEMIBOLD: TextStyle = TextStyle::new(Font::Ui, 26.0, 600);
 pub const HEADING: TextStyle = TextStyle::new(Font::Display, 32.0, 400);
 pub const CLOCK: TextStyle = TextStyle::new(Font::Display, 22.0, 600);
 
-/// Segoe Fluent Icons' glyphs.
+/// Segoe Fluent Icons' glyphs, and one that is not: the trophy, which the icon font lacks and Segoe UI Symbol has.
 pub mod glyph {
     pub const CONTACT: char = '\u{E77B}';
     pub const LIBRARY: char = '\u{E8F1}';
@@ -37,7 +37,8 @@ pub mod glyph {
     pub const GAMEPAD: char = '\u{E7FC}';
     pub const DOWNLOAD: char = '\u{E896}';
     pub const HISTORY: char = '\u{E81C}';
-    pub const TROPHY: char = '\u{E7C1}';
+    /// Not in the icon font: `Ui::icon` draws it from Segoe UI Symbol, as the Bundle's body font does.
+    pub const TROPHY: char = '\u{1F3C6}';
     pub const CHAT: char = '\u{E8BD}';
 }
 

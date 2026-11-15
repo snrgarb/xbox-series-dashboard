@@ -37,10 +37,11 @@ const TILES: [WideTile; 4] = [
         to: Color::rgb(0x2B323C),
         glyph: glyph::SETTINGS,
     },
-    // Its subtitle is the Score, once there are achievements to count (M6).
+    // Its subtitle is the Score, once there are achievements to count (M6). Until then it is the Bundle's line for
+    // none recorded; its other, "Needs PlayniteAchievements", names a dependency there is none of here.
     WideTile {
         title: "Achievements",
-        subtitle: None,
+        subtitle: Some("Nothing recorded yet"),
         from: Color::rgb(0x3FA34D),
         to: Color::rgb(0x0E5A1C),
         glyph: glyph::TROPHY,

@@ -506,6 +506,70 @@ fn the_title_band_is_nearly_opaque() {
     assert!(above_band[0] > 200, "the cover's white edge should show above the band: {above_band:?}");
 }
 
+// --- Measures the Bundle's XAML sets, looked for in the picture. The comparison with a reference lets a few
+// thousand pixels differ, which a line of text, or a band 8 taller, is within. docs/spec/home.md says which Bundle:
+// its pictures are of an older one, with smaller type and the Groups under the top bar. ---
+
+/// Whether a pixel is text's white, or the dimmer white of a subtitle, and not what is under it.
+fn ink(image: &image::RgbaImage, x: u32, y: u32) -> bool {
+    image.get_pixel(x, y).0[..3].iter().all(|&c| c > 150)
+}
+
+/// The rows from `top` to `bottom` with ink between `left` and `right`: the first and the last, if any has.
+fn ink_rows(image: &image::RgbaImage, (left, right): (u32, u32), (top, bottom): (u32, u32)) -> Option<(u32, u32)> {
+    let mut rows = (top..bottom).filter(|&y| (left..right).any(|x| ink(image, x, y)));
+    let first = rows.next()?;
+    Some((first, rows.next_back().unwrap_or(first)))
+}
+
+/// A focused card's title band holds a line of Segoe UI 26 with 8 (of the rows' units) round it: 52.4 tall, not
+/// the 44.5 of the type the Bundle had before (E/HomeTiles.xaml:41, 88-91).
+#[test]
+fn a_title_band_of_one_line_is_52_tall() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.press(&[Button::Down, Button::Down, Button::Right]);
+    let image = stage.still();
+    // The first Group's second card: 352.3..568.4 across, 120.2..450 down, so its band starts at 397.6, over a
+    // cover that is nowhere near black.
+    let above = image.get_pixel(360, 393).0;
+    assert!(above[..3].iter().any(|&c| c > 60), "the cover should show above the band: {above:?}");
+    let within = image.get_pixel(360, 402).0;
+    assert!(within[..3].iter().all(|&c| c < 40), "the band should have started by 402 down: {within:?}");
+}
+
+/// With focus on a Group the page has risen until the Group's header is 64 from the top, and the top bar has gone
+/// up off the screen with it (C/HomeRests.cs:105, 140-143). The Bundle's pictures, older, have it under the bar.
+#[test]
+fn on_a_group_its_header_is_64_down_and_the_top_bar_has_gone() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    let pale = |image: &image::RgbaImage| image.get_pixel(120, 100).0[..3].iter().all(|&c| c > 200);
+    assert!(pale(&stage.still()), "the profile's picture should be at the top left with focus on the Recent row");
+    stage.press(&[Button::Down, Button::Down]);
+    let image = stage.still();
+    assert!(!pale(&image), "the top bar should have gone with focus on a Group");
+    // The header is a line of Bahnschrift 32, 38.4 tall from 64: its capital starts a little under the line's top.
+    let (first, last) = ink_rows(&image, (105, 300), (0, 110)).expect("the Group's header");
+    assert!((64..80).contains(&first) && (88..103).contains(&last), "the header's ink is at {first}..{last}");
+}
+
+/// A wide tile's caption stands 14 (of the rows' units) off the tile's foot, in lines of Segoe UI 26: a lone title
+/// in 994.2..1028.7, and with a subtitle under it the title in 959.6..994.2 (E/PromoRow.xaml:44-58). Achievements
+/// and Downloads have the second line.
+#[test]
+fn the_wide_tiles_captions_stand_on_their_foot_in_one_line_or_two() {
+    let mut stage = Stage::new(screens::fake_library(), HD);
+    let image = stage.still();
+    // Each tile's caption starts 20 in from its left edge; 150 across is short of the glyph in the tile's middle.
+    for (tile, left, two_lines) in [(0, 125, false), (1, 558, false), (2, 992, true), (3, 1425, true)] {
+        let across = (left, left + 150);
+        let foot = ink_rows(&image, across, (994, 1029));
+        assert!(foot.is_some(), "wide tile {tile} should have a line on its foot");
+        assert_eq!(ink_rows(&image, across, (1029, 1044)), None, "wide tile {tile} has text under its caption");
+        let over = ink_rows(&image, across, (960, 994));
+        assert_eq!(over.is_some(), two_lines, "wide tile {tile}'s line over the foot: {over:?}");
+    }
+}
+
 // --- The background's timing, on the ui's clock. docs/spec/home.md, section 8, has the rules. ---
 
 /// The colours of the fake library's background art where `Stage::background` looks: the first game's, the
