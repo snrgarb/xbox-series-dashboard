@@ -74,9 +74,9 @@ Constants: open 120 ms, close 150 ms, contents lag 50 ms (E/OverlayWindow.xaml.c
 |---|---|---|---|---|---|
 | Open | Panel offset x | -700 to 0 | 120 ms | cubic ease-out | 129-136, 315-368 |
 | | Contents' extra offset x | -700 to 0, starting 50 ms later | 120 ms | cubic ease-out | 289-304 |
-| | Dim opacity (and with it the top shade, hints, Status area) | 0 to 1 | 120 ms | cubic ease-out | 315-368 |
+| | Dim opacity (and with it the top shade, hints, Status area) | 0 to 1 | 120 ms | linear (the animation is given no easing) | 342 |
 | Close | Panel offset x | to -700 | 150 ms | cubic ease-in | 144, 342 |
-| | Contents | ride the panel, no lag | | | 144 |
+| | Contents | ride the panel, no lag: their own offset is held where it is, so a close before they have set off never brings them in after | | | 346-367 |
 | | Dim opacity | to 0 | 150 ms | linear | 342 |
 
 - The contents trail the panel on the way in: for the first 50 ms the panel slides in empty.
@@ -88,7 +88,7 @@ Constants: open 120 ms, close 150 ms, contents lag 50 ms (E/OverlayWindow.xaml.c
 
 ### 1.4 Tab change
 
-LB and RB change tab (section 4). The old tab's content (heading, entries; not the tab strip, not the Utilities) goes at once. The new content starts 50 to the side moved toward (RB: from the right; LB: from the left) at opacity 0, and settles: offset to 0 over 120 ms cubic ease-out, opacity to 1 over 120 ms quadratic ease-out (E/PaneFlyIn.cs:20-23, 213-222; E/OverlayWindow.xaml.cs:114). None when the Guide opens onto a tab, none under Reduce motion (E/PaneFlyIn.cs:71-76).
+LB and RB change tab (section 4). The old tab's content (heading, entries and Utilities: everything under the tab strip, which is the `TabContent` panel at E/OverlayWindow.xaml:1080; not the tab strip) goes at once. The new content starts 50 to the side moved toward (RB: from the right; LB: from the left) at opacity 0, and settles: offset to 0 over 120 ms cubic ease-out, opacity to 1 over 120 ms quadratic ease-out (E/PaneFlyIn.cs:20-23, 213-222; E/OverlayWindow.xaml.cs:114). None when the Guide opens onto a tab, none under Reduce motion (E/PaneFlyIn.cs:71-76).
 
 ### 1.5 Behind a dialog
 
@@ -160,7 +160,7 @@ Below the tab strip the content starts 30 down (y 165) (1080). It holds, top to 
 | Entry width | 536 (the whole panel); the entry's own margins bring its fill to x 87..605 | 1183-1190, 63-65 |
 | First entry, Landing | top of the entry's box y 183 (165 + 42 - 24) | 1196-1200 |
 | First entry, Profile & system | about y 213 (heading 161 + about 39.6 + 12) | 1148, 1196 |
-| Utilities | row at the foot: y 942..1029, from x 93 | 1088-1092 |
+| Utilities | row at the foot: y 942..1029, from x 93. On the landing tab only: the other tabs have none (C/ExtensionCore.cs:1170), and their entries' viewport reaches to 28 above the panel's foot (the empty row's margins), y 1017 | 1081-1092 |
 
 Measured: Landing's Home entry y 183..288 with its ring's outer edge 175..296, x 79..613; Profile & system's first ring 204..316.
 
@@ -222,9 +222,9 @@ Heading "Profile & system". Entries (C/ExtensionCore.cs:1228-1243):
 4. Settings, divider above (M3).
 5. Power, divider above.
 
-Focus starts on the Profile entry. The same Utilities show at the foot.
+Focus starts on the Profile entry. **There are no Utilities on this tab**: the row is the landing tab's alone (C/ExtensionCore.cs:1170; the comment at E/OverlayWindow.xaml:1081-1087; `data-guide-recent.jpg` shows none), so Down from Power does nothing.
 
-Measured (old type): dividers at y 403 and y 522, x 108..583.
+Measured (old type): the first divider at y 403, x 108..583. With nothing between Switch profile and Settings (no achievements, as in M2) the second is at y 522; in the picture the achievements stand between them.
 
 ### 2.8 Utilities
 
@@ -249,7 +249,7 @@ C/ExtensionCore.cs:755-866 unless said. The left stick acts as the D-pad (E/Play
 
 | Button | Does | Sound |
 |---|---|---|
-| Up / Down | Moves focus along the entries. At the first entry Up does nothing; Down from the tab's last entry goes to the **first** Utility. No wrap (2186-2251) | Navigate, only when focus moved |
+| Up / Down | Moves focus along the entries. At the first entry Up does nothing; Down from the tab's last entry goes to the **first** Utility, on the landing tab, which alone has any; on the other tabs it does nothing. No wrap (2186-2251) | Navigate, only when focus moved |
 | Up from a Utility | To the tab's last entry, whichever Utility it was | Navigate |
 | Left / Right on a Utility | Along the Utilities; stops at the ends | Navigate when moved |
 | Left / Right on an entry | Nothing (except Volume, section 5.3) | none |

@@ -13,9 +13,9 @@ pub mod theme;
 
 use model::Library;
 pub use model::Sound;
-use ui::{Button, PadEvent, PadStatus, Press, Repeat, Ui};
+use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
-use crate::guide::{Guide, GuideAction};
+use crate::guide::{Around, Face, Guide, GuideAction, Status};
 use crate::home::{Home, HomeAction};
 use crate::launch::LaunchScreen;
 
@@ -58,6 +58,8 @@ pub struct Dashboard {
     clock: Option<String>,
     /// Whether a pad is connected and what powers it, which the Status area shows.
     pad: PadStatus,
+    /// What the Guide's Status area shows beyond those.
+    status: Status,
     /// The Guide setting: off, the Guide button does nothing.
     guide_enabled: bool,
     /// The Guide button's press has done what it does, so what is still to come of it (its release after a hold,
@@ -83,6 +85,7 @@ impl Dashboard {
             user,
             clock: None,
             pad: PadStatus::default(),
+            status: Status::default(),
             guide_enabled: true,
             guide_button_spent: false,
             home: Home::default(),
@@ -119,10 +122,21 @@ impl Dashboard {
             let game = focused.filter(|&game| game <= last).unwrap_or(was.min(last));
             self.home.focus_recent(game, &self.library);
         }
-        // The Guide's list names games by their place: made again.
+        // The Guide's lists name games by their place: made again, focus staying where it is in them.
+        self.refresh_guide();
+    }
+
+    fn refresh_guide(&mut self) {
         if self.guide.is_open() {
-            self.guide.open(&self.library, self.playing);
+            let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+            self.guide.refresh(around);
         }
+    }
+
+    /// The batteries, the notifications' count and whether Discord is connected, as the shell last read them.
+    pub fn set_status(&mut self, status: Status) {
+        self.status = status;
+        self.refresh_guide();
     }
 
     pub fn set_clock(&mut self, text: Option<String>) {
@@ -231,11 +245,13 @@ impl Dashboard {
     /// Gives the press to whatever takes input now. True when it was A and it chose something.
     fn steer(&mut self, press: Press) -> bool {
         if self.guide.is_open() {
-            let action = self.guide.press(press.button);
+            let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+            let action = self.guide.press(press, around);
             if let Some(action) = action {
                 self.guide_action(action);
             }
-            return action.is_some() && press.button == Button::A;
+            // Everything but closing with B or the Guide button is a choice, and sounds as one.
+            return action.is_some_and(|action| action != GuideAction::Close);
         }
         // While a game starts, the Dashboard takes no input.
         if self.launch.up() {
@@ -261,11 +277,9 @@ impl Dashboard {
 
     fn guide_action(&mut self, action: GuideAction) {
         match action {
-            GuideAction::Close => self.close_guide(),
-            GuideAction::QuitGame => {
-                self.effects.push(Effect::QuitGame);
-                self.close_guide();
-            }
+            GuideAction::Close | GuideAction::Home | GuideAction::Resume => self.close_guide(),
+            // The Guide stays open over a game being quit, and goes when the game has ended.
+            GuideAction::QuitGame => self.effects.push(Effect::QuitGame),
             GuideAction::Launch(game) => {
                 self.home.focus_recent(game, &self.library);
                 self.close_guide();
@@ -281,7 +295,7 @@ impl Dashboard {
         if self.playing.is_some() && !self.has_overlay {
             return;
         }
-        self.guide.open(&self.library, self.playing);
+        self.guide.open(Around { library: &self.library, playing: self.playing, discord: self.status.discord });
         self.guide_overlaid = self.playing.is_some();
     }
 
@@ -294,6 +308,11 @@ impl Dashboard {
 
     pub fn guide_open(&self) -> bool {
         self.guide.is_open()
+    }
+
+    /// The Guide, for what it shows and where its focus is.
+    pub fn guide(&self) -> &Guide {
+        &self.guide
     }
 
     /// Whether the Guide is open over a game.
@@ -351,6 +370,7 @@ impl Dashboard {
                 self.launch.show(found);
             }
             self.playing = Some(game);
+            self.refresh_guide();
         }
     }
 
@@ -381,14 +401,33 @@ impl Dashboard {
         self.playing
     }
 
+    /// What the clock reads.
+    fn clock(&self) -> String {
+        self.clock.clone().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string())
+    }
+
+    /// The Guide alone, over whatever is drawn already: the same in Home's window and on the Overlay.
+    pub fn draw_guide(&mut self, ui: &mut Ui) {
+        let clock = self.clock();
+        let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+        // The pad's own word on its charge, unless the shell has said otherwise. One on a cable shows its glyph.
+        let charge = match self.pad.battery {
+            Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),
+            _ => None,
+        };
+        let status = Status { pad_battery: self.status.pad_battery.or(charge), ..self.status.clone() };
+        let face = Face { user: &self.user, clock: &clock, pad: self.pad.connected, status: &status };
+        self.guide.draw(ui, around, &face);
+    }
+
     /// Home's window: the page, and the Guide over it.
     pub fn draw(&mut self, ui: &mut Ui) {
-        let clock = self.clock.clone().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string());
+        let clock = self.clock();
         let status = home::Status { user: &self.user, clock: &clock, pad: self.pad.connected };
         self.home.set_in_front(!self.guide.is_open());
         self.home.draw(ui, &self.library, &status);
         if !self.guide_overlaid {
-            self.guide.draw(ui, &self.library, &self.user);
+            self.draw_guide(ui);
         }
     }
 
@@ -397,7 +436,7 @@ impl Dashboard {
     pub fn draw_overlay(&mut self, ui: &mut Ui) {
         self.launch.draw(ui);
         if self.guide_overlaid {
-            self.guide.draw(ui, &self.library, &self.user);
+            self.draw_guide(ui);
         }
     }
 

@@ -30,15 +30,18 @@ $launchPoints = @(
     # Inside the launcher's 400x200 window in the middle of the screen, left of its title: the Launch screen hides it.
     @{ X = 780; Y = 540; What = "Home's focused tile, and the game's launcher"; Offscreen = @(16, 10, 49) }
 )
-# The Guide over the game, at rest: its panel is the canvas's left 540, the theme's #1C1C1C, and beside it the game
-# under a 60% black dim. Every point is clear of the panel's text and of the game's title in its middle.
-$panel = @(28, 28, 28)
-$dimmedGame = @(6, 13, 32)
+# The Guide over the game, at rest: its panel is x 78..614, y 33..1045 of the canvas, grey turning dark green down
+# it, and beside it the game under the Guide's dim, black at 56%. The panel's points are at y 900, where it is
+# #152611: under the list's last entry (four games end at y 860) and over the Utilities (y 942). The game's are clear
+# of its title in its middle, of the shade across the screen's top 420 and of the hints and the Status area in it.
+# The screenshot test guide_over_a_game (crates/screens/tests/shots.rs) asserts the same colours at the same points.
+$panel = @(21, 38, 17)
+$dimmedGame = @(7, 14, 35)
 $guidePoints = @(
-    @{ X = 270; Y = 700; What = "the Guide's panel"; Colour = $panel }
-    @{ X = 530; Y = 700; What = "the Guide's panel, 10 inside its right edge"; Colour = $panel }
-    @{ X = 560; Y = 700; What = 'the game dimmed, 20 beside the panel'; Colour = $dimmedGame }
-    @{ X = 1230; Y = 300; What = 'the game dimmed'; Colour = $dimmedGame }
+    @{ X = 270; Y = 900; What = "the Guide's panel"; Colour = $panel }
+    @{ X = 604; Y = 900; What = "the Guide's panel, 10 inside its right edge"; Colour = $panel }
+    @{ X = 634; Y = 900; What = 'the game dimmed, 20 beside the panel'; Colour = $dimmedGame }
+    @{ X = 1230; Y = 700; What = 'the game dimmed'; Colour = $dimmedGame }
 )
 
 function Front { $f = Get-Foreground; "$($f.Process) '$($f.Title)'" }

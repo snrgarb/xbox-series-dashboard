@@ -8,6 +8,8 @@ pub enum Ease {
     Linear,
     /// Fast, then settling: WPF's CubicEase EaseOut.
     CubicOut,
+    /// Slow, then leaving fast: WPF's CubicEase EaseIn.
+    CubicIn,
     /// WPF's QuadraticEase EaseOut.
     QuadOut,
     /// WPF's SineEase EaseInOut.
@@ -20,6 +22,7 @@ impl Ease {
         match self {
             Ease::Linear => t,
             Ease::CubicOut => 1.0 - (1.0 - t).powi(3),
+            Ease::CubicIn => t.powi(3),
             Ease::QuadOut => 1.0 - (1.0 - t) * (1.0 - t),
             Ease::SineInOut => 0.5 - 0.5 * (std::f32::consts::PI * t).cos(),
         }
