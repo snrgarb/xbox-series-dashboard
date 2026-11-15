@@ -137,16 +137,6 @@ impl TextSys {
             // Segoe UI's line is 1.33 of its size, Bahnschrift's 1.2.
             let line = if key.font == Font::Display { 1.2 } else { 1.33 };
             let line = if key.font == Font::Icons { size } else { (size * line).round() };
-            let mut buffer = Buffer::new(&mut self.fonts, Metrics::new(size, line));
-            buffer.set_size((key.width > 0).then_some(key.width as f32), None);
-            match key.max_lines {
-                0 => {}
-                1 => {
-                    buffer.set_wrap(Wrap::None);
-                    buffer.set_ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
-                }
-                n => buffer.set_ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(n as usize))),
-            }
             let family = self.families[key.font as usize].as_deref().or(self.families[0].as_deref());
             let family = family.map_or(Family::SansSerif, Family::Name);
             let attrs = Attrs::new().family(family).weight(Weight(key.weight.max(100)));
@@ -155,8 +145,42 @@ impl TextSys {
                 HAlign::Center => Some(Align::Center),
                 HAlign::Right => Some(Align::Right),
             };
-            buffer.set_text(&key.text, &attrs, Shaping::Advanced, align);
-            buffer.shape_until_scroll(&mut self.fonts, false);
+            let fonts = &mut self.fonts;
+            // One line that ends in an ellipsis where it is too long, or lines wrapped to the width.
+            let mut shape = |text: &str, one_line: bool| {
+                let mut buffer = Buffer::new(fonts, Metrics::new(size, line));
+                buffer.set_size((key.width > 0).then_some(key.width as f32), None);
+                if one_line {
+                    buffer.set_wrap(Wrap::None);
+                    buffer.set_ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)));
+                }
+                buffer.set_text(text, &attrs, Shaping::Advanced, align);
+                buffer.shape_until_scroll(fonts, false);
+                buffer
+            };
+            let lines = key.max_lines as usize;
+            let buffer = if lines == 1 {
+                shape(&key.text, true)
+            } else {
+                let wrapped = shape(&key.text, false);
+                // Where each line starts and ends in the text. (cosmic-text's own ellipsis on a last line of several
+                // starts that line with the space it was broken at, so the lines are cut here instead.)
+                let spans: Vec<(usize, usize, usize)> = wrapped
+                    .layout_runs()
+                    .filter_map(|run| Some((run.line_i, run.glyphs.first()?.start, run.glyphs.last()?.end)))
+                    .collect();
+                let one_paragraph = spans.iter().all(|&(paragraph, ..)| paragraph == 0);
+                if lines == 0 || spans.len() <= lines || !one_paragraph {
+                    wrapped
+                } else {
+                    // The lines before the last as they wrapped, each its own line, and the rest on the last, cut
+                    // short with an ellipsis.
+                    let mut cut: Vec<&str> =
+                        spans[..lines - 1].iter().map(|&(_, from, to)| key.text[from..to].trim()).collect();
+                    cut.push(key.text[spans[lines - 1].1..].trim());
+                    shape(&cut.join("\n"), true)
+                }
+            };
             self.buffers.insert(key.clone(), buffer);
         }
         &self.buffers[key]
@@ -175,6 +199,39 @@ impl TextSys {
             self.buffers.retain(|key, _| used.contains(key));
         } else {
             self.used.clear();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lines(text: &str, max_lines: u8) -> Vec<String> {
+        let mut sys = TextSys::new();
+        let key = TextKey {
+            text: text.into(),
+            size: 260,
+            weight: 400,
+            font: Font::Ui,
+            width: 150,
+            max_lines,
+            align: HAlign::Left,
+        };
+        let runs = sys.buffer(&key).layout_runs();
+        runs.map(|run| run.glyphs.iter().map(|glyph| &run.text[glyph.start..glyph.end]).collect()).collect()
+    }
+
+    #[test]
+    fn a_wrapped_line_never_starts_with_the_space_it_was_broken_at() {
+        // Lines that fit in two, and lines that are cut to two: the last line starts with its word.
+        // Whatever the font here, so by what it wraps to with no limit on its lines.
+        for text in ["Copperhead Station", "Copperhead Station of the Long Night Shift"] {
+            let free = lines(text, 0);
+            let cut = lines(text, 2);
+            assert_eq!(cut.len(), 2, "{text}: {cut:?}");
+            assert_eq!(cut[0], free[0], "{text}");
+            assert!(cut[1].starts_with(free[1].trim()), "{text}: {cut:?} of {free:?}");
         }
     }
 }
