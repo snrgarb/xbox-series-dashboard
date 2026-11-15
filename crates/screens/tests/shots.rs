@@ -123,6 +123,17 @@ impl Stage {
         image::RgbaImage::from_raw(target.size.0, target.size.1, pixels).unwrap()
     }
 
+    /// The Guide alone, at rest, over a screen of one colour: what is seen of it over a game.
+    fn still_over(&mut self, game: ui::Color) -> image::RgbaImage {
+        self.host.store.set_time(10.0);
+        let Self { gpu, host, target, dashboard, .. } = self;
+        let pixels = target.still(gpu, host, |ui| {
+            ui.fill(ui.screen(), game, 0.0);
+            dashboard.draw_guide(ui);
+        });
+        image::RgbaImage::from_raw(target.size.0, target.size.1, pixels).unwrap()
+    }
+
     fn check(&mut self, name: &str) {
         let image = self.still();
         compare(name, &image);
@@ -173,6 +184,16 @@ impl Stage {
 
     fn check_frame(&mut self, name: &str) {
         let image = self.frame();
+        compare(name, &image);
+    }
+
+    /// The screen `dt` seconds after the last frame, as an image.
+    fn frame_after(&mut self, dt: f32) -> image::RgbaImage {
+        self.step(dt);
+        self.frame()
+    }
+
+    fn check_image(&mut self, name: &str, image: image::RgbaImage) {
         compare(name, &image);
     }
 }
@@ -352,14 +373,6 @@ fn home_group_card_focused_16_10() {
 }
 
 #[test]
-fn guide() {
-    let mut stage = Stage::on_row(library_with_art(), HD);
-    stage.dashboard.open_guide();
-    stage.press(&[Button::Down]);
-    stage.check("guide");
-}
-
-#[test]
 fn launch_screen() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.launch_started(0);
@@ -382,18 +395,6 @@ fn launch_screen_with_no_art() {
     let mut stage = Stage::new(library, HD);
     stage.dashboard.launch_started(0);
     stage.check("launch-screen-no-art");
-}
-
-/// The Guide over a running game, as the Overlay shows it. Offscreen it is over Home's picture; on screen Home's
-/// window is hidden and the dim is over the game.
-#[test]
-fn guide_over_a_game() {
-    let mut stage = Stage::new(library_with_art(), HD);
-    stage.dashboard.launch_started(1);
-    stage.dashboard.game_booted();
-    stage.still();
-    stage.press(&[Button::Guide, Button::Down]);
-    stage.check("guide-over-game");
 }
 
 /// What the Overlay is wanted for through a launch, and when Home's window has nothing to show.
@@ -908,10 +909,283 @@ fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
     stage.dashboard.game_booted();
     stage.press(&[Button::Left, Button::A]);
     assert!(stage.dashboard.take_effects().is_empty(), "not so much as a sound");
-    // The Guide over the game offers Quit.
-    stage.press(&[Button::Guide, Button::Down, Button::A]);
-    assert_eq!(asked(&mut stage.dashboard), [Effect::QuitGame, Effect::GuideClosed]);
+    // The Guide over the game: Menu on the running game quits it, and the Guide goes when the game has.
+    stage.press(&[Button::Guide, Button::Down, Button::Down, Button::Menu]);
+    assert_eq!(asked(&mut stage.dashboard), [Effect::QuitGame]);
+    assert!(stage.dashboard.guide_open());
     stage.dashboard.game_ended();
+    assert!(!stage.dashboard.guide_open());
     assert_eq!(stage.dashboard.playing(), None);
     assert_eq!(stage.dashboard.home_focus(), Focus::Recent(2));
+}
+
+// --- The Guide (docs/spec/guide.md). Where its focus goes and what a press asks for is tests/guide.rs. ---
+
+use screens::guide::{PcBattery, Status};
+
+/// The colour of the stand-in game the end-to-end tests run, and of the Bundle's pictures of the Guide over a game.
+const GAME: ui::Color = ui::Color::rgb(0x102050);
+
+/// A Dashboard with a game running, its Launch screen gone, and the Guide open over it.
+fn guide_over_game(library: Library, game: usize) -> Stage {
+    let mut stage = Stage::new(library, HD);
+    stage.dashboard.launch_started(game);
+    stage.dashboard.game_booted();
+    stage.still();
+    stage.press(&[Button::Guide]);
+    stage
+}
+
+fn colour(image: &image::RgbaImage, x: u32, y: u32) -> [u8; 3] {
+    let pixel = image.get_pixel(x, y).0;
+    [pixel[0], pixel[1], pixel[2]]
+}
+
+fn within(a: [u8; 3], b: [u8; 3], by: u8) -> bool {
+    a.iter().zip(b).all(|(&a, b)| a.abs_diff(b) <= by)
+}
+
+/// The landing tab over Home as it opens: focus on Home, four games under the divider, the Utilities at the foot.
+#[test]
+fn guide() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.press(&[Button::Guide]);
+    stage.check("guide");
+}
+
+/// A game's entry with focus: its ring over its cover, and the neighbours' covers under its glow.
+#[test]
+fn guide_recent_game_focused() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.press(&[Button::Guide, Button::Down, Button::Down, Button::Down]);
+    stage.check("guide-recent-game");
+}
+
+/// A Utility with focus, the Notifications badge beside it, and the Status area with everything it can show: the
+/// PC's battery, the pad's with its percent, the clock.
+#[test]
+fn guide_utility_focused_with_a_badge_and_batteries() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_pad_connected(true);
+    stage.dashboard.set_status(Status {
+        pad_battery: Some(60),
+        pc_battery: Some(PcBattery { percent: Some(57), charging: false }),
+        notifications: 3,
+        ..Status::default()
+    });
+    stage.press(&[Button::Guide]);
+    stage.press(&[Button::Down; 6]);
+    stage.press(&[Button::Right]);
+    stage.check("guide-utility");
+}
+
+/// The Bundle's own picture of the Guide (guide-over-game's guide-open.jpg): over the stand-in game, which is none
+/// of the library's, with nothing played yet and a pad on a cable.
+#[test]
+fn guide_over_a_game_with_no_games_played() {
+    let mut library = screens::fake_library();
+    library.games.iter_mut().for_each(|game| game.last_played = 0);
+    let mut stage = Stage::new(library, HD);
+    stage.dashboard.set_clock(Some("4:53 PM".into()));
+    stage.dashboard.set_pad_connected(true);
+    stage.press(&[Button::Guide]);
+    let image = stage.still_over(GAME);
+    stage.check_image("guide-no-games", image);
+}
+
+/// Over a running game, as the Overlay shows it: the game first in the list, "Running", with focus and so with the
+/// Menu button's hint; the dim over the game's own colour.
+#[test]
+fn guide_over_a_game() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down]);
+    let image = stage.still_over(GAME);
+    // The colours the end-to-end smoke test looks for on the real screen (e2e/payloads/smoke/run.ps1).
+    assert!(within(colour(&image, 270, 900), [21, 38, 17], 3), "the panel: {:?}", colour(&image, 270, 900));
+    assert!(within(colour(&image, 604, 900), [21, 38, 17], 3), "the panel's edge: {:?}", colour(&image, 604, 900));
+    assert!(within(colour(&image, 634, 900), [7, 14, 35], 3), "beside the panel: {:?}", colour(&image, 634, 900));
+    assert!(within(colour(&image, 1230, 700), [7, 14, 35], 3), "the game dimmed: {:?}", colour(&image, 1230, 700));
+    stage.check_image("guide-over-game", image);
+}
+
+/// A running game with no cover: the console's own tile for it, a pad on the accent.
+#[test]
+fn guide_over_a_game_with_no_cover() {
+    let mut stage = guide_over_game(screens::fake_library(), 3);
+    let image = stage.still_over(GAME);
+    stage.check_image("guide-over-game-no-cover", image);
+}
+
+#[test]
+fn guide_profile_and_system() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.press(&[Button::Guide, Button::RightBumper]);
+    stage.check("guide-profile");
+}
+
+/// Profile & system over a game: Switch profile greyed out, here with focus, which it still takes.
+#[test]
+fn guide_profile_and_system_over_a_game() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::RightBumper, Button::Down]);
+    let image = stage.still_over(GAME);
+    stage.check_image("guide-profile-over-game", image);
+}
+
+#[test]
+fn guide_power_focused() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.press(&[Button::Guide, Button::RightBumper, Button::Down, Button::Down, Button::Down]);
+    stage.check("guide-profile-power");
+}
+
+/// Names too long for their line: a game's wraps to two lines and ends in an ellipsis, with "Running" under it on
+/// the running game; the user's is one line.
+#[test]
+fn guide_long_names() {
+    let mut library = library_with_art();
+    library.user = Some("A Gamertag That Is Far Too Long For The Panel".into());
+    library.games[0].name = "The Legend of the Seven Lanterns: Definitive Anniversary Edition of the Year".into();
+    library.games[1].name = "Microsoft Flight Simulator 40th Anniversary Deluxe Edition".into();
+    library.games[2].name = "Supercalifragilisticexpialidocious".into();
+    let mut stage = guide_over_game(library, 0);
+    let image = stage.still_over(GAME);
+    stage.check_image("guide-long-names", image);
+    stage.press(&[Button::RightBumper]);
+    let image = stage.still_over(GAME);
+    stage.check_image("guide-long-names-profile", image);
+}
+
+/// With Discord connected its tab stands between the two; its entries come with Discord.
+#[test]
+fn guide_discord_tab() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_status(Status { discord: true, ..Status::default() });
+    stage.press(&[Button::Guide, Button::RightBumper]);
+    stage.check("guide-discord");
+}
+
+#[test]
+fn guide_720p() {
+    let mut stage = Stage::on_row(library_with_art(), (1280, 720));
+    stage.dashboard.set_pad_connected(true);
+    stage.press(&[Button::Guide, Button::Down]);
+    stage.check("guide-720p");
+}
+
+/// Wider than 16:9: the panel at the screen's left, the Status area at its right, the dim to both edges.
+#[test]
+fn guide_ultrawide() {
+    let mut stage = Stage::on_row(library_with_art(), (2560, 1080));
+    stage.dashboard.set_pad_connected(true);
+    stage.press(&[Button::Guide]);
+    stage.check("guide-ultrawide");
+}
+
+/// The tab's underline: there once the panel's content is in.
+const UNDERLINE: (u32, u32) = (140, 135);
+const GREEN: [u8; 3] = [44, 162, 67];
+/// A point of the panel under every entry and over the Utilities, and its colour there.
+const PANEL: (u32, u32) = (300, 900);
+const PANEL_COLOUR: [u8; 3] = [21, 38, 17];
+/// The fill of an entry with focus, over the panel's grey.
+const FILL: [u8; 3] = [64, 64, 64];
+
+fn is_panel(image: &image::RgbaImage, x: u32) -> bool {
+    within(colour(image, x, PANEL.1), PANEL_COLOUR, 3)
+}
+
+/// The panel slides in over 120 ms, and what is on it comes 50 ms behind.
+#[test]
+fn the_guide_slides_in_and_its_content_follows_the_panel() {
+    let mut stage = Stage::on_row(screens::fake_library(), HD);
+    stage.frame_after(0.0);
+    stage.press(&[Button::Guide]);
+    let image = stage.frame_after(0.0);
+    assert!(!is_panel(&image, PANEL.0), "the panel starts off the screen");
+    // Halfway through its time the panel is seven eighths in: its right edge at x 526.
+    let image = stage.frame_after(0.06);
+    assert!(is_panel(&image, PANEL.0), "{:?}", colour(&image, PANEL.0, PANEL.1));
+    assert!(is_panel(&image, 520) && !is_panel(&image, 532));
+    assert!(!within(colour(&image, UNDERLINE.0, UNDERLINE.1), GREEN, 8), "its content has only just set off");
+    let image = stage.frame_after(0.06);
+    assert!(is_panel(&image, 608), "the panel is in after 120 ms");
+    assert!(!within(colour(&image, UNDERLINE.0, UNDERLINE.1), GREEN, 8), "its content is still on its way");
+    let image = stage.frame_after(0.06);
+    assert!(within(colour(&image, UNDERLINE.0, UNDERLINE.1), GREEN, 8), "and in 50 ms after it");
+}
+
+/// It slides out over 150 ms, slowly at first, and is gone then.
+#[test]
+fn the_guide_slides_out_and_is_gone() {
+    let mut stage = Stage::on_row(screens::fake_library(), HD);
+    stage.press(&[Button::Guide]);
+    stage.still();
+    stage.press(&[Button::B]);
+    // It sets off in the frame after the press. Two thirds through, it has gone under a third of its way: its
+    // right edge is at x 406.
+    stage.frame_after(0.0);
+    let image = stage.frame_after(0.1);
+    assert!(stage.dashboard.guide().showing());
+    assert!(is_panel(&image, 400) && !is_panel(&image, 412));
+    // Its content goes with it: Home's fill, x 87..605 at rest, ends at 398.
+    assert!(within(colour(&image, 380, 235), FILL, 3), "{:?}", colour(&image, 380, 235));
+    assert!(!within(colour(&image, 420, 235), FILL, 12), "{:?}", colour(&image, 420, 235));
+    stage.frame_after(0.06);
+    assert!(!stage.dashboard.guide().showing());
+}
+
+/// Under Reduce motion the Guide is there at once and gone at once, the dim with it.
+#[test]
+fn under_reduce_motion_the_guide_appears_and_goes_at_once() {
+    let mut stage = Stage::on_row(screens::fake_library(), HD);
+    stage.host.store.reduce_motion = true;
+    let home = stage.frame_after(0.0);
+    stage.press(&[Button::Guide]);
+    let image = stage.frame_after(0.0);
+    assert!(is_panel(&image, 608));
+    assert!(within(colour(&image, UNDERLINE.0, UNDERLINE.1), GREEN, 8));
+    // A new tab's content too: Profile & system's first entry has focus, and its fill is there.
+    stage.press(&[Button::RightBumper]);
+    let image = stage.frame_after(0.0);
+    assert!(within(colour(&image, 430, 225), FILL, 3), "{:?}", colour(&image, 430, 225));
+    stage.press(&[Button::B]);
+    let image = stage.frame_after(0.0);
+    assert!(!stage.dashboard.guide().showing());
+    assert!(image == home, "Home as it was, with no dim left over it");
+}
+
+/// A new tab's content comes in from the side the bumper went toward, fading in over 120 ms; the tab strip does
+/// not move.
+#[test]
+fn a_new_tabs_content_flies_in_from_the_side() {
+    let mut stage = Stage::on_row(screens::fake_library(), HD);
+    stage.press(&[Button::Guide]);
+    stage.still();
+    stage.press(&[Button::RightBumper]);
+    let image = stage.frame_after(0.0);
+    // The underline is under the second tab at once; the first entry's fill is yet to show.
+    assert!(within(colour(&image, UNDERLINE.0 + 84, UNDERLINE.1), GREEN, 8));
+    assert!(!within(colour(&image, 430, 225), FILL, 12), "{:?}", colour(&image, 430, 225));
+    // Halfway it is still 6 to the right of its place: the profile's picture, x 105..165 at rest, starts at 111.
+    const PICTURE: [u8; 3] = [242, 242, 242];
+    let image = stage.frame_after(0.06);
+    assert!(!within(colour(&image, 107, 260), PICTURE, 40), "{:?}", colour(&image, 107, 260));
+    assert!(colour(&image, 135, 250)[0] > 160, "three quarters faded in: {:?}", colour(&image, 135, 250));
+    let image = stage.frame_after(0.06);
+    assert!(within(colour(&image, 430, 225), FILL, 3));
+    assert!(within(colour(&image, 107, 260), PICTURE, 12), "{:?}", colour(&image, 107, 260));
+
+    // Back with the left bumper: from the left, so Home's fill, x 87..605 at rest, ends 6 short on the way.
+    stage.press(&[Button::LeftBumper]);
+    stage.frame_after(0.0);
+    let image = stage.frame_after(0.06);
+    let short = colour(&image, 601, 235);
+    let image = stage.frame_after(0.06);
+    assert!(within(colour(&image, 430, 235), FILL, 3));
+    assert!(
+        !within(short, colour(&image, 601, 235), 12),
+        "{short:?} on the way, {:?} at rest",
+        colour(&image, 601, 235)
+    );
 }

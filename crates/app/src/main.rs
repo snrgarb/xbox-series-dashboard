@@ -51,7 +51,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus]
-       dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,...] [--guide]
+       dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>]";
 
@@ -69,6 +69,8 @@ fn button(name: &str) -> Result<ui::Button, String> {
         "y" => Y,
         "menu" => Menu,
         "view" => View,
+        "lb" => LeftBumper,
+        "rb" => RightBumper,
         "guide" => Guide,
         _ => return Err(format!("bad --press: no button {name}")),
     })

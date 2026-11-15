@@ -16,7 +16,6 @@ pub const ACCENT: Color = Color::rgb(0x107C10);
 pub const TILE: Color = Color::rgb(0x1A1A1A);
 pub const BAND: Color = Color::argb(0xE6000000);
 pub const TEXT_DIM: Color = Color::argb(0xB3FFFFFF);
-pub const PANEL: Color = Color::rgb(0x1C1C1C);
 
 /// Body text: Segoe UI 26, the smallest the Xbox accessibility guidelines allow at ten feet.
 pub const BODY: TextStyle = TextStyle::new(Font::Ui, 26.0, 400);
@@ -40,6 +39,11 @@ pub mod glyph {
     /// Not in the icon font: `Ui::icon` draws it from Segoe UI Symbol, as the Bundle's body font does.
     pub const TROPHY: char = '\u{1F3C6}';
     pub const CHAT: char = '\u{E8BD}';
+    pub const HOME: char = '\u{E80F}';
+    /// The speaker: the Audio utility.
+    pub const VOLUME: char = '\u{E767}';
+    pub const SWITCH_PROFILE: char = '\u{E748}';
+    pub const POWER: char = '\u{E7E8}';
 }
 
 /// The focus ring round a rectangle, with its glow: a 4-wide stroke 4 clear of the edge, its outer corners 16,

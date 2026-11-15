@@ -122,24 +122,66 @@ fn moving_in_the_guide_is_its_own_sound_and_only_when_focus_moved() {
     assert_eq!(press(&mut home, Button::Up), [GUIDE_MOVE]);
     // Left and Right do nothing in the list.
     assert!(press(&mut home, Button::Left).is_empty());
-    // Down to the last entry and against it.
-    let mut sounds = 0;
-    while press(&mut home, Button::Down) == [GUIDE_MOVE] {
-        sounds += 1;
+    assert!(press(&mut home, Button::Right).is_empty());
+    // From the second entry down the other four, onto the first Utility, and against the panel's foot.
+    for _ in 0..5 {
+        assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
     }
-    assert!(sounds > 0);
-    assert!(press(&mut home, Button::Down).is_empty(), "nothing is below the last entry");
+    assert!(press(&mut home, Button::Down).is_empty(), "nothing is below the Utilities");
+    // Along the Utilities and against the row's ends.
+    assert!(press(&mut home, Button::Left).is_empty());
+    assert_eq!(press(&mut home, Button::Right), [GUIDE_MOVE]);
+    assert_eq!(hold(&mut home, Button::Right), [GUIDE_MOVE]);
+    assert!(press(&mut home, Button::Right).is_empty());
+    assert_eq!(press(&mut home, Button::Up), [GUIDE_MOVE]);
     // Home's focus is where it was: the Guide's moves were not Home's.
     assert!(!press(&mut home, Button::B).contains(&MOVE));
+}
+
+#[test]
+fn changing_tab_is_the_move_sound_and_a_bumper_at_the_last_tab_is_silent() {
+    let mut home = dashboard();
+    press(&mut home, Button::Guide);
+    assert!(press(&mut home, Button::LeftBumper).is_empty());
+    assert_eq!(press(&mut home, Button::RightBumper), [GUIDE_MOVE]);
+    assert!(press(&mut home, Button::RightBumper).is_empty());
+    assert!(hold(&mut home, Button::LeftBumper).is_empty(), "a bumper held changes tab once");
+    assert_eq!(press(&mut home, Button::LeftBumper), [GUIDE_MOVE]);
 }
 
 #[test]
 fn a_in_the_guide_is_the_select_sound_then_what_the_entry_does() {
     let mut home = dashboard();
     press(&mut home, Button::Guide);
-    press(&mut home, Button::Down);
-    press(&mut home, Button::Down);
+    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed], "Home");
+    press(&mut home, Button::Guide);
+    for _ in 0..3 {
+        press(&mut home, Button::Down);
+    }
     assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed, Effect::Launch(1)]);
+    // A still held chooses nothing more.
+    assert!(hold(&mut home, Button::A).is_empty());
+}
+
+#[test]
+fn a_on_something_that_does_nothing_is_silent() {
+    let mut home = dashboard();
+    press(&mut home, Button::Guide);
+    // My games & apps, whose page is yet to come.
+    press(&mut home, Button::Down);
+    assert!(press(&mut home, Button::A).is_empty());
+    // A Utility, whose Flyout is yet to come.
+    for _ in 0..5 {
+        press(&mut home, Button::Down);
+    }
+    assert!(press(&mut home, Button::A).is_empty());
+    // The Profile entry, which never does anything.
+    press(&mut home, Button::RightBumper);
+    assert!(press(&mut home, Button::A).is_empty());
+    // And buttons the Guide has no use for.
+    for button in [Button::X, Button::Y, Button::View, Button::Menu] {
+        assert!(press(&mut home, button).is_empty(), "{button:?}");
+    }
 }
 
 #[test]
@@ -154,10 +196,16 @@ fn while_a_game_starts_and_runs_only_the_guide_is_heard() {
     for button in [Button::Right, Button::A, Button::B] {
         assert!(press(&mut home, button).is_empty(), "{button:?} behind the game");
     }
-    // Over the game: the Guide, down to Quit, and A.
+    // Over the game: the Guide, down to the game, and A goes back to it.
     assert_eq!(press(&mut home, Button::Guide), [GUIDE_OPEN]);
     assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
-    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::QuitGame, Effect::GuideClosed]);
+    assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
+    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed]);
+    // Again, and Menu on the game quits it: the menu's one option chosen.
+    assert_eq!(press(&mut home, Button::Guide), [GUIDE_OPEN]);
+    press(&mut home, Button::Down);
+    press(&mut home, Button::Down);
+    assert_eq!(press(&mut home, Button::Menu), [GUIDE_SELECT, Effect::QuitGame]);
     // The game ending puts focus back on its tile in silence.
     home.game_ended();
     assert!(home.take_effects().is_empty());
