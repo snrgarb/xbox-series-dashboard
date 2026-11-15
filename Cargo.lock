@@ -88,6 +88,7 @@ name = "app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "audio",
  "image",
  "input",
  "library",
@@ -135,6 +136,15 @@ name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
+
+[[package]]
+name = "audio"
+version = "0.0.0"
+dependencies = [
+ "model",
+ "tempfile",
+ "windows",
+]
 
 [[package]]
 name = "autocfg"
@@ -2154,6 +2164,8 @@ dependencies = [
 name = "standin"
 version = "0.0.0"
 dependencies = [
+ "audio",
+ "model",
  "serde_json",
  "source-steam",
  "tempfile",

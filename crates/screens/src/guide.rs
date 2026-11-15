@@ -80,6 +80,11 @@ impl Guide {
         self.open
     }
 
+    /// Which entry focus is on, from the top.
+    pub fn focus(&self) -> usize {
+        self.focus
+    }
+
     /// Whether there is anything of it to draw: open, or still sliding away.
     pub fn showing(&self) -> bool {
         self.open || self.shown > 0.0

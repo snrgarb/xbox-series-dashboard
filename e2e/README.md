@@ -51,7 +51,7 @@ the TV PC, not for here.
 
 ## The fake Steam and the stand-ins
 
-`standin.exe` (`crates/standin`) is three things, and has no console window in any of them:
+`standin.exe` (`crates/standin`) is four things, and has no console window in any of them:
 
 - **`standin make-steam <dir>`** writes a fake Steam install: binary `appcache/appinfo.vdf` and `packageinfo.vdf`, the
   user's `localconfig.vdf`, `steamapps/libraryfolders.vdf`, an `appmanifest_<appid>.acf` and a folder under
@@ -60,6 +60,11 @@ the TV PC, not for here.
   six played, so the Recent row is, in order, Ashfall Courier, Lanternfish Deep, Brass Meridian, Quiet Orbit (not
   installed), Thimble & Thorn (its art a PNG named `.jpg`) and Saltwind Rally (not installed); eight never played, two
   of them with no art. Each game's art is a gradient of its own colour.
+- **`standin make-tones <dir>`** writes a 0.15 s tone under each of the names the Dashboard's sounds have in the
+  Bundle (`model::Sound`), a semitone apart. The console's own sounds are in no repository and on no test machine;
+  a test points the Dashboard at the tones with `--media <dir>` and has it log what it plays with `--log-sounds`
+  (`audio: 8 sounds from <dir>`, `audio: device "<name>" started, ...` at the first sound, `audio: played <file>`
+  for each).
 - **The stand-in game.** Every installed game's folder holds a copy of `standin.exe` named `game.exe`, which shows a
   borderless, full-screen, dark-blue window titled with the game's name (from `game-args.txt` beside it) until it is
   closed, Esc is pressed, or ten minutes pass. So "a program in the game's install folder has a window covering the

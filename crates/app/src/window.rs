@@ -18,6 +18,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
+use crate::sounds::Sounds;
 use crate::store::Store;
 use crate::{since_start, Args};
 
@@ -77,6 +78,7 @@ struct App {
     store: Store,
     /// When the library had been read, in ms since the process started.
     library_ready: f64,
+    sounds: Sounds,
 }
 
 pub fn run(args: &Args, library: Library, store: Store) {
@@ -87,6 +89,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
     }
+    // Where --focus put focus is where the Dashboard starts: nothing is heard of getting there.
+    dashboard.take_effects();
     let mut app = App {
         windowed: args.windowed,
         dashboard,
@@ -110,6 +114,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         stale: true,
         presented: None,
         launch: None,
+        sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
     };
@@ -233,6 +238,7 @@ impl App {
                 // Guide closes, and hides once the panel has slid away.
                 Effect::GuideClosed => {}
                 Effect::Exit => event_loop.exit(),
+                Effect::Sound(sound) => self.sounds.play(sound),
             }
         }
     }

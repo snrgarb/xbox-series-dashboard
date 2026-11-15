@@ -12,6 +12,7 @@ pub mod spinner;
 pub mod theme;
 
 use model::Library;
+pub use model::Sound;
 use ui::{Button, Press, Ui};
 
 use crate::guide::{Guide, GuideAction};
@@ -29,6 +30,8 @@ pub enum Effect {
     GuideClosed,
     /// Leave to the desktop.
     Exit,
+    /// Play this sound, if there is a file for it.
+    Sound(Sound),
 }
 
 /// What the Overlay is wanted for.
@@ -124,32 +127,60 @@ impl Dashboard {
         std::mem::take(&mut self.effects)
     }
 
+    /// A press of the pad, and the sound of what it did. The sound is asked for before anything else the press
+    /// asks of the shell, and is decided here for every screen, by what the press changed: a move that went
+    /// nowhere, B, and the Guide closing are silent, as they are in the Bundle.
     pub fn press(&mut self, press: Press) {
+        let (was_open, guide, home) = (self.guide.is_open(), self.guide.focus(), self.home.focus());
+        let asked = self.effects.len();
+        let activated = self.steer(press);
+        let sound = if was_open {
+            if activated {
+                Some(Sound::GuideSelect)
+            } else {
+                (self.guide.is_open() && self.guide.focus() != guide).then_some(Sound::GuideMove)
+            }
+        } else if self.guide.is_open() {
+            Some(Sound::GuideOpen)
+        } else if activated {
+            Some(Sound::Activate)
+        } else {
+            (self.home.focus() != home).then_some(Sound::Move)
+        };
+        if let Some(sound) = sound {
+            self.effects.insert(asked, Effect::Sound(sound));
+        }
+    }
+
+    /// Gives the press to whatever takes input now. True when it was A and it chose something.
+    fn steer(&mut self, press: Press) -> bool {
         if self.guide.is_open() {
-            if let Some(action) = self.guide.press(press.button) {
+            let action = self.guide.press(press.button);
+            if let Some(action) = action {
                 self.guide_action(action);
             }
-            return;
+            return action.is_some() && press.button == Button::A;
         }
         // While a game starts, the Dashboard takes no input.
         if self.launch.up() {
-            return;
+            return false;
         }
         if press.button == Button::Guide {
             if !press.repeat {
                 self.open_guide();
             }
-            return;
+            return false;
         }
         // Behind a running game there is nothing to steer.
         if self.playing.is_some() {
-            return;
+            return false;
         }
         match self.home.press(press.button, &self.library) {
             Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
             Some(HomeAction::OpenGuide) if !press.repeat => self.open_guide(),
-            _ => {}
+            _ => return false,
         }
+        press.button == Button::A
     }
 
     fn guide_action(&mut self, action: GuideAction) {
