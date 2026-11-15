@@ -21,6 +21,8 @@ function Focus-Now { Focus-Lines | Select-Object -Last 1 }
 # "focus: ". Then a rest for the picture, if one is asked for: the software renderer takes most of a second a frame.
 # The hub opens 300 ms after A, which the wait for its line covers.
 function Press([string] $Button, [string] $Expect, [string] $Name = '') {
+    # Two taps closer than a poll of the pad are one: the button has to be seen up between them.
+    Start-Sleep -Milliseconds 130
     $before = @(Focus-Lines).Count
     Push-Button $Button
     $pattern = "^focus: $Expect`$"

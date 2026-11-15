@@ -1,7 +1,7 @@
-//! My games & apps (docs/spec/my-games.md): the shell, Games, Play history and Manage. Where focus goes and what a
+//! My games & apps (docs/spec/my-games.md): the shell, Games, Play history, Full library and Manage. Where focus goes and what a
 //! press asks for, with no picture; then the page drawn offscreen and compared with the committed reference images,
 //! as tests/shots.rs does for Home (`SHOTS=bless cargo test -p screens` accepts what is drawn now). The Bundle's own
-//! pictures of these states are 01 to 08 of docs/spec/pictures.md.
+//! pictures of these states are 01 to 14 of docs/spec/pictures.md.
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
@@ -11,11 +11,12 @@ use model::{Game, Library};
 use render::gpu::{self, Gpu};
 use render::offscreen::{read_back, wait, FORMAT};
 use screens::home::Focus;
+use screens::keyboard::Typed;
 use screens::my_games::Entry;
 use screens::pages::Open;
 use screens::{hint_bar, Dashboard, Effect, Sound};
 use ui::host::Offscreen;
-use ui::Button::{self, Down, Left, Menu, Right, Up, A, B, X, Y};
+use ui::Button::{self, Down, Left, LeftBumper, Menu, Right, RightBumper, Up, A, B, X, Y};
 use ui::{Host, Press};
 
 const DAY: u64 = 86_400;
@@ -144,6 +145,11 @@ fn after(dashboard: &mut Dashboard, buttons: &[Button]) -> String {
     line.strip_prefix("MyGames: ").unwrap_or_else(|| panic!("the page is not up: {line}")).to_string()
 }
 
+/// Where focus is, without what the page says of its state after it.
+fn place(line: &str) -> String {
+    line.split("; ").next().unwrap_or_default().to_string()
+}
+
 /// Longer than the nav's settle wait: a step along the nav after it is a step on its own.
 fn rest() {
     std::thread::sleep(Duration::from_millis(170));
@@ -166,9 +172,7 @@ fn every_way_in_gives_focus_to_the_content() {
     assert_eq!(after(&mut page(Entry::Games), &[]), "Games: Tile(0)");
     assert_eq!(after(&mut page(Entry::PlayHistory), &[]), "PlayHistory: Row(0)");
     assert_eq!(after(&mut page(Entry::Queue), &[]), "Manage: Queue");
-    // Full library's content is #53's: until then it has nothing to focus, and says which filter it was handed.
-    let see_all = Entry::FullLibrary { filter: Some(7) };
-    assert_eq!(after(&mut page(see_all), &[]), "FullLibrary { filter: Some(7) }: Nav(FullLibrary)");
+    assert_eq!(place(&after(&mut page(Entry::FullLibrary { filter: None }), &[])), "FullLibrary: Tile(0)");
 }
 
 #[test]
@@ -199,7 +203,8 @@ fn the_nav_shows_the_item_focus_steps_onto_and_stops_at_its_ends() {
     }
     // Each step, taken on its own, shows its item at once. Down from Full library crosses the line to Manage, and
     // Manage is the end.
-    let full_library = "FullLibrary { filter: None }: Nav(FullLibrary)";
+    let full_library = "FullLibrary: Nav(FullLibrary)";
+    let lines: Vec<String> = lines.iter().map(|line| place(line)).collect();
     assert_eq!(
         lines,
         [
@@ -211,11 +216,14 @@ fn the_nav_shows_the_item_focus_steps_onto_and_stops_at_its_ends() {
         ]
     );
     rest();
-    assert_eq!(after(&mut page, &[Up]), full_library);
-    // Apps and Full library have nothing to focus yet: Right and A leave focus on the nav.
-    assert_eq!(after(&mut page, &[Right, A]), full_library);
+    assert_eq!(place(&after(&mut page, &[Up])), full_library);
+    // Full library's content takes focus; Apps has nothing to focus yet, so Right and A leave focus on its item.
+    assert_eq!(place(&after(&mut page, &[Right])), "FullLibrary: Tile(0)");
+    assert_eq!(place(&after(&mut page, &[Left])), full_library);
     rest();
-    assert_eq!(after(&mut page, &[Up, Right]), "PlayHistory: Row(0)");
+    assert_eq!(after(&mut page, &[Up, Up, Right, A]), "Apps: Nav(Apps)");
+    rest();
+    assert_eq!(after(&mut page, &[Down, Right]), "PlayHistory: Row(0)");
 }
 
 #[test]
@@ -233,7 +241,7 @@ fn focus_passing_along_the_nav_shows_nothing_until_it_rests_or_right_or_a_lands(
     rest();
     assert_eq!(after(&mut page, &[]), "Manage: Nav(Manage)");
     // An item focus has rested on is showing by the next press, even with no frame drawn between.
-    assert_eq!(after(&mut page, &[Up, Up]), "FullLibrary { filter: None }: Nav(PlayHistory)");
+    assert_eq!(place(&after(&mut page, &[Up, Up])), "FullLibrary: Nav(PlayHistory)");
     rest();
     assert_eq!(after(&mut page, &[Left]), "PlayHistory: Nav(PlayHistory)");
 }
@@ -276,13 +284,13 @@ fn down_from_the_last_row_is_see_full_library_which_leads_to_full_library() {
     // Left is the nav, and Right from the nav is the game again, not the button.
     assert_eq!(after(&mut page, &[Down, Left]), "Games: Nav(Games)");
     assert_eq!(after(&mut page, &[Right]), "Games: Tile(16)");
-    // A opens Full library by way of its nav item. It has nothing to focus yet, so focus is on the item.
+    // A opens Full library by way of its nav item, focus on its first game.
     page.take_effects();
-    assert_eq!(after(&mut page, &[Down, A]), "FullLibrary { filter: None }: Nav(FullLibrary)");
+    assert_eq!(place(&after(&mut page, &[Down, A])), "FullLibrary: Tile(0)");
     assert!(asked(&mut page).is_empty());
     // Games forgot its place when the page moved on: back on it, Right is the first game.
     rest();
-    assert_eq!(after(&mut page, &[Up, Up, Up, Right]), "Games: Tile(0)");
+    assert_eq!(after(&mut page, &[Left, Up, Up, Up, Right]), "Games: Tile(0)");
 }
 
 #[test]
@@ -484,6 +492,239 @@ fn a_new_snapshot_keeps_focus_on_its_game_and_falls_back_when_the_game_has_gone(
     assert_eq!(after(&mut page, &[Up]), "PlayHistory: Row(1)", "its row is the third now");
 }
 
+// --- Full library ---
+
+/// The library with Groups to make tabs of: three favourites, a Steam collection "My Picks" of six games, then the
+/// built-ins Most played (the seven played) and Recently added (every game). Four tabs, in that order.
+fn tabbed() -> Library {
+    let mut found = source();
+    let favourites = ["Brass Meridian", "Kestrel Run", "Quiet Orbit"];
+    found.games.iter_mut().for_each(|game| game.favourite = favourites.contains(&game.name.as_str()));
+    let picks = [3u32, 0, 7, 12, 2, 18].map(|i| 2000 + i).to_vec();
+    let collection = model::Collection { source_id: "uc-picks".into(), name: "My Picks".into(), appids: picks };
+    found.collections = Some(vec![collection]);
+    through(&[found])
+}
+
+/// A saved filter's id, by its name.
+fn filter(library: &Library, name: &str) -> i64 {
+    library.filters.iter().find(|filter| filter.name == name).unwrap_or_else(|| panic!("no filter {name}")).id
+}
+
+/// Full library on the tab of the filter named so, as See all opens it; or with no tab lit, as the nav does.
+fn full_library(tab: Option<&str>) -> Dashboard {
+    let library = tabbed();
+    let filter = tab.map(|name| self::filter(&library, name));
+    let mut dashboard = page_on(library, Entry::FullLibrary { filter });
+    dashboard.take_effects();
+    dashboard
+}
+
+/// The focus line after these presses, without the page's and the item's names.
+#[track_caller]
+fn on(dashboard: &mut Dashboard, buttons: &[Button]) -> String {
+    let line = after(dashboard, buttons);
+    line.strip_prefix("FullLibrary: ").unwrap_or_else(|| panic!("Full library is not up: {line}")).to_string()
+}
+
+/// What the focus log says of Full library's state: the lit tab of the four, the sort, the name and the count.
+fn state(tab: usize, name: &str, sort: &str, typed: &str, games: usize) -> String {
+    format!("tab {tab}/4 {name:?}, sort {sort}, name {typed:?}, {games} games")
+}
+
+#[test]
+fn see_all_opens_full_library_on_its_tab_in_the_filters_own_order() {
+    assert_eq!(
+        full_library(Some("Favourites")).focus_line(),
+        format!("MyGames: FullLibrary: Tile(0); {}", state(1, "Favourites", "Name", "", 3))
+    );
+    assert_eq!(
+        on(&mut full_library(Some("My Picks")), &[]),
+        format!("Tile(0); {}", state(2, "My Picks", "Name", "", 6))
+    );
+    assert_eq!(
+        on(&mut full_library(Some("Most played")), &[]),
+        format!("Tile(0); {}", state(3, "Most played", "Playtime", "", 7))
+    );
+    // The nav opens it with no tab lit: every game that is not hidden, by name.
+    assert_eq!(on(&mut full_library(None), &[]), format!("Tile(0); {}", state(0, "", "Name", "", 22)));
+    // A filter that is not a tab (the empty Favourites Home shows when there is no Group) lights none.
+    let mut page = page_on(library(), Entry::FullLibrary { filter: Some(filter(&library(), "Favourites")) });
+    assert!(after(&mut page, &[]).ends_with("; tab 0/2 \"\", sort Name, name \"\", 22 games"));
+}
+
+#[test]
+fn the_tabs_step_with_left_and_right_and_the_bumpers_and_stop_at_their_ends() {
+    let mut page = full_library(Some("My Picks"));
+    // Up from the grid's first row is the row, on Sort; Up again the tabs, which show nothing of it.
+    assert_eq!(place(&on(&mut page, &[Right, Up])), "Sort");
+    assert_eq!(page.hints(), hint_bar::NONE);
+    assert_eq!(on(&mut page, &[Up]), format!("Tabs; {}", state(2, "My Picks", "Name", "", 6)));
+    assert_eq!(on(&mut page, &[Up, A]), format!("Tabs; {}", state(2, "My Picks", "Name", "", 6)));
+    // Right lights the next, its games in its own order, silently: focus did not move.
+    page.take_effects();
+    assert_eq!(on(&mut page, &[Right]), format!("Tabs; {}", state(3, "Most played", "Playtime", "", 7)));
+    assert!(page.take_effects().is_empty(), "a tab switch is silent");
+    assert_eq!(on(&mut page, &[Right, Right]), format!("Tabs; {}", state(4, "Recently added", "Added", "", 22)));
+    // Left back to the first, and Left there is the nav.
+    assert_eq!(on(&mut page, &[Left, Left, Left]), format!("Tabs; {}", state(1, "Favourites", "Name", "", 3)));
+    assert_eq!(place(&on(&mut page, &[Left])), "Nav(FullLibrary)");
+    // Right from the nav is the grid's first game: another tab's grid starts again at its top.
+    assert_eq!(place(&on(&mut page, &[Right])), "Tile(0)");
+    // LB and RB from anywhere on the page, the nav included; they stop at the ends.
+    assert_eq!(
+        on(&mut page, &[RightBumper, RightBumper]),
+        format!("Tile(0); {}", state(3, "Most played", "Playtime", "", 7))
+    );
+    assert_eq!(
+        on(&mut page, &[Left, LeftBumper]),
+        format!("Nav(FullLibrary); {}", state(2, "My Picks", "Name", "", 6))
+    );
+    assert_eq!(
+        on(&mut page, &[LeftBumper, LeftBumper]),
+        format!("Nav(FullLibrary); {}", state(1, "Favourites", "Name", "", 3))
+    );
+    assert_eq!(
+        on(&mut page, &[Right, RightBumper, RightBumper, RightBumper, RightBumper]),
+        format!("Tile(0); {}", state(4, "Recently added", "Added", "", 22))
+    );
+
+    // With no tab lit, Right on the tabs is nothing and Left the nav; RB lights the first.
+    let mut page = full_library(None);
+    assert_eq!(on(&mut page, &[Up, Up, Right]), format!("Tabs; {}", state(0, "", "Name", "", 22)));
+    assert_eq!(on(&mut page, &[LeftBumper]), format!("Tabs; {}", state(0, "", "Name", "", 22)));
+    assert_eq!(on(&mut page, &[RightBumper]), format!("Tabs; {}", state(1, "Favourites", "Name", "", 3)));
+    let mut page = full_library(None);
+    assert_eq!(place(&on(&mut page, &[Up, Up, Left])), "Nav(FullLibrary)");
+}
+
+#[test]
+fn the_row_leads_to_the_tabs_the_grid_and_the_nav_and_remembers_where_it_was() {
+    let mut page = full_library(Some("Recently added"));
+    assert_eq!(place(&on(&mut page, &[Down, Right, Up])), "Tile(1)");
+    assert_eq!(place(&on(&mut page, &[Up])), "Sort");
+    assert_eq!(place(&on(&mut page, &[Right])), "Filter");
+    assert_eq!(place(&on(&mut page, &[Right])), "Filter", "Right at Filter is nothing");
+    // Down is the game the grid was left from; Up from its first row is Filter again, where the row was left.
+    assert_eq!(place(&on(&mut page, &[Down])), "Tile(1)");
+    assert_eq!(place(&on(&mut page, &[Up])), "Filter");
+    assert_eq!(place(&on(&mut page, &[Up, Down])), "Filter", "down from the tabs is the row as it was left");
+    assert_eq!(place(&on(&mut page, &[Left])), "Sort");
+    assert_eq!(place(&on(&mut page, &[Left])), "Nav(FullLibrary)");
+    // Right from the nav is the game it was left from. Down onto a shorter last row is its last game, and nothing
+    // is under that.
+    assert_eq!(place(&on(&mut page, &[Right])), "Tile(1)");
+    assert_eq!(place(&on(&mut page, &[Down, Down, Down])), "Tile(16)");
+    assert_eq!(place(&on(&mut page, &[Down, Down])), "Tile(21)");
+    assert_eq!(page.hints(), hint_bar::MORE_OPTIONS, "Y opens the name box, which is not hinted");
+    // Menu and X open the game's Tile menu; B comes back to it.
+    press(&mut page, &[Menu]);
+    assert!(page.focus_line().starts_with("TileMenu: Menu("), "{}", page.focus_line());
+    assert_eq!(place(&on(&mut page, &[B])), "Tile(21)");
+}
+
+#[test]
+fn the_sort_list_orders_every_tab_until_the_page_closes() {
+    let mut page = full_library(Some("Most played"));
+    // It opens on the option the grid is in, takes every button, and stops at its ends.
+    assert_eq!(place(&on(&mut page, &[Up, A])), "SortList(Playtime)");
+    assert_eq!(page.hints(), hint_bar::NONE);
+    assert_eq!(place(&on(&mut page, &[Down, Left, Right, Y, RightBumper])), "SortList(Playtime)");
+    assert_eq!(on(&mut page, &[]), format!("SortList(Playtime); {}", state(3, "Most played", "Playtime", "", 7)));
+    // B closes it, focus on Sort, nothing chosen.
+    assert_eq!(place(&on(&mut page, &[B])), "Sort");
+    assert_eq!(page.page(), Some("MyGames"));
+    // A chooses: the grid is in that order, and focus is on Sort.
+    assert_eq!(place(&on(&mut page, &[A, Up, Up, Up, Up])), "SortList(Name)");
+    assert_eq!(on(&mut page, &[Down, A]), format!("Sort; {}", state(3, "Most played", "LastPlayed", "", 7)));
+    // It orders the other tabs too, and the nav's way there and back keeps it.
+    assert_eq!(on(&mut page, &[RightBumper]), format!("Sort; {}", state(4, "Recently added", "LastPlayed", "", 22)));
+    rest();
+    press(&mut page, &[Left, Up]);
+    rest();
+    assert_eq!(on(&mut page, &[Down, Right]), format!("Tile(0); {}", state(4, "Recently added", "LastPlayed", "", 22)));
+    // The page closed and opened again has forgotten it.
+    press(&mut page, &[B]);
+    assert_eq!(page.page(), None);
+    page.open_page(Open::MyGames(Entry::FullLibrary { filter: Some(filter(page.library(), "Recently added")) }));
+    assert_eq!(on(&mut page, &[]), format!("Tile(0); {}", state(4, "Recently added", "Added", "", 22)));
+}
+
+#[test]
+fn the_name_box_opens_on_y_and_narrows_the_grid_through_text_entry() {
+    let mut page = full_library(Some("Recently added"));
+    // Y on a game opens the box, empty: nothing is narrowed yet.
+    page.take_effects();
+    assert_eq!(on(&mut page, &[Right, Y]), format!("Name; {}", state(4, "Recently added", "Added", "", 22)));
+    assert_eq!(page.pages_up(), 1);
+    // A on it: text entry over the page, from the name as it is.
+    press(&mut page, &[A]);
+    assert_eq!(page.pages_up(), 2);
+    assert!(page.focus_line().starts_with("TextEntry: "), "{}", page.focus_line());
+    // The grid narrows as it is typed, whatever the case.
+    page.typed(Typed::Text("IN"));
+    press(&mut page, &[Menu]);
+    // Kept, a new name that finds games: focus on the first of them.
+    assert_eq!(on(&mut page, &[]), format!("Tile(0); {}", state(4, "Recently added", "Added", "IN", 6)));
+    // The tab and the sort leave the name as it is.
+    assert_eq!(on(&mut page, &[LeftBumper]), format!("Tile(0); {}", state(3, "Most played", "Playtime", "IN", 2)));
+    // B with a name set clears it; focus stays on its game, Fathom Nine, the sixth of the whole tab. B again is
+    // Home.
+    assert_eq!(on(&mut page, &[B]), format!("Tile(5); {}", state(3, "Most played", "Playtime", "", 7)));
+    press(&mut page, &[B]);
+    assert_eq!(page.page(), None);
+}
+
+#[test]
+fn the_name_box_keeps_focus_when_text_entry_finds_nothing_and_b_there_clears_it() {
+    let mut page = full_library(None);
+    // A on Filter opens the box too.
+    assert_eq!(place(&on(&mut page, &[Up, Right, A])), "Name");
+    // Dropped: the name as it was, focus on the box still.
+    press(&mut page, &[Y]);
+    page.typed(Typed::Text("orbit"));
+    assert!(page.focus_line().starts_with("TextEntry: "), "{}", page.focus_line());
+    press(&mut page, &[B]);
+    assert_eq!(on(&mut page, &[]), format!("Name; {}", state(0, "", "Name", "", 22)));
+    // Kept with a name that finds nothing: focus on the box, the grid empty, and Down goes nowhere.
+    press(&mut page, &[A]);
+    page.typed(Typed::Text("zzz"));
+    press(&mut page, &[Menu]);
+    assert_eq!(on(&mut page, &[Down]), format!("Name; {}", state(0, "", "Name", "zzz", 0)));
+    // The box holds its name as focus leaves it, and Right from Sort comes back to it.
+    assert_eq!(place(&on(&mut page, &[Left, Right])), "Name");
+    // B in the box clears the name and closes it, focus on Filter; Left from Filter is then Sort.
+    assert_eq!(on(&mut page, &[B]), format!("Filter; {}", state(0, "", "Name", "", 22)));
+    assert_eq!(place(&on(&mut page, &[Left])), "Sort");
+    // Left empty, the box closes as focus leaves it.
+    assert_eq!(place(&on(&mut page, &[Y, Left, Right])), "Filter");
+    // The name goes when the page moves to another item.
+    press(&mut page, &[Y, A]);
+    page.typed(Typed::Text("orbit"));
+    press(&mut page, &[Menu]);
+    assert_eq!(on(&mut page, &[]), format!("Tile(0); {}", state(0, "", "Name", "orbit", 1)));
+    press(&mut page, &[Left, Up]);
+    rest();
+    press(&mut page, &[Down]);
+    rest();
+    assert_eq!(on(&mut page, &[Right]), format!("Tile(0); {}", state(0, "", "Name", "", 22)));
+}
+
+#[test]
+fn full_librarys_focus_follows_its_game_when_the_library_changes_and_a_tab_that_goes_goes_dark() {
+    let mut page = full_library(Some("Favourites"));
+    assert_eq!(place(&on(&mut page, &[Right, Right])), "Tile(2)");
+    // Quiet Orbit is still a favourite, the others not: the tab has one game, focus on it.
+    let mut found = source();
+    found.games.iter_mut().for_each(|game| game.favourite = game.name == "Quiet Orbit");
+    page.set_library(through(&[found]));
+    // (A opens the game's hub and B closes it: focus is back where it was.)
+    assert_eq!(on(&mut page, &[A, B]), "Tile(0); tab 1/3 \"Favourites\", sort Name, name \"\", 1 games");
+    // No favourite at all: the tab is gone, no tab is lit, and the grid is every game, focus on the same game.
+    page.set_library(library());
+    assert_eq!(on(&mut page, &[A, B]), "Tile(15); tab 0/2 \"\", sort Name, name \"\", 22 games");
+}
+
 // --- What it looks like ---
 
 fn target_dir() -> PathBuf {
@@ -632,12 +873,96 @@ fn my_games_play_history_empty() {
     stage.check("my_games_play_history_empty");
 }
 
-/// The Bundle's 07, less Full library's content, which is #53's: focus on its nav item.
+/// The Bundle's 07: Full library as the nav opens it, focus on its nav item, no tab lit, every game by name.
 #[test]
 fn my_games_full_library_from_the_nav() {
-    let mut stage = Stage::new(library(), Entry::Games, HD);
+    let mut stage = Stage::new(tabbed(), Entry::Games, HD);
     stage.press(&[Left, Down, Down, Down]);
     stage.check("my_games_full_library_from_the_nav");
+}
+
+/// Full library as See all on a Group opens it, on that Group's tab.
+fn see_all(tab: &str) -> Stage {
+    let library = tabbed();
+    let filter = Some(filter(&library, tab));
+    Stage::new(library, Entry::FullLibrary { filter }, HD)
+}
+
+/// The Bundle's 09: See all on "My Picks", focus on the tabs, which shows nothing.
+#[test]
+fn my_games_full_library_tabs() {
+    let mut stage = see_all("My Picks");
+    stage.press(&[Up, Up]);
+    stage.check("my_games_full_library_tabs");
+}
+
+/// The Bundle's 10: Right on the tabs, the next tab lit, a sort the Sort list does not have ("Sort").
+#[test]
+fn my_games_full_library_another_tab() {
+    let mut stage = see_all("My Picks");
+    stage.press(&[Up, Up, Right]);
+    stage.check("my_games_full_library_another_tab");
+}
+
+/// The Bundle's 11: the Sort list open over the grid, on the option the grid is in.
+#[test]
+fn my_games_full_library_sort_list() {
+    let mut stage = see_all("Recently added");
+    stage.press(&[Up, A, Up]);
+    stage.check("my_games_full_library_sort_list");
+}
+
+/// A sort chosen: "Sorted by" it, and the grid in its order.
+#[test]
+fn my_games_full_library_sorted() {
+    let mut stage = see_all("Recently added");
+    stage.press(&[Up, A, Up, A, Down]);
+    stage.check("my_games_full_library_sorted");
+}
+
+/// The Bundle's 12: the name box open and empty, focus on it.
+#[test]
+fn my_games_full_library_name_box() {
+    let mut stage = see_all("Recently added");
+    stage.press(&[Y]);
+    stage.check("my_games_full_library_name_box");
+}
+
+/// The Bundle's 13: text entry over the page, "In" typed, the grid narrowed behind it.
+#[test]
+fn my_games_full_library_name_entry() {
+    let mut stage = see_all("Recently added");
+    stage.press(&[Y, A]);
+    stage.dashboard.typed(Typed::Text("In"));
+    stage.check("my_games_full_library_name_entry");
+}
+
+/// The Bundle's 14: the name kept, focus on the narrowed grid's first game.
+#[test]
+fn my_games_full_library_name_kept() {
+    let mut stage = see_all("Recently added");
+    stage.press(&[Y, A]);
+    stage.dashboard.typed(Typed::Text("In"));
+    stage.press(&[Menu]);
+    stage.check("my_games_full_library_name_kept");
+}
+
+/// A name that finds nothing: the grid's empty line, focus on the box, "0 games".
+#[test]
+fn my_games_full_library_nothing_found() {
+    let mut stage = see_all("Recently added");
+    stage.press(&[Y, A]);
+    stage.dashboard.typed(Typed::Text("Quiet Orbit of the Long Winter"));
+    stage.press(&[Menu]);
+    stage.check("my_games_full_library_nothing_found");
+}
+
+/// Scrolled to the grid's last row: the rows above pass under the fade and are cut under the Sort row.
+#[test]
+fn my_games_full_library_scrolled() {
+    let mut stage = see_all("Recently added");
+    stage.press(&[Down, Down, Down, Right]);
+    stage.check("my_games_full_library_scrolled");
 }
 
 /// The Bundle's 08: Manage, focus on its Queue box.
@@ -711,6 +1036,37 @@ fn under_reduce_motion_a_pane_is_simply_there() {
     assert_eq!(stage.dashboard.focus_line(), "MyGames: Apps: Nav(Apps)");
     let (apps, games) = (header(&stage.frame_after(0.0)).expect("Apps' header"), games.expect("Games' header"));
     assert!(apps.0.abs_diff(games.0) <= 2, "at its rest in the first frame: {apps:?}, {games:?}");
+}
+
+/// docs/spec/my-games.md, 3.4: across the tabs only the grid moves, in from 50 on the side of the tab lit, over
+/// 120 ms; the tabs and the row stay put. Under Reduce motion it is simply there.
+#[test]
+fn a_tab_switch_flies_the_grid_in_from_its_side() {
+    // The first tile's bright left edge, found along the first row's middle.
+    let edge = |image: &image::RgbaImage| (450..700).find(|&x| image.get_pixel(x, 466).0[..3].iter().all(|&c| c > 200));
+    // The Sort box's left edge, which does not move.
+    let sort = |image: &image::RgbaImage| (480..700).find(|&x| image.get_pixel(x, 292).0[0] > 0x28);
+    // My Picks, then Most played: both start with Ashfall Courier, which has a cover.
+    let mut stage = see_all("My Picks");
+    let at_rest = stage.frame_after(0.5);
+    let (rest_edge, rest_sort) = (edge(&at_rest).expect("the first tile"), sort(&at_rest).expect("Sort"));
+    stage.press(&[RightBumper]);
+    let start = stage.frame_after(0.0);
+    let start_edge = edge(&start).expect("the first tile, starting out");
+    assert!(start_edge.abs_diff(rest_edge + 50) <= 2, "from 50 right: {start_edge}, at rest {rest_edge}");
+    assert_eq!(sort(&start), Some(rest_sort), "the row stays put");
+    let mid = edge(&stage.frame_after(0.04)).expect("on its way");
+    assert!(mid > rest_edge + 2 && mid < start_edge, "on its way: {mid}");
+    assert_eq!(edge(&stage.frame_after(0.2)), Some(rest_edge));
+    // Back a tab: from the left.
+    stage.press(&[LeftBumper]);
+    let start_edge = edge(&stage.frame_after(0.0)).expect("the first tile, from the left");
+    assert!(start_edge.abs_diff(rest_edge - 50) <= 2, "from 50 left: {start_edge}");
+    stage.frame_after(0.2);
+    // Under Reduce motion it is there at once.
+    stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
+    stage.press(&[RightBumper]);
+    assert_eq!(edge(&stage.frame_after(0.0)), Some(rest_edge));
 }
 
 /// The grid slides a row at a time over 300 ms, and jumps under Reduce motion.
