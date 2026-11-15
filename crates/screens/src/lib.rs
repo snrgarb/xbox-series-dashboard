@@ -13,7 +13,7 @@ pub mod theme;
 
 use model::Library;
 pub use model::Sound;
-use ui::{Button, Press, Ui};
+use ui::{Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
 use crate::guide::{Guide, GuideAction};
 use crate::home::{Home, HomeAction};
@@ -32,7 +32,12 @@ pub enum Effect {
     Exit,
     /// Play this sound, if there is a file for it.
     Sound(Sound),
+    /// The Guide button was held: Power (docs/spec/guide.md, 7.1).
+    PowerHold,
 }
+
+/// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
+pub const GUIDE_REPEAT: Repeat = Repeat::millis(700, 80);
 
 /// What the Overlay is wanted for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,8 +56,13 @@ pub struct Dashboard {
     user: String,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
     clock: Option<String>,
-    /// Whether a pad is connected, which the top bar shows.
-    pad: bool,
+    /// Whether a pad is connected and what powers it, which the Status area shows.
+    pad: PadStatus,
+    /// The Guide setting: off, the Guide button does nothing.
+    guide_enabled: bool,
+    /// The Guide button's press has done what it does, so what is still to come of it (its release after a hold,
+    /// its tap after the release that closed the Guide) does nothing more.
+    guide_button_spent: bool,
     home: Home,
     guide: Guide,
     /// Whether the Guide, as it was last opened, is over a game: drawn on the Overlay, not in Home's window.
@@ -72,7 +82,9 @@ impl Dashboard {
             library,
             user,
             clock: None,
-            pad: false,
+            pad: PadStatus::default(),
+            guide_enabled: true,
+            guide_button_spent: false,
             home: Home::default(),
             guide: Guide::default(),
             guide_overlaid: false,
@@ -119,7 +131,65 @@ impl Dashboard {
 
     /// A pad was connected, or the last one went.
     pub fn set_pad_connected(&mut self, connected: bool) {
-        self.pad = connected;
+        self.pad.connected = connected;
+        if !connected {
+            self.pad.battery = None;
+        }
+    }
+
+    /// The pad as `input` reports it. True when that is news.
+    pub fn set_pad(&mut self, pad: PadStatus) -> bool {
+        let news = self.pad != pad;
+        self.pad = pad;
+        news
+    }
+
+    pub fn pad(&self) -> PadStatus {
+        self.pad
+    }
+
+    /// The Guide setting. Off, the Guide button does nothing, a hold too, and nor does the profile on Home's top
+    /// bar. A Guide that is open stays open until it is closed.
+    pub fn set_guide_enabled(&mut self, enabled: bool) {
+        self.guide_enabled = enabled;
+    }
+
+    /// How a held direction repeats now, for whoever times the pad.
+    pub fn repeat(&self) -> Repeat {
+        if self.guide.is_open() {
+            GUIDE_REPEAT
+        } else {
+            Repeat::default()
+        }
+    }
+
+    /// What a pad says happened. A button going down is a `press`. The Guide button is a tap or a hold
+    /// (docs/spec/guide.md, 7.1): a tap closes an open Guide as the button is let go, and opens a closed one when
+    /// the tap is told, 300 ms after the button went down; a hold asks for Power and opens nothing.
+    pub fn pad_event(&mut self, event: PadEvent) {
+        let guide = Press { button: Button::Guide, repeat: false };
+        match event {
+            PadEvent::Press(press) => self.press(press),
+            PadEvent::Release(Button::Guide) => {
+                // Let go after a hold: Power has been asked for, and that is all the press does.
+                if !std::mem::take(&mut self.guide_button_spent) && self.guide.is_open() {
+                    self.press(guide);
+                    self.guide_button_spent = true;
+                }
+            }
+            PadEvent::Release(_) => {}
+            PadEvent::GuideTap => {
+                if !std::mem::take(&mut self.guide_button_spent) && !self.guide.is_open() {
+                    self.press(guide);
+                }
+            }
+            PadEvent::GuideHeld => {
+                self.guide_button_spent = true;
+                if self.guide_enabled {
+                    self.effects.push(Effect::PowerHold);
+                }
+            }
+        }
     }
 
     /// Settings' Background delay. See [`Home::set_background_delay`].
@@ -132,7 +202,8 @@ impl Dashboard {
         std::mem::take(&mut self.effects)
     }
 
-    /// A press of the pad, and the sound of what it did. The sound is asked for before anything else the press
+    /// A press of the pad, and the sound of what it did. A press of the Guide button is a whole tap of it, at once:
+    /// the keyboard's, and a test's. A pad's is told by `pad_event`. The sound is asked for before anything else the press
     /// asks of the shell, and is decided here for every screen, by what the press changed: a move that went
     /// nowhere, B, and the Guide closing are silent, as they are in the Bundle.
     pub fn press(&mut self, press: Press) {
@@ -171,7 +242,7 @@ impl Dashboard {
             return false;
         }
         if press.button == Button::Guide {
-            if !press.repeat {
+            if !press.repeat && self.guide_enabled {
                 self.open_guide();
             }
             return false;
@@ -182,7 +253,7 @@ impl Dashboard {
         }
         match self.home.press(press.button, &self.library) {
             Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
-            Some(HomeAction::OpenGuide) if !press.repeat => self.open_guide(),
+            Some(HomeAction::OpenGuide) if !press.repeat && self.guide_enabled => self.open_guide(),
             _ => return false,
         }
         press.button == Button::A
@@ -204,6 +275,7 @@ impl Dashboard {
         }
     }
 
+    /// Opens the Guide, whatever the Guide setting says: that is for the Guide button.
     pub fn open_guide(&mut self) {
         // Over a game the Guide is on the Overlay; with no Overlay there is nowhere to show it.
         if self.playing.is_some() && !self.has_overlay {
@@ -312,7 +384,7 @@ impl Dashboard {
     /// Home's window: the page, and the Guide over it.
     pub fn draw(&mut self, ui: &mut Ui) {
         let clock = self.clock.clone().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string());
-        let status = home::Status { user: &self.user, clock: &clock, pad: self.pad };
+        let status = home::Status { user: &self.user, clock: &clock, pad: self.pad.connected };
         self.home.set_in_front(!self.guide.is_open());
         self.home.draw(ui, &self.library, &status);
         if !self.guide_overlaid {

@@ -11,7 +11,7 @@ use std::hash::Hash;
 pub use anim::{Ease, Store};
 pub use art::{Art, ArtCache, ArtKey, Kind, Painter};
 pub use host::Host;
-pub use input::{Button, Press};
+pub use input::{Battery, Button, PadEvent, PadStatus, Press, Repeat};
 pub use render::{Font, Gradient, HAlign, Rect, TexId};
 use render::{Frame, Layer, Measured, Quad, Rgba, Text, TextKey, TextSys, WHITE};
 
