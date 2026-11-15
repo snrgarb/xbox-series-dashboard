@@ -77,6 +77,8 @@ A held direction repeats (`Press::repeat`); a screen ignores a repeat for anythi
 
 A press can ask the shell for something, returned as an `Effect` (`Launch(game)`, `QuitGame`, `GuideClosed`, `Exit`) that the window carries out; the shell reports back through methods (`launch_started`, `game_booted`, `game_ended`). The core never calls Windows, so the same core runs under a test.
 
+The games the screens show are a **snapshot** of the library database (`model::Library`, read by the `library` crate): the core never sees the database. When the database changes (Steam read in the background after the first frame, a Play session ending) the window hands the core a new snapshot with `set_library`, which keeps focus on the game it was on. A game is known across snapshots by its `id`; its place in the list is good for one snapshot only.
+
 The Guide, Toasts and the Launch screen will be drawn into their own windows (the Overlay, M2) by the same `Ui` and the same core; offscreen, everything is composed into one frame.
 
 ## Art

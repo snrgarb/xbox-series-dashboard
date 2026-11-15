@@ -16,6 +16,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
+use crate::store::Store;
 use crate::{since_start, Args};
 
 /// How long the loop sleeps with nothing to draw: the pad's thread, the art cache and the window wake it sooner.
@@ -47,9 +48,11 @@ struct App {
     stale: bool,
     presented: bool,
     launch: Option<Launch>,
+    /// The library database: where a newer snapshot comes from, and where Play sessions go.
+    store: Store,
 }
 
-pub fn run(args: &Args, library: Library) {
+pub fn run(args: &Args, library: Library, store: Store) {
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(args.clock.clone());
@@ -72,6 +75,7 @@ pub fn run(args: &Args, library: Library) {
         stale: true,
         presented: false,
         launch: None,
+        store,
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
@@ -159,6 +163,10 @@ impl ApplicationHandler for App {
         let Some(state) = &mut self.state else { return };
         let mut presses = self.pad.poll();
         presses.append(&mut self.keys);
+        if let Some(library) = self.store.changed() {
+            self.dashboard.set_library(library);
+            self.stale = true;
+        }
         let mut wait = if self.launch.is_some() { LAUNCH_EVERY } else { IDLE };
         let mut hidden = false;
 
@@ -169,6 +177,8 @@ impl ApplicationHandler for App {
                 // Nothing to draw behind a running game: only the Guide button does anything.
                 Showing::Nothing => {
                     self.dashboard.game_booted();
+                    let playing = self.dashboard.playing();
+                    self.store.game_booted(playing.and_then(|game| self.dashboard.library().games.get(game)));
                     presses.retain(|p| p.button == Button::Guide && !p.repeat);
                     if presses.is_empty() {
                         hidden = true;
@@ -186,6 +196,9 @@ impl ApplicationHandler for App {
                 Showing::Home => {
                     self.launch = None;
                     self.dashboard.game_ended();
+                    if let Some(library) = self.store.game_ended() {
+                        self.dashboard.set_library(library);
+                    }
                     state.host.store.clear();
                     self.last_frame = Instant::now();
                     self.stale = true;
@@ -263,6 +276,11 @@ impl ApplicationHandler for App {
                 if !self.presented {
                     self.presented = true;
                     eprintln!("first frame presented at {:.0} ms since process start", since_start());
+                    // Steam is read once the first frame is out, and wakes the window if it has news.
+                    let proxy = self.proxy.clone();
+                    self.store.sync_in_background(self.dashboard.library(), move || {
+                        let _ = proxy.send_event(());
+                    });
                 }
             }
             _ => {}

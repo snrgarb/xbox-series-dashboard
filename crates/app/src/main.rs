@@ -1,16 +1,18 @@
 //! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG.
 mod offscreen;
+mod store;
 mod window;
 
 use std::path::PathBuf;
 
-use model::Library;
 pub use shell::since_start;
 
 #[derive(Default)]
 pub struct Args {
     library: Option<PathBuf>,
     steam: Option<PathBuf>,
+    /// The folder the library database is in, in place of the user's own.
+    data_dir: Option<PathBuf>,
     launch_screen: bool,
     guide: bool,
     screenshot: Option<PathBuf>,
@@ -38,9 +40,10 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
     tile.map_or(Vec::new(), |tile| std::iter::once(ui::Button::Down).chain(along(tile)).collect())
 }
 
-const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--windowed]
+const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,...] [--guide]
-                 [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]";
+                 [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
+                 [--data-dir <dir>]";
 
 /// A button by its name on the pad, for `--press`.
 fn button(name: &str) -> Result<ui::Button, String> {
@@ -71,6 +74,7 @@ fn parse_args() -> Result<Args, String> {
             "--launch-screen" => args.launch_screen = true,
             "--guide" => args.guide = true,
             "--steam" => args.steam = Some(value()?.into()),
+            "--data-dir" => args.data_dir = Some(value()?.into()),
             "--screenshot" => args.screenshot = Some(value()?.into()),
             "--size" => {
                 let value = value()?;
@@ -88,24 +92,6 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
-/// The one place the Library comes from: `--library`'s JSON, `--steam`'s install, the Steam install the registry
-/// names, else the built-in fake one.
-fn load_library(args: &Args) -> Library {
-    if let Some(path) = &args.library {
-        let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
-        return serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
-    }
-    match args.steam.clone().or_else(source_steam::find_steam_root) {
-        Some(root) => {
-            let t = std::time::Instant::now();
-            let library = source_steam::load(&root).unwrap_or_else(|e| fail(&format!("{}: {e}", root.display())));
-            eprintln!("steam: {} games from {} in {} ms", library.games.len(), root.display(), t.elapsed().as_millis());
-            library
-        }
-        None => screens::fake_library(),
-    }
-}
-
 fn fail(message: &str) -> ! {
     eprintln!("dashboard: {message}");
     std::process::exit(2);
@@ -114,12 +100,12 @@ fn fail(message: &str) -> ! {
 fn main() {
     since_start();
     let args = parse_args().unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
-    let library = load_library(&args);
+    let (library, store) = store::open(&args);
     if args.screenshot.is_some() {
         offscreen::run(&args, library);
     } else if args.bench || args.size.is_some() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));
     } else {
-        window::run(&args, library);
+        window::run(&args, library, store);
     }
 }

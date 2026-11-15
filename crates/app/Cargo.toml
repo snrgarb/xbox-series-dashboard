@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 model = { path = "../model" }
+library = { path = "../library" }
 source-steam = { path = "../source-steam" }
 render = { path = "../render" }
 ui = { path = "../ui" }
@@ -20,6 +21,8 @@ wgpu = "30"
 winit = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = "1"
+anyhow = "1"
 
 [dev-dependencies]
+tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
