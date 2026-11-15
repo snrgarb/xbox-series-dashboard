@@ -711,7 +711,7 @@ Questions 1, 2, 6 and 13 are answered in section 16, with what else building the
 4. **Update library and Exit.** They lived in Playnite's main menu. Do they become boxes on Settings, entries in the Guide, or neither?
 5. **Update after downloads / Download metadata.** Confirm that the port refreshes its library after an install with no setting, and that fetching missing art is an M4 action (and where its box sits).
 6. **Where settings are stored** in the port: file, format and location; whether anything other than Discord's secrets needs encrypting; whether "saved only once set" is kept.
-7. **The Groups-on-Home entry** (issue #8): confirm its place on Personalisation (section 14), and its name.
+7. **The Groups-on-Home entry** (issue #8): confirm its place on Personalisation (section 14), and its name. **Decided (#57)**: Personalisation, "Groups"; in M3 its first box (16.1).
 8. **Gamerpics.** The Bundle downloads the 100 most liked Xbox 360 gamerpics from xboxgamer.pics into its Gamerpics folder. Does the port fetch them too, or offer only the Windows account picture and the user's own images? (M5.)
 9. **Debug menu**: dropped, or a developer-only page behind a build flag?
 10. **Swapped A/B and the View button.** Playnite offers a confirm/cancel swap; View's effect on this page is UNVERIFIED. Does the port offer the swap, and does View do anything on Settings?
@@ -735,7 +735,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 | Pane | Boxes |
 |---|---|
 | Theme settings | Personalisation (0, 0), Guide (1, 0). Idle (M5) and Discord (M6) come back to the Bundle's places with their features. |
-| Personalisation | Four checkbox boxes, a row each from the top: Background delay (y 210), Reduce motion (359), Show Play history (508), Show battery percentages (657). Boot video, Profiles and Who's playing today? are M5's and go over them when they come; Groups (#57) has its box here too. |
+| Personalisation | **Groups** (0, 0), alone on its row (filters.md 6.1); then four checkbox boxes, a row each: Background delay (y 359), Reduce motion (508), Show Play history (657), Show battery percentages (806). Boot video, Profiles and Who's playing today? are M5's and go over them when they come, and Groups then takes the Bundle's empty slot, (1, 1). |
 | Guide | "Guide", its description and Use the Guide, as 6.8. The Now Playing source under it is M5's. |
 
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
@@ -743,7 +743,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 ### 16.2 A pane that would run off the screen scrolls
 
-Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With M3's four rows nothing scrolls at 1080; the rule is there for M5's rows.
+Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With M3's five rows (Groups, then the four checkbox boxes) nothing scrolls at 1080; the rule is there for M5's rows.
 
 The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (x 520), which its picture 29 of Theme settings has not: a clipping accident of that pane's grid, not copied.
 
@@ -753,7 +753,7 @@ The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (
 |---|---|---|---|
 | Home's top bar button; the Guide's Settings | Theme settings' boxes | the rail's Theme settings | Home: the button; from the Guide, Home's rows |
 | Home's **Settings** wide tile (the Bundle's "Playnite settings" tile, whose category is gone) | Theme settings' boxes | its first box, Personalisation | the rail, then the tile |
-| The Tile menu's Customise Home (`Entry::Personalisation`) | Personalisation | its first box | Theme settings' boxes on Personalisation, the rail, then the tile |
+| The Tile menu's Customise Home (`Entry::Personalisation`) | Personalisation | its first box, Groups (#57) | Theme settings' boxes on Personalisation, the rail, then the tile |
 | Home's **Discord** tile with no Discord tab or the Guide off | Theme settings' boxes until Discord has a page (M6), which it then opens on, focus on Type | its first box | the rail, then the tile |
 
 Left from a pane's first column is B, on the boxes and on the Guide page. From the boxes to the rail and into the category again is its first box, whatever had focus (9.1).
@@ -786,7 +786,9 @@ Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too
 
 The Dashboard's one rule for every screen (docs/ui.md, "Sounds") holds here: focus landing on another control is the move sound, a level up or down included, as Playnite's navigation sound is in the Bundle; A that turns a checkbox over is the activation sound, where the Bundle's is unverified (open question 11); B out of Settings is silent.
 
-`--log-focus` says `focus: Settings: ` and then the rail (`Rail: Theme settings`) or the pane and its control (`Theme settings: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above.
+`--log-focus` says `focus: Settings: ` and then the rail (`Rail: Theme settings`) or the pane and its control (`Theme settings: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3).
+
+The Groups page's menu is a dialog the page shows over itself: while it is up `Page::dialog` says so, it has a dialog's sounds and the Guide puts it away (filters.md 6.2).
 
 ### 16.7 The controls, for the pages still to come
 

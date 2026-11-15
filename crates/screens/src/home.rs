@@ -3,7 +3,7 @@
 //!
 //! This file is where focus is and where it goes; each part of the page draws itself in its own module.
 mod background;
-mod groups;
+pub(crate) mod groups;
 mod recent;
 mod swirl;
 mod tile;

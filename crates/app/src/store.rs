@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use library::Database;
-use model::{Game, Library};
+use model::{FilterChange, Game, Library};
 use screens::settings::{Change, Options, Setting};
 
 use crate::{fail, Args};
@@ -206,6 +206,21 @@ impl Store {
         self.snapshot()
     }
 
+    /// Carries out a change Settings' Groups page asked for: a filter shown or not, moved, made, changed or
+    /// deleted. Gives the snapshot after, in which Home's Groups and Full library's tabs follow it; None when
+    /// nothing was changed (no database, or one that refused it, which is logged).
+    pub fn change_filter(&mut self, change: &FilterChange) -> Option<Library> {
+        let database = self.database.as_mut()?;
+        match database.change_filter(change) {
+            Ok(made) => eprintln!("library: {}", describe(change, made)),
+            Err(e) => {
+                eprintln!("library: {e:#}");
+                return None;
+            }
+        }
+        self.snapshot()
+    }
+
     /// A setting as the database has it; none with no database, or when it has never been set.
     pub fn setting(&self, key: &str) -> Option<String> {
         self.database.as_ref()?.setting(key).map_err(|e| eprintln!("library: {e:#}")).ok()?
@@ -233,6 +248,19 @@ impl Store {
 
     fn snapshot(&self) -> Option<Library> {
         self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()
+    }
+}
+
+/// What the log says of a change to the filters: `filter 3 is shown`, `filter 7 made: "New Group"`.
+fn describe(change: &FilterChange, made: Option<i64>) -> String {
+    match change {
+        FilterChange::Shown { filter, shown } => {
+            format!("filter {filter} is {}", if *shown { "shown" } else { "not shown" })
+        }
+        FilterChange::Move { filter, by } => format!("filter {filter} moved by {by}"),
+        FilterChange::Add { name } => format!("filter {} made: {name:?}", made.unwrap_or_default()),
+        FilterChange::Set { filter, name, .. } => format!("filter {filter} set: {name:?}"),
+        FilterChange::Delete { filter } => format!("filter {filter} deleted"),
     }
 }
 
@@ -291,6 +319,22 @@ mod tests {
         assert_eq!(after.hidden.iter().map(|g| g.id).collect::<Vec<_>>(), [game.id]);
         let after = store.set_hidden(game.id, false).expect("a new snapshot");
         assert!(after.hidden.is_empty() && after.games.iter().any(|g| g.id == game.id));
+    }
+
+    #[test]
+    fn a_change_to_the_filters_is_in_the_next_snapshot() {
+        let (library, mut store) = fake();
+        let groups = |library: &model::Library| library.groups().map(|f| f.name.clone()).collect::<Vec<_>>();
+        assert_eq!(groups(&library), ["Most played", "Recently added"]);
+        let recent = library.filters.iter().find(|f| f.name == "Recently added").unwrap().id;
+        let after = store.change_filter(&model::FilterChange::Move { filter: recent, by: -9 }).expect("a snapshot");
+        assert_eq!(groups(&after), ["Recently added", "Most played"]);
+        let after = store.change_filter(&model::FilterChange::Shown { filter: recent, shown: false }).unwrap();
+        assert_eq!(groups(&after), ["Most played"]);
+        let after = store.change_filter(&model::FilterChange::Add { name: "Mine".into() }).unwrap();
+        assert_eq!(groups(&after), ["Most played", "Mine"]);
+        // What the database refuses changes nothing, and gives no snapshot.
+        assert!(store.change_filter(&model::FilterChange::Delete { filter: recent }).is_none());
     }
 
     #[test]

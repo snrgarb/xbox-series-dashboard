@@ -127,14 +127,15 @@ fn the_game_hub_opens_and_closes_in_silence_and_sounds_as_any_page_between() {
     // The toggle turns the page, which is what focus is on changing.
     assert_eq!(press(&mut home, Button::A), [MOVE]);
     // Menu is the Tile menu, which comes up as a dialog does, and B closes it as one does, onto the hub.
-    let (prompt_open, prompt_close) = (Effect::Sound(Sound::PromptOpen), Effect::Sound(Sound::PromptClose));
-    assert_eq!(press(&mut home, Button::Menu), [prompt_open]);
-    assert_eq!(press(&mut home, Button::B), [prompt_close]);
+    let prompt_open = || Effect::Sound(Sound::PromptOpen);
+    let prompt_close = || Effect::Sound(Sound::PromptClose);
+    assert_eq!(press(&mut home, Button::Menu), [prompt_open()]);
+    assert_eq!(press(&mut home, Button::B), [prompt_close()]);
     assert_eq!(home.page(), Some("GameHub"));
     // A on Manage is a choice that brings it up.
     assert_eq!(press(&mut home, Button::Left), [MOVE]);
-    assert_eq!(press(&mut home, Button::A), [ACTIVATE, prompt_open]);
-    assert_eq!(press(&mut home, Button::B), [prompt_close]);
+    assert_eq!(press(&mut home, Button::A), [ACTIVATE, prompt_open()]);
+    assert_eq!(press(&mut home, Button::B), [prompt_close()]);
     assert_eq!(press(&mut home, Button::B), []);
     assert_eq!(home.page(), None);
     // Play is a choice, and sounds as one.

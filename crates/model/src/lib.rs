@@ -243,6 +243,22 @@ pub struct Filter {
     pub games: Vec<i64>,
 }
 
+/// A change to the saved filters, as Settings' Groups page asks for it (docs/spec/filters.md, section 6). Whoever
+/// owns the library database carries it out (`library::Database::change_filter`) and shows the snapshot after.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilterChange {
+    /// Whether the filter is a Group on Home and a tab on Full library.
+    Shown { filter: i64, shown: bool },
+    /// Its place among all the filters: -1 one up, +1 one down.
+    Move { filter: i64, by: i32 },
+    /// A custom filter of this name: every game, by name, shown, last.
+    Add { name: String },
+    /// A custom filter's name, what it picks and how it sorts, all at once.
+    Set { filter: i64, name: String, rule: Rule, sort: Sort, descending: bool },
+    /// A custom filter goes.
+    Delete { filter: i64 },
+}
+
 /// One of a store's own groupings of games, as a source read it: a Steam collection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Collection {

@@ -12,18 +12,12 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use model::{Game, Library};
-use ui::{Color, Ease, Press, Ui};
+use ui::{Ease, Press, Ui};
 
-use crate::menu_panel::{icon, Answer, MenuPanel, Row};
+use crate::menu_panel::{self, icon, Answer, MenuPanel, Row, DIM, FLY};
 use crate::pages::{Around, Dialog, Open, Page, PageAction};
 use crate::{game_hub, settings, Effect};
 
-/// The dim over the whole page: black at 60%, there at once and gone at once.
-const DIM: Color = Color::argb(0x99000000);
-/// The menu flies up from this far under its place as it opens, and back down to it as it closes.
-const FLY: f32 = 80.0;
-const OPEN_SECONDS: f32 = 0.25;
-const CLOSE_SECONDS: f32 = 0.15;
 /// The flyout hangs from the menu's top left corner, this far in, and comes in from this far to its left.
 const FLYOUT_IN: f32 = 77.0;
 const FLYOUT_TRAVEL: f32 = -48.0;
@@ -247,15 +241,7 @@ impl TileMenu {
     /// Where the panel in the menu's place flies and how much of it shows, on its way in or, `leaving`, out.
     /// Under Reduce motion it is in its place, or gone, at once.
     fn flight(&self, ui: &mut Ui, leaving: bool) -> (f32, f32) {
-        let ids = (("tile menu fly", self.serial, self.flights), ("tile menu fade", self.serial, self.flights));
-        let still = ui.store.reduce_motion;
-        if leaving {
-            let fly = ui.slide(ids.0, FLY, CLOSE_SECONDS, Ease::CubicIn);
-            (fly, ui.tween(ids.1, 0.0, if still { 0.0 } else { CLOSE_SECONDS }, Ease::Linear))
-        } else {
-            let fly = ui.slide_from(ids.0, FLY, 0.0, OPEN_SECONDS, Ease::CubicOut);
-            (fly, ui.tween_from(ids.1, 0.0, 1.0, if still { 0.0 } else { OPEN_SECONDS }, Ease::Linear))
-        }
+        menu_panel::flight(ui, ("tile menu", self.serial, self.flights), leaving)
     }
 }
 
@@ -268,18 +254,9 @@ enum Middle<'a> {
 impl Middle<'_> {
     /// Draws it centred on the screen by its own height, `fly` under its place, at `opacity`.
     fn draw(&self, ui: &mut Ui, fly: f32, opacity: f32) -> (f32, f32) {
-        fn draw<T: Copy>(panel: &MenuPanel<T>, ui: &mut Ui, fly: f32, opacity: f32) -> (f32, f32) {
-            let at = panel.centred(ui);
-            if opacity >= 1.0 {
-                panel.draw(ui, (at.0, at.1 + fly));
-            } else if opacity > 0.0 {
-                panel.draw_faded(ui, (at.0, at.1 + fly), opacity);
-            }
-            at
-        }
         match self {
-            Middle::Menu(panel) => draw(panel, ui, fly, opacity),
-            Middle::Prompt(panel) => draw(panel, ui, fly, opacity),
+            Middle::Menu(panel) => panel.draw_flown(ui, fly, opacity),
+            Middle::Prompt(panel) => panel.draw_flown(ui, fly, opacity),
         }
     }
 }

@@ -49,6 +49,8 @@ pub mod glyph {
     pub const CHECKBOX: char = '\u{E739}';
     pub const CHECKBOX_TICKED: char = '\u{E73A}';
     pub const TICK: char = '\u{E73E}';
+    /// The plus in the tick's slot of the Row that adds one.
+    pub const ADD: char = '\u{E710}';
     pub const CHEVRON_DOWN: char = '\u{E70D}';
     pub const CHEVRON_UP: char = '\u{E70E}';
 }
@@ -117,10 +119,15 @@ pub fn info_height(ui: &mut Ui, info: &str) -> f32 {
 
 /// A Row: a choice in a list, the one set now ticked.
 pub fn row(ui: &mut Ui, rect: Rect, name: &str, ticked: bool, focused: bool) {
+    row_marked(ui, rect, name, ticked.then_some(glyph::TICK), focused);
+}
+
+/// A Row with this glyph in the tick's slot, or with the slot empty: the tick, or the plus of a Row that adds one.
+pub fn row_marked(ui: &mut Ui, rect: Rect, name: &str, mark: Option<char>, focused: bool) {
     ui.fill(rect, if focused { FOCUSED } else { BOX }, 0.0);
     let (_, cy) = rect.center();
-    if ticked {
-        ui.icon(rect.x + 45.0, cy, glyph::TICK, 24.0, Color::WHITE);
+    if let Some(mark) = mark {
+        ui.icon(rect.x + 45.0, cy, mark, 24.0, Color::WHITE);
     }
     line(ui, Rect::new(rect.x + 84.0, rect.y, rect.w - 108.0, rect.h), name, Color::WHITE);
     if focused {
@@ -296,6 +303,19 @@ pub fn show(scroll: f32, top: f32, bottom: f32, height: f32) -> f32 {
     scroll.max(bottom - height).min(top)
 }
 
+/// Draws a pane with `body`, scrolled up by as little as shows whole what lies from `top` to `bottom` where the
+/// pane rests, 32 clear of the screen's foot, and at once: nothing on Settings scrolls with an animation. `first`
+/// is where the pane starts ([`TOP`] or [`BOXES_TOP`]); a pane that fits the screen never moves. Scrolled, it is
+/// cut a ring and its glow's width over `first` and left of [`LEFT`], so what has focus is never cut where it
+/// rests and the rest passes under the header's row.
+pub fn scrolled(ui: &mut Ui, scroll: &mut f32, first: f32, top: f32, bottom: f32, body: impl FnOnce(&mut Ui)) {
+    let foot = ui.screen().h - FOOT;
+    *scroll = show(*scroll, top - first, bottom - first, foot - first).max(0.0);
+    let view = Rect::new(LEFT - FOOT, first - FOOT, 4000.0, 4000.0);
+    let by = *scroll;
+    ui.with_clip(view, |ui| ui.with_offset(0.0, -by, body));
+}
+
 /// What a press on a pane of boxes came to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Move {
@@ -361,13 +381,8 @@ impl Grid {
     /// the screen never moves. `body` draws each box where [`Grid::rect`] says.
     pub fn scrolled(&mut self, ui: &mut Ui, below: f32, body: impl FnOnce(&mut Ui)) {
         let focused = Self::rect(self.row, self.column);
-        let foot = ui.screen().h - FOOT;
         let bottom = focused.y + below.max(focused.h);
-        self.scroll = show(self.scroll, focused.y - BOXES_TOP, bottom - BOXES_TOP, foot - BOXES_TOP).max(0.0);
-        // Cut a ring and its glow's width over and left of the boxes, and not at all below or to the right.
-        let view = Rect::new(LEFT - FOOT, BOXES_TOP - FOOT, 4000.0, 4000.0);
-        let scroll = self.scroll;
-        ui.with_clip(view, |ui| ui.with_offset(0.0, -scroll, body));
+        scrolled(ui, &mut self.scroll, BOXES_TOP, focused.y, bottom, body);
     }
 
     /// How far the pane has scrolled.

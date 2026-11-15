@@ -8,8 +8,9 @@
 # followed by the line expected of it, the second start reads back what the first saved, and the Dashboard stays up.
 #
 # The pictures are to look at beside the Bundle's of the same name (docs/spec/pictures.md, 28 to 35). 30, 32, 33
-# and 34 have none here: Boot video, and Idle with its dropdown, come with M5, and Personalisation opens on
-# Background delay, which is 31. 35 has no Now Playing source under the checkbox, for the same reason.
+# and 34 have none here: Boot video, and Idle with its dropdown, come with M5, and Personalisation opens on its
+# first box, Groups (the groups test's), with Background delay under it, which is 31. 35 has no Now Playing source
+# under the checkbox, for the same reason.
 #
 # The settings are in a data folder of the test's own, empty as it starts, so every option starts at its default and
 # nothing is left changed for the next test.
@@ -136,8 +137,10 @@ try {
     Press B 'Settings: Theme settings: Guide'
     Walk Left 'Settings: Theme settings: Personalisation' 3
 
-    # Personalisation: a checkbox box a row, the focused one's info beside it. Background delay off, Reduce motion on.
-    Press A 'Settings: Personalisation: Background delay' '31-settings-personalisation-checkbox'
+    # Personalisation: Groups, then a checkbox box a row, the focused one's info beside it. Background delay off,
+    # Reduce motion on.
+    Press A 'Settings: Personalisation: Groups'
+    Press Down 'Settings: Personalisation: Background delay' '31-settings-personalisation-checkbox'
     Turn-Over 'home.background_delay' 'false' '31-background-delay-off'
     Press Down 'Settings: Personalisation: Reduce motion'
     Turn-Over 'motion.reduce' 'true' '31-reduce-motion-on'
@@ -167,7 +170,8 @@ try {
     # And the page shows them so: the first box unticked, the second ticked. Then both put back as they were.
     Open-Settings
     Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Background delay' '31-after-restart'
+    Press A 'Settings: Personalisation: Groups'
+    Press Down 'Settings: Personalisation: Background delay' '31-after-restart'
     Turn-Over 'home.background_delay' 'true'
     Press Down 'Settings: Personalisation: Reduce motion'
     Turn-Over 'motion.reduce' 'false' '31-put-back'

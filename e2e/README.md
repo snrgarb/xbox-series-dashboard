@@ -122,6 +122,8 @@ open, thawed as it closes, and thawed at the next start after the Dashboard is k
 the grid's edges and its scroll, Play history, Manage, and B and Y), `search` (Y on Home, a name typed on the Console
 keyboard with the pad, the symbols, the keyboard put away, A on a result opening its hub, and B back step by step),
 `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
+the grid's edges and its scroll, Play history, Manage, and B and Y), `groups` (Settings' Groups: a Group hidden, two swapped and one added by
+name, Home's Groups seen to follow each, and all put back), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
 the Guide, the queue, the Guide button during a Toast), and `overlay` and `video` for the spikes.
 

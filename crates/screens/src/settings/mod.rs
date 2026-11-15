@@ -10,6 +10,8 @@
 //! ([`boxes::Item::Opens`]). Nothing here changes.
 pub mod boxes;
 pub mod controls;
+mod group;
+pub mod groups;
 mod guide;
 pub mod options;
 mod theme_settings;
@@ -17,8 +19,11 @@ mod theme_settings;
 use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
 pub use self::options::{Change, Options, Setting};
-use crate::pages::{Around, Page, PageAction};
+use crate::hint_bar::{self, Hint};
+use crate::keyboard;
+use crate::pages::{Around, Dialog, Page, PageAction};
 use crate::theme::ACCENT;
+use crate::Effect;
 
 /// How the page is opened: what shows, and so where focus lands and how many levels B climbs before the page
 /// closes (docs/spec/settings.md, 8.2).
@@ -63,6 +68,45 @@ pub trait Pane {
     /// [`controls::TOP`], both from [`controls::LEFT`]. `focused` is false while focus is on the rail: nothing on
     /// the pane then has a ring.
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool);
+
+    /// What the focus log says of the pane beyond where its focus is: what a press changes without moving focus
+    /// (whether the Group focus is on is shown).
+    fn state(&self) -> String {
+        String::new()
+    }
+
+    /// The hint bar's hints with focus where it is. Settings shows none (section 10.5) but on the Groups page.
+    fn hints(&self, _around: Around) -> &'static [Hint] {
+        hint_bar::NONE
+    }
+
+    /// A dialog the pane shows over the page (the menu of a Group), and of which kind, while one is up.
+    fn dialog(&self) -> Option<Dialog> {
+        None
+    }
+
+    /// Its dialog goes with no answer: the Guide has taken the screen.
+    fn dismiss_dialog(&mut self) {}
+
+    /// A newer snapshot of the library is in `around`: what the pane keeps of the old one (the Group focus is on)
+    /// it finds again. A page to open over it, if the snapshot brought what it was waiting for (a Group just made,
+    /// whose page opens).
+    fn library_changed(&mut self, _around: Around) -> Option<Box<dyn Pane>> {
+        None
+    }
+
+    /// The text that text entry, opened by this pane, starts from.
+    fn entry_text(&self) -> String {
+        String::new()
+    }
+
+    /// What text entry over the page had to say, while this pane shows.
+    fn entry(&mut self, _event: keyboard::Event, _around: Around) {}
+
+    /// What the pane asks of the shell that no press answered: a name text entry kept, to save.
+    fn asks(&mut self) -> Vec<Effect> {
+        Vec::new()
+    }
 }
 
 /// The rail's width, and the line's between it and the content.
@@ -159,6 +203,59 @@ impl Page for Settings {
             Step::Do(action) => return Some(action),
         }
         None
+    }
+
+    fn state(&self) -> String {
+        match self.panes.last() {
+            Some(pane) if !self.on_rail => pane.state(),
+            _ => String::new(),
+        }
+    }
+
+    fn hints(&self, around: Around) -> &'static [Hint] {
+        match self.panes.last() {
+            Some(pane) if !self.on_rail && pane.dialog().is_none() => pane.hints(around),
+            _ => hint_bar::NONE,
+        }
+    }
+
+    fn dialog(&self) -> Option<Dialog> {
+        self.panes.last().filter(|_| !self.on_rail).and_then(|pane| pane.dialog())
+    }
+
+    fn dismiss_dialog(&mut self) -> bool {
+        if let Some(pane) = self.panes.last_mut() {
+            pane.dismiss_dialog();
+        }
+        true
+    }
+
+    fn library_changed(&mut self, around: Around) {
+        let last = self.panes.len().saturating_sub(1);
+        let mut opened = None;
+        for (at, pane) in self.panes.iter_mut().enumerate() {
+            let over = pane.library_changed(around);
+            if at == last {
+                opened = over;
+            }
+        }
+        if let Some(pane) = opened.filter(|_| !self.on_rail) {
+            self.panes.push(pane);
+        }
+    }
+
+    fn entry_text(&self) -> String {
+        self.panes.last().map(|pane| pane.entry_text()).unwrap_or_default()
+    }
+
+    fn entry(&mut self, event: keyboard::Event, around: Around) {
+        if let Some(pane) = self.panes.last_mut() {
+            pane.entry(event, around);
+        }
+    }
+
+    fn asks(&mut self) -> Vec<Effect> {
+        self.panes.iter_mut().flat_map(|pane| pane.asks()).collect()
     }
 
     fn draw(&mut self, ui: &mut Ui, around: Around) {

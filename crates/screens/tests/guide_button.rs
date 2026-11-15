@@ -174,12 +174,12 @@ fn a_held_direction_repeats_at_the_guides_pace_in_the_guide_and_at_homes_at_home
     pad.at(3000, GUIDE);
     pad.at(3100, 0);
     assert!(!pad.dashboard.guide_open());
-    let moved = Effect::Sound(Sound::Move);
-    assert_eq!(pad.at(4000, DOWN), [moved]);
+    const MOVED: Effect = Effect::Sound(Sound::Move);
+    assert_eq!(pad.at(4000, DOWN), [MOVED]);
     assert_eq!(pad.at(4399, DOWN), []);
-    assert_eq!(pad.at(4400, DOWN), [moved]);
+    assert_eq!(pad.at(4400, DOWN), [MOVED]);
     assert_eq!(pad.at(4519, DOWN), []);
-    assert_eq!(pad.at(4520, DOWN), [moved]);
+    assert_eq!(pad.at(4520, DOWN), [MOVED]);
 }
 
 /// docs/spec/guide.md, 3.5: closed with B, the Guide keeps the foreground until B is let go, so the window that

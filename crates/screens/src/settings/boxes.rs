@@ -10,8 +10,8 @@ use crate::Effect;
 /// A box on a pane of boxes.
 #[derive(Clone, Copy)]
 pub enum Item {
-    /// A opens a page in the boxes' place: an icon and a name.
-    Opens { icon: char, name: &'static str, pane: fn() -> Box<dyn Pane> },
+    /// A opens a page in the boxes' place: an icon and a name. The page is made from the world as it is then.
+    Opens { icon: char, name: &'static str, pane: fn(Around) -> Box<dyn Pane> },
     /// A checkbox box: A turns the option over, at once and saved. Its info text shows beside it while it has
     /// focus, so it has a row to itself.
     Check { setting: Setting, name: &'static str, info: &'static str },
@@ -69,7 +69,7 @@ impl Pane for Boxes {
     fn press(&mut self, press: Press, around: Around) -> Step {
         match (press.button, self.focused()) {
             (Button::B, _) => Step::Back,
-            (Button::A, Item::Opens { pane, .. }) => Step::Open(pane()),
+            (Button::A, Item::Opens { pane, .. }) => Step::Open(pane(around)),
             (Button::A, Item::Check { setting, .. }) => {
                 let change = Change { setting, on: !around.options.get(setting) };
                 Step::Do(PageAction::Effect(Effect::Set(change)))

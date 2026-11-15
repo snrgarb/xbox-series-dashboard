@@ -66,11 +66,11 @@ fn settings(database: &library::Database) -> Dashboard {
     dashboard
 }
 
-/// Personalisation, focus on the checkbox box this far down it.
+/// Personalisation, focus on the checkbox box this far down it: under Groups, its first box.
 fn personalisation(database: &library::Database, down: usize) -> Dashboard {
     let mut dashboard = settings(database);
     press(&mut dashboard, &[Right, A]);
-    press(&mut dashboard, &vec![Down; down]);
+    press(&mut dashboard, &vec![Down; down + 1]);
     dashboard.take_effects();
     dashboard
 }
@@ -107,16 +107,16 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
 
-    // Personalisation: a checkbox box a row.
+    // Personalisation: Groups, then a checkbox box a row.
     press(&mut dashboard, &[A, A]);
-    let boxes = ["Background delay", "Reduce motion", "Show Play history", "Show battery percentages"];
+    let boxes = ["Groups", "Background delay", "Reduce motion", "Show Play history", "Show battery percentages"];
     for name in boxes {
         assert_eq!(dashboard.focus_line(), format!("Settings: Personalisation: {name}"));
         press(&mut dashboard, &[Right, Down]);
     }
     assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Show battery percentages", "the foot stops");
-    press(&mut dashboard, &[Up, Up, Up, Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Background delay", "the top stops");
+    press(&mut dashboard, &[Up, Up, Up, Up, Up]);
+    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Groups", "the top stops");
     // Left steps back to Theme settings' boxes, focus on the box that opened the page.
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
@@ -153,7 +153,7 @@ fn customise_home_opens_personalisation_and_b_climbs_back_through_every_level() 
     let mut dashboard = start(&database);
     press(&mut dashboard, &[Down, Right]);
     dashboard.open_page(Open::Settings(Entry::Personalisation));
-    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Background delay");
+    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Groups");
     press(&mut dashboard, &[B]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
     press(&mut dashboard, &[B]);
@@ -220,7 +220,7 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
 
     // Off, with focus left on the tile: it is on the game that took its place, at once.
     dashboard.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut dashboard, &[Down, Down, A, B, B, B]);
+    press(&mut dashboard, &[Down, Down, Down, A, B, B, B]);
     assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::ShowPlayHistory, on: false }]);
     assert_eq!(dashboard.page(), None);
     press(&mut dashboard, &[Right; 9]);
@@ -231,7 +231,7 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
 
     // On again: the tile is back, and A on it is Play history.
     dashboard.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut dashboard, &[Down, Down, A, B, B, B]);
+    press(&mut dashboard, &[Down, Down, Down, A, B, B, B]);
     assert_eq!((dashboard.home_focus(), dashboard.focused_game()), (Focus::Recent(6), Some(6)));
     press(&mut dashboard, &[Right, A]);
     assert_eq!(dashboard.focus_line(), "MyGames: PlayHistory: Row(0)");
@@ -267,7 +267,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
 
     // Every checkbox on Personalisation turned over, and Use the Guide.
     dashboard.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut dashboard, &[A, Down, A, Down, A, Down, A, B, Right, A, A]);
+    press(&mut dashboard, &[Down, A, Down, A, Down, A, Down, A, B, Right, A, A]);
     assert_eq!(save(&mut dashboard, &database).len(), 5);
     let left = Options {
         background_delay: false,
@@ -289,7 +289,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
 
     // One turned back, and a third start.
     again.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut again, &[Down, A]);
+    press(&mut again, &[Down, Down, A]);
     assert_eq!(save(&mut again, &database), [Change { setting: Setting::ReduceMotion, on: false }]);
     assert_eq!(start(&database).options(), Options { reduce_motion: false, ..left });
 }
@@ -432,7 +432,7 @@ fn settings_theme_settings_box_focused() {
 #[test]
 fn settings_personalisation_checkbox_focused() {
     let mut stage = settings_stage();
-    stage.press(&[Right, A]);
+    stage.press(&[Right, A, Down]);
     stage.check("settings-personalisation-checkbox");
     // Another box, turned over: its info moves with focus, and nothing else does.
     stage.press(&[Down, Down, A]);
@@ -574,7 +574,7 @@ fn settings_rows_and_pane_buttons() {
 /// scrolled just far enough to show it with its info text, and its first rows are cut under the header's row.
 #[test]
 fn a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box() {
-    let opens = |icon, name| Item::Opens { icon, name, pane: || Box::new(RowsAndButtons) };
+    let opens = |icon, name| Item::Opens { icon, name, pane: |_| Box::new(RowsAndButtons) };
     let check = |name| vec![Item::Check { setting: Setting::ReduceMotion, name, info: INFO }];
     const INFO: &str = "Shows how much charge is left beside the controller's battery, and this PC's on a laptop or \
                         handheld. Turn it off to show the batteries alone.";
@@ -650,7 +650,7 @@ fn background_delay_off_shows_a_games_art_almost_at_once() {
 
     // Turned off in Settings, and back on Home: a second after a move the background is the game's focus is on.
     stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[A, B, B, B]);
+    stage.press(&[Down, A, B, B, B]);
     assert!(!stage.dashboard.options().background_delay && stage.dashboard.page().is_none());
     assert!(blue(background(&stage.after(1.0))));
     stage.press(&[Left]);
@@ -664,7 +664,7 @@ fn reduce_motion_is_in_force_from_the_next_frame() {
     stage.after(0.1);
     assert!(!stage.host.store.reduce_motion);
     stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[Down, A]);
+    stage.press(&[Down, Down, A]);
     stage.after(0.04);
     assert!(stage.host.store.reduce_motion, "what slides is told to stand in place");
     // The Guide then shows whole in its first frame, where it would slide in.
@@ -675,7 +675,7 @@ fn reduce_motion_is_in_force_from_the_next_frame() {
     // And off again.
     stage.press(&[B]);
     stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[Down, A]);
+    stage.press(&[Down, Down, A]);
     stage.after(0.04);
     assert!(!stage.host.store.reduce_motion);
 }
@@ -695,7 +695,7 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
     let with = white(&home);
 
     stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[Down, Down, Down, A, B, B, B]);
+    stage.press(&[Down, Down, Down, Down, A, B, B, B]);
     assert!(!stage.dashboard.options().show_battery_percent && stage.dashboard.page().is_none());
     let without = white(&stage.still());
     assert!(without > 100, "the battery's cell is still there: {without}");
