@@ -235,6 +235,18 @@ function Wait-DashboardLog([string] $Pattern, [double] $Seconds = 30, [int] $Aft
     return $null
 }
 
+# Waits for the greeting, the "Hi <user>!" Toast the Dashboard shows once it has started, to come and go: it is on the
+# screen for five seconds, low in the middle (x 736..1184, y 881..1023 of the canvas at its largest), and a tap of the
+# Guide button while it shows opens the Guide on Profile & system. A test that looks at Home or presses the Guide
+# button waits it out first. Returns whether it came and went.
+function Wait-Greeting([double] $Seconds = 30) {
+    $shown = Wait-DashboardLog '^toasts: shown .* \(Greeting\)' $Seconds
+    if (-not $shown) { Say 'note: no greeting showed'; return $false }
+    $gone = Wait-DashboardLog '^toasts: gone' 20
+    Say "the greeting: $shown; $(if ($gone) { $gone } else { 'still there after 20 s' })"
+    [bool] $gone
+}
+
 function Stop-Dashboard {
     if ($script:Dashboard -and -not $script:Dashboard.HasExited) {
         Stop-Process -Id $script:Dashboard.Id -Force -ErrorAction SilentlyContinue

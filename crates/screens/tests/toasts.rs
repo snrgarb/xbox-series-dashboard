@@ -28,6 +28,15 @@ fn showing(dashboard: &Dashboard) -> Option<String> {
     dashboard.toasts().showing().map(|toast| toast.text.clone())
 }
 
+/// A turn of a loop that puts each frame on the screen at once: what there is now, the time passing, what there is
+/// then. True when what is drawn may have changed.
+fn pass(dashboard: &mut Dashboard, seconds: f32) -> bool {
+    dashboard.toasts_presented();
+    let changed = dashboard.advance(seconds);
+    dashboard.toasts_presented();
+    changed
+}
+
 #[test]
 fn a_notification_is_listed_and_shows_in_a_toast_with_its_sound() {
     let mut dashboard = dashboard();
@@ -38,10 +47,10 @@ fn a_notification_is_listed_and_shows_in_a_toast_with_its_sound() {
     assert_eq!((toast.kind, toast.prompt), (ToastKind::Notification, true));
 
     // It goes after five seconds, in silence, and stays in the list.
-    assert!(!dashboard.advance(4.9));
-    assert!(dashboard.advance(0.2));
+    assert!(!pass(&mut dashboard, 4.9));
+    assert!(pass(&mut dashboard, 0.2));
     assert_eq!((showing(&dashboard).as_deref(), dashboard.take_effects()), (None, vec![]));
-    assert!(dashboard.advance(0.5));
+    assert!(pass(&mut dashboard, 0.5));
     assert!(dashboard.toasts().on_screen().is_none());
     assert_eq!(dashboard.toasts().wake(), None);
     let listed: Vec<(u64, &str)> = dashboard.notifications().iter().map(|n| (n.id, n.text.as_str())).collect();
@@ -56,10 +65,10 @@ fn a_second_waits_behind_the_first_and_shows_half_a_second_after_it_goes() {
     // One sound: the second has not shown.
     assert_eq!(dashboard.take_effects(), [NOTIFICATION]);
     assert_eq!((showing(&dashboard).as_deref(), dashboard.toasts().waiting()), (Some("one"), 1));
-    dashboard.advance(5.0);
-    dashboard.advance(0.45);
+    pass(&mut dashboard, 5.0);
+    pass(&mut dashboard, 0.45);
     assert_eq!((showing(&dashboard).as_deref(), dashboard.take_effects()), (None, vec![]));
-    assert!(dashboard.advance(0.1));
+    assert!(pass(&mut dashboard, 0.1));
     assert_eq!((showing(&dashboard).as_deref(), dashboard.take_effects()), (Some("two"), vec![NOTIFICATION]));
     assert_eq!(dashboard.notifications().len(), 2);
 }
@@ -70,7 +79,7 @@ fn a_tap_of_the_guide_button_while_a_toast_shows_opens_the_guide_on_notification
     dashboard.notify("one");
     dashboard.notify("two");
     dashboard.take_effects();
-    dashboard.advance(1.0);
+    pass(&mut dashboard, 1.0);
     dashboard.pad_event(PadEvent::GuideTap);
     assert_eq!(dashboard.take_effects(), [GUIDE_OPEN]);
     assert!(dashboard.guide_open());
@@ -78,7 +87,7 @@ fn a_tap_of_the_guide_button_while_a_toast_shows_opens_the_guide_on_notification
     assert_eq!(dashboard.guide().focus(), (Tab::Landing, Focus::Utility(0)));
     // The Toast goes and the one waiting is forgotten: the Guide has them now.
     assert_eq!((showing(&dashboard).as_deref(), dashboard.toasts().waiting()), (None, 0));
-    dashboard.advance(1.0);
+    pass(&mut dashboard, 1.0);
     assert!(dashboard.toasts().on_screen().is_none());
     assert_eq!((dashboard.toasts().shown(), dashboard.take_effects()), (1, vec![]));
 }
@@ -88,15 +97,15 @@ fn a_tap_as_the_toast_goes_still_opens_the_guide_on_it_and_one_after_does_not() 
     // The tap is told 300 ms after the press: a Toast that began to go meanwhile was showing at the press.
     let mut going = dashboard();
     going.notify("one");
-    going.advance(5.2);
+    pass(&mut going, 5.2);
     assert!(going.toasts().showing().is_none() && going.toasts().on_screen().is_some());
     press(&mut going, Button::Guide);
     assert_eq!(going.guide().focus(), (Tab::Landing, Focus::Utility(0)));
 
     let mut gone = dashboard();
     gone.notify("one");
-    gone.advance(5.0);
-    gone.advance(0.5);
+    pass(&mut gone, 5.0);
+    pass(&mut gone, 0.5);
     press(&mut gone, Button::Guide);
     assert_eq!(gone.guide().focus(), (Tab::Landing, Focus::Entry(0)));
 }
@@ -215,6 +224,7 @@ impl Stage {
 
     /// The same as it is now, `seconds` after the last frame: the Toast where its age puts it.
     fn frame_after(&mut self, seconds: f32) -> image::RgbaImage {
+        self.dashboard.toasts_presented();
         self.dashboard.advance(seconds);
         let Self { gpu, host, target, dashboard, .. } = self;
         loop {
@@ -279,8 +289,8 @@ fn the_banner() {
     let mut stage = Stage::new(HD);
     stage.dashboard.notify("Screenshot saved");
     compare("toast-coming-in", &stage.frame_after(0.15));
-    // Going: at its largest 120 ms in, and gone 410 ms in.
-    stage.frame_after(4.85);
+    // Going, from when its five seconds are seen to be up: at its largest 120 ms in, and gone 410 ms in.
+    stage.frame_after(4.86);
     compare("toast-going", &stage.frame_after(0.12));
     let gone = stage.frame_after(0.3);
     assert!(!is_green(&gone, 960, 950));
@@ -315,6 +325,7 @@ fn the_banner() {
 fn a_frame_for_the_strip_is_the_foot_of_the_whole_screens() {
     let mut stage = Stage::new(HD);
     stage.dashboard.notify("Screenshot saved");
+    stage.dashboard.toasts_presented();
     stage.dashboard.advance(1.0);
     let Stage { gpu, host, target, dashboard, .. } = &mut stage;
     let draw = |host: &mut Host, target: &Offscreen, part, dashboard: &mut Dashboard| {

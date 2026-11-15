@@ -1,6 +1,7 @@
 //! How another program on the same desktop posts a notification to a running Dashboard: a `WM_COPYDATA` message
 //! to the Toast strip's window, found by its class, carrying the text as UTF-8. The Dashboard lists it and shows
-//! its Toast. `standin toast <text>` does it for the tests; nothing else posts any yet (docs/spec/guide.md, 9.7).
+//! its Toast, if it was started with `--allow-toast-posts`: otherwise it takes nothing. `standin toast <text>`
+//! does it for the tests; nothing else posts any (docs/spec/guide.md, 9.7).
 
 /// The class of the window to send to. There is one such window per Dashboard, hidden unless a Toast shows.
 pub const WINDOW_CLASS: &str = "XboxSeriesDashboardToasts";

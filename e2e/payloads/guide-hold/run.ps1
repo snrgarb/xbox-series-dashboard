@@ -61,6 +61,8 @@ try {
     $dashboard = Start-Dashboard @('--log-focus')
     if (-not (Wait-DashboardLog 'first frame presented' 60)) { throw 'The Dashboard never presented a frame' }
     Start-Sleep -Seconds 3
+    # The greeting's Toast comes and goes: a tap of the Guide button during it opens the Guide somewhere else.
+    Wait-Greeting | Out-Null
     if ((Get-Foreground).Title -ne $dashboardTitle) {
         $taken = Set-Foreground $dashboardTitle
         Say "note: the Dashboard was not in front after starting; put in front: $taken; foreground $(Front)"
@@ -214,6 +216,8 @@ try {
     $stoodAgain = @(Get-StoodStill)
     Say "the game's own account: $($stoodAgain -join ' | ')"
     if ($stoodAgain.Count -le $stood.Count) { $failures += 'the game does not say that it stood still until the Dashboard started again' }
+    # The greeting's Toast of this start comes and goes, over the game's pulse.
+    if ($first) { Wait-Greeting | Out-Null }
     # Home's window is over the game now: the game in front again, to see its pulse.
     $front = Set-Foreground $game.name
     Say "the game put in front: $front; foreground $(Front)"

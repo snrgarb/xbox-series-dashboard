@@ -150,6 +150,10 @@ The games the screens show are a **snapshot** of the library database (`model::L
 
 The Dashboard has no clock, and Toasts are timed: five seconds each, half a second between (docs/spec/guide.md, section 9). So it is told how much time has passed, `Dashboard::advance(seconds)`, by the window every turn of its loop and by a test as it likes. `Toasts::wake()` says how long until the queue next changes with nothing posted, and the loop sleeps no longer than that.
 
+It is also told what has reached the screen: `Dashboard::toasts_presented()`, after each frame with the Toasts' picture in it is presented and after the strip is hidden. The queue goes by that. A Toast's five seconds begin with its first presented frame, and the next waits for a frame without the last. So whoever draws Toasts must say so, or the queue stands still (`Toasts::awaits_frame`): a test that steps time calls it as a loop would, before and after each step. One `advance` does one thing to a Toast (going, gone, the next shown), however much time it is told of.
+
+Home's window gives way to a moving Toast where it is slow: when Home's last frame took more than 50 ms (the software renderer), the loop does not ask for Home's redraw while the strip is animating or is about to, for 600 ms after Home's last frame at most.
+
 The banner is not animated through the store. It is drawn where its age puts it (`screens::toasts::banner::pose`: its size, its opacity, how far its tile has slid, which of its line and its prompt shows), so its coming, its turns of text and its going are one function of two numbers, tested without a frame. While it moves it asks for frames (`keep_animating`); at rest between its turns of text it asks to be woken for the next (`wake_in`) and nothing is drawn meanwhile. A settling frame shows it at rest.
 
 `Dashboard::notify(text)` posts a notification: it joins `Dashboard::notifications()`, the list the Guide's Notifications Flyout shows, and tells of itself in a Toast. `Dashboard::greet()` is the "Hi <user>!" Toast.
@@ -174,11 +178,11 @@ Home's window is winit's: borderless, opaque, an ordinary swap chain. It is neve
 |---|---|---|---|
 | Shows | `Dashboard::draw` | `Dashboard::draw_overlay` | `Dashboard::draw_toasts` |
 | Shown | Always, but hidden behind a running game | Only while `Dashboard::overlay()` wants it | Only while a Toast is on screen |
-| Where | The primary monitor | Each time it is shown, the monitor of the window that has the foreground then: the Guide opens on the screen the game is on | The foot of the primary monitor |
+| Where | The primary monitor | Each time it is shown, the monitor of the window that has the foreground then: the Guide opens on the screen the game is on | The foot of that same monitor, each time it is shown |
 | Input | The keyboard, while it has the foreground | Passive: none, clicked through, never activated. Guide: it takes the foreground from the game (an Alt tap, then `SetForegroundWindow`) or from Home's window (no tap: the foreground is ours to move), and gives it back to that window when the Guide closes | None, ever: clicked through, never activated |
 | Cleared to | Black | Nothing (transparent) | Nothing (transparent) |
 
-The strip covers the foot of the screen, the bottom 240 of 1080, and its frame is declared as the whole screen's: `Host::draw_part` lays the frame out for the whole output and draws the part the target is, so a Toast is at the same design units wherever it is drawn. The Overlay comes to be above the strip whenever it is shown, raised or given the foreground (of two topmost windows the one made so last is the upper), so each turn the strip looks for a window of the Dashboard's above it and goes back on top (`ToastStrip::keep_above`). The strip's window is also where another program posts a notification to (`model::post`, a `WM_COPYDATA` message), which is how a test makes a Toast in a running Dashboard: `standin toast <text>`.
+The strip covers the foot of the screen, the bottom 240 of 1080, and its frame is declared as the whole screen's: `Host::draw_part` lays the frame out for the whole output and draws the part the target is, so a Toast is at the same design units wherever it is drawn. The Overlay comes to be above the strip whenever it is shown, raised or given the foreground (of two topmost windows the one made so last is the upper), so each turn the strip looks for a window of the Dashboard's above it and goes back on top (`ToastStrip::keep_above`). The strip's window is also where another program posts a notification to (`model::post`, a `WM_COPYDATA` message), which is how a test makes a Toast in a running Dashboard: `standin toast <text>`. It takes one only in a Dashboard started with `--allow-toast-posts`.
 
 The pad is read through XInput whichever window is in front, so the Guide button works over a game.
 

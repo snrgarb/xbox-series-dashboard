@@ -2,10 +2,12 @@
 # Toast that shows without taking the foreground, goes after its five seconds, a second that waits behind the first,
 # and a tap of the Guide button while a Toast shows, which opens the Guide on Notifications.
 #
-# A notification is posted to the running Dashboard by `standin toast <text>` (crates/model/src/post.rs). What the
-# Dashboard did with it is read from its log (`toasts: posted`, `shown`, `going`, `gone`, each with the time since the
-# Dashboard started) and, since the log saying so is not enough (#23), from the colour of the screen: the banner is
-# the console's green, 128 high with its foot 64 above the screen's, in the middle across.
+# A notification is posted to the running Dashboard by `standin toast <text>` (crates/model/src/post.rs), which the
+# Dashboard takes only when started with --allow-toast-posts: the last thing here is that one started without it takes
+# none. What the Dashboard did with it is read from its log (`toasts: posted`, `shown`, `going`, `gone`, each with the
+# time since the Dashboard started, each said once the frame that shows it is on the screen) and, since the log saying
+# so is not enough (#23), from the colour of the screen: the banner is the console's green, 128 high with its foot 64
+# above the screen's, in the middle across.
 #
 # The sounds are tones `standin make-tones` writes; --log-sounds says each one played.
 $ErrorActionPreference = 'Stop'
@@ -60,6 +62,14 @@ function Find-WrongColours($Points, $Colour, [int] $Tolerance = 8) {
 # Whether the banner is on screen, all the way in.
 function Test-Banner { -not @(Find-WrongColours $cardPoints $green).Count }
 
+# How many lines the log has up to and with the first that matches: what to look after for what follows it. 0 when
+# none does.
+function Find-LogLine([string] $Pattern) {
+    $lines = @(Get-DashboardLog)
+    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match $Pattern) { return $i + 1 } }
+    0
+}
+
 # Posts a notification to the Dashboard, and returns the Dashboard's line saying it took it.
 function Send-Toast([string] $Text) {
     $after = Get-DashboardLogLength
@@ -85,16 +95,28 @@ function Wait-Toast([string] $Text, [string] $Kind, [int] $After = 0, [double] $
 }
 
 # A Toast's time on screen and the wait for the next, from the log's own times: five seconds, then half a second.
-# The loop that times them sleeps a quarter of a second at most, and a slow VM draws slowly: late is allowed, early not.
+# Each line is said after the frame it tells of was presented, so two of them are apart by what the Dashboard timed
+# give or take a frame at each end, and a slow VM's frames are long: 4.7 to 6 s for the five seconds. The next Toast
+# can't be before the last has gone (0.41 s) and is half a second after it began to go, give or take the same.
 function Test-Timing([string] $Shown, [string] $Going, [string] $Next, [string] $What) {
     $showed = (At $Going) - (At $Shown)
     Say "$What`: shown for $showed ms"
-    if ($showed -lt 4950 -or $showed -gt 7000) { $script:failures += "$What showed for $showed ms, not five seconds" }
+    if ($showed -lt 4700 -or $showed -gt 6000) { $script:failures += "$What showed for $showed ms, not five seconds" }
     if ($Next) {
         $gap = (At $Next) - (At $Going)
         Say "$What`: the next showed $gap ms after it went"
-        if ($gap -lt 450 -or $gap -gt 2500) { $script:failures += "the Toast after $What showed $gap ms after it went, not half a second" }
+        if ($gap -lt 410 -or $gap -gt 2000) { $script:failures += "the Toast after $What showed $gap ms after it went, not half a second" }
     }
+}
+
+# The strip's own count of the frames it presented while it was last shown, from the first `strip hidden` line after
+# $After: a Toast's coming in, its turns and its going are some dozens of frames, and a strip kept waiting by Home's
+# window draws a handful.
+function Test-Frames([int] $After, [string] $What, [int] $AtLeast = 15) {
+    $hidden = Wait-DashboardLog '^toasts: strip hidden after' 10 -After $After
+    if ($hidden -notmatch ' and (\d+) frames ') { $script:failures += "the strip did not hide after $What`: $hidden"; return }
+    Say "$What`: $hidden"
+    if ([int] $Matches[1] -lt $AtLeast) { $script:failures += "the strip drew $($Matches[1]) frames for $What, which is not a Toast seen to come and go: $hidden" }
 }
 
 try {
@@ -111,7 +133,8 @@ try {
 
     # ------------------------------------------------------------------------------- at start-up, over Home
     $queued = 'Queued at start'
-    $dashboard = Start-Dashboard @('--media', "`"$media`"", '--log-sounds', '--log-focus', '--toast', "`"$queued`"")
+    $arguments = @('--media', "`"$media`"", '--log-sounds', '--log-focus')
+    $dashboard = Start-Dashboard ($arguments + @('--allow-toast-posts', '--toast', "`"$queued`""))
     $first = Wait-DashboardLog 'first frame presented' 60
     if (-not $first) { throw 'The Dashboard never presented a frame' }
     Say "first frame: $first"
@@ -128,15 +151,25 @@ try {
     if ((Get-Foreground).Title -eq $stripTitle) { $failures += 'the Toast strip took the foreground: it must never be activated' }
     $sound = Wait-DashboardLog '^audio: played Notification\.wav$' 5
     if (-not $sound) { $failures += 'the greeting played no notification sound' }
-    $going = Wait-DashboardLog '^toasts: going' 10
+    # This is while Home is at its busiest, its art coming in and its swirl turning, on a VM that draws Home with
+    # the processor: the Toast must come and go in its own time all the same, and be seen to.
+    $going = Wait-DashboardLog '^toasts: going' 15
+    Say "the greeting: $(if ($going) { $going } else { 'did not go in 15 s' })"
+    if (-not $going) { $failures += 'the greeting did not go after its time' }
+    $early = Get-DashboardLog | Select-Object -First (Find-LogLine '^toasts: going') | Where-Object { $_ -match "^toasts: shown `"$queued`"" }
+    if ($early) { $failures += "--toast's notification showed while the greeting was showing: $early" }
+    Test-Frames (Find-LogLine '^toasts: strip shown') 'the greeting'
     $next = Wait-Toast $queued 'Notification'
     Save-Screen 'queued-at-start'
     Say "after the greeting: $(if ($next) { $next } else { 'nothing' })"
     if ($greeting -and $going -and $next) { Test-Timing $greeting $going $next 'the greeting' }
-    # It goes in its turn, and the strip with it: Home shows where the card was.
-    $after = Get-DashboardLogLength
+    # It goes in its turn, and the strip with it: Home shows where the card was. Looked for after its own shown line,
+    # wherever the log has got to by now.
+    $after = Find-LogLine "^toasts: shown `"$queued`""
+    $goingNext = Wait-DashboardLog '^toasts: going' 15 -After $after
     $gone = Wait-DashboardLog '^toasts: gone' 10 -After $after
     $hidden = Wait-DashboardLog '^toasts: strip hidden' 5 -After $after
+    if ($next -and $goingNext) { Test-Timing $next $goingNext $null "--toast's notification" }
     Start-Sleep -Milliseconds 300
     if (-not $gone -or -not $hidden) { $failures += "the last Toast did not go and the strip hide: gone '$gone', hidden '$hidden'" }
     if (Test-Banner) { $failures += 'the banner is still on screen after its Toast has gone' }
@@ -253,6 +286,23 @@ try {
     Stop-StandInGame
     $ended = Wait-DashboardLog 'the game has ended, Home back' 20
     if (-not $ended) { $failures += 'Home did not come back after the game ended' }
+    if ($dashboard.HasExited) { $failures += "the Dashboard exited with $($dashboard.ExitCode)" }
+
+    # ------------------------------------------------------------- a Dashboard not told to take posts takes none
+    Stop-Dashboard
+    Copy-Item $DashboardLog (Join-Path $Out 'dashboard-first.log') -Force
+    $dashboard = Start-Dashboard $arguments
+    if (-not (Wait-DashboardLog '^toasts: configured' 60)) { throw 'The Toast strip was not made at the second start' }
+    Wait-Greeting | Out-Null
+    $refused = 'Not allowed'
+    $sent = Start-Process (Join-Path $Payload 'standin.exe') -ArgumentList 'toast', "`"$refused`"" -Wait -PassThru
+    Start-Sleep -Seconds 2
+    $taken = Get-DashboardLog | Where-Object { $_ -match "^toasts: (posted|shown) `"$refused`"" }
+    Say "without --allow-toast-posts: standin toast exited with $($sent.ExitCode); the log: $(if ($taken) { $taken -join ' | ' } else { 'nothing of it' })"
+    if ($sent.ExitCode -eq 0) { $failures += 'a Dashboard started without --allow-toast-posts took a posted notification' }
+    if ($taken) { $failures += "a Dashboard started without --allow-toast-posts showed a posted notification: $($taken -join ' | ')" }
+    if (Test-Banner) { $failures += 'a banner is on screen after a post that was not allowed' }
+    Save-Screen 'post-not-allowed'
     if ($dashboard.HasExited) { $failures += "the Dashboard exited with $($dashboard.ExitCode)" }
 
     if ($failures.Count -eq 0) { $result = 'PASS' }

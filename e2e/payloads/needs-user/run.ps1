@@ -35,6 +35,7 @@ try {
     $dashboard = Start-Dashboard
     if (-not (Wait-DashboardLog 'first frame presented' 60)) { throw 'The Dashboard never presented a frame' }
     Start-Sleep -Seconds 3
+    Wait-Greeting | Out-Null
     if ((Get-Foreground).Title -ne $dashboardTitle) {
         $taken = Set-Foreground $dashboardTitle
         Say "note: the Dashboard was not in front after starting; put in front: $taken; foreground $(Front)"

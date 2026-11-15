@@ -40,6 +40,8 @@ pub struct Args {
     page: Option<screens::pages::Open>,
     /// Notifications to post as the Dashboard starts, each telling of itself in a Toast.
     toasts: Vec<String>,
+    /// Other programs may post notifications to the running Dashboard (docs/spec/guide.md, 9.7): for tests.
+    allow_toast_posts: bool,
 }
 
 impl Args {
@@ -57,7 +59,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
-                 [--toast <text>]...
+                 [--toast <text>]... [--allow-toast-posts]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>]
@@ -124,6 +126,7 @@ fn parse_args() -> Result<Args, String> {
             "--dry-power" => args.dry_power = true,
             "--page" => args.page = Some(page(&value()?)?),
             "--toast" => args.toasts.push(value()?),
+            "--allow-toast-posts" => args.allow_toast_posts = true,
             _ => return Err(format!("unknown argument {arg}")),
         }
     }

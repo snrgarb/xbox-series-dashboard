@@ -5,13 +5,17 @@
 //! This is the queue and its timing, and the notifications list the Guide's Notifications Flyout shows. The banner
 //! draws itself in `banner`. The queue is told how much time has passed (`advance`) and has no clock of its own, so
 //! a test steps it as it likes.
+//!
+//! It is also told when its picture has been put on the screen (`presented`), and goes by that: a Toast's five
+//! seconds begin when its first frame is out, and the next one waits until a frame without the last is. What the
+//! queue says and what is on the screen are then the same thing however slowly frames come.
 mod banner;
 
 use std::collections::VecDeque;
 
 use ui::Ui;
 
-/// How long a Toast shows, counted from when it starts to appear.
+/// How long a Toast shows, counted from when its first frame is on the screen.
 pub const SHOWN_SECONDS: f64 = 5.0;
 /// How long after one goes the next one waiting shows.
 pub const GAP_SECONDS: f64 = 0.5;
@@ -47,9 +51,11 @@ pub struct Notification {
 /// The Toast on screen.
 struct Banner {
     toast: Toast,
-    /// When it began to appear, on the queue's clock.
-    since: f64,
-    /// When it began to go, if it has.
+    /// When its first frame was put on the screen, on the queue's clock. None until one has been: its time has not
+    /// begun.
+    since: Option<f64>,
+    /// When it was seen to be time for it to go, if it has been: its going is from there, so it is seen to go
+    /// however late that was.
     going_since: Option<f64>,
 }
 
@@ -61,6 +67,8 @@ pub struct Toasts {
     banner: Option<Banner>,
     /// When the next one waiting shows: the gap after one that went with others behind it.
     next_at: Option<f64>,
+    /// The last Toast has gone and no frame without it has been put on the screen yet: it is still there.
+    uncleared: bool,
     /// How many Toasts have shown.
     shown: u64,
     /// Every notification posted, oldest first.
@@ -90,29 +98,44 @@ impl Toasts {
     /// The first one waiting takes the banner, from the start of its coming in, over one still going.
     fn show_next(&mut self) -> bool {
         let Some(toast) = self.waiting.pop_front() else { return false };
-        self.banner = Some(Banner { toast, since: self.clock, going_since: None });
+        self.banner = Some(Banner { toast, since: None, going_since: None });
+        // Its first frame is drawn over whatever was left of the last.
+        self.uncleared = false;
         self.shown += 1;
         true
     }
 
-    /// This much time has passed. True when a Toast began to show.
+    /// The Toasts' picture as it is now has been put on the screen, or taken off it: whoever shows it says so after
+    /// each frame, and after hiding it. A Toast's time begins with its first frame, and one that has gone is gone.
+    pub fn presented(&mut self) {
+        match &mut self.banner {
+            Some(banner) => {
+                banner.since.get_or_insert(self.clock);
+            }
+            None => self.uncleared = false,
+        }
+    }
+
+    /// This much time has passed. True when a Toast began to show. One step does one thing to a Toast: it is
+    /// seen to be going before it is gone, and gone from the screen before the next shows, however long the step.
     pub fn advance(&mut self, seconds: f32) -> bool {
         self.clock += seconds.max(0.0) as f64;
         if let Some(banner) = &mut self.banner {
-            match banner.going_since {
-                None if self.clock >= banner.since + SHOWN_SECONDS => {
-                    let went = banner.since + SHOWN_SECONDS;
-                    banner.going_since = Some(went);
+            match (banner.since, banner.going_since) {
+                (Some(since), None) if self.clock >= since + SHOWN_SECONDS => {
+                    banner.going_since = Some(self.clock);
                     // With none behind it nothing is waited for: one that comes later shows at once.
-                    self.next_at = (!self.waiting.is_empty()).then_some(went + GAP_SECONDS);
+                    self.next_at = (!self.waiting.is_empty()).then_some(self.clock + GAP_SECONDS);
+                }
+                (_, Some(went)) if self.clock >= went + GOING_SECONDS => {
+                    self.banner = None;
+                    self.uncleared = true;
                 }
                 _ => {}
             }
-            if banner.going_since.is_some_and(|went| self.clock >= went + GOING_SECONDS) {
-                self.banner = None;
-            }
+            return false;
         }
-        if self.next_at.is_some_and(|at| self.clock >= at) {
+        if !self.uncleared && self.next_at.is_some_and(|at| self.clock >= at) {
             self.next_at = None;
             return self.show_next();
         }
@@ -123,8 +146,13 @@ impl Toasts {
     pub fn drop_all(&mut self) {
         self.waiting.clear();
         self.next_at = None;
-        if let Some(banner) = &mut self.banner {
-            banner.going_since.get_or_insert(self.clock);
+        match &mut self.banner {
+            // Not yet on the screen: there is nothing to see go.
+            Some(banner) if banner.since.is_none() => self.banner = None,
+            Some(banner) => {
+                banner.going_since.get_or_insert(self.clock);
+            }
+            None => {}
         }
     }
 
@@ -148,20 +176,30 @@ impl Toasts {
         self.shown
     }
 
-    /// How long until the queue next changes with nothing posted: a Toast goes, is gone, or the next shows.
+    /// Whether the queue waits to hear its picture is on the screen: a Toast's first frame, or the first without
+    /// one that has gone. Whoever shows Toasts has a frame to draw, or a window to hide.
+    pub fn awaits_frame(&self) -> bool {
+        self.uncleared || self.banner.as_ref().is_some_and(|banner| banner.since.is_none())
+    }
+
+    /// How long until the queue next changes with nothing posted and nothing presented: a Toast goes, is gone, or
+    /// the next shows. None while it waits for a frame, too.
     pub fn wake(&self) -> Option<f32> {
-        let banner = self.banner.as_ref().map(|banner| match banner.going_since {
-            None => banner.since + SHOWN_SECONDS,
-            Some(went) => went + GOING_SECONDS,
-        });
-        let soonest = [banner, self.next_at].into_iter().flatten().reduce(f64::min)?;
-        Some((soonest - self.clock).max(0.0) as f32)
+        let at = match &self.banner {
+            Some(banner) => match banner.going_since {
+                None => banner.since? + SHOWN_SECONDS,
+                Some(went) => went + GOING_SECONDS,
+            },
+            None if self.uncleared => return None,
+            None => self.next_at?,
+        };
+        Some((at - self.clock).max(0.0) as f32)
     }
 
     /// The banner, where it is in its coming, its turns of text and its going.
     pub fn draw(&self, ui: &mut Ui) {
         if let Some(banner) = &self.banner {
-            let age = (self.clock - banner.since) as f32;
+            let age = banner.since.map_or(0.0, |since| (self.clock - since) as f32);
             let going = banner.going_since.map(|went| (self.clock - went) as f32);
             banner::draw(ui, &banner.toast, age, going);
         }
@@ -180,39 +218,96 @@ mod tests {
         toasts.showing().map(|toast| toast.text.as_str())
     }
 
+    /// A turn of a loop that puts each frame on the screen at once: what there is now, the time passing, what
+    /// there is then.
+    fn pass(toasts: &mut Toasts, seconds: f32) -> bool {
+        toasts.presented();
+        let began = toasts.advance(seconds);
+        toasts.presented();
+        began
+    }
+
     #[test]
     fn a_toast_shows_for_five_seconds_and_the_next_half_a_second_after_it_goes() {
         let mut toasts = Toasts::default();
         assert!(toasts.post(toast("one")));
         assert!(!toasts.post(toast("two")));
         assert_eq!((showing(&toasts), toasts.waiting()), (Some("one"), 1));
+        toasts.presented();
         assert_eq!(toasts.wake(), Some(5.0));
 
-        assert!(!toasts.advance(4.9));
+        assert!(!pass(&mut toasts, 4.9));
         assert_eq!(showing(&toasts), Some("one"));
-        // Going: no longer showing, still on screen.
-        assert!(!toasts.advance(0.2));
+        // Going, from 5.1 s: no longer showing, still on screen.
+        assert!(!pass(&mut toasts, 0.2));
         assert_eq!(showing(&toasts), None);
         assert_eq!(toasts.on_screen().map(|toast| toast.text.as_str()), Some("one"));
-        // Gone by 5.41 s, and nothing shows until 5.5 s.
-        assert!(!toasts.advance(0.35));
+        // Gone 0.41 s on, and nothing shows until half a second after it went.
+        assert!(!pass(&mut toasts, 0.45));
         assert!(toasts.on_screen().is_none());
         assert!((toasts.wake().unwrap() - 0.05).abs() < 1e-3);
-        assert!(toasts.advance(0.05));
+        assert!(pass(&mut toasts, 0.06));
         assert_eq!((showing(&toasts), toasts.waiting(), toasts.shown()), (Some("two"), 0, 2));
 
         // The last one goes and nothing is left to wake for.
-        toasts.advance(5.0);
-        toasts.advance(0.5);
+        pass(&mut toasts, 5.0);
+        pass(&mut toasts, 0.5);
         assert!(toasts.on_screen().is_none());
         assert_eq!(toasts.wake(), None);
+    }
+
+    #[test]
+    fn a_toasts_time_begins_when_its_first_frame_is_on_the_screen() {
+        let mut toasts = Toasts::default();
+        toasts.post(toast("one"));
+        // However long that takes: it is showing, waits for its frame, and wakes nobody.
+        assert!(!toasts.advance(30.0));
+        assert_eq!((showing(&toasts), toasts.awaits_frame(), toasts.wake()), (Some("one"), true, None));
+        toasts.presented();
+        assert_eq!((toasts.awaits_frame(), toasts.wake()), (false, Some(5.0)));
+        assert!(!toasts.advance(4.9));
+        assert_eq!(showing(&toasts), Some("one"));
+    }
+
+    #[test]
+    fn the_next_does_not_show_until_the_last_is_off_the_screen() {
+        let mut toasts = Toasts::default();
+        toasts.post(toast("one"));
+        toasts.post(toast("two"));
+        toasts.presented();
+        toasts.advance(5.0);
+        toasts.advance(0.45);
+        // Gone, and no frame has said so: the card is still there, and the second waits past its half second.
+        assert!(toasts.on_screen().is_none() && toasts.awaits_frame());
+        assert!(!toasts.advance(3.0));
+        assert_eq!((showing(&toasts), toasts.wake()), (None, None));
+        toasts.presented();
+        assert!(toasts.advance(0.0));
+        assert_eq!(showing(&toasts), Some("two"));
+    }
+
+    #[test]
+    fn a_loop_that_stood_still_misses_nothing_out() {
+        let mut toasts = Toasts::default();
+        toasts.post(toast("one"));
+        toasts.post(toast("two"));
+        // Nine seconds in one step: the first is seen to go, then is gone, then the second shows, a step each.
+        assert!(!pass(&mut toasts, 9.0));
+        assert_eq!(toasts.on_screen().map(|toast| toast.text.as_str()), Some("one"));
+        assert_eq!(showing(&toasts), None);
+        assert!(!pass(&mut toasts, 9.0));
+        assert!(toasts.on_screen().is_none());
+        assert!(pass(&mut toasts, 9.0));
+        // And has its own five seconds, from its own first frame.
+        assert!(!pass(&mut toasts, 4.9));
+        assert_eq!(showing(&toasts), Some("two"));
     }
 
     #[test]
     fn one_posted_after_the_last_has_gone_shows_at_once_even_over_its_going() {
         let mut toasts = Toasts::default();
         toasts.post(toast("one"));
-        toasts.advance(5.1);
+        pass(&mut toasts, 5.1);
         assert_eq!(showing(&toasts), None);
         assert!(toasts.post(toast("two")));
         assert_eq!(showing(&toasts), Some("two"));
@@ -223,22 +318,11 @@ mod tests {
         let mut toasts = Toasts::default();
         toasts.post(toast("one"));
         toasts.post(toast("two"));
-        toasts.advance(5.2);
+        pass(&mut toasts, 5.0);
+        pass(&mut toasts, 0.45);
         assert!(!toasts.post(toast("three")));
-        assert!(toasts.advance(0.35));
+        assert!(pass(&mut toasts, 0.1));
         assert_eq!((showing(&toasts), toasts.waiting()), (Some("two"), 1));
-    }
-
-    #[test]
-    fn a_toast_that_was_late_to_show_still_has_its_five_seconds() {
-        let mut toasts = Toasts::default();
-        toasts.post(toast("one"));
-        toasts.post(toast("two"));
-        // The loop stood still for a while: the second begins when it is seen to.
-        assert!(toasts.advance(9.0));
-        assert_eq!(showing(&toasts), Some("two"));
-        assert!(!toasts.advance(4.9));
-        assert_eq!(showing(&toasts), Some("two"));
     }
 
     #[test]
@@ -246,14 +330,19 @@ mod tests {
         let mut toasts = Toasts::default();
         toasts.post(toast("one"));
         toasts.post(toast("two"));
-        toasts.advance(1.0);
+        pass(&mut toasts, 1.0);
         toasts.drop_all();
         assert_eq!((showing(&toasts), toasts.waiting()), (None, 0));
         assert!(toasts.on_screen().is_some());
         assert!((toasts.wake().unwrap() - GOING_SECONDS as f32).abs() < 1e-3);
-        assert!(!toasts.advance(0.5));
+        assert!(!pass(&mut toasts, 0.5));
         assert!(toasts.on_screen().is_none());
         assert_eq!((toasts.wake(), toasts.shown()), (None, 1));
+
+        // One that had not reached the screen has nothing to show of its going.
+        toasts.post(toast("three"));
+        toasts.drop_all();
+        assert!(toasts.on_screen().is_none() && !toasts.awaits_frame());
     }
 
     #[test]

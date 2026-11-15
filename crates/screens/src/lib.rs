@@ -642,6 +642,12 @@ impl Dashboard {
         before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
     }
 
+    /// The Toasts' picture as it is now has been put on the screen, or taken off it: said by whoever shows it,
+    /// after each frame and after hiding it. The queue goes by it (`toasts::Toasts::presented`).
+    pub fn toasts_presented(&mut self) {
+        self.toasts.presented();
+    }
+
     /// The Toasts: which is on screen, how many wait, how many have shown.
     pub fn toasts(&self) -> &Toasts {
         &self.toasts

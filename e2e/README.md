@@ -81,9 +81,14 @@ the TV PC, not for here.
   at 1 until it exits, as Steam does. For a game that isn't installed it does nothing and exits 1.
 
 - **`standin toast <text>`** posts a notification to the running Dashboard, which lists it and shows its Toast: a
-  `WM_COPYDATA` message to the Toast strip's window (`crates/model/src/post.rs`). It exits 1 when no Dashboard took
-  it. The Dashboard says `toasts: posted "<text>"`, then `toasts: shown "<text>" (Notification), <n> waiting`,
-  `toasts: going` and `toasts: gone` as the Toast comes and goes, each with the time since it started.
+  `WM_COPYDATA` message to the Toast strip's window (`crates/model/src/post.rs`). The Dashboard takes it only when
+  started with `--allow-toast-posts`; it exits 1 when no Dashboard took it. The Dashboard says
+  `toasts: posted "<text>"`, then `toasts: shown "<text>" (Notification), <n> waiting`, `toasts: going` and
+  `toasts: gone` as the Toast comes and goes, each with the time since it started and each once the frame that shows
+  it has been presented.
+
+Every start shows the greeting's Toast, "Hi <user>!", for five seconds, low in the middle of the screen. A test that
+looks at Home or taps the Guide button waits it out first: `Wait-Greeting`.
 
 `Initialize-FakeSteam` (`payloads/lib/E2E.psm1`) puts them in place for the signed-in user: the fake install at
 `C:\e2e\steam`, `HKCU\Software\Valve\Steam\SteamPath` naming it, and `standin.exe steam-url "%1"` registered as the
