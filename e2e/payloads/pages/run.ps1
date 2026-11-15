@@ -1,6 +1,7 @@
 # The page stack, walked with the virtual pad on a fake Steam library: every way from Home into My games & apps,
 # Search and Settings, and B back from each, with focus where it should be; and the hint bar on a Group's game card.
-# Until their own tickets the pages are stand-ins that say only which page they are.
+# Search and Settings are stand-ins until their own tickets, which say only which page they are; My games & apps
+# says which of its items is up and where focus is on it, and is walked in my-games/run.ps1.
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: Recent(2)` on Home, and
 # `focus: Settings: Rail: Theme settings` with a page on top (the page's name, then where it says its focus is). Passes when every
@@ -90,7 +91,7 @@ try {
     # their button.
     Press Up 'TopBar\(Profile\)'
     Walk Right 'TopBar\(MyGames\)' 2
-    Press A 'MyGames: Games' '03-my-games'
+    Press A 'MyGames: Games: Tile\(0\)' '03-my-games'
     Press B 'Recent\(0\)'
     Press Up 'TopBar\(Profile\)'
     Walk Right 'TopBar\(Search\)' 3
@@ -114,7 +115,7 @@ try {
     Press B 'Settings: Rail: Theme settings'
     Press B 'Wide\(1\)'
     Walk Right 'Wide\(3\)' 3
-    Press A 'MyGames: Queue'
+    Press A 'MyGames: Manage: Queue'
     Press B 'Wide\(3\)' '06-back-on-downloads'
 
     # The first Group: the hint bar is up on a game's card, bottom right. Y there is Search, and B comes back to
@@ -127,7 +128,7 @@ try {
     $seeAll = Walk-ToEdge Right 'Group \{ group: 0, card: [1-9]\d* \}'
     Start-Sleep -Milliseconds 3000
     Save-Screen '09-see-all-no-hint-bar'
-    Press A 'MyGames: FullLibrary \{ filter: Some\(\d+\) \}' '10-full-library'
+    Press A 'MyGames: FullLibrary \{ filter: Some\(\d+\) \}: Nav\(FullLibrary\)' '10-full-library'
     Press B ([regex]::Escape($seeAll)) '11-back-on-see-all'
 
     # B on the Group is the Recent row; along it to the Play history tile, its last. Play history, and B back on
@@ -135,7 +136,7 @@ try {
     Press B 'Recent\(\d+\)'
     $history = Walk-ToEdge Right 'Recent\([1-9]\d*\)'
     $lastGame = "Recent\($([int] ($history -replace '\D', '') - 1)\)"
-    Press A 'MyGames: PlayHistory' '12-play-history'
+    Press A 'MyGames: PlayHistory: Row\(0\)' '12-play-history'
     Press B $lastGame '13-back-on-the-last-game'
 
     # The Guide's My games & apps, its second entry: the Guide closes onto the page, and B is Home's rows.
@@ -144,7 +145,7 @@ try {
     Save-Screen '14-guide'
     Push-Button Down
     Start-Sleep -Milliseconds 800
-    Press A 'MyGames: Games' '15-my-games-from-the-guide'
+    Press A 'MyGames: Games: Tile\(0\)' '15-my-games-from-the-guide'
     Press B $lastGame
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }

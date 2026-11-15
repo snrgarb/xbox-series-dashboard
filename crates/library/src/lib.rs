@@ -9,7 +9,7 @@
 //! see the database.
 //!
 //! The snapshot carries the saved filters, each with the games it picks: Home's Groups and Full library's tabs
-//! (`filters`, and docs/spec/filters.md).
+//! (`filters`, and docs/spec/filters.md), and Play history's rows (`history`).
 //!
 //! The schema has a version (`PRAGMA user_version`) and grows by migrations: `MIGRATIONS[n]` takes a database from
 //! version `n` to `n + 1`, and one is never edited once released. What is still to come has its place:
@@ -17,6 +17,7 @@
 //! - Games added by hand (#12): a source of their own, `manual`, with a table beside `games` for the program, its
 //!   arguments and working folder.
 pub mod filters;
+pub mod history;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -331,18 +332,21 @@ impl Database {
     }
 
     /// What the screens are given: every game that is neither hidden nor gone, most recently played first and then
-    /// by name; the hidden ones apart, in the same order; every filter with its games; and the user's name.
+    /// by name; the hidden ones apart, in the same order; every filter with its games; Play history; and the
+    /// user's name.
     pub fn snapshot(&self) -> Result<Library> {
         self.snapshot_at(now())
     }
 
-    /// `snapshot`, with the filters that count days counting them back from `now`.
+    /// `snapshot`, with the filters that count days counting them back from `now`, and Play history's sections as
+    /// of then.
     pub fn snapshot_at(&self, now: u64) -> Result<Library> {
         Ok(Library {
             user: self.setting(&format!("{STEAM}.{USER}"))?,
             games: self.games("hidden = 0 AND gone = 0", &[], None)?,
             hidden: self.games("hidden = 1 AND gone = 0", &[], None)?,
             filters: self.filters_at(now)?,
+            history: history::rows(&self.conn, now)?,
             collections: None,
         })
     }
@@ -532,6 +536,7 @@ mod tests {
     fn without_ids(mut library: Library) -> Library {
         library.games.iter_mut().for_each(|g| (g.id, g.added) = (0, 0));
         library.filters.clear();
+        library.history.clear();
         library
     }
 

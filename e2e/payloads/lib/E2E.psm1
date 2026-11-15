@@ -250,14 +250,16 @@ function Stop-Dashboard {
 # SteamPath registry value naming it, and standin.exe registered as this user's steam:// handler, so a game the
 # Dashboard asks Steam for is started by the stand-in Steam: the game's folder's game.exe, a copy of standin.exe that
 # shows a full-screen window titled with the game's name.
+# With -FullShelf twelve more are installed, twenty in all, which is rows enough for My games & apps to scroll.
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-steam.json in the test's output): user, and
 # games, most recently played first, each with appid, name, installed, install_dir, last_played, cover, hero, header.
-function Initialize-FakeSteam([string] $Root = 'C:\e2e\steam') {
+function Initialize-FakeSteam([string] $Root = 'C:\e2e\steam', [switch] $FullShelf) {
     $standin = Join-Path $script:Payload 'standin.exe'
     if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
     $json = Join-Path $script:Out 'fake-steam.json'
-    $made = Start-Process $standin -ArgumentList 'make-steam', "`"$Root`"", '--json', "`"$json`"" -Wait -PassThru
+    $arguments = @('make-steam', "`"$Root`"", '--json', "`"$json`"") + $(if ($FullShelf) { '--full-shelf' })
+    $made = Start-Process $standin -ArgumentList $arguments -Wait -PassThru
     if ($made.ExitCode -ne 0) {
         $why = Get-Content (Join-Path (Split-Path $Root -Parent) 'standin-error.txt') -Raw -ErrorAction SilentlyContinue
         throw "standin make-steam exited with $($made.ExitCode): $why"

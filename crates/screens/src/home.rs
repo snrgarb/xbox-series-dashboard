@@ -19,7 +19,7 @@ use self::background::Background;
 pub use self::background::{hero_art, DELAY_SECONDS, FADE_SECONDS, LEAVE_SECONDS, SETTLE_SECONDS};
 use self::groups::Group;
 use self::recent::Row;
-pub use self::tile::cover_art;
+pub use self::tile::{cover_art, source, source_badge_at, Source};
 pub use self::top_bar::{profile_picture, Status, TopButton};
 use crate::hint_bar::{self, Hint};
 use crate::pages::Open;
