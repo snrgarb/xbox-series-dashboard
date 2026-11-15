@@ -141,7 +141,7 @@ try {
     $lastRow = Place (Focus-Now)
     $expected = [int] ([math]::Floor(($installed - 1) / $columns) * $columns)
     if ($lastRow -ne $expected) { $failures += "Up from SEE FULL LIBRARY should be tile $expected, the last row's first, and is tile $lastRow" }
-    if ($lastRow -lt 3 * $columns) { $failures += "the last row starts at tile $lastRow: too few rows for the grid to have scrolled" }
+    if ($lastRow -lt 3 * $columns) { $failures += "the last row starts at tile ${lastRow}: too few rows for the grid to have scrolled" }
     # Along the last row to its end, which is the last game.
     $last = Walk-ToEdge Right 'MyGames: Games: Tile\(\d+\)'
     if ((Place $last) -ne $installed - 1) { $failures += "Right along the last row should end on tile $($installed - 1), and ends on '$last'" }
