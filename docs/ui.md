@@ -84,11 +84,29 @@ Everything timed about the pad is timed in `input`, by `Presses`, which is told 
 
 ## Screens and what is over what
 
-`Dashboard` holds the screens and decides who gets a press, top down: the Guide if open, nothing while a Launch screen is up, else the page. As pages arrive in M3 the page becomes a stack (`Vec` of page screens, the top one taking input, each keeping its state while covered); the rule is the same.
+`Dashboard` holds the screens and decides who gets a press, top down: the Guide if open, nothing while a Launch screen is up, else the top page of the page stack, else Home.
+
+### The page stack
+
+Home is always there. Over it is a stack of **pages** (`screens::pages::Stack`): My games & apps, Search, Settings, and what M3's other tickets add. The top page takes the pad; a page under it keeps its struct, so it is as it was when the one over it goes.
+
+- **Opening and closing are instant**, as in the Bundle: a page is there in the next frame and gone in the frame after B. Nothing fades or slides between Home and a page, or between pages.
+- **A page that fills the screen is there in Home's place.** Home is not drawn under it, top bar and all, so it asks for no frames and its animated values are forgotten: when the page goes Home is drawn at its rest at once, at the rest it was left at, since its focus never moved.
+- **My games & apps, Search and Settings are never up together.** A page opened from outside the stack (Home's entry points, the Guide's entries) takes the place of every page that is up, and B on it goes to Home. A page the top page itself asks for (`PageAction::Open`: Y on Games opening Search) goes over it, and B there comes back to the page under it with its focus where it was. That is where the Bundle closes the first page and opens it again on the same game; here it never went.
+- **B** that a page has no use of its own for answers `PageAction::Close`. With no page left, Home's rows take focus back by the Bundle's rules (`Home::uncovered`; docs/spec/home.md, 7.4 and 11).
+- A game ending closes every page, and so does the Guide's Home.
+
+A page is a module of its own under `crates/screens/src/` that implements the `Page` trait: `name` and `focus` (what `--log-focus` says, and what the move sound is decided by), `press`, `draw`, `hints`, and `covers` for one that does not fill the screen and has what is under it drawn first. It is told the library and the game playing each time (`pages::Around`) and keeps neither. **To add a page:** the module, a variant of `pages::Open` carrying how it is opened (each page's own `Entry`), and that variant's line in `Open::page`. Nothing in `Dashboard` changes.
+
+### The hint bar
+
+The bar in the screen's bottom right corner (docs/spec/home.md, 10.4) is drawn **once, by the `Dashboard`**, over whatever has the pad, on a layer of its own. No page draws it: a page says which hints it wants with focus where it is (`Page::hints`, `Home::hints`), one of `hint_bar::NONE`, `MORE_OPTIONS` and `MORE_OPTIONS_AND_SEARCH`, the Bundle's three. It is anchored to the screen's corner whatever the screen's shape, is there or gone at once, and is not drawn while the Guide is open.
+
+### Two pictures
 
 It declares **two pictures**, one for each window (next section):
 
-- `draw(ui)` is Home's window: the page. The Guide is in it only where there is no Overlay to draw it on.
+- `draw(ui)` is Home's window: Home or the pages over it, and the hint bar. The Guide is in it only where there is no Overlay to draw it on.
 - `draw_overlay(ui)` is the Overlay: the Launch screen, and the Guide, **over a running game and over Home alike, so there is one Guide**, as in the Bundle. It is drawn over nothing, so wherever it draws nothing the game shows, or Home, and its dim is a dim over that.
 - `overlay()` says what the Overlay is wanted for: `Nothing` (hidden), `Passive` (something to look at that takes no input: the Launch screen, the Guide sliding away) or `Guide` (it takes the foreground). The answer comes from the screens' own state, which is why each keeps how much of it showed when last drawn (`LaunchScreen::showing`, `Guide::showing`): the Overlay stays up until the fade or the slide has ended. It stays `Guide` after the Guide has closed for as long as the pad's button that closed it is down (`awaiting_release`): the foreground goes back as the button is let go, so the window that gets it never sees the press, or a second later (`RELEASE_FALLBACK`, which `app` times and reports with `release_wait_over`). A tap of the Guide button and a key hand back at once.
 - `guide_over_game()` says the Guide is open over a game: the game is then held still (below).
@@ -101,7 +119,7 @@ The games the screens show are a **snapshot** of the library database (`model::L
 
 ## Sounds
 
-A sound is an effect like any other: `Effect::Sound(Sound::Move)`. No screen asks for one. `Dashboard::press` decides it for all of them, by what the press changed: focus somewhere new is the move sound, A that chose something the activation sound, the Guide opening its own. A move that went nowhere, B and the Guide closing are silent, as in the Bundle (`docs/spec/home.md`, section 9). A screen gets its sounds right by getting its focus right. The sound comes first among a press's effects.
+A sound is an effect like any other: `Effect::Sound(Sound::Move)`. No screen asks for one. `Dashboard::press` decides it for all of them, by what the press changed: focus somewhere new is the move sound, A that chose something the activation sound, the Guide opening its own. A move that went nowhere, B and the Guide closing are silent, as in the Bundle (`docs/spec/home.md`, section 9). On a page focus has moved when the page's `focus()` says something else than before the press; a page opening or closing is not a move, so Y and B are silent, and A that opens a page is a choice. A screen gets its sounds right by getting its focus right. The sound comes first among a press's effects.
 
 `model::Sound` is the one table of which sound is which of the Bundle's files. The files are Microsoft's and never in this repository (#10): the window looks for them at start (`crates/app/src/sounds.rs` says where, in what order), and a sound with no file is silent. Offscreen modes and tests never take the effects to a device, so they play nothing. Volume and mute are the settings `sound.volume` (0 to 1) and `sound.muted` (`true`) in the library database.
 
@@ -139,4 +157,6 @@ Anywhere but Windows there is no Overlay (`Overlay::new` makes none).
 
 ## Tests
 
-Every screen has screenshot tests in `crates/screens/tests/shots.rs`: build a `Dashboard` on a fake library (some games given generated, banded art so a crop or stretch shows; passed through a library database in memory, `from_database`, which is what gives it the saved filters that are Home's Groups and where a test seeds favourites, collections and filters of its own), press buttons, and compare the frame at rest with a committed reference (`crates/shots`), at 1080p and at other shapes. The frame is `draw_all`: the Overlay's picture over Home's window's, so the Guide over a game is seen over Home there, where on screen it is over the game; frames over time (`Stage::run`) are `draw_all` too. They run on lavapipe in CI. Behaviour (where focus goes, what effects a press asks for) is asserted in the same file with no picture. What happens over time is tested on the ui's clock: `Stage::run` draws frames a fixed step apart, `check_frame` compares the screen as it is mid-flight, and a pixel of the background says which art is up. `SHOTS=bless cargo test -p screens` accepts what is drawn now; **look at the image before blessing it**.
+Every screen has screenshot tests in `crates/screens/tests/shots.rs`: build a `Dashboard` on a fake library (some games given generated, banded art so a crop or stretch shows; passed through a library database in memory, `from_database`, which is what gives it the saved filters that are Home's Groups and where a test seeds favourites, collections and filters of its own), press buttons, and compare the frame at rest with a committed reference (`crates/shots`), at 1080p and at other shapes. The frame is `draw_all`: the Overlay's picture over Home's window's, so the Guide over a game is seen over Home there, where on screen it is over the game; frames over time (`Stage::run`) are `draw_all` too. They run on lavapipe in CI. Behaviour (where focus goes, what effects a press asks for) is asserted in the same file with no picture. What happens over time is tested on the ui's clock: `Stage::run` draws frames a fixed step apart, `check_frame` compares the screen as it is mid-flight, and a pixel of the background says which art is up. `SHOTS=bless cargo test -p screens` accepts what is drawn now; **look at the image before blessing it**. Where the pages go and where B leaves focus is `tests/pages.rs`, with no picture; the stack's own rules are unit tests beside it (`pages.rs`).
+
+On the VM a test judges by `--log-focus`, which says where focus is after every press that moved it: `focus: Recent(2)` on Home, as Home's `Focus` is written, and `focus: Settings: Rail` with a page on top, the page's `name()` then its `focus()` (`Dashboard::focus_line`).

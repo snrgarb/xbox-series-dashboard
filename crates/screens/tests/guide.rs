@@ -174,15 +174,14 @@ fn a_on_a_recent_game_closes_the_guide_and_launches_it_with_homes_focus_on_its_t
 }
 
 #[test]
-fn entries_whose_pages_are_yet_to_come_are_there_and_do_nothing() {
+fn entries_whose_flyouts_and_dialogs_are_yet_to_come_are_there_and_do_nothing() {
     let mut guide = at_home();
-    // My games & apps; then every Utility: Notifications, Audio, Search.
-    press(&mut guide, &[Down, A]);
-    press(&mut guide, &[Down, Down, Down, Down, Down, A, Right, A, Right, A]);
-    assert_eq!(guide.guide().focus(), (LANDING, utility(2)));
-    // The Profile entry, which never does anything, Switch profile and Settings.
-    press(&mut guide, &[RightBumper, A, Down, A, Down, A]);
-    assert_eq!(guide.guide().focus(), (PROFILE, entry(2)));
+    // The Utilities with a Flyout: Notifications and Audio. (What opens a page is tests/pages.rs.)
+    press(&mut guide, &[Down, Down, Down, Down, Down, Down, A, Right, A]);
+    assert_eq!(guide.guide().focus(), (LANDING, utility(1)));
+    // The Profile entry, which never does anything, and Switch profile.
+    press(&mut guide, &[RightBumper, A, Down, A]);
+    assert_eq!(guide.guide().focus(), (PROFILE, entry(1)));
     assert!(guide.guide_open());
     assert!(guide.take_effects().iter().all(|effect| *effect == Effect::Sound(screens::Sound::GuideMove)));
 }

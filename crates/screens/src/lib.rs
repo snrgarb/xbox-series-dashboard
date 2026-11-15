@@ -6,8 +6,13 @@
 //! other that shows the Launch screen and the Guide, over a running game and over Home alike. `overlay` says what
 //! the Overlay is wanted for, which the executable follows by showing and hiding it.
 pub mod guide;
+pub mod hint_bar;
 pub mod home;
 pub mod launch;
+pub mod my_games;
+pub mod pages;
+pub mod search;
+pub mod settings;
 pub mod spinner;
 pub mod theme;
 
@@ -16,8 +21,9 @@ pub use model::Sound;
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
 use crate::guide::{Around, Face, Guide, GuideAction, Status};
-use crate::home::{Home, HomeAction};
+use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
+use crate::pages::{Open, PageAction};
 
 /// What the Dashboard asks of the shell.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,6 +77,11 @@ pub struct Dashboard {
     /// its tap after the release that closed the Guide) does nothing more.
     guide_button_spent: bool,
     home: Home,
+    /// The pages over Home, the top one taking the pad (docs/ui.md, "Screens and what is over what").
+    pages: pages::Stack,
+    /// The page over Home was opened by A on the top bar's Search or Settings button, which gets focus back when
+    /// Home shows again.
+    back_to_button: bool,
     guide: Guide,
     /// Whether the Guide, as it was last opened, is on the Overlay, as it is wherever there is one: over a game and
     /// over Home alike, so there is one Guide. Without an Overlay it is drawn in Home's window, at Home only.
@@ -98,6 +109,8 @@ impl Dashboard {
             guide_enabled: true,
             guide_button_spent: false,
             home: Home::default(),
+            pages: pages::Stack::default(),
+            back_to_button: false,
             guide: Guide::default(),
             guide_overlaid: false,
             release_awaited: None,
@@ -242,7 +255,10 @@ impl Dashboard {
     /// asks of the shell, and is decided here for every screen, by what the press changed: a move that went
     /// nowhere, B, and the Guide closing are silent, as they are in the Bundle.
     pub fn press(&mut self, press: Press) {
-        let (was_open, guide, home) = (self.guide.is_open(), self.guide.focus(), self.home.focus());
+        let (was_open, guide) = (self.guide.is_open(), self.guide.focus());
+        // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
+        // opening or closing is no move: B is silent, and so is Y.
+        let (depth, focus) = (self.pages.depth(), self.focus_line());
         let asked = self.effects.len();
         let activated = self.steer(press);
         let sound = if was_open {
@@ -256,7 +272,7 @@ impl Dashboard {
         } else if activated {
             Some(Sound::Activate)
         } else {
-            (self.home.focus() != home).then_some(Sound::Move)
+            (self.pages.depth() == depth && self.focus_line() != focus).then_some(Sound::Move)
         };
         if let Some(sound) = sound {
             self.effects.insert(asked, Effect::Sound(sound));
@@ -288,17 +304,102 @@ impl Dashboard {
         if self.playing.is_some() {
             return false;
         }
+        if !self.pages.is_empty() {
+            let around = pages::Around { library: &self.library, playing: self.playing };
+            match self.pages.press(press, around) {
+                Some(PageAction::Close) => self.close_page(),
+                Some(PageAction::Open(open)) => self.pages.open_over(open),
+                Some(PageAction::Effect(effect)) => self.effects.push(effect),
+                None => return false,
+            }
+            return press.button == Button::A;
+        }
         match self.home.press(press.button, &self.library) {
             Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
             Some(HomeAction::OpenGuide) if !press.repeat && self.guide_enabled => self.open_guide(),
+            Some(HomeAction::Open(open)) if !press.repeat => {
+                let on_button = matches!(self.home.focus(), Focus::TopBar(TopButton::Search | TopButton::Settings));
+                self.pages.open(open);
+                self.back_to_button = on_button && press.button == Button::A;
+            }
+            // The Guide on its Discord tab while Discord is connected (M6, which is when the Guide learns to open
+            // on a tab); with no such tab, or the Guide off, Settings on Discord.
+            Some(HomeAction::Discord) if !press.repeat => {
+                if self.status.discord && self.guide_enabled {
+                    self.open_guide();
+                } else {
+                    self.open_page(Open::Settings(settings::Entry::Discord));
+                }
+            }
             _ => return false,
         }
         press.button == Button::A
     }
 
+    /// Opens a page over Home, in place of any that is up: from the Guide, or by whoever drives the Dashboard.
+    /// B on it goes to Home, its rows taking focus where they last had it.
+    pub fn open_page(&mut self, open: Open) {
+        self.pages.open(open);
+        self.back_to_button = false;
+    }
+
+    /// The top page goes, at once. With none left Home shows again, at the rest it was left at.
+    fn close_page(&mut self) {
+        self.pages.close();
+        if self.pages.is_empty() {
+            self.home.uncovered(std::mem::take(&mut self.back_to_button), &self.library);
+        }
+    }
+
+    /// Every page goes: Home, its rows taking focus where they last had it.
+    fn close_pages(&mut self) {
+        if self.pages.clear() {
+            self.back_to_button = false;
+            self.home.uncovered(false, &self.library);
+        }
+    }
+
+    /// The name of the page that has the pad, if one is up over Home.
+    pub fn page(&self) -> Option<&'static str> {
+        self.pages.top().map(|page| page.name())
+    }
+
+    /// How many pages are up over Home.
+    pub fn pages_up(&self) -> usize {
+        self.pages.depth()
+    }
+
+    /// What is on top of Home's window, the Guide aside, and where its focus is: Home's focus as it is written
+    /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail`). This is `--log-focus`'s
+    /// line, which tests on the VM judge by.
+    pub fn focus_line(&self) -> String {
+        match self.pages.top() {
+            Some(page) => format!("{}: {}", page.name(), page.focus()),
+            None => format!("{:?}", self.home.focus()),
+        }
+    }
+
+    /// The hints the hint bar shows now: those of whatever has the pad, and none under the Guide.
+    pub fn hints(&self) -> &'static [hint_bar::Hint] {
+        if self.guide.is_open() {
+            hint_bar::NONE
+        } else if self.pages.is_empty() {
+            self.home.hints(&self.library)
+        } else {
+            self.pages.hints(pages::Around { library: &self.library, playing: self.playing })
+        }
+    }
+
     fn guide_action(&mut self, action: GuideAction) {
         match action {
-            GuideAction::Close | GuideAction::Home | GuideAction::Resume => self.close_guide(),
+            GuideAction::Close | GuideAction::Resume => self.close_guide(),
+            GuideAction::Home => {
+                self.close_pages();
+                self.close_guide();
+            }
+            GuideAction::MyGames => self.guide_opens(Open::MyGames(my_games::Entry::Games)),
+            GuideAction::Settings => self.guide_opens(Open::Settings(settings::Entry::Rail)),
+            GuideAction::Search => self.guide_opens(Open::Search),
             // The Guide stays open over a game being quit, and goes when the game has ended.
             GuideAction::QuitGame => self.effects.push(Effect::QuitGame),
             GuideAction::Launch(game) => {
@@ -308,6 +409,12 @@ impl Dashboard {
             }
             GuideAction::Exit => self.effects.push(Effect::Exit),
         }
+    }
+
+    /// The Guide closes onto a page, which takes the place of any that is up.
+    fn guide_opens(&mut self, open: Open) {
+        self.close_guide();
+        self.open_page(open);
     }
 
     /// Opens the Guide, whatever the Guide setting says: that is for the Guide button.
@@ -415,6 +522,8 @@ impl Dashboard {
 
     /// The game ended, or never started: Home again, focus on its tile.
     pub fn game_ended(&mut self) {
+        // A page that was up goes with it.
+        self.close_pages();
         if let Some(game) = self.playing.take() {
             self.home.focus_recent(game, &self.library);
         }
@@ -454,12 +563,19 @@ impl Dashboard {
         self.guide.draw(ui, around, &face);
     }
 
-    /// Home's window: the page, and the Guide over it where there is no Overlay to draw it on.
+    /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to
+    /// draw it on.
     pub fn draw(&mut self, ui: &mut Ui) {
         let clock = self.clock();
         let status = home::Status { user: &self.user, clock: &clock, pad: self.pad.connected };
-        self.home.set_in_front(!self.guide.is_open());
-        self.home.draw(ui, &self.library, &status);
+        // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn.
+        if !self.pages.hides_home() {
+            self.home.set_in_front(!self.guide.is_open() && self.pages.is_empty());
+            self.home.draw(ui, &self.library, &status);
+        }
+        self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing });
+        // The hint bar, once for whatever has the pad, over all of it.
+        hint_bar::draw(ui, self.hints());
         if !self.guide_overlaid {
             self.draw_guide(ui);
         }
@@ -520,7 +636,6 @@ pub fn fake_library() -> Library {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::home::Focus;
 
     fn press(dashboard: &mut Dashboard, buttons: &[Button]) {
         for &button in buttons {

@@ -32,6 +32,9 @@ const PITCH: f32 = CARDS_TOP + CARD_HEIGHT + GAP_ABOVE;
 
 pub struct Group<'a> {
     pub name: &'a str,
+    /// The saved filter it is, by its id: what See all opens Full library on. None where the library has no such
+    /// filter.
+    pub filter: Option<i64>,
     /// The games on its cards.
     pub games: Vec<&'a Game>,
     /// The games after those, whose covers See all shows.
@@ -57,12 +60,12 @@ pub fn of(library: &Library) -> Vec<Group<'_>> {
             continue;
         }
         let more = games.split_off(games.len().min(CARDS));
-        groups.push(Group { name: &filter.name, games, more });
+        groups.push(Group { name: &filter.name, filter: Some(filter.id), games, more });
     }
     if groups.is_empty() {
         let favourites = library.filters.iter().find(|f| f.key.as_deref() == Some(FAVOURITES.0));
         let name = favourites.map_or(FAVOURITES.1, |f| f.name.as_str());
-        groups.push(Group { name, games: Vec::new(), more: Vec::new() });
+        groups.push(Group { name, filter: favourites.map(|f| f.id), games: Vec::new(), more: Vec::new() });
     }
     groups
 }

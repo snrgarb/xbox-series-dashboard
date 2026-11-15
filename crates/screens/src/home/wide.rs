@@ -57,6 +57,11 @@ const TILES: [WideTile; 4] = [
 ];
 
 pub const COUNT: usize = TILES.len();
+/// The tiles' places, left to right.
+pub const DISCORD: usize = 0;
+pub const SETTINGS: usize = 1;
+pub const ACHIEVEMENTS: usize = 2;
+pub const DOWNLOADS: usize = 3;
 
 pub fn rect(i: usize) -> Rect {
     let top = recent::TOP + (recent::HEIGHT + GAP_ABOVE) * S;
