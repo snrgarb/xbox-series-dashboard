@@ -42,8 +42,11 @@ public static class E2EDesk {
 
 # A line in steps.txt, the test's account of what it did and saw, which `e2e/run.sh` prints after the run. Written to
 # the host, not the output stream, so a function that says something still returns only what it returns.
+# Each line has the clock's time and, after it, the seconds since the test began by a stopwatch: the VM's time sync
+# can move the clock by hours mid-test, and the stopwatch says how long things really took.
+$script:Began = [Diagnostics.Stopwatch]::StartNew()
 function Say([string] $Text) {
-    $line = "[$(Get-Date -Format HH:mm:ss.fff)] $Text"
+    $line = "[$(Get-Date -Format HH:mm:ss.fff) +$($script:Began.Elapsed.TotalSeconds.ToString('0.0'))s] $Text"
     Add-Content (Join-Path $script:Out 'steps.txt') $line -Encoding UTF8
     Write-Host $line
 }
@@ -94,14 +97,30 @@ function Test-Colour($Pixel, $Rgb, [int] $Tolerance = 8) {
         ([Math]::Abs($Pixel.B - $Rgb[2]) -le $Tolerance)
 }
 
+# Whether a wait of $Seconds that began with $Watch and has slept $SleptMs in all should go on. Time is the
+# stopwatch's, never the clock's, which the VM's time sync can move mid-test; and the wait's own sleeps must add up to
+# $Seconds too, so a stopwatch that jumped forward with the clock (a 60 s wait once came back at once on a run where
+# the clock moved five hours) cannot end a wait early. Says so when the two disagree by more than a minute.
+function Test-StillWaiting($Watch, [double] $SleptMs, [double] $Seconds) {
+    $elapsed = $Watch.Elapsed.TotalSeconds
+    if ($elapsed -lt $Seconds) { return $true }
+    if ($SleptMs / 1000 -lt $Seconds) {
+        if ($elapsed - $SleptMs / 1000 -gt 60) { Say "note: the stopwatch says $([int] $elapsed) s into a wait that has slept $([int] ($SleptMs / 1000)) s: waiting by the sleeps" }
+        return $true
+    }
+    return $false
+}
+
 # Runs $Condition every quarter second until it gives something true, which is returned, or $null after $Seconds.
 function Wait-Until([scriptblock] $Condition, [double] $Seconds = 10) {
-    $watch = [Diagnostics.Stopwatch]::StartNew()  # not the clock, which the VM's time sync can move mid-test
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $slept = 0
     do {
         $got = & $Condition
         if ($got) { return $got }
         Start-Sleep -Milliseconds 250
-    } while ($watch.Elapsed.TotalSeconds -lt $Seconds)
+        $slept += 250
+    } while (Test-StillWaiting $watch $slept $Seconds)
     return $null
 }
 
@@ -204,13 +223,15 @@ function Get-DashboardLogLength { @(Get-DashboardLog).Count }
 # line, or $null after $Seconds. Throws if the Dashboard exits meanwhile without having logged it.
 function Wait-DashboardLog([string] $Pattern, [double] $Seconds = 30, [int] $After = 0) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
+    $slept = 0
     do {
         $exited = $script:Dashboard -and $script:Dashboard.HasExited
         $hit = Get-DashboardLog | Select-Object -Skip $After | Where-Object { $_ -match $Pattern } | Select-Object -First 1
         if ($hit) { return $hit }
         if ($exited) { throw "The Dashboard exited with $($script:Dashboard.ExitCode) before logging '$Pattern'" }
         Start-Sleep -Milliseconds 100
-    } while ($watch.Elapsed.TotalSeconds -lt $Seconds)
+        $slept += 100
+    } while (Test-StillWaiting $watch $slept $Seconds)
     return $null
 }
 

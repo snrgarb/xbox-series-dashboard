@@ -90,5 +90,13 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Get-DashboardLog`, `Get-DashboardLogLength`, `Wait-DashboardLog <pattern> <seconds> [-After <lines>]` | what it logged |
 | `Initialize-FakeSteam`, `Get-StandInGame`, `Stop-StandInGame` | the fake Steam and its games |
 
+The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again), `needs-user` (a
+launcher that stays: the Launch screen steps aside for it), and `overlay` and `video` for the spikes.
+
+Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
+mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets
+`DASHBOARD_NEEDS_USER_MS`, so that a slow VM keeping the game's launcher up does not count as a window that needs the
+user.
+
 A test waits on the Dashboard's log lines rather than sleeping, and matches them exactly as the code prints them: when
 a log line changes, so must the tests that wait for it.

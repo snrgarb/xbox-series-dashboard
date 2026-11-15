@@ -65,6 +65,10 @@ try {
     # The game shows a launcher first, so the Launch screen has something to hide and is up long enough to look at.
     Add-Content (Join-Path $game.install_dir 'game-args.txt') @('--splash-ms', "$splashMs") -Encoding Ascii
 
+    # The launcher is no question put to the user, however long a slow VM keeps it up: that rule has a test of its
+    # own (needs-user).
+    $env:DASHBOARD_NEEDS_USER_MS = '120000'
+
     # Home, first frame.
     $dashboard = Start-Dashboard
     $first = Wait-DashboardLog 'first frame presented' 60
@@ -76,6 +80,8 @@ try {
     if ($first -match 'first frame presented at (\d+) ms') { Say "first frame presented at $($Matches[1]) ms since process start" }
     else { $failures += "the first frame line has no time: $first" }
     if (-not $adapter) { $failures += 'no adapter line in the log' }
+    $startUp = Wait-DashboardLog '^start-up:' 1
+    Say "start-up line: $(if ($startUp) { $startUp } else { 'none' })"
     if ($steam -notmatch "^steam: $(@($library.games).Count) games ") { $failures += "the Dashboard did not read the fake Steam's $(@($library.games).Count) games: $steam" }
     # Art decodes after the first frame.
     Start-Sleep -Seconds 3
@@ -127,7 +133,7 @@ try {
     if ((Get-Foreground).Title -eq $overlayTitle) { $failures += 'the Launch screen took the foreground: it must never be activated' }
     $booted = Wait-DashboardLog 'the game has booted' 60
     Say "booted: $(if ($booted) { $booted } else { 'no line in 60 s' }); foreground $(Front)"
-    if (-not $booted) { throw 'The game never counted as booted' }
+    if (-not $booted) { throw "The game never counted as booted (launch log: $((Get-DashboardLog | Where-Object { $_ -match '^launch:' }) -join ' | '))" }
     $gone = Wait-DashboardLog 'Launch screen gone' 10
     Say "Launch screen: $(if ($gone) { $gone } else { 'not gone in 10 s' })"
     if (-not $gone) { $failures += 'the Launch screen did not go' }
