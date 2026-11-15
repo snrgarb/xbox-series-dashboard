@@ -162,7 +162,17 @@ fn see_all_opens_full_library_on_its_groups_filter_and_b_comes_back_on_see_all_a
         let see_all = Focus::Group { group, card: 6 };
         assert_eq!(home.home_focus(), see_all);
         let at_rest = rests(&home);
-        let line = format!("MyGames: FullLibrary {{ filter: Some({}) }}: Nav(FullLibrary)", filter.id);
+        // Full library on that filter's tab, focus on its first game, the grid in the filter's own order.
+        let (tab, tabs, games) = (group + 1, shown.len(), filter.games.len());
+        let sort = format!(
+            "{:?}{}",
+            filter.sort,
+            if filter.descending == filter.sort.default_descending() { "" } else { " reversed" }
+        );
+        let line = format!(
+            "MyGames: FullLibrary: Tile(0); tab {tab}/{tabs} {:?}, sort {sort}, name \"\", {games} games",
+            filter.name
+        );
         there_and_back(&mut home, A, &line, see_all);
         assert_eq!(rests(&home), at_rest, "Home is still at the Group's rest");
         // B again is the Group's own: back to the Recent row.

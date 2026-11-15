@@ -3,7 +3,8 @@
 # item under focus showing, Play history's rows, Manage's box, Y to Search and back, and B home.
 #
 # Judged by what --log-focus says after each press: `focus: MyGames: Games: Tile(3)`, the page, the item that is up,
-# and where focus is on it; `focus: MyGames: Apps: Nav(Apps)` with focus on the nav. No place is counted: a walk goes
+# and where focus is on it; `focus: MyGames: Apps: Nav(Apps)` with focus on the nav. While Full library is up its
+# state follows (`; tab 0/5 "", sort Name, name "", 26 games`): the full-library payload judges that. No place is counted: a walk goes
 # to an edge or to a named place, and how many games or rows there are is the library's to say. Passes when every
 # press is followed by the line expected of it, a press at an edge by none, and the Dashboard stays up.
 #
@@ -95,7 +96,7 @@ function Place([string] $At) { [int] ($At -replace '^.*\((\d+)\)$', '$1') }
 
 # With focus on the nav the item that is up trails focus by the settle wait when focus is passing along it, so a
 # line there is judged by the item focus is on, whatever is showing.
-function Nav([string] $Item) { "MyGames: .+: Nav\($Item\)" }
+function Nav([string] $Item) { "MyGames: .+: Nav\($Item\)(; .*)?" }
 
 try {
     Close-WindowsPrompts
@@ -153,9 +154,10 @@ try {
     if ((Place $last) -ne $installed - 1) { $failures += "Right along the last row should end on tile $($installed - 1), and ends on '$last'" }
     Picture 'games-last-tile'
 
-    # SEE FULL LIBRARY: Full library, focus on its nav item (its content is #53's).
+    # SEE FULL LIBRARY: Full library with no tab lit, focus on its first game; Left is its nav item.
     Press Down 'MyGames: Games: SeeFullLibrary'
-    Press A 'MyGames: FullLibrary \{ filter: None \}: Nav\(FullLibrary\)' 'full-library-from-see-full-library'
+    Press A 'MyGames: FullLibrary: Tile\(0\); tab 0/.*' 'full-library-from-see-full-library'
+    Press Left (Nav 'FullLibrary')
 
     # The nav: up to its top, where it stops, and down it an item at a time, each showing as focus steps onto it.
     Walk-ToEdge Up (Nav 'Games') | Out-Null

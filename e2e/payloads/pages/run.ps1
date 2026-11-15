@@ -133,7 +133,7 @@ try {
     $seeAll = Walk-ToEdge Right 'Group \{ group: 0, card: [1-9]\d* \}'
     Start-Sleep -Milliseconds 3000
     Save-Screen '09-see-all-no-hint-bar'
-    Press A 'MyGames: FullLibrary \{ filter: Some\(\d+\) \}: Nav\(FullLibrary\)' '10-full-library'
+    Press A 'MyGames: FullLibrary: Tile\(0\); tab 1/\d+ ".+", .*' '10-full-library'
     Press B ([regex]::Escape($seeAll)) '11-back-on-see-all'
 
     # B on the Group is the Recent row; along it to the Play history tile, its last. Play history, and B back on

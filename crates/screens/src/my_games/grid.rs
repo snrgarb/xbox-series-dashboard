@@ -1,5 +1,6 @@
 //! The grid of games: five to a row, three rows and the top of a fourth in view, scrolled a row at a time
-//! (docs/spec/my-games.md, 5.2 and 5.5). Games' grid, and Full library's (#53) with another top.
+//! (docs/spec/my-games.md, 5.2 and 5.5). Games' grid, and Full library's, which is the same list lifted under its
+//! Sort and Filter row (7.1).
 //!
 //! In the Bundle this is Playnite's own list, whose scrolling and edges are not in the Bundle's source. They are
 //! decided here (the spec's section 16): the grid moves by whole rows, the least that brings the focused row into
@@ -16,7 +17,7 @@ pub const COLUMNS: usize = 5;
 /// The rows that are whole in view.
 const ROWS: usize = 3;
 /// The list's box across, which an empty grid's line is centred in.
-const LIST: (f32, f32) = (516.5, 1237.0);
+pub const LIST: (f32, f32) = (516.5, 1237.0);
 /// The list's height: three and a half cells, each as tall as a fifth of its width, a whole number of units.
 pub const HEIGHT: f32 = 865.0;
 const CELL: f32 = HEIGHT / 3.5;
@@ -28,6 +29,9 @@ const PITCH: f32 = 246.6;
 const WIDTH: f32 = 231.6;
 /// The grid slides to its row over this long, as Home's page does to a rest.
 const SCROLL_SECONDS: f32 = 0.3;
+/// Full library's grid is cut 4 under its Sort and Filter row, and its first row's tiles are 24 under the cut.
+pub const FULL_LIBRARY_CUT: f32 = 326.0;
+const FULL_LIBRARY_PADDING: f32 = 24.0;
 
 /// What tells one game from another across snapshots of the library, with or without a database's ids.
 pub type Key = (i64, u32);
@@ -53,17 +57,31 @@ pub struct Grid {
     id: &'static str,
     /// The list's top: a quarter cell and half a gap over the first row's tiles.
     top: f32,
+    /// Where the grid is cut, top and bottom: the list's own box on Games; on Full library its top is under the
+    /// Sort and Filter row and its foot is under the screen's.
+    cut: (f32, f32),
     focus: usize,
     /// The game focus is on, by which it is found again when the library changes.
     key: Option<Key>,
     /// The row in the first of the three slots.
     first_row: usize,
+    /// How many times the grid has started again at its top: it is there at once then, not slid to.
+    fresh: u32,
 }
 
 impl Grid {
     /// Games' grid: the list from y 126, its first row's tiles at 195.29.
     pub fn games() -> Self {
-        Self { id: "games grid", top: 126.0, focus: 0, key: None, first_row: 0 }
+        Self { id: "games grid", top: 126.0, cut: (126.0, 126.0 + HEIGHT), focus: 0, key: None, first_row: 0, fresh: 0 }
+    }
+
+    /// Full library's grid (docs/spec/my-games.md, 7.1): the list lifted so that its first row's tiles are at 350,
+    /// 24 under where it is cut at 326. Three rows show whole and no fourth: the list's own box runs on under the
+    /// screen's foot.
+    pub fn full_library() -> Self {
+        let top = FULL_LIBRARY_CUT + FULL_LIBRARY_PADDING - CELL / 4.0 - GAP / 2.0;
+        let cut = (FULL_LIBRARY_CUT, top + HEIGHT);
+        Self { id: "full library grid", top, cut, focus: 0, key: None, first_row: 0, fresh: 0 }
     }
 
     /// The tile focus is on, or was when it left for the nav.
@@ -71,9 +89,10 @@ impl Grid {
         self.focus
     }
 
-    /// Focus on the first game and the grid at its top: what was remembered is forgotten.
+    /// Focus on the first game and the grid at its top, at once: what was remembered is forgotten.
     pub fn forget(&mut self) {
         (self.focus, self.key, self.first_row) = (0, None, 0);
+        self.fresh = self.fresh.wrapping_add(1);
     }
 
     /// The library may have changed: focus stays on its game wherever that is now, and falls back to the first if
@@ -135,7 +154,7 @@ impl Grid {
     /// The list's box: what the grid is cut to, top and bottom. Across it is left open, for the glow.
     fn clip(&self, ui: &Ui) -> Rect {
         let left = nav::WIDTH + 2.0;
-        Rect::new(left, self.top, ui.screen().right() - left, HEIGHT)
+        Rect::new(left, self.cut.0, ui.screen().right() - left, self.cut.1 - self.cut.0)
     }
 
     /// The foot of the last row's tiles as the grid is drawn now, if that row is wholly in view: what is under the
@@ -147,14 +166,14 @@ impl Grid {
     }
 
     fn scroll(&self, ui: &mut Ui) -> f32 {
-        ui.slide((self.id, "scroll"), self.first_row as f32 * CELL, SCROLL_SECONDS, Ease::CubicOut)
+        ui.slide((self.id, "scroll", self.fresh), self.first_row as f32 * CELL, SCROLL_SECONDS, Ease::CubicOut)
     }
 
     /// Draws the grid. `focused` says focus is on its tile; `running` is the game being launched or running. With
     /// no games, `empty` is its one line, centred in the list's box.
     pub fn draw(&mut self, ui: &mut Ui, games: &[&Game], focused: bool, running: Option<Key>, empty: &str) {
         if !self.keep(games) {
-            ui.label_centered(LIST.0 + LIST.1 / 2.0, self.top + HEIGHT / 2.0, empty, &NO_GAMES);
+            ui.label_centered(LIST.0 + LIST.1 / 2.0, (self.cut.0 + self.cut.1) / 2.0, empty, &NO_GAMES);
             return;
         }
         let scroll = self.scroll(ui);

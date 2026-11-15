@@ -43,6 +43,10 @@ pub mod glyph {
     pub const MANAGE: char = '\u{E821}';
     /// A filled triangle: the running game's mark.
     pub const PLAY: char = '\u{F5B0}';
+    /// Full library's: the Sort box's chevron, Filter's funnel, and the tick on the sort the grid is in.
+    pub const CHEVRON: char = '\u{E70D}';
+    pub const FILTER: char = '\u{E71C}';
+    pub const TICK: char = '\u{E73E}';
 }
 
 /// `XboxFocusGlow` round a band whose middle line is `line` and whose corners there are `radius`: 11 wide, half
@@ -63,4 +67,11 @@ pub fn slab(ui: &mut Ui, rect: Rect, radius: f32) {
 pub fn ring(ui: &mut Ui, outer: Rect) {
     glow(ui, outer.grow(-2.0), 8.0);
     ui.ring(outer, ACCENT_LIGHT, 10.0, 4.0);
+}
+
+/// A focus ring 4 wide on a box's own edge, inside it, with the glow on its middle line: the name box's, which
+/// stays dark so that the name stays legible, and whose ring would be painted over by the grid if it stood out.
+pub fn ring_inside(ui: &mut Ui, rect: Rect) {
+    glow(ui, rect.grow(-2.0), 12.0);
+    ui.ring(rect, ACCENT_LIGHT, 4.0, 4.0);
 }
