@@ -1,6 +1,6 @@
 # Video frames in the renderer through Media Foundation
 
-**Draft.** Researched and built 2026-11-15 for #6. The code is `spikes/video` (`video-spike.exe`); it cross-compiles and links, and **none of it has run on Windows yet**. Everything about how it behaves there is in [To be measured](#to-be-measured), still empty.
+Researched and built 2026-11-15 for #6. The code is `spikes/video` (`video-spike.exe`). It has run on the win11-e2e VM (`e2e/run.sh video`, software rendering through WARP): the results are in [To be measured](#to-be-measured). The timings only a real GPU can give are still to be taken on the TV PC.
 
 Each claim is tagged with its source. **[inference]** marks reasoning nobody has tested. **[docs]** is Microsoft Learn, **[wgpu]** is the wgpu 30.0.2 source in the cargo registry, **[spike]** is the code in this repository.
 
@@ -87,21 +87,21 @@ One thing C would do better: it follows the default device when the user changes
 
 ## To be measured
 
-Nothing below has been run. The commands, and what each log line means, are in the pull request.
+The VM table is from `e2e/run.sh video` on 2026-11-15. The TV PC table is empty.
 
 ### On the win11-e2e VM (WARP, correctness only)
 
 | Question | Result |
 |---|---|
-| Does `--make-clip clip.mp4` succeed (H.264 and AAC encoders present)? If not, the HRESULT, and does `clip.wmv`? | |
-| Does the clip play: `video: opened`, `first frame presented`, `end of stream`? | |
-| The media types logged: native subtype, frame size (is the display aperture needed?), sound format | |
-| Is the picture the right way up, the right colours, and opaque? (screenshot: the frame counter reads left to right, white bar first on frame 0) | |
-| `decoded`, `presented`, `dropped` at the end of a 5 s clip (150 frames) | |
-| Sound: is there an endpoint? `audio: device ... started` or `audio: none (...)` | |
-| With no endpoint, or `--no-audio`, does it still play at the right speed (5 s clip ends about 5 s after the first frame)? | |
-| Does a key skip it? Does `--seconds 2` stop it? | |
-| `--basic-processing` and `--dxva`: do they work at all on WARP? | |
+| Does `--make-clip clip.mp4` succeed (H.264 and AAC encoders present)? If not, the HRESULT, and does `clip.wmv`? | Yes, both: `clip.mp4` (H.264, AAC, 341 kB, written in 0.3 s) and `clip.wmv` (WMV3, WMA, 450 kB). |
+| Does the clip play: `video: opened`, `first frame presented`, `end of stream`? | Yes, mp4 and wmv, to `end of stream` and exit 0. First frame 0.7 to 0.9 s after the process starts for mp4. |
+| The media types logged: native subtype, frame size (is the display aperture needed?), sound format | `1280x720 30.00 fps 5.01 s, video H264 -> RGB32, audio AAC -> PCM 48000 Hz 2 ch 16-bit`; texture 1280x720, so the aperture handling gave the right size. |
+| Is the picture the right way up, the right colours, and opaque? (screenshot: the frame counter reads left to right, white bar first on frame 0) | Yes: the bars in order, the counter readable, opaque, full screen and windowed, for H.264 and WMV3. |
+| `decoded`, `presented`, `dropped` at the end of a 5 s clip (150 frames) | `decoded=150 presented=38 dropped=112`. The VM presents about four frames a second at 1080p, so most frames are dropped; decode itself averaged 3 to 12 ms a frame, the copy out 0.3 ms and the upload 0.3 ms. |
+| Sound: is there an endpoint? `audio: device ... started` or `audio: none (...)` | There is one: `device "Speakers (High Definition Audio Device)" started, 48000 Hz 2 ch 16-bit, buffer 200 ms`. `AUTOCONVERTPCM` took the decoder's format as it is. Nobody heard it. |
+| With no endpoint, or `--no-audio`, does it still play at the right speed (5 s clip ends about 5 s after the first frame)? | **Not on the VM, with or without sound:** the 5 s clip took about 10 s. The window takes at most the four queued frames per present, and a present takes 250 ms here, so the decoder is held back and the picture falls behind the clock. The product must drain every due frame before each present (or let the decoder skip), so a slow screen drops frames and never slows the film. To be confirmed at real speed on the TV PC. |
+| Does a key skip it? Does `--seconds 2` stop it? | `--seconds` stops it. A key skips it too readily: a key press that arrived as the window opened ended the first run at once. Keys now count only once the picture has been up 300 ms; the product should take skips from the pad and from keys pressed while it has the foreground. |
+| `--basic-processing` and `--dxva`: do they work at all on WARP? | Both work and show the same picture. `--dxva` took 1.3 s longer to the first frame on WARP. |
 
 ### On the TV PC (RX 9070 XT, DX12, real timings)
 

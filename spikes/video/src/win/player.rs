@@ -277,7 +277,13 @@ impl ApplicationHandler for Player {
         let Some(screen) = &mut self.screen else { return };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed && !event.repeat => {
+            // A key pressed for something else as the window opens is not a skip: only one pressed once the picture
+            // has been up a moment counts. On the VM a stray key press arrived with the window.
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed
+                    && !event.repeat
+                    && self.started.is_some_and(|at| at.elapsed() > Duration::from_millis(300)) =>
+            {
                 log!("video: skipped by a key");
                 event_loop.exit();
             }
