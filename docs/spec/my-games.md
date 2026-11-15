@@ -736,7 +736,7 @@ A Playnite filter preset is a named, saved filter (any of Playnite's filter crit
 
 ## 15. Open questions
 
-Questions 1 to 7, 9, 10 and 12 are answered in section 16; 8, 11 and 13 are still open.
+Questions 1 to 7, 9, 10 and 12 are answered in section 16, 8 and 11 in section 17; 13 is still open.
 
 1. **Intended or measured x?** The grid's tiles measure 526..1744 (2 in from the Sort row's 524..1746) and Play history's rows 529..1746, where the source's comments intend both flush at 524..1746. Build the artefacts as the pictures show them ("exactly as the theme"), or the alignment the author intended? (Tile width follows: 231.6 measured, 232.4 intended.)
 2. **Grid scrolling.** Playnite's panel decides how far the grid moves when focus goes to a row out of view, and animates only if the user's Playnite setting says so; none of it is in the repo. Proposal to confirm: scroll by whole rows (247.14) so the focused row rests in one of the three row slots, with the page's own slide (home.md 7.3: 300 ms cubic ease-out, instant under Reduce motion). On Games, does the quarter row at the foot stay as the hint that more follows?
@@ -756,7 +756,7 @@ Questions 1 to 7, 9, 10 and 12 are answered in section 16; 8, 11 and 13 are stil
 
 ## 16. Decided in #52 (the shell, Games, Play history and Manage)
 
-What the port does where section 15 asked, each settled as this document recommends or, failing that, as the Bundle does it. Questions 8 and 11 are Full library's (#53) and 13 is shared with Home's; they stay open.
+What the port does where section 15 asked, each settled as this document recommends or, failing that, as the Bundle does it. Questions 8 and 11 are Full library's, answered in section 17; 13 is shared with Home's and stays open.
 
 1. **Measured x (question 1).** The artefacts are built as the pictures show them: the grid's tiles at x 526 + 246.6 a column, 231.6 wide; Play history's row backs 529..1746 with the row's item 525..1750. Not the flush 524..1746 the source's comments intend.
 2. **Grid scrolling (question 2, and the issue).** The grid moves by whole rows of 247.14, the least that brings the focused row into one of its three whole slots, so the focused row is whole on screen and the next row shows its top: the quarter row at the foot stays. It slides with the page's own slide (300 ms, cubic ease-out) and is simply there under Reduce motion. With focus on SEE FULL LIBRARY the grid is at its end, "Looking for more?" and the button under its last row.
@@ -773,4 +773,24 @@ What the port does where section 15 asked, each settled as this document recomme
 13. **A tile with no cover.** Its game's name, centred on the tile's dark fill as Home's tile writes it, and gone under the title band while the tile has focus. (In the Bundle Playnite draws its own default cover there.)
 14. **The count (question 12).** "N games" for any N, one included, as the Bundle writes it. The progress text of section 11.3 is not drawn yet (`my_games::progress`).
 15. **Left out on purpose.** The fly-in's two held frames, which work around WPF's layout pass, and the playing mark's path: the mark is the glyph U+F5B0.
-16. **What the focus log says.** `MyGames: <item up>: <where>`: `Games: Tile(3)`, `Games: SeeFullLibrary`, `PlayHistory: Row(2)`, `Manage: Queue`, and `Games: Nav(Apps)` while focus is on the nav, where the item up is the one showing, which trails focus by the settle wait of section 4.2. Full library until #53: `FullLibrary { filter: Some(7) }: Nav(FullLibrary)`.
+16. **What the focus log says.** `MyGames: <item up>: <where>`: `Games: Tile(3)`, `Games: SeeFullLibrary`, `PlayHistory: Row(2)`, `Manage: Queue`, and `Games: Nav(Apps)` while focus is on the nav, where the item up is the one showing, which trails focus by the settle wait of section 4.2. Full library adds its state after a `;` (section 17).
+
+---
+
+## 17. Decided in #53 (Full library)
+
+What the port does for Full library, settled as this document and [filters.md](filters.md) recommend or, failing that, as the Bundle does it. Compared with the Bundle's pictures 07 and 09 to 14 of `port-reference-20261115-192720/`.
+
+1. **The tabs.** `Library::groups()`: the saved filters that are Home's Groups, shown and with a game, in the same order. See all lights its Group's tab; the nav and SEE FULL LIBRARY open the page with none lit, the grid then every game that is not hidden, by name. A filter See all names that is not a tab (the empty Favourites Home shows when there is no Group, filters.md 4.1) lights none. A lit tab whose filter stops being a tab (it lost its last game, or was hidden) goes dark, and the grid is every game, focus staying on its game.
+2. **A tab's games** are its filter's, in the filter's own sort and direction; a hidden game is in the Hidden tab only. The name narrows them on top; a sort chosen on the Sort list orders them.
+3. **Stepping the tabs.** Left and Right on the tabs, and LB and RB from anywhere on the page (the nav included, not under the open Sort list), stop at the first tab and the last: nothing wraps (the Bundle's is Playnite's and unverified). Left on the first tab is the nav. With no tab lit, Right on the tabs is nothing and Left the nav, as the Bundle; **RB lights the first tab** and LB is nothing. A tab switch starts the grid again at its first game, which Down from the row and Right from the nav then land on.
+4. **The strip scrolls** at once, the least that shows the lit tab whole, when the tabs are wider than 520..1750.
+5. **Tabs with nothing to show (question 11).** The strip is left empty and the Sort row stays at y 262: nothing moves up. Focus on the tabs shows nothing, as in the Bundle, and the focus log says `Tabs`.
+6. **The Sort list** has four options until there is a release date (filters.md 3.2): A–Z, Last played, Recently added, Playtime, each in its own direction. The box reads "Sorted by" the option the grid is in, and "Sort" when it is in none of them (a filter sorted the other way up). The tick stands after the option's name, where the Bundle's picture 11 has it (x about 720), not at x 542 as the source's margin reads: the glyph is centred in what is right of its 18 of margin. Over a long name ("Recently added") it lies on the name, as it would in the Bundle. The name box shows no ring while text entry is over the page, as in picture 13. A chosen sort orders every tab until the page closes, and is kept across the nav.
+7. **The name** is matched as a case-insensitive "contains" on the game's name. The count beside Filter and the nav's count follow the tab and the name at once. (The Bundle's pictures 13 and 14 show the count still at the tab's whole, "15 games" over two games, and the lit tab gone dark while a name is set: both are Playnite's filter refreshing late, and are not copied.)
+8. **Focus with nothing in the grid.** The page opened, or Right from the nav, on a grid that is empty: focus on the name box if a name emptied it, else on Sort. The row is always there to hold it; focus never stays on the nav for want of somewhere to go.
+9. **Darkening not-installed games (question 8).** Off: the Download badge alone marks them, as in the pictures.
+10. **Sounds (question 13's part).** A tab switch, a sort chosen and the name box opening are silent, as the Bundle has none; a move of focus (onto the tabs, the row, the Sort list's options) is the move sound, as everywhere.
+11. **What the focus log says.** `MyGames: FullLibrary: <where>; tab <n>/<tabs> "<name>", sort <Sort>[ reversed], name "<name>", <count> games`. Where is `Tabs`, `Sort`, `Name`, `Filter`, `SortList(Playtime)` or `Tile(3)`, or `Nav(Item)` with focus on the nav. The tab's place is 0, its name empty, with none lit; `reversed` marks a sort the other way up from the Sort list's. While text entry is over the page the line is text entry's.
+12. **The fly-in across tabs** is section 3.4's: the grid only, from 50 on the side of the tab lit, 120 ms; none when See all lights the tab, none under Reduce motion.
+

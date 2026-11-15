@@ -49,7 +49,7 @@ impl Open {
     /// (the Tile menu of a game that has gone) is not made.
     fn page(self, under: Option<&dyn Page>, around: Around) -> Option<Box<dyn Page>> {
         Some(match self {
-            Open::MyGames(entry) => Box::new(my_games::MyGames::open(entry)),
+            Open::MyGames(entry) => Box::new(my_games::MyGames::opened(entry, around)),
             Open::Search => Box::new(search::Search::open()),
             Open::Settings(entry) => Box::new(settings::Settings::open(entry)),
             Open::TextEntry(entry) => {
