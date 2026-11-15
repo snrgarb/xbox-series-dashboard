@@ -21,7 +21,8 @@ function Press([string] $Button, [string] $Expect, [string] $Name = '') {
     $pattern = "^focus: $Expect`$"
     $got = Wait-Until { $lines = @(Focus-Lines); if ($lines.Count -gt $before -and $lines[-1] -match $pattern) { $lines[-1] } } 8
     if ($Name) {
-        Start-Sleep -Milliseconds 2500
+        # Home slides to its rest over a few frames, and the software renderer takes a second or so a frame.
+        Start-Sleep -Milliseconds 4500
         Save-Screen $Name
     }
     if ($got) {
@@ -47,6 +48,27 @@ function Walk([string] $Button, [string] $Expect, [int] $Most = 10) {
         Say "$Button never reached '$Expect': $(Focus-Now)"
         $script:failures += "$Button never reached 'focus: $Expect': '$(Focus-Now)'"
     }
+}
+
+# Presses a direction until it moves focus no more: the end of a row, which does not wrap. How long a row is is the
+# library's to say, so its last place is found, never counted. Returns what follows "focus: " there, which must
+# match $Expect.
+function Walk-ToEdge([string] $Button, [string] $Expect, [int] $Most = 12) {
+    $reached = $false
+    foreach ($press in 1..$Most) {
+        $was = Focus-Now
+        Push-Button $Button
+        Start-Sleep -Milliseconds 1500
+        if ((Focus-Now) -eq $was) { $reached = $true; break }
+    }
+    $at = (Focus-Now) -replace '^focus: ', ''
+    if ($reached -and $at -match "^$Expect`$") {
+        Say "$Button to the row's end: $at"
+    } else {
+        Say "$Button did not end on '$Expect': $at"
+        $script:failures += "$Button should have ended on '$Expect', and focus is '$at'"
+    }
+    $at
 }
 
 try {
@@ -80,7 +102,7 @@ try {
 
     # The wide tiles: Discord (Settings on Discord, there being no Discord tab), Settings, Downloads. Each gives
     # focus back to its tile. Achievements opens the Guide and is not pressed here.
-    Press Down 'Recent\(\d\)'
+    Press Down 'Recent\(\d+\)'
     Press Down 'Wide\(\d\)'
     Walk Left 'Wide\(0\)' 4
     Press A 'Settings: Discord'
@@ -97,19 +119,21 @@ try {
     Press Down 'Group \{ group: 0, card: 0 \}' '07-hint-bar-on-a-group-card'
     Press Y 'Search: Open'
     Press B 'Group \{ group: 0, card: 0 \}' '08-back-on-the-group-card'
-    # See all, the Group's last card: no hint bar; Full library on the Group's filter; B back on See all.
-    Walk Right 'Group \{ group: 0, card: 6 \}' 12
-    Start-Sleep -Milliseconds 2500
+    # See all, the Group's last card, wherever that is: no hint bar; Full library on the Group's filter; B back on
+    # See all.
+    $seeAll = Walk-ToEdge Right 'Group \{ group: 0, card: [1-9]\d* \}'
+    Start-Sleep -Milliseconds 3000
     Save-Screen '09-see-all-no-hint-bar'
     Press A 'MyGames: FullLibrary \{ filter: Some\(\d+\) \}' '10-full-library'
-    Press B 'Group \{ group: 0, card: 6 \}' '11-back-on-see-all'
+    Press B ([regex]::Escape($seeAll)) '11-back-on-see-all'
 
     # B on the Group is the Recent row; along it to the Play history tile, its last. Play history, and B back on
     # the game's tile before it.
-    Press B 'Recent\(\d\)'
-    Walk Right 'Recent\(7\)' 12
+    Press B 'Recent\(\d+\)'
+    $history = Walk-ToEdge Right 'Recent\([1-9]\d*\)'
+    $lastGame = "Recent\($([int] ($history -replace '\D', '') - 1)\)"
     Press A 'MyGames: PlayHistory' '12-play-history'
-    Press B 'Recent\(6\)' '13-back-on-the-last-game'
+    Press B $lastGame '13-back-on-the-last-game'
 
     # The Guide's My games & apps, its second entry: the Guide closes onto the page, and B is Home's rows.
     Push-Button Guide
@@ -118,7 +142,7 @@ try {
     Push-Button Down
     Start-Sleep -Milliseconds 800
     Press A 'MyGames: Games' '15-my-games-from-the-guide'
-    Press B 'Recent\(6\)'
+    Press B $lastGame
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }
