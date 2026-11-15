@@ -45,8 +45,8 @@ fn vs(@builtin(vertex_index) vi: u32, i: Inst) -> VOut {
     return o;
 }
 
-@fragment
-fn fs(in: VOut) -> @location(0) vec4<f32> {
+// The quad's colour where its texture reads `texel`.
+fn shade(in: VOut, texel: vec4<f32>) -> vec4<f32> {
     let r = min(in.params.x, min(in.half.x, in.half.y));
     let q = abs(in.local) - in.half + r;
     let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
@@ -70,7 +70,22 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
     } else if (in.params.z == 3.0) {
         t = clamp(length(unit * 2.0 - 1.0), 0.0, 1.0);
     }
-    let uv = mix(in.uv.xy, in.uv.zw, unit);
-    let c = mix(in.c0, in.c1, t) * textureSample(tex, samp, uv);
+    let c = mix(in.c0, in.c1, t) * texel;
     return vec4<f32>(c.rgb * c.a * a, c.a * a);
+}
+
+fn texel_at(in: VOut) -> vec4<f32> {
+    let unit = clamp((in.local + in.half) / (2.0 * in.half), vec2<f32>(0.0), vec2<f32>(1.0));
+    return textureSample(tex, samp, mix(in.uv.xy, in.uv.zw, unit));
+}
+
+@fragment
+fn fs(in: VOut) -> @location(0) vec4<f32> {
+    return shade(in, texel_at(in));
+}
+
+// For a video texture, whose fourth byte is whatever the decoder left there: the picture is opaque.
+@fragment
+fn fs_opaque(in: VOut) -> @location(0) vec4<f32> {
+    return shade(in, vec4<f32>(texel_at(in).rgb, 1.0));
 }
