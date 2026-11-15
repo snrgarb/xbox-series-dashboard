@@ -38,6 +38,8 @@ const WHITE: u32 = 0x00FF_FFFF;
 /// Set once the game was asked to end, by its window closing, Esc or its time running out, rather than its
 /// launcher's window going away on its own.
 static ENDED: AtomicBool = AtomicBool::new(false);
+/// Whether the game stays up when its window is asked to close (--ignore-close).
+static IGNORE_CLOSE: AtomicBool = AtomicBool::new(false);
 /// The game's own window, once it is up: the one that has the pulse.
 static GAME: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 /// How many times the pulse has beaten, and when it last did, in ms since Windows started.
@@ -58,6 +60,7 @@ fn wide(s: &str) -> Vec<u16> {
 pub fn game(args: &GameArgs) -> i32 {
     unsafe {
         SetProcessDPIAware();
+        IGNORE_CLOSE.store(args.ignore_close, Ordering::Relaxed);
         let instance = GetModuleHandleW(null());
         let class = wide("StandInGame");
         let mut wc: WNDCLASSW = std::mem::zeroed();
@@ -150,6 +153,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
             GetClientRect(hwnd, &mut client);
             InvalidateRect(hwnd, &pulse_rect(&client), 0);
         }
+        // A game that has hung: asked to close, it stays, until it is ended or its time is up.
+        WM_CLOSE if IGNORE_CLOSE.load(Ordering::Relaxed) => note("game: asked to close, and staying"),
         WM_TIMER | WM_CLOSE => {
             ENDED.store(true, Ordering::Relaxed);
             DestroyWindow(hwnd);

@@ -7,10 +7,11 @@
 //!   standin make-tones <dir>
 //!       Writes a short tone into <dir> under each of the names the Dashboard's sounds have in the Bundle, for
 //!       `dashboard --media <dir>`: the console's own sounds are in no repository and on no test machine.
-//!   standin game [--title <t>] [--splash-ms <n>] [--seconds <n>]
+//!   standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
 //!       The stand-in game: a borderless, full-screen, dark-blue window titled <t> ("Stand-in game"). It closes when
 //!       asked to, on Esc, and after <seconds> (600) in case a test leaves it behind. With --splash-ms, a small window
-//!       titled "<t> launcher" shows for that long first, as a game's launcher or splash screen does.
+//!       titled "<t> launcher" shows for that long first, as a game's launcher or splash screen does. With
+//!       --ignore-close it does not close when asked to, as a game that has hung does not, and says so in the log.
 //!       Its pulse, a square towards the window's bottom right, changes colour four times a second while the game
 //!       runs, and so stands still while the game is frozen; a beat that comes late says in the log how long the
 //!       game stood still.
@@ -35,7 +36,7 @@ use source_steam::fixture::{self, Fixture};
 
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
        standin make-tones <dir>
-       standin game [--title <t>] [--splash-ms <n>] [--seconds <n>]
+       standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
        standin steam-url steam://rungameid/<appid>";
 
 /// The arguments a `game.exe` run with none takes instead, one a line.
@@ -47,11 +48,13 @@ struct GameArgs {
     /// How long the launcher's small window shows first; 0 for none.
     splash_ms: u32,
     seconds: u32,
+    /// Whether it stays up when its window is asked to close, as a game that has hung does.
+    ignore_close: bool,
 }
 
 impl GameArgs {
     fn parse(args: &[String]) -> Result<GameArgs, String> {
-        let mut out = GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600 };
+        let mut out = GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600, ignore_close: false };
         let mut it = args.iter();
         while let Some(arg) = it.next() {
             let mut value = || it.next().ok_or(format!("{arg} needs a value"));
@@ -60,6 +63,7 @@ impl GameArgs {
                 "--title" => out.title = value()?.clone(),
                 "--splash-ms" => out.splash_ms = number(value()?)?,
                 "--seconds" => out.seconds = number(value()?)?,
+                "--ignore-close" => out.ignore_close = true,
                 _ => return Err(format!("unknown argument {arg}")),
             }
         }
@@ -226,13 +230,14 @@ mod tests {
     fn game_arguments() {
         assert_eq!(
             GameArgs::parse(&[]).unwrap(),
-            GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600 }
+            GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600, ignore_close: false }
         );
         assert_eq!(
             GameArgs::parse(&strings(&["--title", "Brass Meridian", "--splash-ms", "2500", "--seconds", "30"]))
                 .unwrap(),
-            GameArgs { title: "Brass Meridian".into(), splash_ms: 2500, seconds: 30 }
+            GameArgs { title: "Brass Meridian".into(), splash_ms: 2500, seconds: 30, ignore_close: false }
         );
+        assert!(GameArgs::parse(&strings(&["--ignore-close"])).unwrap().ignore_close);
         assert!(GameArgs::parse(&strings(&["--title"])).is_err());
         assert!(GameArgs::parse(&strings(&["--seconds", "soon"])).is_err());
         assert!(GameArgs::parse(&strings(&["--fullscreen"])).is_err());

@@ -75,7 +75,8 @@ the TV PC, not for here.
   frozen game paints nothing, so its pulse stands still, and when a beat comes more than 1.5 s late the game says
   `game: stood still for <n> ms` in `standin.log`. A test that wants a launcher or splash
   first adds `--splash-ms` and its length on two lines of `game-args.txt`: a small window titled "<name> launcher" then
-  shows for that long before the game's.
+  shows for that long before the game's. A test that wants a game that has hung adds `--ignore-close` on a line: the
+  game then stays when its window is asked to close, and says `game: asked to close, and staying`.
 - **The stand-in Steam**, `standin steam-url steam://rungameid/<appid>`: finds the game's folder from its app manifest
   under the `SteamPath` in the registry, starts its `game.exe`, and keeps `HKCU\Software\Valve\Steam\Apps\<appid>\Running`
   at 1 until it exits, as Steam does. For a game that isn't installed it does nothing and exits 1.

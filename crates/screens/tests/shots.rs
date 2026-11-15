@@ -1159,11 +1159,14 @@ fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
     stage.dashboard.game_booted();
     stage.press(&[Button::Left, Button::A]);
     assert!(stage.dashboard.take_effects().is_empty(), "not so much as a sound");
-    // The Guide over the game: Quit in the running game's menu quits it, and the Guide goes when the game has.
+    // The Guide over the game: Quit in the running game's menu quits it, and the Guide goes half a second after
+    // the game has.
     stage.press(&[Button::Guide, Button::Down, Button::Down, Button::Menu, Button::A]);
     assert_eq!(asked(&mut stage.dashboard), [Effect::QuitGame]);
     assert!(stage.dashboard.guide_open());
     stage.dashboard.game_ended();
+    assert!(stage.dashboard.guide_open());
+    stage.dashboard.advance(screens::CLOSE_AFTER_QUIT);
     assert!(!stage.dashboard.guide_open());
     assert_eq!(stage.dashboard.playing(), None);
     assert_eq!(stage.dashboard.home_focus(), Focus::Recent(2));
@@ -1530,6 +1533,73 @@ fn guide_running_game_menu() {
     assert_eq!(colour(&image, 1183, 500), [43, 43, 43]);
     assert!(within(colour(&image, 728, 590), GREEN, 8), "{:?}", colour(&image, 728, 590));
     stage.check_image("guide-game-menu", image);
+}
+
+// --- Games from the Guide (docs/spec/guide.md, 6.4, 7.3, 7.4). What the presses ask for is tests/guide_games.rs.
+// No picture of the Bundle shows a running game in the Guide: these are from its XAML and C#.
+
+/// "Quit X and start Y?": A on a game played before, while another runs. The prompt's title wraps; its first
+/// answer has focus.
+#[test]
+fn guide_quit_and_start_prompt() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down, Button::Down, Button::A]);
+    let image = stage.still_over(GAME);
+    // The points the end-to-end test looks at (e2e/payloads/guide-games/run.ps1): the menu panel beside its title,
+    // and the game under the Guide's dim and the dialog's.
+    assert_eq!(colour(&image, 745, 420), [43, 43, 43], "the menu panel");
+    assert!(within(colour(&image, 1230, 900), [2, 4, 11], 3), "the game: {:?}", colour(&image, 1230, 900));
+    stage.check_image("guide-quit-and-start", image);
+}
+
+/// "Force quit X?", ten seconds after Quit: the prompt with its message, focus on Force quit.
+#[test]
+fn guide_force_quit_prompt() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down, Button::Menu, Button::A]);
+    stage.dashboard.advance(screens::QUIT_TIMEOUT);
+    let image = stage.still_over(GAME);
+    assert_eq!(colour(&image, 745, 420), [43, 43, 43], "the menu panel");
+    stage.check_image("guide-force-quit", image);
+}
+
+/// The same with the Guide setting off, the game having been quit some other way: the prompt over the dim alone,
+/// with no panel, no hints and no Status area.
+#[test]
+fn guide_force_quit_prompt_with_the_guide_off() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down, Button::Menu, Button::A, Button::B]);
+    stage.still();
+    stage.dashboard.set_guide_enabled(false);
+    stage.dashboard.advance(screens::QUIT_TIMEOUT);
+    let image = stage.still_over(GAME);
+    // Where the panel would be there is the game, under the Guide's dim and the dialog's.
+    assert!(within(colour(&image, 270, 900), [2, 4, 11], 3), "no panel: {:?}", colour(&image, 270, 900));
+    stage.check_image("guide-force-quit-alone", image);
+}
+
+/// A game that ends by itself under the open Guide leaves the Guide open, over Home now, its list without the
+/// game and focus where it was.
+#[test]
+fn guide_after_the_game_under_it_ended() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down]);
+    stage.still();
+    stage.dashboard.game_ended();
+    assert!(stage.dashboard.guide_open());
+    stage.check("guide-game-ended");
+}
+
+/// Home chosen in the Guide over a game: Home's window draws again, in front of the game, and takes the pad.
+#[test]
+fn home_from_the_guide_over_a_game_draws_home_again() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    assert!(stage.dashboard.home_covered());
+    stage.press(&[Button::A]);
+    assert!(!stage.dashboard.home_covered() && stage.dashboard.in_front_of_game());
+    // Home as `home_with_art` has it, to the pixel.
+    stage.press(&[Button::Down, Button::Right]);
+    stage.check("home-art");
 }
 
 /// The panel behind a dialog is out of focus: an edge of it that is sharp with no dialog is soft with one, and

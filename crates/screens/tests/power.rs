@@ -285,7 +285,26 @@ fn a_menu_whose_game_stops_by_itself_goes_with_it() {
     guide.game_ended();
     assert_eq!(guide.take_effects(), []);
     assert_eq!(guide.guide().dialog(), None);
-    assert!(!guide.guide_open());
+    assert!(guide.guide_open(), "the Guide stays, as the Bundle's does");
+}
+
+#[test]
+fn power_stays_up_when_the_game_under_it_stops() {
+    // From its entry: Power is about the PC, not the game.
+    let mut guide = on_power_entry(in_game());
+    press(&mut guide, &[A, Up]);
+    guide.game_ended();
+    assert_eq!(guide.take_effects(), []);
+    assert_eq!(guide.guide().dialog(), on_tile(3));
+    assert!(guide.guide_open() && guide.guide().panel_shown());
+
+    // By a hold, with no panel.
+    let mut guide = in_game();
+    hold(&mut guide);
+    guide.game_ended();
+    assert_eq!(guide.take_effects(), []);
+    assert_eq!(guide.guide().dialog(), ON_CLOSE);
+    assert!(guide.guide_open() && !guide.guide().panel_shown());
 }
 
 #[test]

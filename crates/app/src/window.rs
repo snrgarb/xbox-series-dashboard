@@ -81,6 +81,11 @@ struct App {
     freezer: Freezer,
     /// Since when the Guide has been closed with the button that closed it still down.
     release_wait: Option<Instant>,
+    /// Who gets the foreground once the Guide has let go of it, when that is not the window that had it as the
+    /// Guide opened (docs/spec/guide.md, 3.3).
+    hand_back: Option<HandBack>,
+    /// When the Dashboard was last told how much time had passed.
+    turn: Instant,
     /// The library database: where a newer snapshot comes from, and where Play sessions go.
     store: Store,
     /// When the library had been read, in ms since the process started.
@@ -109,6 +114,15 @@ enum KeyPress {
     Backspace { repeat: bool },
     /// What a key types, for a page that takes text (text entry). Nothing anywhere else.
     Text(String),
+}
+
+/// Who the Guide hands the foreground to as it closes over a running game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandBack {
+    /// Home's window, in front of the game: Home or a page was chosen.
+    Home,
+    /// The game's own window: the running game was chosen.
+    Game,
 }
 
 /// The minute it is, counted from 1970: what the clock's next change is told by.
@@ -170,6 +184,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
         launch: None,
         freezer,
         release_wait: None,
+        hand_back: None,
+        turn: Instant::now(),
         sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
@@ -303,6 +319,45 @@ impl App {
         self.overlay_moving.then_some(rest)
     }
 
+    /// Puts in front what the Guide said should be, once the Guide has let go of the foreground (the button that
+    /// closed it is up): Home's window in front of the running game, or the game's own window. Where the Overlay
+    /// has the foreground it is told who to give it to, and gives it as it stops being the Guide; where it has
+    /// not (the Guide in Home's window, or no Guide at all: A on the running game's tile) Home's window gives or
+    /// takes it itself. True when Home's window is to be hidden behind the game once the Overlay has handed over.
+    fn hand_back(&mut self) -> bool {
+        if self.dashboard.overlay() == OverlayShows::Guide {
+            return false;
+        }
+        let (Some(to), Some(state)) = (self.hand_back.take(), &self.state) else { return false };
+        let Some(launch) = &mut self.launch else { return false };
+        let overlay = self.overlay.as_mut().filter(|overlay| overlay.mode() == Some(Mode::Guide));
+        match to {
+            HandBack::Home => {
+                launch.show_home(overlay.is_none());
+                if let Some(overlay) = overlay {
+                    overlay.give_back_to(window_handle(&state.window));
+                }
+                // Home's window has been hidden since the game came up: it draws afresh.
+                self.last_frame = Instant::now();
+                self.stale = true;
+                false
+            }
+            HandBack::Game => match overlay {
+                Some(overlay) if !launch.game_window().is_null() => {
+                    overlay.give_back_to(launch.game_window());
+                    true
+                }
+                _ => {
+                    // A game with no window to go back to: the Dashboard stays in front of it.
+                    if !launch.show_game(true) {
+                        self.dashboard.show_dashboard();
+                    }
+                    false
+                }
+            },
+        }
+    }
+
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
         for effect in self.dashboard.take_effects() {
             match effect {
@@ -312,9 +367,19 @@ impl App {
                         launch.quit_game(&mut self.freezer);
                     }
                 }
+                // With nothing of the game's to end, asking again would never help.
+                Effect::ForceQuitGame => {
+                    let ended = self.launch.as_mut().is_some_and(|launch| launch.force_quit(&mut self.freezer));
+                    if !ended {
+                        self.dashboard.quit_given_up();
+                    }
+                }
                 // The Overlay follows what the Dashboard shows: it gives the foreground back as the Guide closes,
                 // once the button that closed it is up, and hides once the panel has slid away.
                 Effect::GuideClosed => {}
+                // Who it gives the foreground to then: carried out as it lets go (`hand_back`).
+                Effect::ShowHome => self.hand_back = Some(HandBack::Home),
+                Effect::ShowGame => self.hand_back = Some(HandBack::Game),
                 // The sound of leaving is played to its end first, as the Bundle plays it.
                 Effect::Exit => {
                     eprintln!("power: exit to desktop at {:.0} ms", since_start());
@@ -391,6 +456,15 @@ impl ApplicationHandler for App {
                 self.make_overlay();
             }
         }
+        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
+        let focus = self.dashboard.focus_line();
+        let guide = self.dashboard.guide_line();
+        // What the Dashboard times itself: a game that was asked to quit and has not, the Guide closing after one.
+        let passed = std::mem::replace(&mut self.turn, Instant::now()).elapsed();
+        if self.dashboard.advance(passed.as_secs_f32()) {
+            self.stale = true;
+            self.overlay_stale = true;
+        }
         let events = self.pad.poll();
         let mut presses: Vec<Press> = Vec::new();
         let keys = std::mem::take(&mut self.keys);
@@ -432,19 +506,25 @@ impl ApplicationHandler for App {
                     // Whatever of it was frozen under the Guide has gone with it.
                     self.freezer.thaw();
                     self.launch = None;
-                    self.dashboard.game_ended();
+                    self.hand_back = None;
+                    // A Guide that is open stays open, and closing it lands on Home, whose window is back behind it.
+                    if let (Some(overlay), Some(state)) = (&mut self.overlay, &self.state) {
+                        overlay.give_back_to(window_handle(&state.window));
+                    }
+                    // The library first, with the Play session that has just ended: a game that is to start now
+                    // is named by its place in the library as it is.
                     if let Some(library) = self.store.game_ended() {
                         self.dashboard.set_library(library);
                     }
+                    self.dashboard.game_ended();
                     self.last_frame = Instant::now();
                     self.stale = true;
+                    self.overlay_stale = true;
                 }
             }
         }
 
         let pressed = typed || !presses.is_empty() || !events.is_empty();
-        let focus = self.dashboard.focus_line();
-        let guide = self.dashboard.guide_line();
         for event in events {
             self.dashboard.pad_event(event);
         }
@@ -496,12 +576,19 @@ impl ApplicationHandler for App {
         if self.freezer.is_frozen() && self.dashboard.overlay() != OverlayShows::Guide {
             self.freezer.thaw();
         }
+        let home_hides = self.hand_back();
         let overlay_wants = self.follow_overlay();
         if let Some(launch) = &mut self.launch {
+            // The game has the foreground again, from the Overlay: Home's window goes behind it as it was.
+            if home_hides {
+                launch.show_game(false);
+            }
             // Said once the Overlay has done what was asked of it, so the log's order is what happened.
             if !self.dashboard.launch_screen_showing() {
                 launch.launch_screen_gone();
             }
+            // A game being quit is not held still, so it is free to close; one the user gave up quitting is again.
+            launch.quitting(self.dashboard.quitting());
             let over_game = self.dashboard.guide_over_game();
             launch.guide(over_game);
             if over_game && self.overlay.as_ref().is_some_and(|overlay| overlay.mode() == Some(Mode::Guide)) {
@@ -533,7 +620,8 @@ impl ApplicationHandler for App {
         // Woken sooner by the pad's thread, the art cache and the windows' messages. During a launch, in time for
         // its next look at the desktop.
         let launch = self.launch.as_ref().map(|launch| launch.wait());
-        let wants = [Some(IDLE), launch, overlay_wants, home_wants, release_wants];
+        let timer = self.dashboard.timer().map(Duration::from_secs_f32);
+        let wants = [Some(IDLE), launch, overlay_wants, home_wants, release_wants, timer];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
