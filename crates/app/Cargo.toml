@@ -12,6 +12,7 @@ path = "src/main.rs"
 model = { path = "../model" }
 source-steam = { path = "../source-steam" }
 render = { path = "../render" }
+ui = { path = "../ui" }
 screens = { path = "../screens" }
 input = { path = "../input" }
 shell = { path = "../shell" }
@@ -21,4 +22,4 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = "1"
 
 [dev-dependencies]
-shots = { path = "../shots" }
+image = { version = "0.25", default-features = false, features = ["png"] }
