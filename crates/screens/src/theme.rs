@@ -1,5 +1,5 @@
 //! The theme's colours, type and measures, as the Bundle's XAML has them (docs/spec/).
-use ui::{Color, Font, Rect, TextStyle, Ui};
+use ui::{Color, Font, Gradient, Rect, TextStyle, Ui};
 
 /// The Recent row, the wide tiles and the Groups are authored on a panel 1526 wide and shown 1700 wide: everything
 /// in them (sizes, radii, the focus ring, type) is multiplied by this. The top bar is not.
@@ -47,6 +47,17 @@ pub fn focus_ring(ui: &mut Ui, rect: Rect, scale: f32) {
     // The theme's glow is a band 11 wide centred on the ring's centre line, at half opacity, blurred by 17.
     ui.glow(rect.grow(11.5 * scale), ACCENT_LIGHT.fade(0.5), 17.5 * scale, 11.0 * scale, 17.0 * scale);
     ui.ring(rect.grow(8.0 * scale), ACCENT_LIGHT, 16.0 * scale, 4.0 * scale);
+}
+
+/// The hero scrim, over a game's art on the whole screen: dark at the top for the top bar, clear through the
+/// middle, darker at the foot for the rows (docs/spec/home.md section 8.4).
+pub fn hero_scrim(ui: &mut Ui) {
+    let screen = ui.screen();
+    let stop = |share: f32| screen.h * share;
+    let top = Rect::new(screen.x, 0.0, screen.w, stop(0.22));
+    ui.gradient(top, Color::argb(0x99000000), Color::CLEAR, Gradient::Vertical, 0.0);
+    let foot = Rect::new(screen.x, stop(0.4), screen.w, stop(0.6));
+    ui.gradient(foot, Color::CLEAR, Color::argb(0xD9000000), Gradient::Vertical, 0.0);
 }
 
 /// The focus ring round a circle: 3 wide, `gap` clear of it.

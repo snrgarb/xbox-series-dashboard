@@ -8,6 +8,8 @@ Ticket: [#2](https://github.com/snrgarb/xbox-series-dashboard/issues/2). Status:
 
 Yes, with stock wgpu and no patches: on the VM the composition swap chain is created (on WARP too), the Overlay comes out translucent over the window behind exactly as predicted, the `guide` mode takes the keyboard and gives it back, and the `passive` mode is never activated. This holds for games that run in a window, borderless, or under Fullscreen Optimizations. Not for true exclusive fullscreen, which no separate window can draw over (to be seen on the TV PC). The blending question is settled: the renderer now always blends encoded values on a non-sRGB target, as WPF does, and the DWM composes the stored bytes as they are, so the two agree exactly.
 
+**Built on it:** `shell::Overlay` (#27), which shows the Launch screen and the Guide over a game. It differs from the spike in two ways, both because it shares one wgpu instance and device with Home's window. It makes the composition tree itself and hands wgpu the visual (the spike's `--visual`): `DxgiFromVisual` is an option of the whole instance and would put Home's window on a composition swap chain too. And it is one window that changes between `passive` and `guide` while it runs, by adding and removing `WS_EX_NOACTIVATE` and `WS_EX_TRANSPARENT`; it is made with `WS_EX_LAYERED` and keeps it in both (`DASHBOARD_OVERLAY_NO_LAYERED=1` makes it without).
+
 ## The spike
 
 `spikes/overlay`, binary `overlay-spike`. Windows only; elsewhere it prints "Windows only" and exits 2.

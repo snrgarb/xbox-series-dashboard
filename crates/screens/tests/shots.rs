@@ -118,7 +118,8 @@ impl Stage {
     fn still(&mut self) -> image::RgbaImage {
         self.host.store.set_time(10.0);
         let Self { gpu, host, target, dashboard, .. } = self;
-        let pixels = target.still(gpu, host, |ui| dashboard.draw(ui));
+        // Home's window and the Overlay over it, in one picture.
+        let pixels = target.still(gpu, host, |ui| dashboard.draw_all(ui));
         image::RgbaImage::from_raw(target.size.0, target.size.1, pixels).unwrap()
     }
 
@@ -244,6 +245,131 @@ fn launch_screen() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.launch_started(0);
     stage.check("launch-screen");
+}
+
+/// A game with a cover and no background art: the cover, blurred and darkened.
+#[test]
+fn launch_screen_with_a_cover_alone() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.dashboard.launch_started(3);
+    stage.check("launch-screen-cover");
+}
+
+/// A game with no art at all: black, the Spinner and its name, here long enough to wrap.
+#[test]
+fn launch_screen_with_no_art() {
+    let mut library = screens::fake_library();
+    library.games[0].name = "The Legend of the Seven Lanterns: Definitive Anniversary Edition".into();
+    let mut stage = Stage::new(library, HD);
+    stage.dashboard.launch_started(0);
+    stage.check("launch-screen-no-art");
+}
+
+/// The Guide over a running game, as the Overlay shows it. Offscreen it is over Home's picture; on screen Home's
+/// window is hidden and the dim is over the game.
+#[test]
+fn guide_over_a_game() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.dashboard.launch_started(1);
+    stage.dashboard.game_booted();
+    stage.still();
+    stage.press(&[Button::Guide, Button::Down]);
+    stage.check("guide-over-game");
+}
+
+/// What the Overlay is wanted for through a launch, and when Home's window has nothing to show.
+#[test]
+fn the_overlay_shows_the_launch_screen_then_the_guide_over_the_game() {
+    use screens::OverlayShows;
+    let mut stage = Stage::new(screens::fake_library(), HD);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
+    // The Guide over Home is in Home's window, not on the Overlay.
+    stage.press(&[Button::Guide]);
+    stage.still();
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
+    assert!(!stage.dashboard.guide_over_game());
+    stage.press(&[Button::B]);
+    stage.still();
+
+    // The Launch screen: passive, and Home is covered once it has faded in.
+    stage.dashboard.launch_started(2);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Passive);
+    assert!(!stage.dashboard.home_covered(), "Home shows until the Launch screen has faded in over it");
+    stage.still();
+    assert!(stage.dashboard.home_covered());
+    assert!(stage.dashboard.launch_screen_showing());
+
+    // Booted: it fades away, and then the Overlay has nothing to show.
+    stage.dashboard.game_booted();
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Passive, "still fading");
+    stage.still();
+    assert!(!stage.dashboard.launch_screen_showing());
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
+    assert!(stage.dashboard.home_covered(), "the game is in front");
+
+    // The Guide over the game takes input; closed, it slides away passive, then the Overlay is done.
+    stage.press(&[Button::Guide]);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Guide);
+    assert!(stage.dashboard.guide_over_game());
+    stage.still();
+    stage.press(&[Button::B]);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Passive);
+    assert!(!stage.dashboard.guide_over_game());
+    stage.still();
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
+
+    stage.dashboard.game_ended();
+    assert!(!stage.dashboard.home_covered());
+}
+
+/// Where the Overlay can't be made, nothing that needs it is shown, and nothing waits for it.
+#[test]
+fn with_no_overlay_there_is_no_launch_screen_and_no_guide_over_a_game() {
+    use screens::OverlayShows;
+    let mut stage = Stage::new(screens::fake_library(), HD);
+    stage.dashboard.set_overlay(false);
+    stage.dashboard.launch_started(2);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
+    assert!(!stage.dashboard.launch_screen_showing());
+    assert!(stage.dashboard.home_covered());
+    stage.dashboard.game_booted();
+    stage.press(&[Button::Guide]);
+    assert!(!stage.dashboard.guide_open());
+    stage.dashboard.game_ended();
+    stage.press(&[Button::Guide]);
+    assert!(stage.dashboard.guide_open(), "at Home the Guide is in Home's window");
+}
+
+/// Losing the Overlay mid-launch drops what it showed.
+#[test]
+fn an_overlay_lost_takes_what_it_showed_with_it() {
+    use screens::OverlayShows;
+    let mut stage = Stage::new(screens::fake_library(), HD);
+    stage.dashboard.launch_started(2);
+    stage.dashboard.game_booted();
+    stage.press(&[Button::Guide]);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Guide);
+    stage.dashboard.set_overlay(false);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
+    assert!(!stage.dashboard.guide_open() && !stage.dashboard.launch_screen_showing());
+}
+
+/// The Launch screen is the whole screen's: nothing of Home shows through it, corner to corner.
+#[test]
+fn the_launch_screen_with_no_art_is_black_to_the_corners() {
+    let mut stage = Stage::new(screens::fake_library(), HD);
+    stage.dashboard.launch_started(0);
+    let image = stage.still();
+    for (x, y) in [(0, 0), (1919, 0), (0, 1079), (1919, 1079), (400, 300), (1500, 900)] {
+        assert_eq!(image.get_pixel(x, y).0, [0, 0, 0, 255], "at ({x}, {y})");
+    }
+    // The Spinner is there: something white on its ring, round the screen's middle.
+    let on_ring = (0..360).any(|degrees| {
+        let (sin, cos) = (degrees as f32).to_radians().sin_cos();
+        let pixel = image.get_pixel((960.0 + 29.4 * sin) as u32, (540.0 - 29.4 * cos) as u32).0;
+        pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200
+    });
+    assert!(on_ring, "no white on the Spinner's ring");
 }
 
 /// The focused tile's title band is the theme's 90% black: over a white-edged cover its top edge is nearly black.

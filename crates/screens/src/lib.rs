@@ -1,9 +1,14 @@
 //! The Dashboard's core: every screen and what is open, with no window and nothing of Windows in it. The executable
 //! feeds it the pad's presses and what the shell saw happen (a game started, it ended), draws it each frame, and
 //! carries out the effects it asks for. Tests do the same with no window at all.
+//!
+//! It declares two pictures: Home's window's (`draw`) and the Overlay's (`draw_overlay`), the window above every
+//! other that shows the Launch screen and, over a running game, the Guide. `overlay` says what the Overlay is wanted
+//! for, which the executable follows by showing and hiding it.
 pub mod guide;
 pub mod home;
 pub mod launch;
+pub mod spinner;
 pub mod theme;
 
 use model::Library;
@@ -26,6 +31,18 @@ pub enum Effect {
     Exit,
 }
 
+/// What the Overlay is wanted for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OverlayShows {
+    /// Nothing: it is hidden, and nothing is drawn on it.
+    Nothing,
+    /// Something to look at that takes no input, so whatever is in front keeps the foreground: the Launch screen,
+    /// or the Guide sliding away.
+    Passive,
+    /// The Guide over a running game: it takes the foreground from the game.
+    Guide,
+}
+
 pub struct Dashboard {
     library: Library,
     user: String,
@@ -35,7 +52,11 @@ pub struct Dashboard {
     pad: bool,
     home: Home,
     guide: Guide,
+    /// Whether the Guide, as it was last opened, is over a game: drawn on the Overlay, not in Home's window.
+    guide_overlaid: bool,
     launch: LaunchScreen,
+    /// Whether there is an Overlay to draw on.
+    has_overlay: bool,
     /// The game being launched or running, by its place in the library.
     playing: Option<usize>,
     effects: Vec<Effect>,
@@ -51,7 +72,9 @@ impl Dashboard {
             pad: false,
             home: Home::default(),
             guide: Guide::default(),
+            guide_overlaid: false,
             launch: LaunchScreen::default(),
+            has_overlay: true,
             playing: None,
             effects: Vec::new(),
         }
@@ -146,7 +169,12 @@ impl Dashboard {
     }
 
     pub fn open_guide(&mut self) {
+        // Over a game the Guide is on the Overlay; with no Overlay there is nowhere to show it.
+        if self.playing.is_some() && !self.has_overlay {
+            return;
+        }
         self.guide.open(&self.library, self.playing);
+        self.guide_overlaid = self.playing.is_some();
     }
 
     pub fn close_guide(&mut self) {
@@ -160,20 +188,60 @@ impl Dashboard {
         self.guide.is_open()
     }
 
-    /// How wide the Guide's panel was when last drawn, from the screen's left edge, in design units.
-    pub fn guide_panel_width(&self) -> f32 {
-        self.guide.panel_width()
+    /// Whether the Guide is open over a game.
+    pub fn guide_over_game(&self) -> bool {
+        self.guide_overlaid && self.guide.is_open()
+    }
+
+    /// Says whether there is an Overlay to draw on, as there is unless told otherwise. Without one no Launch screen
+    /// shows and the Guide does not open over a game: neither can be drawn in Home's window, which is behind the
+    /// game.
+    pub fn set_overlay(&mut self, there: bool) {
+        self.has_overlay = there;
+        if !there {
+            // Whatever it was showing is gone with it.
+            self.launch = LaunchScreen::default();
+            if self.guide_overlaid {
+                self.guide = Guide::default();
+                self.guide_overlaid = false;
+            }
+        }
+    }
+
+    /// What the Overlay is wanted for now.
+    pub fn overlay(&self) -> OverlayShows {
+        let guide = self.guide_overlaid && self.guide.showing();
+        if guide && self.guide.is_open() {
+            OverlayShows::Guide
+        } else if guide || self.launch.showing() {
+            OverlayShows::Passive
+        } else {
+            OverlayShows::Nothing
+        }
+    }
+
+    /// Whether the Launch screen is up, or still fading away.
+    pub fn launch_screen_showing(&self) -> bool {
+        self.launch.showing()
+    }
+
+    /// Whether Home's window has nothing to show: a game is running in front of it, or its Launch screen has faded
+    /// in over it.
+    pub fn home_covered(&self) -> bool {
+        self.playing.is_some() && (!self.launch.up() || self.launch.covers())
     }
 
     /// The shell has asked the store for the game: its Launch screen comes up.
     pub fn launch_started(&mut self, game: usize) {
         if let Some(found) = self.library.games.get(game) {
-            self.launch.show(found);
+            if self.has_overlay {
+                self.launch.show(found);
+            }
             self.playing = Some(game);
         }
     }
 
-    /// The game's own window is up: the Launch screen goes.
+    /// The Launch screen goes: the game's own window is up, or something else wants the screen.
     pub fn game_booted(&mut self) {
         self.launch.hide();
     }
@@ -200,12 +268,29 @@ impl Dashboard {
         self.playing
     }
 
+    /// Home's window: the page, and the Guide over it.
     pub fn draw(&mut self, ui: &mut Ui) {
         let clock = self.clock.clone().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string());
         let status = home::Status { user: &self.user, clock: &clock, pad: self.pad };
         self.home.draw(ui, &self.library, &status);
+        if !self.guide_overlaid {
+            self.guide.draw(ui, &self.library, &self.user);
+        }
+    }
+
+    /// The Overlay: the Launch screen, and the Guide over a game. Drawn over nothing, so where it draws nothing
+    /// the game shows.
+    pub fn draw_overlay(&mut self, ui: &mut Ui) {
         self.launch.draw(ui);
-        self.guide.draw(ui, &self.library, &self.user);
+        if self.guide_overlaid {
+            self.guide.draw(ui, &self.library, &self.user);
+        }
+    }
+
+    /// Both in one frame, the Overlay's picture over Home's window's: what an offscreen frame shows.
+    pub fn draw_all(&mut self, ui: &mut Ui) {
+        self.draw(ui);
+        self.draw_overlay(ui);
     }
 }
 

@@ -1,13 +1,15 @@
-//! The window: borderless fullscreen on the primary monitor, or 1280x720 with `--windowed`. It feeds the Dashboard
-//! the pad and the keyboard, draws it when something has changed, and carries out what it asks of the shell.
+//! The windows: Home's, borderless fullscreen on the primary monitor or 1280x720 with `--windowed`, and the Overlay
+//! above every other window, which shows what the Dashboard wants over a game (docs/ui.md). This feeds the Dashboard
+//! the pad and the keyboard, draws each window when what it shows has changed, and carries out what the Dashboard
+//! asks of the shell.
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use input::Pad;
 use model::Library;
 use render::gpu::{self, Gpu};
-use screens::{Dashboard, Effect};
-use shell::{Launch, Showing};
+use screens::{Dashboard, Effect, OverlayShows};
+use shell::{Key as OverlayKey, Launch, Mode, Overlay, Step};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -21,10 +23,8 @@ use crate::{since_start, Args};
 
 /// How long the loop sleeps with nothing to draw: the pad's thread, the art cache and the window wake it sooner.
 const IDLE: Duration = Duration::from_millis(250);
-/// How often a launch is looked at: the game's window appearing, booting, ending.
-const LAUNCH_EVERY: Duration = Duration::from_millis(8);
-/// The same behind a running game.
-const LAUNCH_EVERY_HIDDEN: Duration = Duration::from_millis(30);
+/// How soon the Overlay is tried again when it had no frame to draw on.
+const OVERLAY_RETRY: Duration = Duration::from_millis(16);
 
 struct State {
     host: Host,
@@ -41,6 +41,15 @@ struct App {
     pad: Pad,
     /// Keys pressed since the pad was last looked at, as the buttons they stand for.
     keys: Vec<Press>,
+    /// The Overlay, made once Home's first frame is out. None before, anywhere but Windows, and where it could not
+    /// be made. Before `state`, so it is dropped before the device it draws with.
+    overlay: Option<Overlay>,
+    overlay_tried: bool,
+    /// The Overlay's own animated values: its frames are drawn by Home's renderer from Home's art.
+    overlay_store: ui::Store,
+    overlay_last_frame: Instant,
+    /// The Overlay wants a frame whatever else: it was just shown, a button was pressed, art came in.
+    overlay_stale: bool,
     state: Option<State>,
     proxy: EventLoopProxy<()>,
     last_frame: Instant,
@@ -53,6 +62,7 @@ struct App {
 }
 
 pub fn run(args: &Args, library: Library, store: Store) {
+    shell::log_wgpu();
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(args.clock.clone());
@@ -69,6 +79,11 @@ pub fn run(args: &Args, library: Library, store: Store) {
             }
         }),
         keys: Vec::new(),
+        overlay: None,
+        overlay_tried: false,
+        overlay_store: ui::Store::default(),
+        overlay_last_frame: Instant::now(),
+        overlay_stale: false,
         state: None,
         proxy: event_loop.create_proxy(),
         last_frame: Instant::now(),
@@ -81,21 +96,90 @@ pub fn run(args: &Args, library: Library, store: Store) {
 }
 
 impl App {
+    /// Makes the Overlay, the first time it is called. Where there can't be one the Dashboard is told, and shows
+    /// nothing that would need it.
+    fn make_overlay(&mut self) {
+        let Some(state) = &self.state else { return };
+        if self.overlay_tried {
+            return;
+        }
+        self.overlay_tried = true;
+        self.overlay = Overlay::new(&state.gpu, state.config.format);
+        if self.overlay.is_none() {
+            self.dashboard.set_overlay(false);
+            if cfg!(windows) {
+                eprintln!("overlay: none: games start with no Launch screen and the Guide opens only at Home");
+            }
+        }
+    }
+
     /// Starts a game through Steam, the Dashboard showing its Launch screen.
     fn launch(&mut self, game: usize) {
-        let Some(state) = &self.state else { return };
         if self.launch.is_some() {
             return;
         }
+        self.make_overlay();
+        let Some(state) = &self.state else { return };
         let Some(found) = self.dashboard.library().games.get(game) else { return };
         let Some(dir) = &found.install_dir else {
             eprintln!("launch: {} isn't installed", found.name);
             return;
         };
-        if let Some(launch) = Launch::start(found.appid, &found.name, dir, window_handle(&state.window)) {
+        let home = window_handle(&state.window);
+        if let Some(launch) = Launch::start(found.appid, &found.name, dir, home, self.overlay.is_some()) {
             self.launch = Some(launch);
             self.dashboard.launch_started(game);
         }
+    }
+
+    /// Shows, hides and draws the Overlay as the Dashboard wants it. Returns how soon it wants another turn, None
+    /// when it has nothing more to draw.
+    fn follow_overlay(&mut self) -> Option<Duration> {
+        let (Some(overlay), Some(state)) = (&mut self.overlay, &mut self.state) else { return None };
+        let wanted = |dashboard: &Dashboard| match dashboard.overlay() {
+            OverlayShows::Nothing => None,
+            OverlayShows::Passive => Some(Mode::Passive),
+            OverlayShows::Guide => Some(Mode::Guide),
+        };
+        let mode = wanted(&self.dashboard);
+        if mode != overlay.mode() {
+            if overlay.mode().is_none() {
+                // Shown afresh: whatever was moving when it was last hidden starts again from its start.
+                self.overlay_store.clear();
+                self.overlay_last_frame = Instant::now();
+            }
+            overlay.set(mode);
+            self.overlay_stale = true;
+        }
+        mode?;
+        let moving = self.overlay_store.animating() || state.host.art.pending() > 0;
+        if !self.overlay_stale && !moving {
+            return None;
+        }
+        let Some(frame) = overlay.frame(&state.gpu) else {
+            if overlay.lost() {
+                // It said why. From here on the Dashboard shows nothing that needs it.
+                self.overlay = None;
+                self.dashboard.set_overlay(false);
+                return None;
+            }
+            return Some(OVERLAY_RETRY);
+        };
+        let now = Instant::now();
+        let dt = (now - self.overlay_last_frame).as_secs_f32().min(0.1);
+        self.overlay_last_frame = now;
+        self.overlay_stale = false;
+        let view = frame.texture.create_view(&Default::default());
+        let (gpu, size, dashboard) = (&state.gpu, overlay.size(), &mut self.dashboard);
+        // Cleared to nothing: where the Dashboard draws nothing, the game shows.
+        state.host.with_store(&mut self.overlay_store, |host| {
+            host.draw(gpu, &view, size, dt, wgpu::Color::TRANSPARENT, |ui| dashboard.draw_overlay(ui))
+        });
+        overlay.present(gpu, frame);
+        // At once if something is moving, or if that frame was the last of something: the Overlay is then hidden
+        // without waiting out the loop's sleep.
+        let moving = self.overlay_store.animating() || state.host.art.pending() > 0;
+        (moving || wanted(&self.dashboard) != mode).then_some(Duration::ZERO)
     }
 
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
@@ -107,13 +191,9 @@ impl App {
                         launch.quit_game();
                     }
                 }
-                // Over a game, the window hides at once and the game gets the foreground back.
-                Effect::GuideClosed => {
-                    if let (Some(launch), Some(state)) = (&mut self.launch, &mut self.state) {
-                        launch.close_guide();
-                        state.host.store.clear();
-                    }
-                }
+                // Over a game the Overlay follows what the Dashboard shows: it gives the foreground back as the
+                // Guide closes, and hides once the panel has slid away.
+                Effect::GuideClosed => {}
                 Effect::Exit => event_loop.exit(),
             }
         }
@@ -157,49 +237,53 @@ impl ApplicationHandler for App {
 
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
         self.stale = true;
+        self.overlay_stale = true;
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(state) = &mut self.state else { return };
+        if self.state.is_none() {
+            return;
+        }
+        // After Home's first frame, so the Overlay costs the start-up nothing.
+        if self.presented {
+            self.make_overlay();
+        }
         let mut presses = self.pad.poll();
         presses.append(&mut self.keys);
         if let Some(library) = self.store.changed() {
             self.dashboard.set_library(library);
             self.stale = true;
+            self.overlay_stale = true;
         }
-        let mut wait = if self.launch.is_some() { LAUNCH_EVERY } else { IDLE };
-        let mut hidden = false;
+        // The keyboard is the Overlay's while it is the Guide over a game.
+        if let Some(overlay) = &mut self.overlay {
+            presses.extend(overlay.take_keys().into_iter().map(|(key, repeat)| {
+                let button = match key {
+                    OverlayKey::Left => Button::Left,
+                    OverlayKey::Right => Button::Right,
+                    OverlayKey::Up => Button::Up,
+                    OverlayKey::Down => Button::Down,
+                    OverlayKey::Enter => Button::A,
+                    OverlayKey::Back | OverlayKey::Escape => Button::B,
+                };
+                Press { button, repeat }
+            }));
+        }
 
         if let Some(launch) = &mut self.launch {
-            match launch.tick() {
-                // The Launch screen, or its fade: keep drawing.
-                Showing::LaunchScreen => self.stale = true,
-                // Nothing to draw behind a running game: only the Guide button does anything.
-                Showing::Nothing => {
+            match launch.tick(self.overlay.as_ref()) {
+                Step::Same => {}
+                Step::LaunchScreenGoes => {
                     self.dashboard.game_booted();
                     let playing = self.dashboard.playing();
                     self.store.game_booted(playing.and_then(|game| self.dashboard.library().games.get(game)));
-                    presses.retain(|p| p.button == Button::Guide && !p.repeat);
-                    if presses.is_empty() {
-                        hidden = true;
-                        wait = LAUNCH_EVERY_HIDDEN;
-                    } else {
-                        launch.open_guide();
-                        self.last_frame = Instant::now();
-                    }
                 }
-                Showing::Guide => {
-                    let size = (state.config.width, state.config.height);
-                    let panel = self.dashboard.guide_panel_width() * ui::scale_for(size);
-                    launch.clip_to_guide(panel.round() as u32);
-                }
-                Showing::Home => {
+                Step::Ended => {
                     self.launch = None;
                     self.dashboard.game_ended();
                     if let Some(library) = self.store.game_ended() {
                         self.dashboard.set_library(library);
                     }
-                    state.host.store.clear();
                     self.last_frame = Instant::now();
                     self.stale = true;
                 }
@@ -210,14 +294,28 @@ impl ApplicationHandler for App {
         for press in presses {
             self.dashboard.press(press);
         }
+        self.overlay_stale |= pressed;
         self.carry_out(event_loop);
+        let overlay_wants = self.follow_overlay();
+        if let Some(launch) = &mut self.launch {
+            // Said once the Overlay has done what was asked of it, so the log's order is what happened.
+            if !self.dashboard.launch_screen_showing() {
+                launch.launch_screen_gone();
+            }
+            launch.guide(self.dashboard.guide_over_game());
+        }
 
         let Some(state) = &self.state else { return };
-        // Drawn when something changed or is moving, and once a second for the clock.
+        // Home's window is drawn when something changed or is moving, and once a second for the clock; not at all
+        // behind a game or under its Launch screen, where it keeps the last frame it showed.
         let due = self.last_frame.elapsed() >= Duration::from_secs(1);
-        if !hidden && (self.stale || pressed || due || state.host.animating()) {
+        if !self.dashboard.home_covered() && (self.stale || pressed || due || state.host.animating()) {
             state.window.request_redraw();
         }
+        // Woken sooner by the pad's thread, the art cache and the windows' messages. During a launch, in time for
+        // its next look at the desktop.
+        let launch = self.launch.as_ref().map(|launch| launch.wait());
+        let wait = [Some(IDLE), launch, overlay_wants].into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
 

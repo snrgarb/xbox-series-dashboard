@@ -1,4 +1,5 @@
-//! `--screenshot`: the Dashboard drawn to a texture with no window, read back and saved as a PNG.
+//! `--screenshot`: the Dashboard drawn to a texture with no window, read back and saved as a PNG. What the Overlay
+//! would show (`--launch-screen`, the Guide over a game) is drawn over Home's window's picture in the same frame.
 use model::Library;
 use render::gpu;
 use render::offscreen::{wait, FORMAT};
@@ -71,7 +72,7 @@ pub fn run(args: &Args, library: Library) {
     }
     // Endless animations stand where they do at this moment, the same every run.
     host.store.set_time(10.0);
-    let pixels = target.still(&gpu, &mut host, |ui| dashboard.draw(ui));
+    let pixels = target.still(&gpu, &mut host, |ui| dashboard.draw_all(ui));
     image::save_buffer(out, &pixels, size.0, size.1, image::ColorType::Rgba8)
         .unwrap_or_else(|e| fail(&format!("{}: {e}", out.display())));
     eprintln!("wrote {} ({}x{}) at {:.1} ms", out.display(), size.0, size.1, since_start());

@@ -15,11 +15,11 @@ The Dashboard is a fixed set of 10-foot screens steered by a pad. Its navigation
 | Crate | Holds |
 |---|---|
 | `render` | The GPU: a `Frame` of `Layer`s, each quads then text. Textures. Fonts and shaping. Offscreen read-back. |
-| `ui` | `Ui` (drawing in design units), `Store` (animated values), `ArtCache`, `Button`/`Press`, `Host` (renderer + cache + store for one window) and `Offscreen`. |
+| `ui` | `Ui` (drawing in design units), `Store` (animated values), `ArtCache`, `Button`/`Press`, `Host` (renderer + cache + store) and `Offscreen`. |
 | `screens` | The screens and the `Dashboard` core that owns them. The theme's colours, type and measures (`theme`). |
 | `input` | The pad through XInput, turned into `Press`es (with direction repeat). |
-| `shell` | Windows itself. |
-| `app` | The window and the wiring. |
+| `shell` | Windows itself: the Overlay window, and launching a game and following it. |
+| `app` | The two windows and the wiring. |
 
 ## Coordinates
 
@@ -37,7 +37,7 @@ Within a layer, quads are drawn in order and the layer's text is drawn over all 
 
 ## Drawing
 
-- `fill`, `gradient` (vertical, horizontal, diagonal, radial), `ring`, `glow` (a soft band): rounded rectangles, antialiased by a signed-distance shader.
+- `fill`, `gradient` (vertical, horizontal, diagonal, radial), `ring`, `glow` (a soft band): rounded rectangles, antialiased by a signed-distance shader. `arc` is part of a circle's ring with round ends, which is what the Spinner is made of (`screens::spinner`).
 - `image` / `art`: a texture filling a box, cropped on the GPU to the box's shape (`Crop::Top` is the theme's rule for covers and backgrounds).
 - `label*` for one line, `paragraph` for text in a box (wrapped, a maximum number of lines, an ellipsis, never drawn outside the box), `icon` for a Segoe Fluent Icons glyph.
 - Text styles are consts in `screens::theme` (`BODY` is Segoe UI 26, the Xbox accessibility floor).
@@ -58,7 +58,7 @@ let share = ui.approach(("recent tile", i), if focused { 1.0 } else { 0.0 }, 0.0
 - `tween(id, target, seconds, ease)`: when the target changes, the value goes there from wherever it is, as WPF's to-only animations do. The first time an id is seen it is at its target; `tween_from` starts it somewhere else (a fade-in).
 - `slide` / `slide_from`: the same for movement, which is instant under Settings' **Reduce motion**; fades stay.
 - `approach(id, target, tau)`: exponential, for the Recent row's tile growth (63% of the way every 50 ms).
-- `time()`: for what turns endlessly (the Spinner, the swirl).
+- `time()`: for what turns endlessly (the Spinner, the swirl). Reduce motion leaves these turning.
 - A value nothing asked for this frame is forgotten, so something that leaves and comes back starts afresh.
 - `Store::animating()` says whether another frame is wanted; the window draws only when something changed, is moving, or the clock's second is up.
 - `set_settle(true)` ends every animation at once: a screenshot is of the screen at rest.
@@ -73,13 +73,40 @@ A held direction repeats (`Press::repeat`); a screen ignores a repeat for anythi
 
 ## Screens and what is over what
 
-`Dashboard` holds the screens and decides who gets a press, top down: the Guide if open, nothing while a Launch screen is up, else the page. It draws bottom up: the page, the Launch screen, the Guide, each on its own layer. As pages arrive in M3 the page becomes a stack (`Vec` of page screens, the top one taking input, each keeping its state while covered); the rule is the same.
+`Dashboard` holds the screens and decides who gets a press, top down: the Guide if open, nothing while a Launch screen is up, else the page. As pages arrive in M3 the page becomes a stack (`Vec` of page screens, the top one taking input, each keeping its state while covered); the rule is the same.
 
-A press can ask the shell for something, returned as an `Effect` (`Launch(game)`, `QuitGame`, `GuideClosed`, `Exit`) that the window carries out; the shell reports back through methods (`launch_started`, `game_booted`, `game_ended`). The core never calls Windows, so the same core runs under a test.
+It declares **two pictures**, one for each window (next section):
+
+- `draw(ui)` is Home's window: the page, and the Guide when it was opened over Home.
+- `draw_overlay(ui)` is the Overlay: the Launch screen, and the Guide when it was opened over a running game. It is drawn over nothing, so wherever it draws nothing the game shows, and its dim is a dim over the game.
+- `overlay()` says what the Overlay is wanted for: `Nothing` (hidden), `Passive` (something to look at that takes no input: the Launch screen, the Guide sliding away) or `Guide` (it takes the foreground). The answer comes from the screens' own state, which is why each keeps how much of it showed when last drawn (`LaunchScreen::showing`, `Guide::showing`): the Overlay stays up until the fade or the slide has ended.
+- `home_covered()` says Home's window has nothing to show: a game is in front of it, or its Launch screen has faded in over it.
+- `draw_all(ui)` is both in one frame, the Overlay's over Home's: what `--screenshot` and the screenshot tests draw.
+
+A press can ask the shell for something, returned as an `Effect` (`Launch(game)`, `QuitGame`, `GuideClosed`, `Exit`) that the window carries out; the shell reports back through methods (`launch_started`, `game_booted`, `game_ended`). The core never calls Windows, so the same core runs under a test. Where there is no Overlay (`set_overlay(false)`: it could not be made) the core shows nothing that needs one: no Launch screen, and no Guide over a game.
 
 The games the screens show are a **snapshot** of the library database (`model::Library`, read by the `library` crate): the core never sees the database. When the database changes (Steam read in the background after the first frame, a Play session ending) the window hands the core a new snapshot with `set_library`, which keeps focus on the game it was on. A game is known across snapshots by its `id`; its place in the list is good for one snapshot only.
 
-The Guide, Toasts and the Launch screen will be drawn into their own windows (the Overlay, M2) by the same `Ui` and the same core; offscreen, everything is composed into one frame.
+## Two windows
+
+Home's window is winit's: borderless, opaque, an ordinary swap chain. It is never made topmost, layered or clipped (that was the proof of concept's Launch screen, and #23). The **Overlay** (`shell::Overlay`) is a second window above every other, a running game's included, drawn with premultiplied alpha through a composition swap chain; `docs/research/overlay-window.md` has why it is made the way it is. Toasts will be drawn on it too.
+
+| | Home's window | The Overlay |
+|---|---|---|
+| Shows | `Dashboard::draw` | `Dashboard::draw_overlay` |
+| Shown | Always, but hidden behind a running game | Only while `Dashboard::overlay()` wants it |
+| Input | The keyboard, while it has the foreground | Passive: none, clicked through, never activated. Guide: it takes the foreground from the game (an Alt tap, then `SetForegroundWindow`) and gives it back when the Guide closes |
+| Cleared to | Black | Nothing (transparent) |
+
+The pad is read through XInput whichever window is in front, so the Guide button works over a game.
+
+**One GPU, one renderer, one art cache.** Both windows are surfaces of the same `wgpu` instance and device, in the same format, and are drawn by the same `Host`: its renderer, its fonts and glyphs, and its `ArtCache`, so a piece of art is decoded once and is one texture whichever window shows it (the Launch screen's art is the art Home already has up behind the focused game). What the Overlay has of its own is a `Store`: animated values are forgotten when a frame doesn't ask for them, so two pictures can't share one. `Host::with_store` draws a frame with another store in place of the Host's.
+
+The Overlay's composition tree (device, target, visual) is made by `shell`, and wgpu is handed the visual. wgpu can make it itself, but only for every window of an instance at once, which would change Home's swap chain too.
+
+**Who decides what.** The `Dashboard` decides what each window shows and whether the Overlay is wanted. `app` follows it every turn of the loop: shows, hides or changes the Overlay's mode, draws it while something on it is moving, and draws Home's window unless it is covered. `shell::Launch` follows the game (asked of Steam, its window up, booted, a window that wants the user, given up, ended), says when the Launch screen should go, hides Home's window as it does and brings it back when the game ends. Hidden, the Overlay is out of the compositor's scene and nothing is drawn or presented on it.
+
+Anywhere but Windows there is no Overlay (`Overlay::new` makes none).
 
 ## Art
 
@@ -87,4 +114,4 @@ The Guide, Toasts and the Launch screen will be drawn into their own windows (th
 
 ## Tests
 
-Every screen has screenshot tests in `crates/screens/tests/shots.rs`: build a `Dashboard` on a fake library (some games given generated, banded art so a crop or stretch shows), press buttons, and compare the frame at rest with a committed reference (`crates/shots`), at 1080p and at other shapes. They run on lavapipe in CI. Behaviour (where focus goes, what effects a press asks for) is asserted in the same file with no picture. `SHOTS=bless cargo test -p screens` accepts what is drawn now; **look at the image before blessing it**.
+Every screen has screenshot tests in `crates/screens/tests/shots.rs`: build a `Dashboard` on a fake library (some games given generated, banded art so a crop or stretch shows), press buttons, and compare the frame at rest with a committed reference (`crates/shots`), at 1080p and at other shapes. The frame is `draw_all`: the Overlay's picture over Home's window's, so the Guide over a game is seen over Home there, where on screen it is over the game. They run on lavapipe in CI. Behaviour (where focus goes, what effects a press asks for) is asserted in the same file with no picture. `SHOTS=bless cargo test -p screens` accepts what is drawn now; **look at the image before blessing it**.
