@@ -8,9 +8,10 @@
 //! **Adding a page:** a module with a struct that implements [`Page`], a variant of [`Open`] that carries how it is
 //! opened, and that variant's line in [`Open::page`]. Nothing else here changes, and nothing in `Dashboard`.
 use model::Library;
-use ui::{Press, Ui};
+use ui::{Button, Press, Repeat, Ui};
 
 use crate::hint_bar::{self, Hint};
+use crate::keyboard::{self, Typed};
 use crate::{my_games, search, settings, Effect};
 
 /// What a page is told of the world each time it is pressed or drawn. It keeps none of it.
@@ -29,15 +30,26 @@ pub enum Open {
     MyGames(my_games::Entry),
     Search,
     Settings(settings::Entry),
+    /// Text entry over the page that asks for it (`keyboard::text_entry`), which hears of it through
+    /// [`Page::entry`].
+    TextEntry(keyboard::Entry),
+    /// The stand-in page that opens text entry until Full library and Settings do (`keyboard::stand_in`).
+    KeyboardStandIn,
 }
 
 impl Open {
-    /// The page, made anew: a page remembers nothing from the last time it was up.
-    fn page(self) -> Box<dyn Page> {
+    /// The page, made anew: a page remembers nothing from the last time it was up. `under` is the page it opens
+    /// over, if it is opened over one.
+    fn page(self, under: Option<&dyn Page>) -> Box<dyn Page> {
         match self {
             Open::MyGames(entry) => Box::new(my_games::MyGames::open(entry)),
             Open::Search => Box::new(search::Search::open()),
             Open::Settings(entry) => Box::new(settings::Settings::open(entry)),
+            Open::TextEntry(entry) => {
+                let text = under.map(|page| page.entry_text()).unwrap_or_default();
+                Box::new(keyboard::TextEntry::open(entry, text))
+            }
+            Open::KeyboardStandIn => Box::new(keyboard::stand_in::StandIn::open()),
         }
     }
 }
@@ -81,6 +93,42 @@ pub trait Page {
     fn covers(&self) -> bool {
         true
     }
+
+    /// What the focus log says of the page beyond where its focus is, after it: what a press can change without
+    /// moving focus, such as the text typed. A change here alone is not a move, and makes no sound.
+    fn state(&self) -> String {
+        String::new()
+    }
+
+    /// A held direction's pace while the page has the pad.
+    fn repeat(&self) -> Repeat {
+        Repeat::default()
+    }
+
+    /// What a physical keyboard typed that is text's (letters, Space, Backspace), while the page is on top. True
+    /// if the page takes text now; false, and Backspace is B as it is everywhere else and the rest is nothing.
+    fn typed(&mut self, _typed: Typed, _around: Around) -> bool {
+        false
+    }
+
+    /// A button of the pad that `press` was just given is down (`down`), or was let go: for what is drawn only
+    /// while a button is held, as a key of the Console keyboard is. A keyboard's key and a test's `press` tell
+    /// of neither.
+    fn pad(&mut self, _button: Button, _down: bool) {}
+
+    /// The text that text entry starts from when this page opens it (`Open::TextEntry`), with focus where it is.
+    fn entry_text(&self) -> String {
+        String::new()
+    }
+
+    /// What text entry over this page has to say: the text as it changes, kept, or dropped
+    /// (`keyboard::text_entry`). Told in the press that did it, before text entry goes.
+    fn entry(&mut self, _event: keyboard::Event, _around: Around) {}
+
+    /// Text entry's own: what it has for the page under it since it was last asked.
+    fn says(&mut self) -> Option<keyboard::Event> {
+        None
+    }
 }
 
 /// The pages that are up, the last on top. Home is under them all and is not one of them.
@@ -108,12 +156,13 @@ impl Stack {
     /// games & apps, Search and Settings are never up together and B on it goes to Home.
     pub fn open(&mut self, open: Open) {
         self.pages.clear();
-        self.pages.push(open.page());
+        self.pages.push(open.page(None));
     }
 
     /// Opens a page the top page asked for, over it.
     pub fn open_over(&mut self, open: Open) {
-        self.pages.push(open.page());
+        let page = open.page(self.top());
+        self.pages.push(page);
     }
 
     /// The top page goes.
@@ -130,7 +179,37 @@ impl Stack {
 
     /// Gives the press to the top page.
     pub fn press(&mut self, press: Press, around: Around) -> Option<PageAction> {
-        self.pages.last_mut()?.press(press, around)
+        let action = self.pages.last_mut()?.press(press, around);
+        self.relay(around);
+        action
+    }
+
+    /// Gives the top page what a physical keyboard typed. False if it takes no text, or no page is up.
+    pub fn typed(&mut self, typed: Typed, around: Around) -> bool {
+        let taken = self.pages.last_mut().is_some_and(|page| page.typed(typed, around));
+        self.relay(around);
+        taken
+    }
+
+    /// Tells the top page a button of the pad it was given is down, or was let go.
+    pub fn pad(&mut self, button: Button, down: bool) {
+        if let Some(page) = self.pages.last_mut() {
+            page.pad(button, down);
+        }
+    }
+
+    /// A held direction's pace on the top page, if one is up.
+    pub fn repeat(&self) -> Option<Repeat> {
+        self.top().map(|page| page.repeat())
+    }
+
+    /// What the top page has for the page under it (text entry's text) goes to that page.
+    fn relay(&mut self, around: Around) {
+        if let Some((top, under)) = self.pages.split_last_mut() {
+            if let (Some(event), Some(under)) = (top.says(), under.last_mut()) {
+                under.entry(event, around);
+            }
+        }
     }
 
     /// Whether a page fills the screen: Home is not drawn, its top bar neither.

@@ -36,6 +36,8 @@ pub struct Args {
     log_focus: bool,
     /// Turning off, restarting and sleeping are said in the log and not done.
     dry_power: bool,
+    /// A page to start on, in place of Home: one that nothing on Home opens yet.
+    page: Option<screens::pages::Open>,
 }
 
 impl Args {
@@ -55,7 +57,16 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
-                 [--data-dir <dir>]";
+                 [--data-dir <dir>]
+       either with [--page keyboard]: start on the page that opens text entry, until Full library and Settings do";
+
+/// A page by its name, for `--page`.
+fn page(name: &str) -> Result<screens::pages::Open, String> {
+    match name {
+        "keyboard" => Ok(screens::pages::Open::KeyboardStandIn),
+        _ => Err(format!("bad --page: no page {name}")),
+    }
+}
 
 /// A button by its name on the pad, for `--press`.
 fn button(name: &str) -> Result<ui::Button, String> {
@@ -73,6 +84,9 @@ fn button(name: &str) -> Result<ui::Button, String> {
         "view" => View,
         "lb" => LeftBumper,
         "rb" => RightBumper,
+        "lt" => LeftTrigger,
+        "rt" => RightTrigger,
+        "ls" => LeftStick,
         "guide" => Guide,
         _ => return Err(format!("bad --press: no button {name}")),
     })
@@ -105,6 +119,7 @@ fn parse_args() -> Result<Args, String> {
             "--log-frames" => args.log_frames = true,
             "--log-focus" => args.log_focus = true,
             "--dry-power" => args.dry_power = true,
+            "--page" => args.page = Some(page(&value()?)?),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use input::Pad;
 use model::{Library, Sound};
 use render::gpu::{self, Gpu};
+use screens::keyboard::Typed;
 use screens::{Dashboard, Effect, OverlayShows, Setting};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step};
@@ -51,8 +52,8 @@ struct App {
     windowed: bool,
     dashboard: Dashboard,
     pad: Pad,
-    /// Keys pressed since the pad was last looked at, as the buttons they stand for.
-    keys: Vec<Press>,
+    /// Keys pressed since the pad was last looked at, as the buttons they stand for, or as the text they type.
+    keys: Vec<KeyPress>,
     /// The Overlay, made once Home's first frame is out. None before, anywhere but Windows, and where it could not
     /// be made. Before `state`, so it is dropped before the device it draws with.
     overlay: Option<Overlay>,
@@ -100,6 +101,16 @@ struct App {
     frames: Option<(u32, u32, Instant)>,
 }
 
+/// A key of the keyboard, as the Dashboard is given it.
+enum KeyPress {
+    /// A key that stands for a button of the pad: the arrows, Enter, Escape.
+    Button(Press),
+    /// Backspace: it deletes where text is being typed, and is B anywhere else.
+    Backspace { repeat: bool },
+    /// What a key types, for a page that takes text (text entry). Nothing anywhere else.
+    Text(String),
+}
+
 /// The minute it is, counted from 1970: what the clock's next change is told by.
 fn minute() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs() / 60)
@@ -128,6 +139,9 @@ pub fn run(args: &Args, library: Library, store: Store) {
     freezer.thaw_leftovers();
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
+    }
+    if let Some(page) = args.page {
+        dashboard.open_page(page);
     }
     // Where --focus put focus is where the Dashboard starts: nothing is heard of getting there.
     dashboard.take_effects();
@@ -378,7 +392,9 @@ impl ApplicationHandler for App {
             }
         }
         let events = self.pad.poll();
-        let mut presses = std::mem::take(&mut self.keys);
+        let mut presses: Vec<Press> = Vec::new();
+        let keys = std::mem::take(&mut self.keys);
+        let typed = !keys.is_empty();
         if self.dashboard.set_pad(self.pad.status()) {
             self.stale = true;
             self.overlay_stale = true;
@@ -426,11 +442,26 @@ impl ApplicationHandler for App {
             }
         }
 
-        let pressed = !presses.is_empty() || !events.is_empty();
+        let pressed = typed || !presses.is_empty() || !events.is_empty();
         let focus = self.dashboard.focus_line();
         let guide = self.dashboard.guide_line();
         for event in events {
             self.dashboard.pad_event(event);
+        }
+        // The keyboard's keys, in the order they were pressed. Text goes to a page that takes it; Backspace
+        // deletes there, and is B where nothing does.
+        for key in keys {
+            match key {
+                KeyPress::Button(press) => self.dashboard.press(press),
+                KeyPress::Backspace { repeat } => {
+                    if !self.dashboard.typed(Typed::Backspace) {
+                        self.dashboard.press(Press { button: Button::B, repeat });
+                    }
+                }
+                KeyPress::Text(text) => {
+                    self.dashboard.typed(Typed::Text(&text));
+                }
+            }
         }
         for press in presses {
             self.dashboard.press(press);
@@ -518,17 +549,28 @@ impl ApplicationHandler for App {
                     Key::Named(NamedKey::ArrowUp) => Button::Up,
                     Key::Named(NamedKey::ArrowDown) => Button::Down,
                     Key::Named(NamedKey::Enter) => Button::A,
-                    Key::Named(NamedKey::Backspace) => Button::B,
-                    // Esc is B, and at Home with nothing open it is the way out.
+                    Key::Named(NamedKey::Backspace) => {
+                        self.keys.push(KeyPress::Backspace { repeat: event.repeat });
+                        return;
+                    }
+                    // Esc is B, and at Home with nothing open it is the way out. On a page it closes what B
+                    // closes: text entry first, dropping the text (docs/spec/search.md, 8.4).
                     Key::Named(NamedKey::Escape) => {
-                        if !self.dashboard.guide_open() && self.dashboard.playing().is_none() {
+                        let nothing_open = !self.dashboard.guide_open() && self.dashboard.pages_up() == 0;
+                        if nothing_open && self.dashboard.playing().is_none() {
                             event_loop.exit();
                         }
                         Button::B
                     }
-                    _ => return,
+                    // Any other key is what it types, Space among them: a page that takes text gets it as typed.
+                    _ => {
+                        if let Some(text) = event.text {
+                            self.keys.push(KeyPress::Text(text.to_string()));
+                        }
+                        return;
+                    }
                 };
-                self.keys.push(Press { button, repeat: event.repeat });
+                self.keys.push(KeyPress::Button(Press { button, repeat: event.repeat }));
             }
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 state.config.width = size.width;

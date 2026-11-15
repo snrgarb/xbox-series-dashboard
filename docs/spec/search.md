@@ -382,7 +382,7 @@ E/ConsoleKeyboardControl.xaml:19-24, 31-63. All opaque, "sampled from the consol
 | Rest | `#FF2F3238` (`KeyBrush`) | `#FF3A3D44` (`SideKeyBrush`), a shade lighter |
 | Focused | `#FF555963` (`FocusedKeyBrush`) | same |
 | Held down (the pad's A on the focused key; the pad button the key carries; a mouse press) | `#FF7A7E88` (`PressedKeyBrush`), for as long as the button is held; wins over focused | same |
-| Latched / active (Shift on, symbols showing) | **No colour of its own: NOT FOUND.** Shift on shows only as capitals on the letter keys; the symbols layer shows only as the symbols key reading "abc". | - |
+| Latched / active (Shift on, symbols showing) | **No colour of its own: NOT FOUND.** Shift on shows only as capitals on the letter keys; the symbols layer shows only as the symbols key reading "abc". **The port lights Shift while it is on** (decided in #54): the Shift key takes the focused key's `#FF555963`, with no ring, on either layer, and goes back to the side keys' grey as Shift goes off. The symbols key is not lit. | - |
 | Disabled | No key is ever disabled: NOT FOUND | - |
 
 All changes are instant. "Held" is drawn only while focus is on the board: a pad button a key carries lights that key until it is let go, whichever key has focus, and everything held is let go when focus leaves the board (E/ConsoleKeyboardControl.xaml.cs:35, 146-185, 219-246).
@@ -403,6 +403,14 @@ Every face is centred in its key (E/ConsoleKeyboardControl.xaml:39, 107-125). Te
 | Space bar | The mark: an open box `M0,0 L0,6 L24,6 L24,0` (24 wide, 6 tall, open at the top), white stroke 2, no fill, pushed down by a 10 top margin; 12 to its right, the badge | **Y**: round 24, stroke and letter **`#FFFFB900`**, "Y" at 14 | 116-117, 195-203 |
 
 The badges are part of the key at all times (not only when a pad is connected). There is no A badge and no B badge on the board. Glyph names are Segoe MDL2's; what each code point draws in the installed font is **UNVERIFIED** here.
+
+Where each face stands in its key, worked out from the template's stacks and checked against pictures 13, 15 and 17 (key face = x, y, w, h; cx, cy its middle):
+
+- Symbols: the text's left edge at cx - (text width + 12 + 28) / 2; the LT badge 12 after the text, y cy - 11 .. cy + 11.
+- Backspace: glyph box 26 wide from cx - 31; X's ring from cx + 7 to cx + 31, both centred on cy.
+- Cursor left / right: the stack is 26 + 16 + 18 = 60 tall, so the chevron's middle is at y + 33 and the pill's at y + 71 (pill x cx - 16 .. cx + 16).
+- Shift / Enter: the stack is 26 + 14 + 24 = 64 tall, so the arrow's middle is at y + 31 and the badge's at y + 70.
+- Space bar: the mark's stroke makes it 25 by 7 for the layout; mark, 12, ring is 61 wide, so the mark's left stroke is centred on cx - 30.5, its top is at cy + 1.5 and its foot at cy + 8.5; Y's ring is centred on cx + 18.5.
 
 ### 7.4 Focus ring
 
@@ -475,7 +483,7 @@ How it opens (C/ConsoleKeyboard.cs:88-107): on Search, always empty, cursor 0, S
 - The text is a plain string; the cursor is an index into it, 0..length (C/ConsoleKeyboard.cs:16-17, 42-54). Characters go in **at the cursor**, not at the end (lines 183-187; CT/SearchTests.cs:455).
 - One caret, no selection, no word or line jumps, no Home/End, no forward delete: NOT FOUND.
 - The owner draws the text in two runs either side of a 2 x 30 white caret (sections 2 and 10.2).
-- **No maximum length** and no character filter on the keys (NOT FOUND). A physical keyboard's text goes in less any control characters (lines 151-162).
+- **No maximum length** and no character filter on the keys (NOT FOUND). A physical keyboard's text goes in less any control characters (lines 151-162). The port's text entry can be opened with a most (a Group's name is 40 characters at most, [filters.md](filters.md) section 6): at the most, a key or a typed character puts nothing in, though a key pressed still turns Shift off; a text it opened over is left as long as it is.
 
 ### 8.4 A physical keyboard
 
@@ -532,7 +540,7 @@ What that gives at the wide and tall keys:
 | Symbols, backspace | Left / Right outward | Nothing |
 | Any row-0 key | Up | Leaves the board (Search) or nothing (text entry) |
 
-Held D-pad repeat is Playnite's (every 80 ms by the core's account, C/ExtensionCore.cs:45-46): **UNVERIFIED**.
+Held D-pad repeat is Playnite's (every 80 ms by the core's account, C/ExtensionCore.cs:45-46): **UNVERIFIED**. **The port (decided in #54):** a held direction repeats after 700 ms, then every 80 ms, as in the Guide and the Tile menu, and stops dead at an edge.
 
 ### 9.3 Pad shortcuts
 
@@ -553,7 +561,7 @@ C/ConsoleKeyboard.cs:164-180; E/ConsoleKeyboardControl.xaml.cs:219-238; CT/Searc
 
 A shortcut does exactly what pressing its key does, and lights that key while the button is held (section 7.2).
 
-**Held repeat on backspace and the cursor: NOT FOUND in the Bundle.** Neither the model nor the control starts a timer; a key is pressed once per button-down event that reaches it. Whether Playnite sends repeated button-down events for a held A, X, LB or RB is **UNVERIFIED**. See open question 4.
+**Held repeat on backspace and the cursor: NOT FOUND in the Bundle.** Neither the model nor the control starts a timer; a key is pressed once per button-down event that reaches it. Whether Playnite sends repeated button-down events for a held A, X, LB or RB is **UNVERIFIED**. **The port (decided in #54): only directions repeat.** A held A, X, Y, LB, RB, left stick click, LT or Menu presses its key once.
 
 ---
 
@@ -601,9 +609,9 @@ Arithmetic, upward from the keyboard's foot at 1080 - 110 = 970: keyboard 260 (t
 
 **Caption:** Bahnschrift 30, weight 350 (SemiLight), white, one line, character ellipsis, left-aligned 28 in from the field's left edge (the same style as Search's row headings) (lines 29-34, 64).
 
-**Field:** Search's pill: `#FF2E3136`, `CornerRadius="27"`, 928 x 54 (lines 19, 67-68). The text area is inset 28 each side (x 524..1396, w 872) and **clips** (`ClipToBounds="True"`): the text is left-aligned, in two runs either side of the caret, Segoe UI 26 white, vertically centred; a text longer than the area is cut on the right and does not scroll, the caret going out of sight with it (lines 69-75). The caret is the same 2 x 30 white rectangle with 1 clear each side, **always shown** (the keyboard is always up), not blinking. The field has **no placeholder**, **no focus state and no ring**: focus is never on it (lines 66, 72; E/TextEntryControl.xaml.cs:39).
+**Field:** Search's pill: `#FF2E3136`, `CornerRadius="27"`, 928 x 54 (lines 19, 67-68). The text area is inset 28 each side (x 524..1396, w 872) and **clips** (`ClipToBounds="True"`): the text is left-aligned, in two runs either side of the caret, Segoe UI 26 white, vertically centred; a text longer than the area is cut on the right and does not scroll, the caret going out of sight with it (lines 69-75). **The port scrolls it (decided in #54):** when what is before the caret is wider than the area, the text is drawn that much to the left, so the caret stands at the area's right edge with the text's end before it; with the caret moved back until what is before it fits, the text is at rest again with its start at the area's left edge. Nothing is drawn outside the area either way. The caret is the same 2 x 30 white rectangle with 1 clear each side, **always shown** (the keyboard is always up), not blinking. The field has **no placeholder**, **no focus state and no ring**: focus is never on it (lines 66, 72; E/TextEntryControl.xaml.cs:39).
 
-**Masked input:** while the entry is secret the field shows one **U+25CF** (black circle) per character typed, in the same font and colour, the caret among them at the cursor; the real text is never drawn (E/TextEntryControl.xaml.cs:24-25, 198-209). The keyboard forgets the text as text entry goes, kept or dropped, so a secret does not linger in it, and the next entry is plain again (C/ExtensionCore.TextEntry.cs:142-161; CT/TextEntryTests.cs:252-282). There is no "show" toggle (NOT FOUND).
+**Masked input:** while the entry is secret the field shows one **U+25CF** (black circle) per character typed, in the same font and colour, the caret among them at the cursor; the real text is never drawn (E/TextEntryControl.xaml.cs:24-25, 198-209). **The port draws the dots itself** (decided in #54: which font supplies U+25CF is unverified, and no picture shows a secret): white discs 12 across, one every 18, so they are the same on every machine. The keyboard forgets the text as text entry goes, kept or dropped, so a secret does not linger in it, and the next entry is plain again (C/ExtensionCore.TextEntry.cs:142-161; CT/TextEntryTests.cs:252-282). There is no "show" toggle (NOT FOUND).
 
 ### 10.3 Focus
 
@@ -630,6 +638,13 @@ Not while it is up: the Tile menu (C/ExtensionCore.TileMenu.cs:33), Y's Search (
 ### 10.5 Transitions, sounds, hint bar
 
 It appears and goes **in one frame** (`Visibility`, E/TextEntryControl.xaml:42): no fade of the dim, no slide of the keyboard (NOT FOUND). No sound of the extension's (section 6). The hint bar is under its dim and shows nothing of text entry's; the keys' own badges say what the pad does. Reduce motion changes nothing here.
+
+**The port (decided in #54):**
+
+- Sounds: moving from key to key is the move sound, as Playnite's focus sound is in the Bundle; a move that goes nowhere at an edge is silent. Pressing a key, a shortcut, Shift or the layer turning, Menu and B are silent. A on the box that opens text entry is the activation sound, as A that opens any page is.
+- The hint bar is not drawn while text entry is up, where the Bundle leaves the page's own bar dimmed under it: the Dashboard draws the bar for whatever has the pad, and text entry has no hints.
+- On a screen of another shape (open question 11) the keyboard stays 110 off the screen's foot with the field and caption over it, and the dim's two stops stay at four tenths and 62 hundredths of the screen's height.
+- A physical keyboard's Escape is B on every page, text entry among them, and leaves the Dashboard only at Home with nothing open.
 
 ---
 
@@ -716,11 +731,11 @@ The badge letters (10 to 14 px) are the only text here under the Bundle's 26 px 
 1. **There is no picture of any of this.** Every number is from the XAML. Should someone run the Bundle's `cover-fit` or `hub-panel` test on the VM (both take a `search` shot; neither shows text entry or the symbols layer) and add shots of the keyboard's three layers and of text entry, to check this file before or after the port is built?
 2. **Recently added needs a date added**, which the Dashboard's library does not record (`home.md` section 11). What stands for it with Steam alone: the time the library first saw the game, a file time from Steam's own files, or leave the row in the library's order until it exists?
 3. **Scrolling between the Games and Apps rows with the keyboard up.** The Bundle leaves it to WPF: an instant jump that can leave a row's heading scrolled off and the focused tile's ring cut at the viewport's edge (section 3.6, UNVERIFIED). Copy that, or scroll by whole rows so the heading and the ring always show? It only matters once Apps exist (M4); in M3 one row at most shows and nothing scrolls.
-4. **Held repeat.** The Bundle has no repeat of its own on backspace, the cursor keys or A; what happens on a held X in Playnite is unknown. Should the port repeat a held X / LB / RB (and A on a key) at the D-pad's rate, or press once per press?
+4. **Held repeat.** The Bundle has no repeat of its own on backspace, the cursor keys or A; what happens on a held X in Playnite is unknown. Should the port repeat a held X / LB / RB (and A on a key) at the D-pad's rate, or press once per press? **Decided (#54):** held directions repeat as everywhere else (700 ms, then 80 ms); nothing else repeats (sections 9.2, 9.3).
 5. **Sounds.** The Bundle adds none; Playnite's focus sound probably plays on every move between keys and tiles, and nothing is known to play on a key press, on Search opening or closing, or on the keyboard going away. Which of the port's sounds, if any, go on: moving between keys, pressing a key, opening and leaving Search, opening and closing text entry?
 6. **The search box's glow.** Copy the Bundle's rectangular glow on the pill (squarer than the ring at both ends), or draw the round variant, which is what its shape calls for and what Playnite's own keyboard's field uses?
-7. **Shift and symbols have no lit state.** Keep it exactly so (Shift on is seen only in the letters' case), or light the latched key? The requirement is "exactly as the theme", so the default is to keep it.
-8. **A text longer than the field** is cut on the right and the caret goes out of sight, on Search (904 px of text) and in text entry (872 px). Copy that, or keep the caret in view by scrolling the text? A 32-character Client Secret in dots fits; a long name filter may not.
+7. **Shift and symbols have no lit state.** Keep it exactly so (Shift on is seen only in the letters' case), or light the latched key? The requirement is "exactly as the theme", so the default is to keep it. **Decided (#54):** Shift lights while it is on, in the focused key's grey; the symbols key does not (section 7.2).
+8. **A text longer than the field** is cut on the right and the caret goes out of sight, on Search (904 px of text) and in text entry (872 px). Copy that, or keep the caret in view by scrolling the text? A 32-character Client Secret in dots fits; a long name filter may not. **Decided (#54):** long text scrolls in the field with the caret kept in view (section 10.2); Search's box draws its text the same way.
 9. **Menu on a result** does nothing in the Bundle and the hint bar is empty on Search. Keep it so, or give results the Tile menu that Home's and Games' tiles have?
 10. **Search tiles show neither the Running badge nor the source badge**, though the core marks a found game as running. Keep it so (parity), or draw them as Home does?
 11. **Other screen shapes.** The Bundle's page is always 1080 tall and as wide as the aspect makes it, so a narrower screen shows fewer whole tiles (section 3.3) while the search box (960) and the keyboard (928) stay their size, centred. The Dashboard instead keeps 1920 across and lets the height grow (1200 at 16:10, `home.md` section 11): then the row is always 7 tiles and the question is vertical. Proposal: the search box stays 77 from the top, the keyboard 110 off the foot, and the results take the extra height. Agreed?

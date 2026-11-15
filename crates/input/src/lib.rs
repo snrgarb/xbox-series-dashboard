@@ -14,13 +14,14 @@ use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat};
 
 /// XInput's button bits, and two of our own for the triggers. The Guide button is not among them: it is followed
 /// on its own.
-const BITS: [(u32, Button); 14] = [
+const BITS: [(u32, Button); 15] = [
     (0x0001, Button::Up),
     (0x0002, Button::Down),
     (0x0004, Button::Left),
     (0x0008, Button::Right),
     (0x0010, Button::Menu),
     (0x0020, Button::View),
+    (0x0040, Button::LeftStick),
     (0x0100, Button::LeftBumper),
     (0x0200, Button::RightBumper),
     (0x1000, Button::A),

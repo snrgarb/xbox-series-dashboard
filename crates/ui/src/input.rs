@@ -18,6 +18,8 @@ pub enum Button {
     RightBumper,
     LeftTrigger,
     RightTrigger,
+    /// The left stick's click.
+    LeftStick,
     /// The Xbox logo button.
     Guide,
 }

@@ -1720,3 +1720,201 @@ fn menu_panel_prompt_with_a_message() {
     });
     stage.check_image("menu-panel-prompt-message", image);
 }
+
+// --- The Console keyboard and text entry (docs/spec/search.md, sections 7 to 10) ---
+
+use screens::keyboard::Typed;
+use screens::pages::Open;
+
+/// Text entry over the stand-in page that opens it (`screens::keyboard::stand_in`), on its Name box: "Filter by
+/// name" over an empty name, focus on Q.
+fn text_entry(size: (u32, u32)) -> Stage {
+    let mut stage = Stage::new(library_with_art(), size);
+    stage.dashboard.open_page(Open::KeyboardStandIn);
+    stage.press(&[A]);
+    stage
+}
+
+/// "Ha" typed by walking, as the Bundle's picture of text entry has it: H, then back along the row to A.
+const HA: [Button; 13] = [Down, Right, Right, Right, Right, Right, A, Left, Left, Left, Left, Left, A];
+
+/// The keys' greys, and the field's.
+const KEY: [u8; 3] = [0x2F, 0x32, 0x38];
+const SIDE_KEY: [u8; 3] = [0x3A, 0x3D, 0x44];
+const FOCUSED_KEY: [u8; 3] = [0x55, 0x59, 0x63];
+const HELD_KEY: [u8; 3] = [0x7A, 0x7E, 0x88];
+const FIELD: [u8; 3] = [0x2E, 0x31, 0x36];
+
+/// The letters with Shift on, as the keyboard opens over nothing: the Bundle's picture 15, with the Shift key lit.
+#[test]
+fn keyboard_letters_with_shift_on() {
+    text_entry(HD).check("keyboard-shift");
+}
+
+/// "Ha" typed, focus on A, the letters in lower case: the Bundle's picture 13.
+#[test]
+fn keyboard_letters_after_typing() {
+    let mut stage = text_entry(HD);
+    stage.press(&HA);
+    stage.check("keyboard-letters");
+}
+
+/// The symbols, focus on the symbols key, which reads "abc": the Bundle's picture 17.
+#[test]
+fn keyboard_symbols() {
+    let mut stage = text_entry(HD);
+    stage.press(&HA);
+    stage.press(&[Up, Up, Left, A]);
+    assert_eq!(stage.dashboard.focus_line(), "TextEntry: Symbols; \"Ha|\" lower symbols");
+    stage.check("keyboard-symbols");
+}
+
+#[test]
+fn text_entry_of_a_secret() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.dashboard.open_page(Open::KeyboardStandIn);
+    stage.press(&[Down, Down, A, A, A, A, A, Button::LeftBumper]);
+    stage.check("text-entry-secret");
+}
+
+#[test]
+fn text_entry_16_10() {
+    let mut stage = text_entry((1920, 1200));
+    stage.press(&HA);
+    stage.check("text-entry-16-10");
+}
+
+#[test]
+fn text_entry_720p() {
+    let mut stage = text_entry((1280, 720));
+    stage.press(&HA);
+    stage.check("text-entry-720p");
+}
+
+/// The keys are opaque blocks 4 apart in the Bundle's four greys: the letters', the side keys' a shade lighter,
+/// the focused key's under the one ring, 3 thick and touching the key, and the lightest while a pad button holds a
+/// key down (E/ConsoleKeyboardControl.xaml:19-63, 233). Shift is lit while it is on (#54).
+#[test]
+fn the_keys_are_the_bundles_greys_and_the_ring_hugs_the_focused_key() {
+    let mut stage = text_entry(HD);
+    let image = stage.still();
+    // R's face is x 822..888, y 764..812, clear of the glow round Q; the caret's left key x 498..608, y 764..864; backspace x 1312..1422,
+    // y 712..760. Each is sampled in a corner, clear of what it shows.
+    assert_eq!(colour(&image, 826, 768), KEY, "a letter key");
+    assert_eq!(colour(&image, 616, 924), KEY, "the space bar");
+    assert_eq!(colour(&image, 502, 768), SIDE_KEY, "a side key");
+    assert_eq!(colour(&image, 1316, 716), SIDE_KEY, "backspace");
+    // Between two keys the page shows, dimmed: there is no plate behind the keys.
+    assert!(colour(&image, 750, 790).iter().all(|&c| c < 0x20), "between keys: {:?}", colour(&image, 750, 790));
+    // Q has focus: its face x 612..678, y 764..812, lighter; the ring's 3 lie just outside it, and 5 outside
+    // there is no ring.
+    assert!(within(colour(&image, 645, 772), FOCUSED_KEY, 12), "the focused key: {:?}", colour(&image, 645, 772));
+    for (x, y) in [(610, 788), (680, 788), (645, 762), (645, 814)] {
+        assert!(
+            within(colour(&image, x, y), [0x2C, 0xA2, 0x43], 24),
+            "the ring at {x}, {y}: {:?}",
+            colour(&image, x, y)
+        );
+    }
+    assert!(!within(colour(&image, 606, 788), [0x2C, 0xA2, 0x43], 60), "the ring is 3 thick");
+    assert!(within(colour(&image, 645, 766), FOCUSED_KEY, 40), "and touches the key: {:?}", colour(&image, 645, 766));
+    // Shift is on as the keyboard opens over nothing, and its key is lit; typing turns it off.
+    assert_eq!(colour(&image, 502, 872), FOCUSED_KEY, "Shift while it is on");
+    stage.press(&[A]);
+    let image = stage.still();
+    assert_eq!(colour(&image, 502, 872), SIDE_KEY, "Shift while it is off");
+
+    // X held down on the pad lights backspace until it is let go, wherever focus is; A lights the focused key.
+    let down = |button| ui::PadEvent::Press(Press { button, repeat: false });
+    stage.dashboard.pad_event(down(Button::X));
+    stage.dashboard.pad_event(down(A));
+    let image = stage.still();
+    assert_eq!(colour(&image, 1316, 716), HELD_KEY, "backspace while X is down");
+    assert!(within(colour(&image, 645, 772), HELD_KEY, 12), "Q while A is down: {:?}", colour(&image, 645, 772));
+    stage.dashboard.pad_event(ui::PadEvent::Release(Button::X));
+    stage.dashboard.pad_event(ui::PadEvent::Release(A));
+    let image = stage.still();
+    assert_eq!(colour(&image, 1316, 716), SIDE_KEY, "backspace once X is up");
+    assert!(within(colour(&image, 645, 772), FOCUSED_KEY, 12));
+}
+
+/// Where the caret is in text entry's field: the rightmost white in the line just over the letters' tops, which
+/// only the caret, 30 tall, reaches. The field's text area is x 524..1396, its middle y 647.
+fn caret_x(image: &image::RgbaImage) -> Option<u32> {
+    (500..1420).rev().find(|&x| colour(image, x, 634).iter().all(|&c| c > 200))
+}
+
+/// The page dims, lighter above and darker at the foot; the field is Search's pill, the keyboard's width, with
+/// the caret after the text; and a space typed moves the caret as far as any character
+/// (E/TextEntryControl.xaml:51-75).
+#[test]
+fn text_entry_dims_the_page_and_the_caret_follows_the_text() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.dashboard.open_page(Open::KeyboardStandIn);
+    let page = stage.still();
+    stage.press(&[A]);
+    let image = stage.still();
+    // The page's fill, #1F1F1F, under 35% black at the top and 78% from y 670 down.
+    assert_eq!(colour(&page, 710, 60), [0x1F; 3]);
+    assert!(within(colour(&image, 710, 60), [20; 3], 1), "the dim at the top: {:?}", colour(&image, 710, 60));
+    assert!(within(colour(&image, 710, 430), [20; 3], 1), "at four tenths: {:?}", colour(&image, 710, 430));
+    assert!(within(colour(&image, 300, 700), [7; 3], 1), "from 62 hundredths: {:?}", colour(&image, 300, 700));
+    assert!(within(colour(&image, 300, 1070), [7; 3], 1), "at the foot: {:?}", colour(&image, 300, 1070));
+    let between = colour(&image, 300, 550)[0];
+    assert!((8..20).contains(&between), "darkening between the two: {between}");
+    // The field, x 496..1424, y 620..674, a pill: its ends are round.
+    assert_eq!(colour(&image, 960, 624), FIELD);
+    assert_eq!(colour(&image, 1400, 647), FIELD);
+    assert_ne!(colour(&image, 498, 622), FIELD, "the pill's corner is cut");
+    // Empty, the caret stands at the text's start: 1 in from x 524, 2 wide.
+    assert_eq!(caret_x(&image), Some(526));
+    // The caption's ink is over the field, from the text's left edge.
+    let caption = ink_rows(&image, (524, 760), (560, 612)).expect("the caption");
+    assert!((570..585).contains(&caption.0) && (596..610).contains(&caption.1), "the caption's ink: {caption:?}");
+    assert!(ink_rows(&image, (500, 522), (560, 612)).is_none(), "the caption starts at the field's text");
+
+    stage.dashboard.typed(Typed::Text("a"));
+    let after_a = caret_x(&stage.still()).expect("the caret");
+    stage.dashboard.typed(Typed::Text(" "));
+    let after_space = caret_x(&stage.still()).expect("the caret");
+    stage.dashboard.typed(Typed::Text("a"));
+    let after_both = caret_x(&stage.still()).expect("the caret");
+    assert!(after_a > 530 && after_space >= after_a + 5, "a space moves the caret: {after_a}, {after_space}");
+    assert_eq!(after_both - after_space, after_a - 526, "and the next character is as far on as the first");
+}
+
+/// A text longer than the field scrolls, the caret kept in view at the field's right edge, and nothing of it is
+/// drawn outside the text's area (#54; the Bundle cuts it and loses the caret).
+#[test]
+fn a_text_longer_than_the_field_scrolls_to_keep_the_caret_in_view() {
+    let mut stage = text_entry(HD);
+    stage.dashboard.typed(Typed::Text(&"Wide text ".repeat(12)));
+    let image = stage.still();
+    assert_eq!(caret_x(&image), Some(1394), "the caret stands at the area's right edge");
+    assert_eq!(colour(&image, 1400, 647), FIELD, "nothing is drawn past the text's area");
+    assert_eq!(colour(&image, 520, 647), FIELD);
+    assert!(ink_rows(&image, (524, 1390), (630, 664)).is_some(), "the text's end shows");
+    // The caret back at the start: the text is at rest again, its start showing.
+    stage.press(&[Button::LeftBumper; 120]);
+    let image = stage.still();
+    assert_eq!(caret_x(&image), Some(526));
+    stage.check("text-entry-long");
+}
+
+/// A secret is a dot for each character, 18 apart, and the caret among them where the cursor is.
+#[test]
+fn a_secret_is_drawn_as_dots_with_the_caret_among_them() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.dashboard.open_page(Open::KeyboardStandIn);
+    stage.press(&[Down, Down, A, A, A, A]);
+    let image = stage.still();
+    let white = |image: &image::RgbaImage, x: u32| colour(image, x, 647).iter().all(|&c| c > 200);
+    assert!(white(&image, 533) && white(&image, 551) && white(&image, 569), "three dots");
+    assert!(!white(&image, 542) && !white(&image, 587), "and nothing between or after them");
+    assert_eq!(caret_x(&image), Some(580), "the caret after the third");
+    // The caret between the second and third: the third dot stands past it.
+    stage.press(&[Button::LeftBumper]);
+    let image = stage.still();
+    assert_eq!(caret_x(&image), Some(562));
+    assert!(white(&image, 533) && white(&image, 551) && white(&image, 573));
+}
