@@ -32,7 +32,7 @@ try {
     $launcherTitle = "$($game.name) launcher"
     Add-Content (Join-Path $game.install_dir 'game-args.txt') @('--splash-ms', '600000') -Encoding Ascii
 
-    $dashboard = Start-Dashboard
+    $dashboard = Start-Dashboard @('--log-focus')
     if (-not (Wait-DashboardLog 'first frame presented' 60)) { throw 'The Dashboard never presented a frame' }
     Start-Sleep -Seconds 3
     Wait-Greeting | Out-Null
@@ -49,11 +49,13 @@ try {
     $home_ = Get-DesignPixel $beside.X $beside.Y
     Say "Home at ($($beside.X), $($beside.Y)): $(Format-Colour $home_)"
 
-    # A: the Launch screen over the launcher.
+    # A: the game's Game hub, after the double tap's 300 ms. A on its Play: the Launch screen over the launcher.
+    Push-Button A
+    if (-not (Wait-DashboardLog "^focus: GameHub: $($game.appid) Hub Play`$" 10)) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     Push-Button A
     $up = Wait-DashboardLog 'Launch screen up' 10
-    Say "after A: $(if ($up) { $up } else { 'no Launch screen up line' })"
-    if (-not $up) { throw "A did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
+    Say "after A on Play: $(if ($up) { $up } else { 'no Launch screen up line' })"
+    if (-not $up) { throw "A on Play did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     $front = Wait-Until { (Get-Foreground).Title -eq $launcherTitle } 30
     Say "the launcher in front: $([bool] $front); foreground $(Front)"
     if (-not $front) { $failures += "the game's launcher did not take the foreground: $(Front)" }

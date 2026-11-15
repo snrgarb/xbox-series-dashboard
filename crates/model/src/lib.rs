@@ -55,6 +55,30 @@ pub struct Game {
     /// when the game is first seen. In a snapshot only the games of `Library::hidden` are.
     #[serde(default)]
     pub hidden: bool,
+    /// When the game came out, in Unix seconds; 0 when its store does not say. This and the five that follow are
+    /// what the Game hub tells of a game beyond its name (docs/spec/game-hub.md, 14.1): only what the store's own
+    /// files on this machine hold, so any of them may be missing.
+    #[serde(default)]
+    pub released: u64,
+    /// Who made it, as the store names them.
+    #[serde(default)]
+    pub developers: Vec<String>,
+    /// Who published it.
+    #[serde(default)]
+    pub publishers: Vec<String>,
+    /// What the installed game takes on disk, in bytes; 0 when it is not installed or the store does not say.
+    #[serde(default)]
+    pub size_on_disk: u64,
+    /// The critics' score, 0 to 100 (Steam's is Metacritic's).
+    #[serde(default)]
+    pub critic_score: Option<u8>,
+    /// The share of the store's players who recommend it, 0 to 100.
+    #[serde(default)]
+    pub community_score: Option<u8>,
+    /// How many Play sessions the library database has of it: the times it was played from the Dashboard. Only a
+    /// snapshot counts them; a source reads 0.
+    #[serde(default)]
+    pub play_count: u32,
 }
 
 /// One run of a game, from its window coming up to its ending.

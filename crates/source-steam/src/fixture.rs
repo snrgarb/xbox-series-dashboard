@@ -67,6 +67,37 @@ pub struct FixtureGame {
     pub last_played: u64,
     pub playtime_minutes: u32,
     pub art: Art,
+    /// Who made it and who published it, when it came out and what it scores: what appinfo may say of a game. All
+    /// made up.
+    pub facts: Facts,
+    /// What the manifest of an installed game says it takes on disk, in bytes.
+    pub size_on_disk: u64,
+}
+
+/// What `appinfo.vdf` says of a game beyond its name and art. Whatever is empty, 0 or `None` is left out of the
+/// file, as Steam leaves it out for a game it has not cached it for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Facts {
+    pub developers: Vec<String>,
+    pub publishers: Vec<String>,
+    /// How they are written: as `common/associations`, the current way, or as `extended/developer` and
+    /// `extended/publisher`, which is all an older entry has and holds one name each.
+    pub credits: Credits,
+    /// `common/steam_release_date`, in Unix seconds.
+    pub released: u64,
+    /// `common/original_release_date`: set for a game that came out before it came to Steam.
+    pub first_released: u64,
+    /// `common/metacritic_score`.
+    pub critic_score: Option<u8>,
+    /// `common/review_percentage`.
+    pub community_score: Option<u8>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Credits {
+    #[default]
+    Associations,
+    Extended,
 }
 
 /// How a game's cover, hero and header are stored under `appcache/librarycache/<appid>`.
@@ -106,6 +137,10 @@ impl Fixture {
     /// The other eight were never played and come after, by name; every second one is installed, and Ember Choir and
     /// Hollow Pines Motel have no art.
     ///
+    /// Each has made-up facts (`facts`): most a developer, a publisher, a release date and scores; Brass Meridian
+    /// two developers; Lanternfish Deep an older entry with its credits in `extended`; Thimble & Thorn a date from
+    /// before it came to Steam; Quiet Orbit no scores; Hollow Pines Motel nothing at all.
+    ///
     /// Two collections made by hand: Couch co-op (Brass Meridian, Saltwind Rally, Glasswing Atlas, Marrow Street)
     /// and Short sessions (Lanternfish Deep, Thimble & Thorn, Copperhead Station, and the DLC, which is no game).
     /// One dynamic and one deleted, which `load` leaves out. Brass Meridian and Ember Choir are in Steam's
@@ -136,6 +171,9 @@ impl Fixture {
             last_played: if played { NEWEST_PLAY - i as u64 * 86_400 } else { 0 },
             playtime_minutes: if played { 90 + (6 - i as u32) * 240 } else { 0 },
             art,
+            facts: facts(i),
+            // From a little over 1 GB, each game 3.3 GB more than the last.
+            size_on_disk: 1_234_567_890 + i as u64 * 3_543_210_000,
         });
         let games: Vec<FixtureGame> = games.collect();
         let appids = |of: &[usize]| of.iter().map(|&i| games[i].appid).collect::<Vec<u32>>();
@@ -192,9 +230,38 @@ impl Fixture {
             last_played: 0,
             playtime_minutes: 0,
             art: if i % 3 == 2 { Art::None } else { Art::Flat },
+            facts: Facts::default(),
+            size_on_disk: 0,
         }));
         spec
     }
+}
+
+/// The made-up facts of the standard fixture's game `i`.
+fn facts(i: usize) -> Facts {
+    const STUDIOS: [&str; 5] = ["Tin Lantern", "Second Kettle", "Mossback Works", "Paper Comet", "Low Tide Collective"];
+    const PUBLISHERS: [&str; 3] = ["Harbour & Hull", "Ninth Bell Games", "Oddfellow Interactive"];
+    // The first came out on 12 March 2019; each after it 173 days later.
+    let released = 1_552_348_800 + i as u64 * 173 * 86_400;
+    let mut facts = Facts {
+        developers: vec![STUDIOS[i % STUDIOS.len()].to_string()],
+        publishers: vec![PUBLISHERS[i % PUBLISHERS.len()].to_string()],
+        credits: Credits::Associations,
+        released,
+        first_released: 0,
+        critic_score: Some(62 + (i as u8 * 7) % 33),
+        community_score: Some(55 + (i as u8 * 11) % 44),
+    };
+    match i {
+        1 => facts.credits = Credits::Extended,
+        2 => facts.developers.push(STUDIOS[4].to_string()),
+        3 => (facts.critic_score, facts.community_score) = (None, None),
+        // Out for eleven years before it came to Steam.
+        4 => facts.first_released = released - 11 * 365 * 86_400,
+        11 => facts = Facts::default(),
+        _ => {}
+    }
+    facts
 }
 
 /// Writes `spec` as a Steam install at `root`, making the folder. Files already there are written over.
@@ -378,7 +445,46 @@ fn game_info(game: &FixtureGame) -> Kv {
         ));
     }
     common.push(("gameid".to_string(), Kv::Int(game.appid)));
-    map([("appid", Kv::Int(game.appid)), ("common", Kv::Map(common))])
+
+    // What the Game hub tells of a game, where Steam keeps it: the credits as associations (with a franchise among
+    // them, which is neither) or in `extended`; the dates and the scores as numbers in `common`.
+    let facts = &game.facts;
+    let mut extended: Vec<(String, Kv)> = Vec::new();
+    match facts.credits {
+        Credits::Associations => {
+            let credit = |ty: &str, name: &String| map([("type", s(ty)), ("name", s(name))]);
+            let developers = facts.developers.iter().map(|name| credit("developer", name));
+            let franchise = (!facts.developers.is_empty()).then(|| credit("franchise", &game.name));
+            let publishers = facts.publishers.iter().map(|name| credit("publisher", name));
+            let all = developers.chain(franchise).chain(publishers).enumerate();
+            let all: Vec<(String, Kv)> = all.map(|(at, credit)| (at.to_string(), credit)).collect();
+            if !all.is_empty() {
+                common.push(("associations".to_string(), Kv::Map(all)));
+            }
+        }
+        Credits::Extended => {
+            for (key, names) in [("developer", &facts.developers), ("publisher", &facts.publishers)] {
+                extended.extend(names.first().map(|name| (key.to_string(), s(name))));
+            }
+        }
+    }
+    let numbers = [
+        ("steam_release_date", facts.released),
+        ("original_release_date", facts.first_released),
+        ("metacritic_score", facts.critic_score.map_or(0, u64::from)),
+        ("review_percentage", facts.community_score.map_or(0, u64::from)),
+    ];
+    for (key, number) in numbers {
+        let present = number > 0 || (key == "review_percentage" && facts.community_score.is_some());
+        if present {
+            common.push((key.to_string(), Kv::Int(number as u32)));
+        }
+    }
+    let mut info = vec![("appid".to_string(), Kv::Int(game.appid)), ("common".to_string(), Kv::Map(common))];
+    if !extended.is_empty() {
+        info.push(("extended".to_string(), Kv::Map(extended)));
+    }
+    Kv::Map(info)
 }
 
 /// `appcache/packageinfo.vdf`, version 28. The games are split over two packages, as bought one by one and in a
@@ -488,7 +594,7 @@ fn manifest(game: &FixtureGame) -> Vec<u8> {
         ("StateFlags", s(4)),
         ("installdir", s(&game.install_dir)),
         ("LastPlayed", s(game.last_played)),
-        ("SizeOnDisk", s(1_048_576)),
+        ("SizeOnDisk", s(game.size_on_disk)),
     ]);
     map([("AppState", state)]).to_text().into_bytes()
 }
@@ -600,6 +706,18 @@ mod tests {
             assert_eq!(game.installed, want.installed, "{name}");
             assert_eq!(game.last_played, want.last_played, "{name}");
             assert_eq!(game.playtime_minutes, want.playtime_minutes, "{name}");
+            // What appinfo and the manifest say of it. An older entry's `extended` holds one name of each.
+            let facts = &want.facts;
+            assert_eq!(game.developers, facts.developers, "{name}");
+            assert_eq!(game.publishers, facts.publishers, "{name}");
+            let released = if facts.first_released > 0 { facts.first_released } else { facts.released };
+            assert_eq!(game.released, released, "{name}");
+            assert_eq!(
+                (game.critic_score, game.community_score),
+                (facts.critic_score, facts.community_score),
+                "{name}"
+            );
+            assert_eq!(game.size_on_disk, if want.installed { want.size_on_disk } else { 0 }, "{name}");
             let dir = want.installed.then(|| root.join("steamapps").join("common").join(&want.install_dir));
             assert_eq!(game.install_dir, dir, "{name}");
             assert!(dir.is_none_or(|d| d.is_dir()), "{name}");
@@ -620,6 +738,15 @@ mod tests {
         }
         let played = spec.games.iter().filter(|g| g.last_played > 0);
         assert!(played.clone().count() == 6 && played.map(|g| g.last_played).is_sorted_by(|a, b| a > b));
+
+        // The fixture has every way a game's facts are written, and a game with none.
+        let by_name = |name: &str| library.games.iter().find(|g| g.name == name).unwrap();
+        assert_eq!(by_name("Brass Meridian").developers, ["Mossback Works", "Low Tide Collective"]);
+        assert_eq!(by_name("Lanternfish Deep").publishers, ["Ninth Bell Games"]);
+        assert!(by_name("Thimble & Thorn").released < by_name("Ashfall Courier").released);
+        assert_eq!(by_name("Quiet Orbit").critic_score, None);
+        let none = by_name("Hollow Pines Motel");
+        assert!(none.developers.is_empty() && none.publishers.is_empty() && none.released == 0);
     }
 
     #[test]

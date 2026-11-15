@@ -11,12 +11,14 @@
 //!
 //! **Adding a page:** a module with a struct that implements [`Page`], a variant of [`Open`] that carries how it is
 //! opened, and that variant's line in [`Open::page`]. Nothing else here changes, and nothing in `Dashboard`.
+use std::time::{Duration, Instant};
+
 use model::{Library, Sound};
-use ui::{Button, Press, Repeat, Ui};
+use ui::{Button, Press, Repeat, Snapshot, Ui};
 
 use crate::hint_bar::{self, Hint};
 use crate::keyboard::{self, Typed};
-use crate::{my_games, search, settings, tile_menu, Effect};
+use crate::{game_hub, my_games, search, settings, tile_menu, Effect};
 
 /// What a page is told of the world each time it is pressed or drawn. It keeps none of it.
 #[derive(Clone, Copy)]
@@ -26,12 +28,16 @@ pub struct Around<'a> {
     pub playing: Option<usize>,
     /// Settings' options as they are now.
     pub options: settings::Options,
+    /// The Dashboard's clock (`Dashboard::advance`): the moment of the press, or of the frame. A page that times
+    /// something reads it here, never the system's.
+    pub now: Instant,
 }
 
 /// A page to open, and how: each page's own `Entry` says where on it to open and where focus lands.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Open {
     MyGames(my_games::Entry),
+    GameHub(game_hub::Entry),
     Search,
     Settings(settings::Entry),
     /// Text entry over the page that asks for it (`keyboard::text_entry`), which hears of it through
@@ -50,6 +56,7 @@ impl Open {
     fn page(self, under: Option<&dyn Page>, around: Around) -> Option<Box<dyn Page>> {
         Some(match self {
             Open::MyGames(entry) => Box::new(my_games::MyGames::open(entry)),
+            Open::GameHub(entry) => Box::new(game_hub::GameHub::open(entry)),
             Open::Search => Box::new(search::Search::open()),
             Open::Settings(entry) => Box::new(settings::Settings::open(entry)),
             Open::TextEntry(entry) => {
@@ -98,6 +105,17 @@ impl Dialog {
     }
 }
 
+/// What time has brought a page ([`Page::tick`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Tick {
+    /// The page waits for nothing.
+    Nothing,
+    /// Something of the page's is this long off: ask again by then.
+    Wait(Duration),
+    /// Its time has come: what the page asks for, as a press would.
+    Act(PageAction),
+}
+
 /// A page over Home. It owns its state and its focus, as every screen does (docs/ui.md): `press` moves them, `draw`
 /// declares the frame from them.
 pub trait Page {
@@ -111,6 +129,13 @@ pub trait Page {
     /// A press of the pad while the page is on top. A held direction comes with `press.repeat`; ignore a repeat for
     /// anything but movement. B that the page has no use of its own for answers [`PageAction::Close`].
     fn press(&mut self, press: Press, around: Around) -> Option<PageAction>;
+
+    /// What time has brought the page by `around.now`, for a page that waits on something: Play history's rows
+    /// wait out the double tap's time before a game's hub opens. Asked each time the Dashboard's clock moves on
+    /// (`Dashboard::advance`) and after each press, while the page is on top.
+    fn tick(&mut self, _around: Around) -> Tick {
+        Tick::Nothing
+    }
 
     /// Declares the frame. A page that covers the screen fills it first: nothing of Home is drawn under it.
     fn draw(&mut self, ui: &mut Ui, around: Around);
@@ -174,6 +199,24 @@ pub trait Page {
     fn draw_leaving(&mut self, _ui: &mut Ui, _around: Around) -> bool {
         false
     }
+
+    /// For a page that fills the screen and yet shows what it was opened over, as the Game hub does in the strips
+    /// above and below its band: a number that is this page's alone, by which it then asks for the picture
+    /// ([`behind`]). The picture is of the page under it, or Home, as it was when this page was first drawn: an
+    /// eighth of the screen each way, and blurred. None, as most pages are, has none taken.
+    fn behind(&self) -> Option<u64> {
+        None
+    }
+}
+
+fn behind_key(page: u64) -> (&'static str, u64) {
+    ("the screen behind a page", page)
+}
+
+/// The picture of the screen behind the page that calls itself `page` ([`Page::behind`]), to draw with
+/// `Ui::image`. None when none could be taken.
+pub fn behind(ui: &mut Ui, page: u64) -> Option<Snapshot> {
+    ui.snapshot_taken(behind_key(page))
 }
 
 /// The pages that are up, the last on top. Home is under them all and is not one of them.
@@ -289,6 +332,11 @@ impl Stack {
         }
     }
 
+    /// What time has brought the top page.
+    pub fn tick(&mut self, around: Around) -> Tick {
+        self.pages.last_mut().map_or(Tick::Nothing, |page| page.tick(around))
+    }
+
     /// Whether a page fills the screen: Home is not drawn, its top bar neither.
     pub fn hides_home(&self) -> bool {
         self.pages.iter().any(|page| page.covers())
@@ -300,21 +348,40 @@ impl Stack {
     }
 
     /// Draws what shows of the pages: the topmost that fills the screen and those over it. Each but the first thing
-    /// in the frame is on a layer of its own, so it covers the text of what is under it.
-    pub fn draw(&mut self, ui: &mut Ui, around: Around) {
+    /// in the frame is on a layer of its own, so it covers the text of what is under it. `home` draws Home, for a
+    /// page that asks for a picture of the screen behind it and has only Home there.
+    pub fn draw(&mut self, ui: &mut Ui, around: Around, home: &mut dyn FnMut(&mut Ui)) {
         let first = self.pages.iter().rposition(|page| page.covers()).unwrap_or(0);
         let over_home = !self.hides_home();
-        for (at, page) in self.pages.iter_mut().enumerate().skip(first) {
+        for at in first..self.pages.len() {
+            if let Some(page) = self.pages[at].behind() {
+                // Taken the first time the page is drawn, and kept while it asks for it.
+                let under = &mut self.pages[..at];
+                ui.snapshot(behind_key(page), 8, 2.0, |ui| Self::draw_under(under, ui, around, home));
+            }
             if at > first || over_home {
                 ui.layer();
             }
-            page.draw(ui, around);
+            self.pages[at].draw(ui, around);
         }
         if let Some(page) = &mut self.leaving {
             ui.layer();
             if !page.draw_leaving(ui, around) {
                 self.leaving = None;
             }
+        }
+    }
+
+    /// Draws the screen as it is with `pages` the only ones up: Home, or the topmost of them that fills the screen,
+    /// and those over it.
+    fn draw_under(pages: &mut [Box<dyn Page>], ui: &mut Ui, around: Around, home: &mut dyn FnMut(&mut Ui)) {
+        let first = pages.iter().rposition(|page| page.covers());
+        if first.is_none() {
+            home(ui);
+        }
+        for page in pages.iter_mut().skip(first.unwrap_or(0)) {
+            ui.layer();
+            page.draw(ui, around);
         }
     }
 }
@@ -362,7 +429,7 @@ mod tests {
     }
 
     fn around(library: &Library) -> Around<'_> {
-        Around { library, playing: None, options: settings::Options::default() }
+        Around { library, playing: None, options: settings::Options::default(), now: Instant::now() }
     }
 
     fn focus(stack: &Stack) -> Option<(&'static str, String)> {

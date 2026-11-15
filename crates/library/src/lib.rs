@@ -85,6 +85,17 @@ const MIGRATIONS: &[&str] = &[
     ) WITHOUT ROWID;",
     // 2: a store's collections, and the saved filters.
     filters::MIGRATION,
+    // 3: what the Game hub tells of a game, where its store's own files say (docs/spec/game-hub.md, 14.1).
+    "-- Unix seconds; 0 = the store does not say.
+    ALTER TABLE games ADD COLUMN released INTEGER NOT NULL DEFAULT 0;
+    -- The names, one a line, in the store's order.
+    ALTER TABLE games ADD COLUMN developers TEXT NOT NULL DEFAULT '';
+    ALTER TABLE games ADD COLUMN publishers TEXT NOT NULL DEFAULT '';
+    -- Bytes; 0 = not installed, or the store does not say.
+    ALTER TABLE games ADD COLUMN size_on_disk INTEGER NOT NULL DEFAULT 0;
+    -- 0 to 100, or none.
+    ALTER TABLE games ADD COLUMN critic_score INTEGER;
+    ALTER TABLE games ADD COLUMN community_score INTEGER;",
 ];
 
 /// What a sync changed.
@@ -157,8 +168,9 @@ impl Database {
 
     /// Merges what `source` has just been read as (`found`) into the database, at the time `now`:
     /// - a game not seen before is added;
-    /// - a game seen before takes the source's name, installed state and art; its last played and playtime only
-    ///   ever go up, so a Play session recorded here is not undone by a source that has not caught up;
+    /// - a game seen before takes the source's name, installed state, art and facts (who made it, when it came
+    ///   out, its size and scores); its last played and playtime only ever go up, so a Play session recorded here
+    ///   is not undone by a source that has not caught up;
     /// - a game the source no longer lists is marked uninstalled and gone.
     ///
     /// Play sessions, hidden and favourite are the user's and are left as they are: what the source says of the two
@@ -181,6 +193,17 @@ impl Database {
             playtime: i64,
             gone: bool,
             art: Vec<(String, String)>,
+            facts: Facts,
+        }
+        /// What the source says of the game beyond those: the Game hub's facts.
+        #[derive(PartialEq)]
+        struct Facts {
+            released: i64,
+            developers: String,
+            publishers: String,
+            size_on_disk: i64,
+            critic_score: Option<i64>,
+            community_score: Option<i64>,
         }
 
         let tx = self.conn.transaction()?;
@@ -188,7 +211,8 @@ impl Database {
         {
             let mut by_id: HashMap<i64, String> = HashMap::new();
             let mut rows = tx.prepare(
-                "SELECT id, source_id, name, installed, install_dir, last_played, playtime_minutes, gone
+                "SELECT id, source_id, name, installed, install_dir, last_played, playtime_minutes, gone,
+                        released, developers, publishers, size_on_disk, critic_score, community_score
                  FROM games WHERE source = ?1",
             )?;
             let mut rows = rows.query([source])?;
@@ -202,6 +226,14 @@ impl Database {
                     playtime: row.get(6)?,
                     gone: row.get(7)?,
                     art: Vec::new(),
+                    facts: Facts {
+                        released: row.get(8)?,
+                        developers: row.get(9)?,
+                        publishers: row.get(10)?,
+                        size_on_disk: row.get(11)?,
+                        critic_score: row.get(12)?,
+                        community_score: row.get(13)?,
+                    },
                 };
                 by_id.insert(id, source_id.clone());
                 known.insert(source_id, Known { id, state, seen: false });
@@ -227,6 +259,24 @@ impl Database {
             }
             Ok(())
         };
+        let set_facts = |game: i64, facts: &Facts| -> Result<()> {
+            tx.execute(
+                "UPDATE games
+                 SET released = ?2, developers = ?3, publishers = ?4, size_on_disk = ?5, critic_score = ?6,
+                     community_score = ?7
+                 WHERE id = ?1",
+                params![
+                    game,
+                    facts.released,
+                    facts.developers,
+                    facts.publishers,
+                    facts.size_on_disk,
+                    facts.critic_score,
+                    facts.community_score
+                ],
+            )?;
+            Ok(())
+        };
         for game in &found.games {
             let source_id = game.appid.to_string();
             let mut art: Vec<(String, String)> =
@@ -243,6 +293,14 @@ impl Database {
                 playtime: game.playtime_minutes as i64,
                 gone: false,
                 art,
+                facts: Facts {
+                    released: game.released as i64,
+                    developers: game.developers.join("\n"),
+                    publishers: game.publishers.join("\n"),
+                    size_on_disk: game.size_on_disk as i64,
+                    critic_score: game.critic_score.map(i64::from),
+                    community_score: game.community_score.map(i64::from),
+                },
             };
             match known.get_mut(&source_id) {
                 None => {
@@ -265,7 +323,9 @@ impl Database {
                             game.hidden
                         ],
                     )?;
-                    set_art(tx.last_insert_rowid(), &state.art)?;
+                    let id = tx.last_insert_rowid();
+                    set_art(id, &state.art)?;
+                    set_facts(id, &state.facts)?;
                     synced.added += 1;
                 }
                 Some(known) => {
@@ -293,12 +353,18 @@ impl Database {
                     if state.art != known.state.art {
                         set_art(known.id, &state.art)?;
                     }
+                    if state.facts != known.state.facts {
+                        set_facts(known.id, &state.facts)?;
+                    }
                     synced.updated += 1;
                 }
             }
         }
         for known in known.values().filter(|k| !k.seen && !k.state.gone) {
-            tx.execute("UPDATE games SET installed = 0, install_dir = NULL, gone = 1 WHERE id = ?1", [known.id])?;
+            tx.execute(
+                "UPDATE games SET installed = 0, install_dir = NULL, size_on_disk = 0, gone = 1 WHERE id = ?1",
+                [known.id],
+            )?;
             synced.gone += 1;
         }
         let key = format!("{source}.{USER}");
@@ -369,12 +435,19 @@ impl Database {
         let mut place: HashMap<i64, usize> = HashMap::new();
         let mut rows = self.conn.prepare(&format!(
             "SELECT id, source, source_id, name, installed, install_dir, last_played, playtime_minutes, favourite,
-                    added, hidden
+                    added, hidden, released, developers, publishers, size_on_disk, critic_score, community_score,
+                    (SELECT COUNT(*) FROM play_sessions WHERE play_sessions.game = games.id)
              FROM games WHERE {filter} ORDER BY last_played DESC, sort_name, name, id {limit}"
         ))?;
         let mut rows = rows.query(values)?;
         while let Some(row) = rows.next()? {
             let (id, source, source_id): (i64, String, String) = (row.get(0)?, row.get(1)?, row.get(2)?);
+            let names = |at: usize| -> rusqlite::Result<Vec<String>> {
+                Ok(row.get::<_, String>(at)?.lines().map(str::to_string).collect())
+            };
+            let score = |at: usize| -> rusqlite::Result<Option<u8>> {
+                Ok(row.get::<_, Option<i64>>(at)?.and_then(|score| u8::try_from(score).ok()))
+            };
             place.insert(id, games.len());
             games.push(Game {
                 id,
@@ -389,6 +462,13 @@ impl Database {
                 favourite: row.get(8)?,
                 added: row.get::<_, i64>(9)?.max(0) as u64,
                 hidden: row.get(10)?,
+                released: row.get::<_, i64>(11)?.max(0) as u64,
+                developers: names(12)?,
+                publishers: names(13)?,
+                size_on_disk: row.get::<_, i64>(14)?.max(0) as u64,
+                critic_score: score(15)?,
+                community_score: score(16)?,
+                play_count: row.get::<_, i64>(17)?.clamp(0, u32::MAX as i64) as u32,
                 cover: None,
                 hero: None,
                 header: None,
@@ -603,6 +683,75 @@ mod tests {
     }
 
     #[test]
+    fn a_sync_takes_what_the_source_says_of_a_game_and_follows_it() {
+        let mut db = Database::in_memory().unwrap();
+        let mut first = found();
+        let told = first.games.iter_mut().find(|g| g.appid == 20).unwrap();
+        told.released = 1_552_348_800;
+        told.developers = vec!["Tin Lantern".into(), "Second Kettle".into()];
+        told.publishers = vec!["Harbour & Hull".into()];
+        told.size_on_disk = 48_000_000_000;
+        (told.critic_score, told.community_score) = (Some(87), Some(0));
+        let told = told.clone();
+        db.sync(STEAM, &first, NOW).unwrap();
+        let read = |db: &Database| db.snapshot().unwrap().games.into_iter().find(|g| g.appid == 20).unwrap();
+        let game = read(&db);
+        assert_eq!(Game { id: 0, added: 0, ..game.clone() }, told);
+        // A game the source says nothing of has nothing.
+        let untold = db.snapshot().unwrap().games.into_iter().find(|g| g.appid == 10).unwrap();
+        assert!(untold.released == 0 && untold.developers.is_empty() && untold.critic_score.is_none());
+        assert_eq!(db.sync(STEAM, &first, NOW).unwrap(), Synced::default());
+
+        // A fact that changes is an update; one the source no longer has is gone.
+        let changed = first.games.iter_mut().find(|g| g.appid == 20).unwrap();
+        changed.developers.pop();
+        changed.critic_score = None;
+        changed.size_on_disk = 50_000_000_000;
+        assert_eq!(db.sync(STEAM, &first, NOW).unwrap(), Synced { added: 0, updated: 1, gone: 0 });
+        let after = read(&db);
+        assert_eq!((after.id, after.developers.as_slice()), (game.id, &["Tin Lantern".to_string()][..]));
+        assert_eq!((after.critic_score, after.community_score, after.size_on_disk), (None, Some(0), 50_000_000_000));
+
+        // Each Play session is one more time played, and no source's to change.
+        for start in [NOW, NOW + 600] {
+            let session = db.session_started(game.id, start).unwrap();
+            db.session_ended(session, start + 60).unwrap();
+        }
+        assert_eq!(read(&db).play_count, 2);
+        db.sync(STEAM, &first, NOW).unwrap();
+        assert_eq!(read(&db).play_count, 2);
+        assert_eq!(db.game(game.id).unwrap().unwrap().play_count, 2);
+    }
+
+    #[test]
+    fn a_database_from_before_the_facts_gains_them_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.execute_batch(MIGRATIONS[1]).unwrap();
+            conn.pragma_update(None, "user_version", 2).unwrap();
+            conn.execute(
+                "INSERT INTO games (source, source_id, name, sort_name, installed, added)
+                 VALUES ('steam', '20', 'Bramble', 'bramble', 1, 1600000000)",
+                [],
+            )
+            .unwrap();
+        }
+        let mut db = Database::open(&path).unwrap();
+        assert_eq!(db.version().unwrap(), MIGRATIONS.len());
+        let before = db.snapshot().unwrap().games.remove(0);
+        assert!(before.released == 0 && before.publishers.is_empty() && before.community_score.is_none());
+        // The next sync fills them in, and the game is the same game.
+        let mut next = found();
+        next.games.iter_mut().for_each(|g| g.released = 1_552_348_800);
+        assert_eq!(db.sync(STEAM, &next, NOW).unwrap(), Synced { added: 2, updated: 1, gone: 0 });
+        let after = db.game(before.id).unwrap().unwrap();
+        assert_eq!((after.released, after.added), (1_552_348_800, 1_600_000_000));
+    }
+
+    #[test]
     fn a_game_the_source_drops_is_kept_but_not_shown_and_comes_back_as_it_was() {
         let mut db = Database::in_memory().unwrap();
         db.sync(STEAM, &found(), NOW).unwrap();
@@ -779,6 +928,10 @@ mod tests {
         assert_eq!(played.last_played, NOW + 3600);
         assert_eq!(played.playtime_minutes, spec.games[0].playtime_minutes + 60);
         assert_eq!(db.sessions(marked).unwrap().len(), 1);
+        // Uninstalled, it takes no room; who made it and when is as Steam said.
+        assert_eq!((played.play_count, played.size_on_disk), (1, 0));
+        assert_eq!(played.developers, spec.games[0].facts.developers);
+        assert_eq!(played.released, spec.games[0].facts.released);
         assert!(after.games.iter().all(|g| g.id != hidden));
     }
 }

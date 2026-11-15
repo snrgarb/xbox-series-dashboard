@@ -124,9 +124,11 @@ try {
     Press Left 'MyGames: Games: Nav\(Games\)' '01-my-games-games-first-rows'
     Press Right 'MyGames: Games: Tile\(0\)' '02-my-games-games-tile-focused'
 
-    # The grid's edges stop. A has nothing to open until the Game hub is there; Menu is the game's Tile menu, and B closes it.
+    # The grid's edges stop. A is the game's Game hub, at once (the grid has no double tap), and B comes back to the
+    # tile; Menu is the game's Tile menu, and B closes it.
     Press-Stays Up 'nothing is over the first row'
-    Press-Stays A 'no Game hub yet'
+    Press A 'GameHub: \d+ Hub (Play|Install)'
+    Press B 'MyGames: Games: Tile\(0\)'
     Press Start 'TileMenu: Menu\(.*'
     Press B 'MyGames: Games: Tile\(0\)'
     $rowEnd = Walk-ToEdge Right 'MyGames: Games: Tile\([1-9]\d*\)'

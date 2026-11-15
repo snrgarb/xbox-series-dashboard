@@ -24,17 +24,26 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
         dashboard.record(text);
     }
     dashboard.set_clock(args.clock.clone());
-    let press = |dashboard: &mut Dashboard, button| dashboard.press(Press { button, repeat: false });
+    let press = |dashboard: &mut Dashboard, host: &mut Host, button| {
+        dashboard.press(Press { button, repeat: false });
+        // An A on a game's tile (or a Play history row): its Game hub opens when the double tap's time is up, over
+        // the screen as it then looks, which the hub keeps a picture of. So that is drawn to rest first, and the
+        // time then passed at once.
+        if let Some(wait) = dashboard.timer() {
+            target.still(&gpu, host, |ui| dashboard.draw(ui));
+            dashboard.advance(wait);
+        }
+    };
     // Home starts with focus on the profile: a game to launch or a row to walk is on the Recent row.
     let on_row = args.focus.or((args.launch_screen || args.bench).then_some(0));
     for button in crate::focus_presses(on_row) {
-        press(&mut dashboard, button);
+        press(&mut dashboard, &mut host, button);
     }
     if let Some(page) = args.page {
         dashboard.open_page(page);
     }
     for &button in &args.press {
-        press(&mut dashboard, button);
+        press(&mut dashboard, &mut host, button);
     }
 
     // The first frame goes out before any art is in, as the window's would.
@@ -53,7 +62,7 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
             if frame % 20 == 0 {
                 let step = frame / 20;
                 let forward = (step / (count - 1).max(1)).is_multiple_of(2);
-                press(&mut dashboard, if forward { Button::Right } else { Button::Left });
+                press(&mut dashboard, &mut host, if forward { Button::Right } else { Button::Left });
             }
             let index = host.draw(&gpu, &target.view, size, 1.0 / 60.0, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
             wait(&gpu, Some(index));
@@ -76,7 +85,7 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
     }
     if args.guide {
         dashboard.open_guide();
-        press(&mut dashboard, Button::Down);
+        press(&mut dashboard, &mut host, Button::Down);
     }
     // The first is the Toast in the picture: the rest wait behind it.
     for text in &args.toasts {

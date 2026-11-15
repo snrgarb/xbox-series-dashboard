@@ -195,9 +195,13 @@ try {
         if (-not (Wait-DashboardLog $want 5 -After $before)) { throw "$step did not put focus on the Recent row's tile $at" }
         $at += 1
     }
+    # A is the game's Game hub, after the double tap's 300 ms; A on its Play is the launch.
+    $before = Get-DashboardLogLength
+    Push-Button A
+    if (-not (Wait-DashboardLog '^focus: GameHub: \d+ Hub Play$' 10 -After $before)) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     Push-Button A
     $up = Wait-DashboardLog 'Launch screen up' 10
-    if (-not $up) { throw "A did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
+    if (-not $up) { throw "A on Play did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     $booted = Wait-DashboardLog 'the game has booted' 60
     if (-not $booted) { throw "The game never counted as booted (launch log: $((Get-DashboardLog | Where-Object { $_ -match '^launch:' }) -join ' | '))" }
     $launchGone = Wait-DashboardLog 'Launch screen gone' 10

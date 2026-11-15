@@ -225,8 +225,9 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
     assert_eq!(dashboard.page(), None);
     press(&mut dashboard, &[Right; 9]);
     assert_eq!((dashboard.home_focus(), dashboard.focused_game()), (Focus::Recent(7), Some(7)), "eight games");
-    press(&mut dashboard, &[A]);
-    assert!(dashboard.take_effects().contains(&Effect::Launch(7)), "A on the eighth tile plays its game");
+    // A double tap: one A is the game's hub, once the second's time has passed.
+    press(&mut dashboard, &[A, A]);
+    assert!(dashboard.take_effects().contains(&Effect::Launch(7)), "A twice on the eighth tile plays its game");
 
     // On again: the tile is back, and A on it is Play history.
     dashboard.open_page(Open::Settings(Entry::Personalisation));
@@ -392,7 +393,8 @@ impl Stage {
     fn check_pane(&mut self, name: &str, pane: Box<dyn Pane>) {
         let mut page = Settings::showing(pane);
         let library = Library::default();
-        let around = Around { library: &library, playing: None, options: Options::default() };
+        let around =
+            Around { library: &library, playing: None, options: Options::default(), now: std::time::Instant::now() };
         let Self { gpu, host, target, .. } = self;
         let pixels = target.still(gpu, host, |ui| page.draw(ui, around));
         compare(name, &image::RgbaImage::from_raw(HD.0, HD.1, pixels).unwrap());
@@ -498,7 +500,7 @@ impl Pane for Idle {
 }
 
 fn around(library: &Library) -> Around<'_> {
-    Around { library, playing: None, options: Options::default() }
+    Around { library, playing: None, options: Options::default(), now: std::time::Instant::now() }
 }
 
 /// The Bundle's pictures 33 and 34: a dropdown box with focus, and its list open on the choice that is set.

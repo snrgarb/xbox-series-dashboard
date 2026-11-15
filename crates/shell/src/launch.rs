@@ -125,6 +125,9 @@ mod win {
         needs_user: Duration,
         /// When the desktop was last looked at.
         looked: Instant,
+        /// The looks while the game starts, and how many of them came late: said when the launch gives up, where
+        /// it tells a machine that did not keep up from a game that never showed a window.
+        looks: (u32, u32),
         /// Whether the game's window has been said to be up.
         said_up: bool,
         /// Since when nothing of the game has shown.
@@ -187,6 +190,7 @@ mod win {
                 other: None,
                 needs_user: needs_user(),
                 looked: now,
+                looks: (0, 0),
                 said_up: false,
                 gone_since: None,
                 seen: false,
@@ -266,6 +270,8 @@ mod win {
                 return Step::Same;
             }
             self.game_since = None;
+            self.looks.0 += 1;
+            self.looks.1 += (since_last >= LATE) as u32;
             unsafe { AllowSetForegroundWindow(ASFW_ANY) };
             // A window that keeps the foreground without being the game wants the user. How long it has kept it is
             // counted in looks that came on time, a fifth of a second each, and not by the clock: on a machine that
@@ -285,6 +291,8 @@ mod win {
                 }
             }
             if now - self.started >= GIVE_UP {
+                let (looks, late) = self.looks;
+                log(&format!("{late} of {looks} looks at the desktop came late"));
                 if self.seen {
                     log("no game window after two minutes, Launch screen stepping aside");
                     return self.reveal();

@@ -22,27 +22,41 @@ pub enum Source {
     Steam,
 }
 
+impl Source {
+    /// The store's name, as the Game hub writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Source::Steam => "Steam",
+        }
+    }
+}
+
 /// The game's source. Every game is Steam's until the library has other sources and says which.
 pub fn source(_game: &Game) -> Option<Source> {
     Some(Source::Steam)
 }
 
-/// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow. The marks are the stores'
-/// own logos, which are not this project's to ship: until they are loaded from somewhere they may be, a plain
-/// white disc stands in for the mark. This is the one place to draw the real thing.
+/// A source's mark, filling `mark`. The marks are the stores' own logos, which are not this project's to ship:
+/// until they are loaded from somewhere they may be, a plain white disc stands in for the mark. This is the one
+/// place to draw the real thing.
+pub fn source_mark(ui: &mut Ui, mark: Rect, source: Source) {
+    let Source::Steam = source;
+    ui.fill(mark, Color::WHITE, 999.0);
+}
+
+/// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow.
 pub fn source_badge(ui: &mut Ui, tile: Rect, source: Source) {
     source_badge_at(ui, tile, source, S);
 }
 
 /// The source's badge at another scale than the rows': 1 on My games & apps, where nothing is scaled.
 pub fn source_badge_at(ui: &mut Ui, tile: Rect, source: Source, scale: f32) {
-    let Source::Steam = source;
     let side = 20.0 * scale;
     let mark = Rect::new(tile.x + 10.0 * scale, tile.bottom() - 10.0 * scale - side, side, side);
     // The theme's shadow: 0.8 black, blurred by 6, straight under the mark.
     let shadow = mark.grow(3.0 * scale);
     ui.glow(shadow, Color::BLACK.fade(0.8), 999.0, shadow.w / 2.0, 6.0 * scale);
-    ui.fill(mark, Color::WHITE, 999.0);
+    source_mark(ui, mark, source);
 }
 
 /// A game's face: its cover filling the tile from the top, or for want of one its name on the dark tile, set

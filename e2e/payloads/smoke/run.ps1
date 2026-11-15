@@ -1,6 +1,6 @@
-# Smoke: the Dashboard starts on a fake Steam library and draws Home, the virtual pad moves focus, A launches a game
-# through the Launch screen, the Guide button opens the Guide over the game and closes it, and Home comes back when the
-# game ends. The game is the stand-in, started by the stand-in Steam (lib\E2E.psm1, Initialize-FakeSteam).
+# Smoke: the Dashboard starts on a fake Steam library and draws Home, the virtual pad moves focus, A opens a game's
+# Game hub and A on its Play launches the game through the Launch screen, the Guide button opens the Guide over the
+# game and closes it, and Home comes back when the game ends. The game is the stand-in, started by the stand-in Steam (lib\E2E.psm1, Initialize-FakeSteam).
 #
 # The Launch screen and the Guide over the game are on the Overlay, and are checked by the colour of the screen at
 # points of the Dashboard's 1920x1080 canvas where it is known what each draws: the log saying so is not enough (#23).
@@ -82,7 +82,7 @@ try {
     $tones = @(Get-ChildItem $media -Filter *.wav).Count
 
     # Home, first frame.
-    $dashboard = Start-Dashboard @('--media', "`"$media`"", '--log-sounds')
+    $dashboard = Start-Dashboard @('--media', "`"$media`"", '--log-sounds', '--log-focus')
     $first = Wait-DashboardLog 'first frame presented' 60
     $adapter = Wait-DashboardLog '^adapter:' 1
     Say "adapter line: $(if ($adapter) { $adapter } else { 'none' })"
@@ -134,10 +134,18 @@ try {
     # Down from the profile, then along the row.
     if ($moved -ne $moves + 1) { $failures += "$moved move sounds for $($moves + 1) moves" }
 
-    # A: the Launch screen, then the game.
+    # A: the game's Game hub, once the double tap's 300 ms have passed with no second A, focus on Play. (A double
+    # tap would play at once, but two presses 300 ms apart are not something a VM this slow can be trusted to make:
+    # that is the game-hub test's to try.) Then A on Play: the Launch screen, then the game.
+    Push-Button A
+    $hub = Wait-DashboardLog "^focus: GameHub: $($game.appid) Hub Play`$" 10
+    Say "after A: $(if ($hub) { $hub } else { "no hub: $((Get-DashboardLog | Where-Object { $_ -match '^focus: ' } | Select-Object -Last 1))" })"
+    if (-not $hub) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
+    Start-Sleep -Milliseconds 1500
+    Save-Screen 'game-hub'
     Push-Button A
     $up = Wait-DashboardLog 'Launch screen up' 10
-    Say "after A: $(if ($up) { $up } else { 'no Launch screen up line' })"
+    Say "after A on Play: $(if ($up) { $up } else { 'no Launch screen up line' })"
     $selected = Wait-DashboardLog '^audio: played activation\.wav$' 5
     Say "select sound: $(if ($selected) { $selected } else { 'none' })"
     if (-not $selected) { $failures += 'A played no select sound' }
