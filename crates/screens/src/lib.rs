@@ -815,8 +815,12 @@ impl Dashboard {
         let show_percent = self.status.show_percent && self.options.show_battery_percent;
         // The badge counts the notifications the Dashboard itself holds, unless the shell has told of more.
         let notifications = self.status.notifications.max(self.toasts.notifications().len() as u32);
-        let status =
-            Status { pad_battery: self.status.pad_battery.or(charge), show_percent, notifications, ..self.status.clone() };
+        let status = Status {
+            pad_battery: self.status.pad_battery.or(charge),
+            show_percent,
+            notifications,
+            ..self.status.clone()
+        };
         let face = Face { user: &self.user, clock: &clock, pad: self.pad.connected, status: &status };
         self.guide.draw(ui, around, &face);
     }
@@ -824,7 +828,6 @@ impl Dashboard {
     /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to
     /// draw it on; and the Toast, where Toasts have no window of their own.
     pub fn draw(&mut self, ui: &mut Ui) {
-        ui.store.reduce_motion = self.options.reduce_motion;
         self.draw_home(ui);
         if !self.toast_strip {
             self.draw_toasts(ui);
@@ -832,6 +835,7 @@ impl Dashboard {
     }
 
     fn draw_home(&mut self, ui: &mut Ui) {
+        ui.store.reduce_motion = self.options.reduce_motion;
         let clock = self.clock();
         // A wireless pad's charge, as the Guide's Status area has it; one on a cable shows its glyph.
         let pad_battery = self.status.pad_battery.or(match self.pad.battery {
