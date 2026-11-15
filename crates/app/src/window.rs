@@ -11,7 +11,9 @@ use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
 use screens::toasts::Seen;
 use screens::{Dashboard, Effect, OverlayShows, Setting};
+use shell::audio::{self, AudioControl, SystemAudio};
 use shell::power::{DryPower, Power, SystemPower};
+use shell::store::{Addresses, Ask, SystemAddresses};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step, ToastStrip};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
@@ -112,6 +114,9 @@ struct App {
     freezer: Freezer,
     /// Since when the Guide has been closed with the button that closed it still down.
     release_wait: Option<Instant>,
+    /// Who gets the foreground once the Guide has let go of it, when that is not the window that had it as the
+    /// Guide opened (docs/spec/guide.md, 3.3).
+    hand_back: Option<HandBack>,
     /// The library database: where a newer snapshot comes from, and where Play sessions go.
     store: Store,
     /// When the library had been read, in ms since the process started.
@@ -124,6 +129,13 @@ struct App {
     log_focus: bool,
     /// What turns the machine off, restarts it and puts it to sleep: for real, or with --dry-power in the log only.
     power: Box<dyn Power>,
+    /// What opens a store's address for a game: Steam's, to install or uninstall it.
+    addresses: Box<dyn Addresses>,
+    /// The system's sound, which the Guide's Audio Flyout shows and changes.
+    audio: Box<dyn AudioControl>,
+    /// When it was last read while the Audio Flyout is open: it is read as the Flyout opens and every `AUDIO_EVERY`
+    /// after, so that the Flyout follows what is changed elsewhere.
+    audio_read: Option<Instant>,
     /// How long the sound of leaving has still to play: Exit waits for it.
     leaving: Duration,
     /// The minute of the day Home's last frame showed on its clock.
@@ -143,6 +155,15 @@ enum KeyPress {
     Text(String),
 }
 
+/// Who the Guide hands the foreground to as it closes over a running game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandBack {
+    /// Home's window, in front of the game: Home or a page was chosen.
+    Home,
+    /// The game's own window: the running game was chosen.
+    Game,
+}
+
 /// The minute it is, counted from 1970: what the clock's next change is told by.
 fn minute() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs() / 60)
@@ -150,6 +171,9 @@ fn minute() -> u64 {
 
 /// The longest Exit waits for the sound of leaving.
 const LEAVING_AT_MOST: Duration = Duration::from_secs(4);
+
+/// How often the system's sound is read while the Audio Flyout is open.
+const AUDIO_EVERY: Duration = Duration::from_millis(250);
 
 /// How often --log-frames says what was drawn.
 const FRAMES_EVERY: Duration = Duration::from_secs(5);
@@ -165,6 +189,9 @@ pub fn run(args: &Args, library: Library, store: Store) {
         eprintln!("guide: off ({}): the Guide button does nothing", Setting::UseGuide.key());
     }
     dashboard.set_options(options);
+    for text in &args.notify {
+        dashboard.record(text);
+    }
     // A Dashboard that was killed with the Guide open over a game left the game frozen: it is let go first of all.
     let data_dir = args.data_dir.clone().or_else(library::data_dir);
     let mut freezer = Freezer::new(data_dir.as_deref());
@@ -213,6 +240,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         launch: None,
         freezer,
         release_wait: None,
+        hand_back: None,
         sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
@@ -220,6 +248,9 @@ pub fn run(args: &Args, library: Library, store: Store) {
         log_focus: args.log_focus,
         // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
         power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
+        addresses: Box::new(SystemAddresses),
+        audio: Box::new(SystemAudio),
+        audio_read: None,
         leaving: Duration::ZERO,
         minute: minute(),
         frames: args.log_frames.then(|| ([0; 3], Instant::now())),
@@ -452,6 +483,75 @@ impl App {
         self.overlay_moving.then_some(rest)
     }
 
+    /// Puts in front what the Guide said should be, once the Guide has let go of the foreground (the button that
+    /// closed it is up): Home's window in front of the running game, or the game's own window. Where the Overlay
+    /// has the foreground it is told who to give it to, and gives it as it stops being the Guide; where it has
+    /// not (the Guide in Home's window, or no Guide at all: A on the running game's tile) Home's window gives or
+    /// takes it itself. True when Home's window is to be hidden behind the game once the Overlay has handed over.
+    fn hand_back(&mut self) -> bool {
+        if self.dashboard.overlay() == OverlayShows::Guide {
+            return false;
+        }
+        let (Some(to), Some(state)) = (self.hand_back.take(), &self.state) else { return false };
+        let Some(launch) = &mut self.launch else { return false };
+        let overlay = self.overlay.as_mut().filter(|overlay| overlay.mode() == Some(Mode::Guide));
+        match to {
+            HandBack::Home => {
+                launch.show_home(overlay.is_none());
+                if let Some(overlay) = overlay {
+                    overlay.give_back_to(window_handle(&state.window));
+                }
+                // Home's window has been hidden since the game came up: it draws afresh.
+                self.last_frame = Instant::now();
+                self.stale = true;
+                false
+            }
+            HandBack::Game => match overlay {
+                Some(overlay) if !launch.game_window().is_null() => {
+                    overlay.give_back_to(launch.game_window());
+                    true
+                }
+                _ => {
+                    // A game with no window to go back to: the Dashboard stays in front of it.
+                    if !launch.show_game(true) {
+                        self.dashboard.show_dashboard();
+                    }
+                    false
+                }
+            },
+        }
+    }
+
+    /// Reads the system's sound and tells the Dashboard, if it is not as the Dashboard has it. With --log-focus,
+    /// what was read is said whenever it is news: `audio: volume 67, muted false, output "Speakers" of 2, ...`.
+    fn read_audio(&mut self) {
+        let read = self.audio.read();
+        self.audio_read = Some(Instant::now());
+        if read != *self.dashboard.audio() {
+            self.dashboard.set_audio(read);
+            self.stale = true;
+            self.overlay_stale = true;
+        }
+    }
+
+    /// Reads the system's sound as the Audio Flyout opens and every `AUDIO_EVERY` while it is open. How soon it
+    /// is to be read again.
+    fn follow_audio(&mut self) -> Option<Duration> {
+        if !self.dashboard.audio_shown() {
+            self.audio_read = None;
+            return None;
+        }
+        let opened = self.audio_read.is_none();
+        if self.audio_read.is_none_or(|read| read.elapsed() >= AUDIO_EVERY) {
+            let was = self.dashboard.audio().clone();
+            self.read_audio();
+            if self.log_focus && (opened || was != *self.dashboard.audio()) {
+                eprintln!("audio: {}", audio::describe(self.dashboard.audio()));
+            }
+        }
+        self.audio_read.map(|read| AUDIO_EVERY.saturating_sub(read.elapsed()))
+    }
+
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
         for effect in self.dashboard.take_effects() {
             match effect {
@@ -461,9 +561,19 @@ impl App {
                         launch.quit_game(&mut self.freezer);
                     }
                 }
+                // With nothing of the game's to end, asking again would never help.
+                Effect::ForceQuitGame => {
+                    let ended = self.launch.as_mut().is_some_and(|launch| launch.force_quit(&mut self.freezer));
+                    if !ended {
+                        self.dashboard.quit_given_up();
+                    }
+                }
                 // The Overlay follows what the Dashboard shows: it gives the foreground back as the Guide closes,
                 // once the button that closed it is up, and hides once the panel has slid away.
                 Effect::GuideClosed => {}
+                // Who it gives the foreground to then: carried out as it lets go (`hand_back`).
+                Effect::ShowHome => self.hand_back = Some(HandBack::Home),
+                Effect::ShowGame => self.hand_back = Some(HandBack::Game),
                 // The sound of leaving is played to its end first, as the Bundle plays it.
                 Effect::Exit => {
                     eprintln!("power: exit to desktop at {:.0} ms", since_start());
@@ -477,9 +587,49 @@ impl App {
                     }
                 }
                 Effect::Power(command) => self.power.carry_out(command),
+                // The Audio Flyout's: done, and read back at once, so the Flyout shows what the system made of it.
+                Effect::Volume(level) => {
+                    self.audio.set_volume(level);
+                    self.audio_read = None;
+                }
+                Effect::Mute(muted) => {
+                    self.audio.set_muted(muted);
+                    self.audio_read = None;
+                }
+                Effect::DefaultDevice(flow, device) => {
+                    let id = self.dashboard.audio().devices(flow).0.get(device).map(|device| device.id.clone());
+                    if let Some(id) = id {
+                        self.audio.set_default(flow, &id);
+                    }
+                    self.audio_read = None;
+                }
                 // In force already: saved, so that it is still so the next time.
                 Effect::Set(change) => self.store.set(change),
+                // The user's marks go to the library database, and what it says then is what the screens show.
+                Effect::Favourite { game, on } => {
+                    let marked = self.store.set_favourite(game, on);
+                    self.show(marked);
+                }
+                Effect::Hidden { game, on } => {
+                    let marked = self.store.set_hidden(game, on);
+                    self.show(marked);
+                }
+                Effect::Install(game) => {
+                    crate::games::ask_store(self.dashboard.library(), game, Ask::Install, &mut *self.addresses);
+                }
+                Effect::Uninstall(game) => {
+                    crate::games::ask_store(self.dashboard.library(), game, Ask::Uninstall, &mut *self.addresses);
+                }
             }
+        }
+    }
+
+    /// A newer snapshot of the library, if there is one, takes the place of the one on screen.
+    fn show(&mut self, library: Option<Library>) {
+        if let Some(library) = library {
+            self.dashboard.set_library(library);
+            self.stale = true;
+            self.overlay_stale = true;
         }
     }
 }
@@ -546,6 +696,9 @@ impl ApplicationHandler for App {
                 self.make_overlay();
             }
         }
+        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
+        let focus = self.dashboard.focus_line();
+        let guide = self.dashboard.guide_line();
         if let Some(strip) = &mut self.toast_strip {
             for text in strip.take_posts() {
                 eprintln!("toasts: posted {text:?} at {:.0} ms", since_start());
@@ -554,6 +707,11 @@ impl ApplicationHandler for App {
                 // The open Guide counts it, on its Notifications Utility.
                 self.overlay_stale = true;
             }
+        }
+        // What the Dashboard times itself: a game that was asked to quit and has not, the Guide closing after one.
+        if self.dashboard.take_timed() {
+            self.stale = true;
+            self.overlay_stale = true;
         }
         let events = self.pad.poll();
         let mut presses: Vec<Press> = Vec::new();
@@ -596,19 +754,25 @@ impl ApplicationHandler for App {
                     // Whatever of it was frozen under the Guide has gone with it.
                     self.freezer.thaw();
                     self.launch = None;
-                    self.dashboard.game_ended();
+                    self.hand_back = None;
+                    // A Guide that is open stays open, and closing it lands on Home, whose window is back behind it.
+                    if let (Some(overlay), Some(state)) = (&mut self.overlay, &self.state) {
+                        overlay.give_back_to(window_handle(&state.window));
+                    }
+                    // The library first, with the Play session that has just ended: a game that is to start now
+                    // is named by its place in the library as it is.
                     if let Some(library) = self.store.game_ended() {
                         self.dashboard.set_library(library);
                     }
+                    self.dashboard.game_ended();
                     self.last_frame = Instant::now();
                     self.stale = true;
+                    self.overlay_stale = true;
                 }
             }
         }
 
         let pressed = typed || !presses.is_empty() || !events.is_empty();
-        let focus = self.dashboard.focus_line();
-        let guide = self.dashboard.guide_line();
         for event in events {
             self.dashboard.pad_event(event);
         }
@@ -644,6 +808,7 @@ impl ApplicationHandler for App {
             self.toasts_changed();
         }
         self.carry_out(event_loop);
+        let audio_wants = self.follow_audio();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
         // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
         let mut release_wants = None;
@@ -664,14 +829,21 @@ impl ApplicationHandler for App {
         if self.freezer.is_frozen() && self.dashboard.overlay() != OverlayShows::Guide {
             self.freezer.thaw();
         }
+        let home_hides = self.hand_back();
         let overlay_wants = self.follow_overlay();
         let toasts_want = self.follow_toasts();
         self.say_toasts();
         if let Some(launch) = &mut self.launch {
+            // The game has the foreground again, from the Overlay: Home's window goes behind it as it was.
+            if home_hides {
+                launch.show_game(false);
+            }
             // Said once the Overlay has done what was asked of it, so the log's order is what happened.
             if !self.dashboard.launch_screen_showing() {
                 launch.launch_screen_gone();
             }
+            // A game being quit is not held still, so it is free to close; one the user gave up quitting is again.
+            launch.quitting(self.dashboard.quitting());
             let over_game = self.dashboard.guide_over_game();
             launch.guide(over_game);
             if over_game && self.overlay.as_ref().is_some_and(|overlay| overlay.mode() == Some(Mode::Guide)) {
@@ -722,7 +894,9 @@ impl ApplicationHandler for App {
         let launch = self.launch.as_ref().map(|launch| launch.wait());
         // And in time for the Toasts' next change: one goes, the next shows.
         let toasts = queue;
-        let wants = [Some(IDLE), launch, overlay_wants, toasts_want, toasts, home_wants, release_wants];
+        let timer = self.dashboard.timer().map(Duration::from_secs_f32);
+        let wants =
+            [Some(IDLE), launch, overlay_wants, toasts_want, toasts, home_wants, release_wants, timer, audio_wants];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }

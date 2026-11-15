@@ -312,12 +312,24 @@ fn y_on_a_game_opens_search_over_the_page_and_b_comes_back_to_the_game() {
 }
 
 #[test]
-fn a_and_menu_on_a_game_ask_nothing_until_the_game_hub_and_the_tile_menu_are_there() {
+fn a_on_a_game_asks_nothing_until_the_game_hub_is_there_and_menu_and_x_open_its_tile_menu() {
     let mut page = page(Entry::Games);
     page.take_effects();
-    assert_eq!(after(&mut page, &[A, Menu, X]), "Games: Tile(0)");
+    assert_eq!(after(&mut page, &[A]), "Games: Tile(0)");
     assert!(page.take_effects().is_empty());
     assert_eq!(page.pages_up(), 1);
+    // The Tile menu over the page, which says "Customise games & apps" where Home's says "Customise Home"; B
+    // comes back to the tile.
+    for button in [Menu, X] {
+        press(&mut page, &[button]);
+        assert!(page.focus_line().starts_with("TileMenu: Menu("), "{}", page.focus_line());
+        assert_eq!(page.pages_up(), 2);
+        press(&mut page, &[Down, Down, Down, Down, Down, Down, Up]);
+        let line = page.focus_line();
+        assert!(line.starts_with("TileMenu: Menu(Customise games & apps) of "), "{line}");
+        assert_eq!(after(&mut page, &[B]), "Games: Tile(0)");
+        assert_eq!(page.pages_up(), 1);
+    }
 }
 
 #[test]

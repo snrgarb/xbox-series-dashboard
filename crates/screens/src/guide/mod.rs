@@ -9,22 +9,25 @@
 //! This file is where focus is and where it goes, and how the Guide comes and goes; each part draws itself in its
 //! own module.
 mod entries;
+mod flyout;
 mod hints;
 pub(crate) mod marks;
 mod panel;
 mod status;
 mod utilities;
 
-use model::{Library, PowerCommand};
+use model::{Audio, Flow, Library, PowerCommand};
 use ui::{Button, Color, Ease, Gradient, Press, Rect, TextStyle, Ui};
 
 pub use self::entries::{Entry, Kind};
+pub use self::flyout::{AudioItem, Flyout, FlyoutFocus};
 pub(crate) use self::status::pad_battery;
 pub use self::status::{PcBattery, Status};
 pub use self::utilities::Utility;
 use crate::menu_panel::{self, Answer, MenuPanel, Row};
 use crate::theme::ACCENT_LIGHT;
 use crate::wide_dialog::{self, Tile, WideDialog};
+use crate::Notification;
 
 /// The panel slides in over 120 ms and out over 150; what is on it comes in 50 ms behind it.
 const OPEN_SECONDS: f32 = 0.12;
@@ -74,12 +77,23 @@ pub enum GuideAction {
     Search,
     /// The running game was chosen: close, back to it.
     Resume,
-    /// Launch the game at this place in the library.
+    /// A game played before was chosen, by its place in the library: launched, or with another game running asked
+    /// about first (`Guide::ask_quit_and_start`).
     Launch(usize),
     /// Quit the running game.
     QuitGame,
-    /// A opened a dialog over the Guide: there is nothing to carry out.
+    /// "Quit and start": quit the running game, and start this one when it has stopped.
+    QuitAndStart(usize),
+    /// "Force quit": the running game did not close when asked.
+    ForceQuit,
+    /// A opened a dialog over the Guide, a Flyout or a dropdown's list: there is nothing to carry out.
     Asked,
+    /// Audio's Volume: the system's master volume to this, 0 to 100.
+    Volume(u8),
+    /// Audio's Mute: the system's master mute on or off.
+    Mute(bool),
+    /// A device chosen in one of Audio's dropdowns, by its place among its flow's: Windows' default from now.
+    Device(Flow, usize),
     /// A Power option was chosen: close, then carry it out.
     Power(PowerChoice),
 }
@@ -97,6 +111,11 @@ pub enum PowerChoice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuChoice {
     QuitGame,
+    /// "Quit and start", with the game to start.
+    QuitAndStart(usize),
+    ForceQuit,
+    /// A prompt's "Cancel": as B.
+    Cancel,
 }
 
 /// A dialog over the Guide. It takes every press but the Guide button's.
@@ -136,6 +155,10 @@ pub struct Around<'a> {
     pub playing: Option<usize>,
     /// Whether the Discord tab is there.
     pub discord: bool,
+    /// The system's sound, which the Audio Flyout shows.
+    pub audio: &'a Audio,
+    /// What has been posted, oldest first, which the Notifications Flyout lists.
+    pub notifications: &'a [Notification],
 }
 
 /// What the Guide shows that is not its own: the user's name, the clock, the Status area's values.
@@ -160,6 +183,9 @@ pub struct Guide {
     /// The dialog up over the Guide, and how many have come up: each comes in once.
     dialog: Option<Dialog>,
     asked: u32,
+    /// The Flyout open over the panel, and how many have opened.
+    flyout: Option<flyout::State>,
+    flyouts: u32,
     /// Whether any of it showed when last drawn: the panel still sliding away, or the dim still fading.
     shown: bool,
     /// How many times the tab has changed since the Guide opened, and which way the last change went: -1 for the
@@ -183,6 +209,8 @@ impl Default for Guide {
             panel: true,
             dialog: None,
             asked: 0,
+            flyout: None,
+            flyouts: 0,
             shown: false,
             turns: (0, 0.0),
             lag: 0.0,
@@ -202,6 +230,7 @@ impl Guide {
         self.open = true;
         self.panel = true;
         self.dialog = None;
+        self.flyout = None;
         self.turns = (0, 0.0);
         self.show(tab, around);
     }
@@ -213,6 +242,7 @@ impl Guide {
             self.open(around);
         }
         self.panel = false;
+        self.flyout = None;
         self.ask_power();
     }
 
@@ -228,6 +258,26 @@ impl Guide {
     pub fn close(&mut self) {
         self.open = false;
         self.dialog = None;
+        self.flyout = None;
+    }
+
+    /// Opens a Utility's Flyout over the panel, focus on its first entry: A on the Utility, or the Guide opened
+    /// on what a Toast told of. Only on a tab that has the Utility.
+    pub fn open_flyout(&mut self, which: Flyout) {
+        let utility = match which {
+            Flyout::Notifications => Utility::Notifications,
+            Flyout::Audio => Utility::Audio,
+        };
+        if let Some(at) = self.utilities.iter().position(|&u| u == utility) {
+            self.focus = Focus::Utility(at);
+            self.flyouts += 1;
+            self.flyout = Some(flyout::State::new(which, self.flyouts));
+        }
+    }
+
+    /// The Flyout open over the panel, and where focus is in it.
+    pub fn flyout(&self, around: Around) -> Option<(Flyout, FlyoutFocus)> {
+        self.flyout.as_ref().map(|flyout| (flyout.which, flyout.focus(around)))
     }
 
     /// The dialog up over the Guide, if one is, and where its focus is.
@@ -238,9 +288,48 @@ impl Guide {
         }
     }
 
-    /// Whether the panel shows: not when Power came by a hold.
+    /// The title of the menu or prompt up over the Guide.
+    pub fn dialog_title(&self) -> Option<&str> {
+        match self.dialog.as_ref()? {
+            Dialog::Menu(menu) => Some(menu.title()),
+            Dialog::Power(_) => None,
+        }
+    }
+
+    /// Whether the panel shows: not when Power came by a hold, nor under a prompt that came with the Guide off.
     pub fn panel_shown(&self) -> bool {
         self.panel
+    }
+
+    /// The panel does not show: what is up is a prompt on its own, and answering it closes the Guide.
+    pub fn without_panel(&mut self) {
+        self.panel = false;
+    }
+
+    /// Asks "Quit {running} and start {name}?" (docs/spec/guide.md, 6.4): A on a game while another runs.
+    pub fn ask_quit_and_start(&mut self, running: &str, game: usize, name: &str) {
+        let rows = vec![
+            Row::new(menu_panel::icon::PLAY, "Quit and start", MenuChoice::QuitAndStart(game)),
+            Row::new(menu_panel::icon::CANCEL, "Cancel", MenuChoice::Cancel),
+        ];
+        self.ask(MenuPanel::prompt(&format!("Quit {running} and start {name}?"), None, rows));
+    }
+
+    /// Asks "Force quit {name}?": the game was asked to close and has not.
+    pub fn ask_force_quit(&mut self, name: &str) {
+        let rows = vec![
+            Row::new(menu_panel::icon::QUIT, "Force quit", MenuChoice::ForceQuit),
+            Row::new(menu_panel::icon::CANCEL, "Cancel", MenuChoice::Cancel),
+        ];
+        let message = "It hasn't closed. Anything unsaved will be lost.";
+        self.ask(MenuPanel::prompt(&format!("Force quit {name}?"), Some(message), rows));
+    }
+
+    /// Puts a menu or a prompt up, in place of whatever dialog was. A Flyout that was open closes under it.
+    fn ask(&mut self, menu: MenuPanel<MenuChoice>) {
+        self.flyout = None;
+        self.dialog = Some(Dialog::Menu(menu));
+        self.asked += 1;
     }
 
     pub fn is_open(&self) -> bool {
@@ -312,9 +401,14 @@ impl Guide {
         if let Focus::Entry(at) = self.focus {
             self.focus = Focus::Entry(at.min(self.entries.len().saturating_sub(1)));
         }
-        // A menu whose game has stopped by itself goes, in silence.
+        // A menu or a prompt is about the running game: when that has stopped it goes, in silence. Power is about
+        // the PC, and stays.
         if matches!(self.dialog, Some(Dialog::Menu(_))) && around.playing.is_none() {
             self.dialog = None;
+        }
+        // An open Flyout follows what it shows: the notifications, the devices.
+        if let Some(flyout) = &mut self.flyout {
+            flyout.follow(around);
         }
         self.scroll_to_focus();
     }
@@ -328,6 +422,21 @@ impl Guide {
         }
         if self.dialog.is_some() {
             return if press.button == Button::Guide { Some(GuideAction::Close) } else { self.answer(press) };
+        }
+        // An open Flyout takes the pad: B closes a dropdown's list, then the Flyout, focus back on its Utility.
+        // The bumpers do nothing meanwhile.
+        if let Some(flyout) = &mut self.flyout {
+            if press.button == Button::Guide {
+                return Some(GuideAction::Close);
+            }
+            return match flyout.press(press, around) {
+                flyout::Outcome::Chose(action) => Some(action),
+                flyout::Outcome::Close => {
+                    self.flyout = None;
+                    None
+                }
+                flyout::Outcome::Nothing => None,
+            };
         }
         let last = self.entries.len().checked_sub(1);
         match (press.button, self.focus) {
@@ -348,23 +457,29 @@ impl Guide {
             (Button::LeftBumper, _) => self.turn(-1, around),
             (Button::RightBumper, _) => self.turn(1, around),
             (Button::A, Focus::Entry(at)) => {
-                let action = self.entries.get(at).and_then(|entry| select(entry, around));
+                let action = self.entries.get(at).and_then(select);
                 if action == Some(GuideAction::Asked) {
                     self.ask_power();
                 }
                 return action;
             }
-            // Search opens its page, at Home: bringing the Dashboard in front of a running game is #40's.
-            (Button::A, Focus::Utility(at)) if self.utilities.get(at) == Some(&Utility::Search) => {
-                return around.playing.is_none().then_some(GuideAction::Search);
+            (Button::A, Focus::Utility(at)) => {
+                return match self.utilities.get(at)? {
+                    Utility::Search => Some(GuideAction::Search),
+                    Utility::Notifications => {
+                        self.open_flyout(Flyout::Notifications);
+                        Some(GuideAction::Asked)
+                    }
+                    Utility::Audio => {
+                        self.open_flyout(Flyout::Audio);
+                        Some(GuideAction::Asked)
+                    }
+                };
             }
-            // The Utilities' Flyouts (#41) are yet to come.
-            (Button::A, Focus::Utility(_)) => {}
             // The running game's menu: its name, and Quit.
             (Button::Menu, Focus::Entry(at)) if self.entries.get(at).is_some_and(Entry::has_menu) => {
                 let rows = vec![Row::new(menu_panel::icon::QUIT, "Quit", MenuChoice::QuitGame)];
-                self.dialog = Some(Dialog::Menu(MenuPanel::menu(&self.entries[at].title, rows)));
-                self.asked += 1;
+                self.ask(MenuPanel::menu(&self.entries[at].title, rows));
             }
             (Button::B | Button::Guide, _) => return Some(GuideAction::Close),
             _ => {}
@@ -385,7 +500,9 @@ impl Guide {
             },
             Dialog::Menu(menu) => match menu.press(press) {
                 Answer::Chose(MenuChoice::QuitGame) => Some(GuideAction::QuitGame),
-                Answer::Declined => (!self.panel).then_some(GuideAction::Close),
+                Answer::Chose(MenuChoice::QuitAndStart(game)) => Some(GuideAction::QuitAndStart(game)),
+                Answer::Chose(MenuChoice::ForceQuit) => Some(GuideAction::ForceQuit),
+                Answer::Chose(MenuChoice::Cancel) | Answer::Declined => (!self.panel).then_some(GuideAction::Close),
                 Answer::Moved | Answer::Nothing => return None,
             },
         };
@@ -454,7 +571,10 @@ impl Guide {
             // What stands beside the panel goes with it, at once. A dialog over the panel leaves it be.
             if self.panel {
                 top_shade(ui, screen);
-                ui.with_offset(screen.x, 0.0, |ui| hints::draw(ui, focused.is_some_and(Entry::has_menu)));
+                // The hints hide for a Flyout.
+                if self.flyout.is_none() {
+                    ui.with_offset(screen.x, 0.0, |ui| hints::draw(ui, focused.is_some_and(Entry::has_menu)));
+                }
                 status::draw(ui, face.status, face.clock, face.pad);
             }
         });
@@ -467,6 +587,9 @@ impl Guide {
                     ui.group(bounds, BEHIND_BLUR, 1.0, |ui| self.panel(ui, behind, around, face));
                 } else {
                     self.panel(ui, behind, around, face);
+                    if let Some(flyout) = &mut self.flyout {
+                        flyout.draw(ui, around);
+                    }
                 }
             });
         }
@@ -534,30 +657,30 @@ impl Guide {
                     });
                 });
 
+                // Focus is in the open Flyout, not on the Utility that opened it.
                 let focus = match self.focus {
-                    Focus::Utility(at) => Some(at),
-                    Focus::Entry(_) => None,
+                    Focus::Utility(at) if self.flyout.is_none() => Some(at),
+                    _ => None,
                 };
-                utilities::draw(ui, &self.utilities, focus, face.status.notifications);
+                // The badge counts what the Flyout lists, or what the shell says there is, whichever is more.
+                let count = face.status.notifications.max(around.notifications.len() as u32);
+                utilities::draw(ui, &self.utilities, focus, count);
             });
         });
     }
 }
 
 /// What A does on an entry, if anything. Entries whose dialogs are yet to come are drawn and do nothing: Switch
-/// profile (M5), the Profile entry (which never does).
-fn select(entry: &Entry, around: Around) -> Option<GuideAction> {
-    let playing = around.playing.is_some();
+/// profile (M5), the Profile entry (which never does). Over a running game Home and the pages bring the Dashboard
+/// in front of it, and a recent game is asked about first: both are the Dashboard's to do.
+fn select(entry: &Entry) -> Option<GuideAction> {
     match entry.kind {
-        // Bringing Home in front of a running game is the shell's to do (#40): until then Home is chosen at Home.
-        Kind::Home => (!playing).then_some(GuideAction::Home),
+        Kind::Home => Some(GuideAction::Home),
         Kind::Running(_) => Some(GuideAction::Resume),
-        // With a game running, a recent game asks "Quit X and start Y?" first (#40).
-        Kind::Recent(game) => (!playing).then_some(GuideAction::Launch(game)),
+        Kind::Recent(game) => Some(GuideAction::Launch(game)),
         Kind::Power => Some(GuideAction::Asked),
-        // As Home: these open their pages at Home.
-        Kind::MyGames => (!playing).then_some(GuideAction::MyGames),
-        Kind::Settings => (!playing).then_some(GuideAction::Settings),
+        Kind::MyGames => Some(GuideAction::MyGames),
+        Kind::Settings => Some(GuideAction::Settings),
         Kind::Profile | Kind::SwitchProfile => None,
     }
 }

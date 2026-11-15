@@ -75,7 +75,8 @@ the TV PC, not for here.
   frozen game paints nothing, so its pulse stands still, and when a beat comes more than 1.5 s late the game says
   `game: stood still for <n> ms` in `standin.log`. A test that wants a launcher or splash
   first adds `--splash-ms` and its length on two lines of `game-args.txt`: a small window titled "<name> launcher" then
-  shows for that long before the game's.
+  shows for that long before the game's. A test that wants a game that has hung adds `--ignore-close` on a line: the
+  game then stays when its window is asked to close, and says `game: asked to close, and staying`.
 - **The stand-in Steam**, `standin steam-url steam://rungameid/<appid>`: finds the game's folder from its app manifest
   under the `SteamPath` in the registry, starts its `game.exe`, and keeps `HKCU\Software\Valve\Steam\Apps\<appid>\Running`
   at 1 until it exits, as Steam does. For a game that isn't installed it does nothing and exits 1.
@@ -116,7 +117,8 @@ walked with the pad), `needs-user` (a launcher that stays: the Launch screen ste
 Guide on the Overlay at Home and over the game, on the monitor of the window in front; the game frozen while it is
 open, thawed as it closes, and thawed at the next start after the Dashboard is killed with the Guide open), `pages`
 (every way from Home into a page and B back from each), `my-games` (My games & apps on the full shelf: along its nav,
-the grid's edges and its scroll, Play history, Manage, and B and Y), `toast` (the greeting, Toasts over the game and
+the grid's edges and its scroll, Play history, Manage, and B and Y), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
+output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
 the Guide, the queue, the Guide button during a Toast), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours

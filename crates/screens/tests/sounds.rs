@@ -171,11 +171,6 @@ fn a_in_the_guide_is_the_select_sound_then_what_the_entry_does() {
 fn a_on_something_that_does_nothing_is_silent() {
     let mut home = dashboard();
     press(&mut home, Button::Guide);
-    // A Utility, whose Flyout is yet to come.
-    for _ in 0..6 {
-        press(&mut home, Button::Down);
-    }
-    assert!(press(&mut home, Button::A).is_empty());
     // The Profile entry, which never does anything.
     press(&mut home, Button::RightBumper);
     assert!(press(&mut home, Button::A).is_empty());
@@ -201,7 +196,7 @@ fn while_a_game_starts_and_runs_only_the_guide_is_heard() {
     assert_eq!(press(&mut home, Button::Guide), [GUIDE_OPEN]);
     assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
     assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
-    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed]);
+    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed, Effect::ShowGame]);
     // Again, and Menu on the game is its menu, whose one option quits it.
     assert_eq!(press(&mut home, Button::Guide), [GUIDE_OPEN]);
     press(&mut home, Button::Down);

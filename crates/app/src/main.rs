@@ -1,4 +1,5 @@
 //! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG.
+mod games;
 mod offscreen;
 mod sounds;
 mod store;
@@ -42,6 +43,9 @@ pub struct Args {
     toasts: Vec<String>,
     /// Other programs may post notifications to the running Dashboard (docs/spec/guide.md, 9.7): for tests.
     allow_toast_posts: bool,
+    /// Notifications that are in the list as the Dashboard starts, in order, with no Toast: what a test has in the
+    /// Notifications Flyout.
+    notify: Vec<String>,
 }
 
 impl Args {
@@ -59,10 +63,10 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
-                 [--toast <text>]... [--allow-toast-posts]
+                 [--toast <text>]... [--notify <text>]... [--allow-toast-posts]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
-                 [--data-dir <dir>] [--toast <text>]
+                 [--data-dir <dir>] [--toast <text>] [--notify <text>]...
        either with [--page keyboard]: start on the page that opens text entry, until Full library and Settings do";
 
 /// A page by its name, for `--page`.
@@ -127,6 +131,7 @@ fn parse_args() -> Result<Args, String> {
             "--page" => args.page = Some(page(&value()?)?),
             "--toast" => args.toasts.push(value()?),
             "--allow-toast-posts" => args.allow_toast_posts = true,
+            "--notify" => args.notify.push(value()?),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }

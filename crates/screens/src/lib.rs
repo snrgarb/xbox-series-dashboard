@@ -18,19 +18,21 @@ pub mod search;
 pub mod settings;
 pub mod spinner;
 pub mod theme;
+pub mod tile_menu;
 pub mod toasts;
 pub mod wide_dialog;
 
-use model::Library;
+use model::{Audio, Flow, Library};
 pub use model::{PowerCommand, Sound};
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
-use crate::guide::{Around, DialogFocus, Face, Guide, GuideAction, PowerChoice, Status, Tab};
+use crate::guide::{Around, DialogFocus, Face, Flyout, FlyoutFocus, Guide, GuideAction, PowerChoice, Status, Tab};
 use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
 pub use crate::settings::{Options, Setting};
-use crate::toasts::{Notification, Toast, ToastKind, Toasts};
+pub use crate::toasts::Notification;
+use crate::toasts::{Toast, ToastKind, Toasts};
 
 /// What the Dashboard asks of the shell.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,8 +41,15 @@ pub enum Effect {
     Launch(usize),
     /// Ask the running game to close.
     QuitGame,
-    /// The Guide closed: over a game, the game gets the foreground back.
+    /// The running game was asked to close and has not: end it. The shell answers `quit_given_up` when it finds
+    /// nothing to end.
+    ForceQuitGame,
+    /// The Guide closed: the window that had the foreground gets it back, unless one of the two below says who does.
     GuideClosed,
+    /// The Dashboard in front of the running game, which runs on behind it: Home or a page chosen in the Guide.
+    ShowHome,
+    /// The running game in front again, whatever was in front when the Guide opened.
+    ShowGame,
     /// Leave to the desktop: Power's Exit to desktop.
     Exit,
     /// Play this sound, if there is a file for it.
@@ -48,9 +57,27 @@ pub enum Effect {
     /// Turn the machine off, restart it or put it to sleep: chosen in Power (docs/spec/guide.md, 6.2). Whoever
     /// carries effects out decides whether that is for real; nothing in this crate can do it.
     Power(PowerCommand),
+    /// Audio's Volume moved: the system's master volume to this, 0 to 100. The Dashboard shows the new level
+    /// already, and takes the system's word for it at the next `set_audio`.
+    Volume(u8),
+    /// Audio's Mute: the system's master mute on or off.
+    Mute(bool),
+    /// A device chosen in one of Audio's dropdowns, by its place among `audio()`'s of that flow: make it Windows'
+    /// default.
+    DefaultDevice(Flow, usize),
     /// Settings changed an option. The Dashboard has taken the change already: this is for whoever keeps the
     /// settings to save it.
     Set(settings::Change),
+    /// Mark the game with this id in the library database as a favourite, or as one no longer. The shell answers
+    /// with a new snapshot of the library (`set_library`).
+    Favourite { game: i64, on: bool },
+    /// Hide the game with this id from every list but the Hidden filter's, or show it again. A new snapshot
+    /// follows, as for a favourite.
+    Hidden { game: i64, on: bool },
+    /// Ask its store to install the game with this id in the library database: the store's own window does it.
+    Install(i64),
+    /// Ask its store to uninstall the game with this id. The player has said yes to "Uninstall X?".
+    Uninstall(i64),
 }
 
 /// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
@@ -59,6 +86,24 @@ pub const GUIDE_REPEAT: Repeat = Repeat::millis(700, 80);
 /// How long the Guide waits for the button that closed it to be let go before it hands the foreground back all the
 /// same (docs/spec/guide.md, 3.5). Timed by whoever has a clock, who then says `release_wait_over`.
 pub const RELEASE_FALLBACK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long a game asked to quit has to close by itself before "Force quit?" is asked, in seconds; and as long
+/// again after a force quit before it is asked anew (docs/spec/guide.md, 7.4).
+pub const QUIT_TIMEOUT: f32 = 10.0;
+
+/// How long after a game quit from the Guide has stopped the Guide closes, in seconds.
+pub const CLOSE_AFTER_QUIT: f32 = 0.5;
+
+/// The running game being quit (docs/spec/guide.md, 7.4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Quit {
+    /// The seconds it still has to close by itself.
+    left: f32,
+    /// Whether "Force quit?" is up: nothing is counted meanwhile.
+    asked: bool,
+    /// The game to start once it has stopped, by its place in the library: "Quit and start".
+    then: Option<usize>,
+}
 
 /// What the Overlay is wanted for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -112,6 +157,20 @@ pub struct Dashboard {
     toast_strip: bool,
     /// Whether frames come slowly: Home then gives way to a Toast.
     slow_renderer: bool,
+    /// Whether the Dashboard is in front of the running game: Home or a page was chosen in the Guide over it. The
+    /// game runs on behind, first in the Guide's list, where A on it brings it back.
+    in_front: bool,
+    /// The quit of the running game that is under way.
+    quit: Option<Quit>,
+    /// The seconds until the Guide closes by itself: the game quit from it has stopped.
+    close_in: Option<f32>,
+    /// Whether the time told has changed what the Guide shows, since `take_timed` last asked.
+    timed: bool,
+    /// The buttons pressed while a dialog page (the Tile menu) was up and not let go since: held on after it has
+    /// closed, they do nothing to what was under it (docs/spec/tile-menu.md, section 6).
+    held: Vec<Button>,
+    /// The system's sound as the shell last read it, which the Audio Flyout shows.
+    audio: Audio,
     effects: Vec<Effect>,
 }
 
@@ -138,6 +197,12 @@ impl Dashboard {
             toasts: Toasts::default(),
             toast_strip: false,
             slow_renderer: false,
+            in_front: false,
+            quit: None,
+            close_in: None,
+            timed: false,
+            held: Vec::new(),
+            audio: Audio::default(),
             effects: Vec::new(),
         }
     }
@@ -158,6 +223,9 @@ impl Dashboard {
         let was = self.home.focused_game(&self.library).filter(|_| on_row);
         let focused = was.and_then(place);
         self.playing = self.playing.and_then(place);
+        if let Some(quit) = &mut self.quit {
+            quit.then = quit.then.and_then(place);
+        }
         self.user = library.user.clone().unwrap_or_else(|| "Player".into());
         self.library = library;
         // A focused game that has left the Recent row leaves focus on the tile where it was, or the row's last.
@@ -172,7 +240,13 @@ impl Dashboard {
 
     fn refresh_guide(&mut self) {
         if self.guide.is_open() {
-            let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+            let around = Around {
+                library: &self.library,
+                playing: self.playing,
+                discord: self.status.discord,
+                audio: &self.audio,
+                notifications: self.toasts.notifications(),
+            };
             self.guide.refresh(around);
         }
     }
@@ -181,6 +255,47 @@ impl Dashboard {
     pub fn set_status(&mut self, status: Status) {
         self.status = status;
         self.refresh_guide();
+    }
+
+    /// The system's sound, as the shell has just read it. An open Audio Flyout follows.
+    pub fn set_audio(&mut self, audio: Audio) {
+        self.audio = audio;
+        self.refresh_guide();
+    }
+
+    /// The system's sound as the Dashboard has it: `Effect::DefaultDevice` names a device by its place here.
+    pub fn audio(&self) -> &Audio {
+        &self.audio
+    }
+
+    /// Whether the Audio Flyout is open: the shell reads the system's sound as it opens and keeps reading while
+    /// it is, so that it follows what is changed elsewhere.
+    pub fn audio_shown(&self) -> bool {
+        self.flyout().is_some_and(|(which, _)| which == Flyout::Audio)
+    }
+
+    /// The Flyout open over the Guide's panel, and where focus is in it.
+    pub fn flyout(&self) -> Option<(Flyout, FlyoutFocus)> {
+        self.guide.flyout(self.guide_around()).filter(|_| self.guide.is_open())
+    }
+
+    /// Notifications, in the open Guide: its Flyout opens, where the showing tab has the Utility (the landing
+    /// tab, which the Guide opens on). What the Guide shows when it was opened while a Toast told of a
+    /// notification (docs/spec/guide.md, 9.5).
+    pub fn open_notifications(&mut self) {
+        if self.guide.is_open() {
+            self.guide.open_flyout(Flyout::Notifications);
+        }
+    }
+
+    fn guide_around(&self) -> Around<'_> {
+        Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: self.toasts.notifications(),
+        }
     }
 
     pub fn set_clock(&mut self, text: Option<String>) {
@@ -236,9 +351,10 @@ impl Dashboard {
         pages::Around { library: &self.library, playing: self.playing, options: self.options }
     }
 
-    /// How a held direction repeats now, for whoever times the pad.
+    /// How a held direction repeats now, for whoever times the pad: in the Guide and in a dialog at their pace
+    /// (docs/spec/tile-menu.md, section 6), anywhere else at Home's.
     pub fn repeat(&self) -> Repeat {
-        if self.guide.is_open() {
+        if self.guide.is_open() || self.pages.dialog().is_some() {
             GUIDE_REPEAT
         } else if self.page_has_pad() {
             self.pages.repeat().unwrap_or_default()
@@ -290,6 +406,7 @@ impl Dashboard {
             }
             PadEvent::Release(button) => {
                 self.pages.pad(button, false);
+                self.held.retain(|&held| held != button);
                 if self.release_awaited == Some(button) {
                     self.release_awaited = None;
                 }
@@ -302,7 +419,161 @@ impl Dashboard {
             PadEvent::GuideHeld => {
                 self.guide_button_spent = true;
                 self.open_power();
+                self.settle_quit();
             }
+        }
+    }
+
+    /// Time has passed: `seconds` since the Dashboard was last told the time, by this or by `toasts_presented`.
+    /// Toasts are timed by it, since the Dashboard has no clock: one that begins to show asks for its sound. True
+    /// when what `draw_toasts` draws may have changed.
+    ///
+    /// The quit of a game is timed by it too (docs/spec/guide.md, 7.4): "Force quit?" once the game has had
+    /// `QUIT_TIMEOUT` to close, and the Guide closing `CLOSE_AFTER_QUIT` after a game quit from it has stopped.
+    /// Whether anything came of that is `take_timed`'s to say.
+    pub fn advance(&mut self, seconds: f32) -> bool {
+        let before = (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some());
+        if self.toasts.advance(seconds) {
+            self.effects.push(Effect::Sound(Sound::Notification));
+        }
+        self.pass(seconds);
+        before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
+    }
+
+    /// The time the quit of a game goes by.
+    fn pass(&mut self, seconds: f32) {
+        let due = self.quit.as_mut().filter(|quit| !quit.asked).is_some_and(|quit| {
+            quit.left -= seconds;
+            quit.left <= 0.0
+        });
+        if due {
+            self.offer_force_quit();
+            self.timed = true;
+        }
+        if let Some(left) = &mut self.close_in {
+            *left -= seconds;
+            if *left <= 0.0 {
+                self.close_in = None;
+                self.timed |= self.guide.is_open();
+                self.close_guide();
+            }
+        }
+    }
+
+    /// Whether the time told since this was last asked changed what the Guide shows: "Force quit?" came up, or
+    /// the Guide closed after a quit.
+    pub fn take_timed(&mut self) -> bool {
+        std::mem::take(&mut self.timed)
+    }
+
+    /// How soon `advance` has something to do, in seconds: None when nothing is being timed.
+    pub fn timer(&self) -> Option<f32> {
+        let quit = self.quit.filter(|quit| !quit.asked).map(|quit| quit.left);
+        [quit, self.close_in].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+    }
+
+    /// Whether the running game has been asked to quit and has not stopped yet, nor been given up on: it is not
+    /// frozen under the Guide meanwhile, so it is free to close.
+    pub fn quitting(&self) -> bool {
+        self.quit.is_some()
+    }
+
+    /// Whether the Dashboard is in front of the running game.
+    pub fn in_front_of_game(&self) -> bool {
+        self.playing.is_some() && self.in_front
+    }
+
+    /// The shell found nothing of the game to end: asking again would never help, so the quit is over and the game
+    /// left to itself.
+    pub fn quit_given_up(&mut self) {
+        self.quit = None;
+    }
+
+    /// Quits the running game: asked to close, as its window's close button would, with no confirmation. Nothing
+    /// while it is being quit already.
+    fn quit_game(&mut self) {
+        if self.playing.is_some() && self.quit.is_none() {
+            self.quit = Some(Quit { left: QUIT_TIMEOUT, asked: false, then: None });
+            self.effects.push(Effect::QuitGame);
+        }
+    }
+
+    /// The game has not closed by itself in time: "Force quit {X}?", over the Guide, which opens for it if it is
+    /// closed; with the Guide setting off, over the dim alone.
+    fn offer_force_quit(&mut self) {
+        let Some(name) = self.playing.and_then(|game| self.library.games.get(game)).map(|game| game.name.clone())
+        else {
+            self.quit = None;
+            return;
+        };
+        if !self.open_guide_for_a_prompt() {
+            self.quit = None;
+            return;
+        }
+        self.guide.ask_force_quit(&name);
+        if let Some(quit) = &mut self.quit {
+            quit.asked = true;
+        }
+        self.effects.push(Effect::Sound(Sound::PromptOpen));
+    }
+
+    /// A prompt needs the Guide: opened if it is closed, with its panel only if the Guide setting is on. False when
+    /// there is nowhere to show it: over a game with no Overlay.
+    fn open_guide_for_a_prompt(&mut self) -> bool {
+        if !self.guide.is_open() {
+            self.open_guide();
+            if !self.options.use_guide {
+                self.guide.without_panel();
+            }
+        }
+        self.guide.is_open()
+    }
+
+    /// "Force quit?" has gone unanswered with "Force quit": by Cancel, B, the Guide closing or another dialog taking
+    /// its place. Declined, the game is left running and the quit is over, with whatever was to start after it.
+    fn settle_quit(&mut self) {
+        let prompt = matches!(self.guide.dialog(), Some(DialogFocus::Menu { prompt: true, .. }));
+        if self.quit.is_some_and(|quit| quit.asked) && !prompt {
+            self.quit = None;
+        }
+    }
+
+    /// A on a game: started, or with another game running asked about first, "Quit {X} and start {Y}?"
+    /// (docs/spec/guide.md, 6.4), over the Guide, which opens for it. On the running game itself, back to it. Two
+    /// games are never started at once: while one is quitting or starting, nothing.
+    fn play(&mut self, game: usize) {
+        if self.playing == Some(game) {
+            self.show_game();
+            return;
+        }
+        if self.quit.is_some() || self.launch.up() {
+            return;
+        }
+        let Some(running) = self.playing else {
+            self.effects.push(Effect::Launch(game));
+            return;
+        };
+        let name = |game: usize| self.library.games.get(game).map_or("the game", |game| game.name.as_str()).to_string();
+        let (running, name) = (name(running), name(game));
+        if self.open_guide_for_a_prompt() {
+            self.guide.ask_quit_and_start(&running, game, &name);
+        }
+    }
+
+    /// The running game in front again.
+    fn show_game(&mut self) {
+        if self.playing.is_some() {
+            self.in_front = false;
+            self.effects.push(Effect::ShowGame);
+        }
+    }
+
+    /// The Dashboard in front of the running game, if one is running: Home or a page was chosen in the Guide over
+    /// it. The shell says so itself when the game it was to go back to has no window.
+    pub fn show_dashboard(&mut self) {
+        if self.playing.is_some() {
+            self.in_front = true;
+            self.effects.push(Effect::ShowHome);
         }
     }
 
@@ -325,15 +596,24 @@ impl Dashboard {
     /// A dialog over the Guide has sounds of its own: one for its coming up, after A's if A brought it; a move's;
     /// A's on an option, which in a prompt is the sound of its closing; and B's, the closing's. A tap of the Guide
     /// button closes whatever is up in silence.
+    ///
+    /// A page that is a dialog (the Tile menu) sounds as a dialog does (docs/spec/tile-menu.md, section 8): its
+    /// opening, after the sound of what opened it; a move along its rows; A on a row, which in a prompt is the
+    /// sound of its closing; B at every level. A move with nowhere to go is silent there too.
     pub fn press(&mut self, press: Press) {
-        let (was_open, guide) = (self.guide.is_open(), self.guide.focus());
+        let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
         let (depth, focus) = (self.pages.depth(), self.focus_place());
         let dialog = self.guide.dialog();
+        let page_dialog = self.pages.dialog();
         let asked = self.effects.len();
         let activated = self.steer(press);
+        self.settle_quit();
         let select = activated.then_some(Sound::GuideSelect);
+        let moved = self.pages.depth() == depth && self.focus_place() != focus;
+        // A dialog page that was not up before the press came up by it.
+        let opened = (page_dialog.is_none() && self.pages.dialog().is_some()).then_some(Sound::PromptOpen);
         let sounds = match (dialog, self.guide.dialog()) {
             (None, Some(_)) => [select, Some(Sound::PromptOpen)],
             (Some(was), Some(now)) => [(was != now).then_some(Sound::GuideMove), None],
@@ -349,48 +629,71 @@ impl Dashboard {
                 }
             }
             (None, None) if was_open => {
-                let moved = self.guide.is_open() && self.guide.focus() != guide;
+                // B closing a Flyout or a list changes where focus is, and is silent all the same.
+                let moved = press.button != Button::B && self.guide.is_open() && self.guide_place() != guide;
                 [select.or(moved.then_some(Sound::GuideMove)), None]
             }
             (None, None) if self.guide.is_open() => [Some(Sound::GuideOpen), None],
-            (None, None) if activated => [Some(Sound::Activate), None],
-            (None, None) => {
-                let moved = self.pages.depth() == depth && self.focus_place() != focus;
-                [moved.then_some(Sound::Move), None]
-            }
+            (None, None) => match (page_dialog, press.button) {
+                (Some(kind), Button::A) if !press.repeat => [Some(kind.chosen()), None],
+                (Some(_), Button::B) if !press.repeat => [Some(Sound::PromptClose), None],
+                (Some(_), _) => [moved.then_some(Sound::GuideMove), None],
+                (None, _) if activated => [Some(Sound::Activate), opened],
+                (None, _) => [moved.then_some(Sound::Move), opened],
+            },
         };
         for (at, sound) in sounds.into_iter().flatten().enumerate() {
             self.effects.insert(asked + at, Effect::Sound(sound));
         }
     }
 
+    /// Where the Guide's focus is, and the volume: a press that changed any of it moved something.
+    fn guide_place(&self) -> ((Tab, guide::Focus), Option<(Flyout, FlyoutFocus)>, u8) {
+        (self.guide.focus(), self.guide.flyout(self.guide_around()), self.audio.volume)
+    }
+
     /// Power, by a hold of the Guide button (docs/spec/guide.md, 7.1): over the dim alone, wherever the Dashboard
     /// is. An open Guide's panel slides away under it. Not with the Guide setting off, nor while a game starts, nor
     /// over a game with no Overlay to show it on.
     fn open_power(&mut self) {
-        let nowhere = self.playing.is_some() && !self.has_overlay;
+        let nowhere = self.playing.is_some() && !self.has_overlay && !self.in_front;
         if !self.options.use_guide || nowhere || (self.launch.up() && !self.guide.is_open()) {
             return;
         }
         if !self.guide.is_open() {
+            // A dialog page closes with no answer as the Guide comes.
+            self.pages.close_dialog();
             // As the Guide opens: on the Overlay where there is one, which keeps the foreground if it still has it.
             self.guide_overlaid = self.has_overlay;
             self.release_awaited = None;
         }
-        self.guide.open_power(Around { library: &self.library, playing: self.playing, discord: self.status.discord });
+        self.guide.open_power(Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: self.toasts.notifications(),
+        });
         self.effects.push(Effect::Sound(Sound::PromptOpen));
     }
 
     /// Gives the press to whatever takes input now. True when it was A and it chose something.
     fn steer(&mut self, press: Press) -> bool {
         if self.guide.is_open() {
-            let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+            let around = Around {
+                library: &self.library,
+                playing: self.playing,
+                discord: self.status.discord,
+                audio: &self.audio,
+                notifications: self.toasts.notifications(),
+            };
             let action = self.guide.press(press, around);
             if let Some(action) = action {
                 self.guide_action(action);
             }
             // Everything but closing with B or the Guide button is a choice, and sounds as one.
-            return action.is_some_and(|action| action != GuideAction::Close);
+            // The volume moving is a move, and sounds as one.
+            return action.is_some_and(|action| !matches!(action, GuideAction::Close | GuideAction::Volume(_)));
         }
         // While a game starts, the Dashboard takes no input.
         if self.launch.up() {
@@ -408,29 +711,60 @@ impl Dashboard {
             return false;
         }
         // Behind a running game there is nothing to steer.
-        if self.playing.is_some() {
+        if self.playing.is_some() && !self.in_front {
             return false;
+        }
+        if self.pages.dialog().is_some() {
+            // The dialog gets every press, and each button pressed while it is up is remembered until let go.
+            if !self.held.contains(&press.button) {
+                self.held.push(press.button);
+            }
+        } else if press.repeat && self.held.contains(&press.button) {
+            // Still down from before the dialog closed: nothing under it hears of it.
+            return false;
+        } else {
+            // Pressed afresh: it was let go, whether or not anyone said so (a key has no release).
+            self.held.retain(|&held| held != press.button);
         }
         if !self.pages.is_empty() {
             let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
             match self.pages.press(press, around) {
                 Some(PageAction::Close) => self.close_page(),
-                Some(PageAction::Open(open)) => self.pages.open_over(open),
+                Some(PageAction::Open(open)) => {
+                    self.pages.open_over(open, around);
+                }
                 Some(PageAction::Effect(Effect::Set(change))) => self.set(change),
+                // A page's Play is Home's: with another game running it is asked about first.
+                Some(PageAction::Effect(Effect::Launch(game))) => self.play(game),
+                // And a page's Quit is the Guide's, with its ten seconds and "Force quit?".
+                Some(PageAction::Effect(Effect::QuitGame)) => self.quit_game(),
                 Some(PageAction::Effect(effect)) => self.effects.push(effect),
+                Some(PageAction::CloseWith(effect)) => {
+                    self.close_page();
+                    self.effects.push(effect);
+                }
+                // What was under the page is under the new one: B there comes back to it.
+                Some(PageAction::Replace(open)) => {
+                    self.pages.close();
+                    let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
+                    if !self.pages.open_over(open, around) {
+                        self.close_page();
+                    }
+                }
                 None => return false,
             }
             return press.button == Button::A;
         }
         match self.home.press(press.button, &self.library) {
-            Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
+            Some(HomeAction::Launch(game)) if !press.repeat => self.play(game),
             // The profile opens the Guide where the profile is.
             Some(HomeAction::OpenGuide) if !press.repeat && self.options.use_guide => {
                 self.open_guide_on(Tab::ProfileAndSystem);
             }
             Some(HomeAction::Open(open)) if !press.repeat => {
                 let on_button = matches!(self.home.focus(), Focus::TopBar(TopButton::Search | TopButton::Settings));
-                self.pages.open(open);
+                self.pages
+                    .open(open, pages::Around { library: &self.library, playing: self.playing, options: self.options });
                 self.back_to_button = on_button && press.button == Button::A;
             }
             // The Guide on its Discord tab while Discord is connected (M6); with no such tab, or the Guide off,
@@ -450,7 +784,7 @@ impl Dashboard {
     /// Opens a page over Home, in place of any that is up: from the Guide, or by whoever drives the Dashboard.
     /// B on it goes to Home, its rows taking focus where they last had it.
     pub fn open_page(&mut self, open: Open) {
-        self.pages.open(open);
+        self.pages.open(open, pages::Around { library: &self.library, playing: self.playing, options: self.options });
         self.back_to_button = false;
     }
 
@@ -493,15 +827,35 @@ impl Dashboard {
     /// The Guide's own line beside `focus_line`'s, written the same way and logged as `guide: ...` when it
     /// changes: `closed`, or the tab and focus (`ProfileAndSystem Entry(3)`), then `, no panel` when Power came by
     /// a hold, then the dialog up over it and its focus (`, dialog Power(Close)`).
+    ///
+    /// A menu or a prompt has its title after it (`, dialog Menu { prompt: true, row: 0 } "Force quit Hades II?"`),
+    /// and whatever the line is, it ends `, quitting` while the running game is being quit, and
+    /// `, quitting, then Celeste` when a game is to start after it.
     pub fn guide_line(&self) -> String {
+        let quitting = match self.quit {
+            Some(Quit { then: Some(next), .. }) => {
+                format!(", quitting, then {}", self.library.games.get(next).map_or("?", |game| game.name.as_str()))
+            }
+            Some(_) => ", quitting".into(),
+            None => String::new(),
+        };
         if !self.guide.is_open() {
-            return "closed".into();
+            return format!("closed{quitting}");
         }
         let (tab, focus) = self.guide.focus();
         let panel = if self.guide.panel_shown() { "" } else { ", no panel" };
+        let title = self.guide.dialog_title().map(|title| format!(" {title:?}")).unwrap_or_default();
+        let flyout = match self.guide.flyout(self.guide_around()) {
+            Some((Flyout::Audio, at)) => {
+                let muted = if self.audio.muted { ", muted" } else { "" };
+                format!(", flyout Audio {at:?}, volume {}{muted}", self.audio.volume)
+            }
+            Some((which, at)) => format!(", flyout {which:?} {at:?}"),
+            None => String::new(),
+        };
         match self.guide.dialog() {
-            Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}"),
-            None => format!("{tab:?} {focus:?}{panel}"),
+            Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}{title}{quitting}"),
+            None => format!("{tab:?} {focus:?}{panel}{flyout}{quitting}"),
         }
     }
 
@@ -528,22 +882,61 @@ impl Dashboard {
 
     fn guide_action(&mut self, action: GuideAction) {
         match action {
-            GuideAction::Close | GuideAction::Resume => self.close_guide(),
+            GuideAction::Close => self.close_guide(),
+            // To the game's own window, whatever the Guide opened over.
+            GuideAction::Resume => {
+                self.close_guide();
+                self.show_game();
+            }
+            // Over a running game, the Dashboard comes in front of it, as the Bundle brings Playnite.
             GuideAction::Home => {
                 self.close_pages();
                 self.close_guide();
+                self.show_dashboard();
             }
             GuideAction::MyGames => self.guide_opens(Open::MyGames(my_games::Entry::Games)),
             GuideAction::Settings => self.guide_opens(Open::Settings(settings::Entry::Rail)),
             GuideAction::Search => self.guide_opens(Open::Search),
-            // The Guide stays open over a game being quit, and goes when the game has ended.
-            GuideAction::QuitGame => self.effects.push(Effect::QuitGame),
-            GuideAction::Launch(game) => {
+            // The Guide stays open over a game being quit, and closes a moment after the game has stopped.
+            GuideAction::QuitGame => self.quit_game(),
+            // The game that was running is quit, and the one chosen starts when it has stopped.
+            GuideAction::QuitAndStart(game) => {
+                self.quit_game();
+                if let Some(quit) = &mut self.quit {
+                    quit.then = Some(game);
+                }
+            }
+            // Ended, not asked: and asked about again if it is somehow still there after as long again.
+            GuideAction::ForceQuit => {
+                if let Some(quit) = &mut self.quit {
+                    (quit.left, quit.asked) = (QUIT_TIMEOUT, false);
+                    self.effects.push(Effect::ForceQuitGame);
+                }
+            }
+            GuideAction::Launch(game) if self.playing.is_none() && !self.launch.up() => {
                 self.home.focus_recent(game, &self.library);
                 self.close_guide();
                 self.effects.push(Effect::Launch(game));
             }
+            // With a game running the Guide stays, under the question.
+            GuideAction::Launch(game) => self.play(game),
             GuideAction::Asked => {}
+            // The level shows at once; the shell's next reading says what the system made of it.
+            GuideAction::Volume(level) => {
+                self.audio.volume = level;
+                self.effects.push(Effect::Volume(level));
+            }
+            GuideAction::Mute(muted) => {
+                self.audio.muted = muted;
+                self.effects.push(Effect::Mute(muted));
+            }
+            GuideAction::Device(flow, device) => {
+                match flow {
+                    Flow::Output => self.audio.output = Some(device),
+                    Flow::Input => self.audio.input = Some(device),
+                }
+                self.effects.push(Effect::DefaultDevice(flow, device));
+            }
             // The Guide closes first; then what was chosen is the shell's to do.
             GuideAction::Power(choice) => {
                 self.close_guide();
@@ -556,10 +949,11 @@ impl Dashboard {
         }
     }
 
-    /// The Guide closes onto a page, which takes the place of any that is up.
+    /// The Guide closes onto a page, which takes the place of any that is up: in front of a running game, too.
     fn guide_opens(&mut self, open: Open) {
         self.close_guide();
         self.open_page(open);
+        self.show_dashboard();
     }
 
     /// Opens the Guide, whatever the Guide setting says: that is for the Guide button.
@@ -570,10 +964,18 @@ impl Dashboard {
     /// Opens the Guide on a tab.
     pub fn open_guide_on(&mut self, tab: Tab) {
         // Over a game the Guide is on the Overlay; with no Overlay there is nowhere to show it.
-        if self.playing.is_some() && !self.has_overlay {
+        if self.playing.is_some() && !self.has_overlay && !self.in_front {
             return;
         }
-        let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+        // A dialog page closes with no answer as the Guide comes (docs/spec/tile-menu.md, section 6).
+        self.pages.close_dialog();
+        let around = Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: self.toasts.notifications(),
+        };
         self.guide.open_on(tab, around);
         self.guide_overlaid = self.has_overlay;
         // Opened again before the foreground went back: the Overlay still has it, and keeps it.
@@ -588,28 +990,36 @@ impl Dashboard {
         match toast {
             ToastKind::Notification => self.open_notifications(),
             ToastKind::Greeting => {
-                let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+                let around = Around {
+                    library: &self.library,
+                    playing: self.playing,
+                    discord: self.status.discord,
+                    audio: &self.audio,
+                    notifications: self.toasts.notifications(),
+                };
                 self.guide.show_tab(guide::Tab::ProfileAndSystem, around);
             }
         }
     }
 
-    /// Notifications, in the open Guide. The hook for the Notifications Flyout (#41), which opens here; until there
-    /// is one, focus goes to the Utility that will open it.
-    fn open_notifications(&mut self) {
-        self.guide.focus_utility(guide::Utility::Notifications);
+    /// Whether the Guide's Notifications Flyout is open: a notification that comes meanwhile is listed there and
+    /// makes no Toast.
+    fn notifications_open(&self) -> bool {
+        matches!(self.flyout(), Some((Flyout::Notifications, _)))
     }
 
-    /// Whether the Guide's Notifications Flyout is open: a notification that comes meanwhile is listed there and
-    /// makes no Toast. The hook for the Flyout (#41): there is none yet, so it never is.
-    fn notifications_open(&self) -> bool {
-        false
+    /// Adds a notification to the list the Notifications Flyout shows, which follows if it is open, with no Toast:
+    /// one that was there before the Dashboard started. Gives its id in the list.
+    pub fn record(&mut self, text: &str) -> u64 {
+        let id = self.toasts.record(text);
+        self.refresh_guide();
+        id
     }
 
     /// Posts a notification: it joins the list the Notifications Flyout shows, and tells of itself in a Toast.
     /// Gives its id in the list.
     pub fn notify(&mut self, text: &str) -> u64 {
-        let id = self.toasts.record(text);
+        let id = self.record(text);
         if !self.notifications_open() {
             // With the Guide off the Guide button does nothing, and the Toast does not say to press it.
             self.toast(Toast { kind: ToastKind::Notification, text: text.to_string(), prompt: self.options.use_guide });
@@ -635,22 +1045,13 @@ impl Dashboard {
         }
     }
 
-    /// This much time has passed: what Toasts are timed by, since the Dashboard has no clock. A Toast that begins
-    /// to show asks for its sound. True when what `draw_toasts` draws may have changed.
-    pub fn advance(&mut self, seconds: f32) -> bool {
-        let before = (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some());
-        if self.toasts.advance(seconds) {
-            self.effects.push(Effect::Sound(Sound::Notification));
-        }
-        before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
-    }
-
     /// The Toasts' picture as it is now has been put on the screen, or taken off it: said by whoever shows it,
     /// after each frame and after hiding it. The queue goes by it (`toasts::Toasts::presented`).
     /// `seconds` is the time since the Dashboard was last told the time, by this or by `advance`: a frame is out
     /// well into a turn of the loop.
     pub fn toasts_presented(&mut self, seconds: f32) {
         self.toasts.tick(seconds);
+        self.pass(seconds);
         self.toasts.presented();
     }
 
@@ -686,6 +1087,7 @@ impl Dashboard {
     pub fn close_guide(&mut self) {
         if self.guide.is_open() {
             self.guide.close();
+            self.close_in = None;
             self.effects.push(Effect::GuideClosed);
         }
     }
@@ -755,7 +1157,7 @@ impl Dashboard {
     /// Whether Home's window has nothing to show: a game is running in front of it, or its Launch screen has faded
     /// in over it.
     pub fn home_covered(&self) -> bool {
-        self.playing.is_some() && (!self.launch.up() || self.launch.covers())
+        self.playing.is_some() && !self.in_front && (!self.launch.up() || self.launch.covers())
     }
 
     /// The shell has asked the store for the game: its Launch screen comes up.
@@ -765,6 +1167,7 @@ impl Dashboard {
                 self.launch.show(found);
             }
             self.playing = Some(game);
+            (self.in_front, self.quit, self.close_in) = (false, None, None);
             self.refresh_guide();
         }
     }
@@ -775,6 +1178,11 @@ impl Dashboard {
     }
 
     /// The game ended, or never started: Home again, focus on its tile.
+    ///
+    /// An open Guide stays open, as the Bundle's does (docs/spec/guide.md, 3.4): its list is made again without the
+    /// game, a menu or a prompt about the game goes in silence, and Power stays up. Closing it then lands on Home.
+    /// Only a game that was quit from the Guide takes the Guide with it: `CLOSE_AFTER_QUIT` later, or at once when
+    /// another game was to start after it, which is then asked of the shell.
     pub fn game_ended(&mut self) {
         // A page that was up goes with it.
         self.close_pages();
@@ -782,7 +1190,21 @@ impl Dashboard {
             self.home.focus_recent(game, &self.library);
         }
         self.launch.hide();
-        self.guide.close();
+        self.in_front = false;
+        let quit = self.quit.take();
+        // A prompt that was up on its own goes with the dim it showed over.
+        let alone = self.guide.is_open() && !self.guide.panel_shown() && self.guide.dialog_title().is_some();
+        self.refresh_guide();
+        if alone {
+            self.close_guide();
+        }
+        if let Some(next) = quit.and_then(|quit| quit.then).filter(|&next| next < self.library.games.len()) {
+            self.home.focus_recent(next, &self.library);
+            self.close_guide();
+            self.effects.push(Effect::Launch(next));
+        } else if quit.is_some() && self.guide.is_open() {
+            self.close_in = Some(CLOSE_AFTER_QUIT);
+        }
     }
 
     /// The game focus is on, by its place in the library.
@@ -806,7 +1228,13 @@ impl Dashboard {
     /// The Guide alone, over whatever is drawn already: the same in Home's window and on the Overlay.
     pub fn draw_guide(&mut self, ui: &mut Ui) {
         let clock = self.clock();
-        let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+        let around = Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: self.toasts.notifications(),
+        };
         // The pad's own word on its charge, unless the shell has said otherwise. One on a cable shows its glyph.
         let charge = match self.pad.battery {
             Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),
@@ -851,7 +1279,9 @@ impl Dashboard {
         };
         // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn.
         if !self.pages.hides_home() {
-            self.home.set_in_front(!self.guide.is_open() && self.pages.is_empty() && !self.home_gives_way());
+            // Under a page that leaves it showing (the Tile menu) Home goes on as it was; and it holds still
+            // while it gives way to a Toast.
+            self.home.set_in_front(!self.guide.is_open() && !self.home_gives_way());
             self.home.draw(ui, &self.library, &status);
         }
         self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing, options: self.options });

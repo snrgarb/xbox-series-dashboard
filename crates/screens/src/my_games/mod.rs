@@ -14,7 +14,7 @@
 //! | Manage | `manage` |
 //!
 //! **Hooks for other tickets**, each one function that does nothing yet: [`full_library`] and
-//! [`full_library_count`] (#53), [`open_game_hub`] (#51), [`open_tile_menu`] (#50), `manage::open_manage_queue`
+//! [`full_library_count`] (#53), [`open_game_hub`] (#51), `manage::open_manage_queue`
 //! and `nav::foot` (M4), [`progress`] (the library updating).
 mod games;
 mod grid;
@@ -69,10 +69,10 @@ fn open_game_hub(_game: &Game) -> Option<PageAction> {
     None
 }
 
-/// **#50's hook.** Menu on a game (and X on a grid tile) opens its Tile menu, with "Customise games & apps" in
-/// place of Home's "Customise Home". Nothing until there is a Tile menu.
-fn open_tile_menu(_game: &Game) -> Option<PageAction> {
-    None
+/// Menu on a game (and X on a grid tile) opens its Tile menu, with "Customise games & apps" in place of Home's
+/// "Customise Home".
+fn open_tile_menu(game: &Game) -> Option<PageAction> {
+    Some(crate::tile_menu::open(game, crate::tile_menu::Opener::MyGames))
 }
 
 /// **#53's hook.** Full library's content, opened on the tab of this saved filter (`model::Filter::id`), or as the

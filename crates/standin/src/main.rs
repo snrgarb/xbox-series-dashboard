@@ -7,10 +7,11 @@
 //!   standin make-tones <dir>
 //!       Writes a short tone into <dir> under each of the names the Dashboard's sounds have in the Bundle, for
 //!       `dashboard --media <dir>`: the console's own sounds are in no repository and on no test machine.
-//!   standin game [--title <t>] [--splash-ms <n>] [--seconds <n>]
+//!   standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
 //!       The stand-in game: a borderless, full-screen, dark-blue window titled <t> ("Stand-in game"). It closes when
 //!       asked to, on Esc, and after <seconds> (600) in case a test leaves it behind. With --splash-ms, a small window
-//!       titled "<t> launcher" shows for that long first, as a game's launcher or splash screen does.
+//!       titled "<t> launcher" shows for that long first, as a game's launcher or splash screen does. With
+//!       --ignore-close it does not close when asked to, as a game that has hung does not, and says so in the log.
 //!       Its pulse, a square towards the window's bottom right, changes colour four times a second while the game
 //!       runs, and so stands still while the game is frozen; a beat that comes late says in the log how long the
 //!       game stood still.
@@ -23,6 +24,8 @@
 //!   standin toast <text>
 //!       Posts a notification to the running Dashboard, which shows its Toast (`model::post`). Exits 1 when no
 //!       Dashboard took it: none is running, or it has no Toast strip yet.
+//!   standin steam-url steam://install/<appid> | steam://uninstall/<appid>
+//!       Says in the log which it was asked, the address with it, and does nothing more: a test reads the line.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -38,8 +41,8 @@ use source_steam::fixture::{self, Fixture};
 
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
        standin make-tones <dir>
-       standin game [--title <t>] [--splash-ms <n>] [--seconds <n>]
-       standin steam-url steam://rungameid/<appid>
+       standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
+       standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
        standin toast <text>";
 
 /// The arguments a `game.exe` run with none takes instead, one a line.
@@ -51,11 +54,13 @@ struct GameArgs {
     /// How long the launcher's small window shows first; 0 for none.
     splash_ms: u32,
     seconds: u32,
+    /// Whether it stays up when its window is asked to close, as a game that has hung does.
+    ignore_close: bool,
 }
 
 impl GameArgs {
     fn parse(args: &[String]) -> Result<GameArgs, String> {
-        let mut out = GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600 };
+        let mut out = GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600, ignore_close: false };
         let mut it = args.iter();
         while let Some(arg) = it.next() {
             let mut value = || it.next().ok_or(format!("{arg} needs a value"));
@@ -64,6 +69,7 @@ impl GameArgs {
                 "--title" => out.title = value()?.clone(),
                 "--splash-ms" => out.splash_ms = number(value()?)?,
                 "--seconds" => out.seconds = number(value()?)?,
+                "--ignore-close" => out.ignore_close = true,
                 _ => return Err(format!("unknown argument {arg}")),
             }
         }
@@ -75,6 +81,14 @@ impl GameArgs {
 fn appid_of(url: &str) -> Option<u32> {
     let rest = url.trim().strip_prefix("steam://rungameid/")?;
     rest.trim_end_matches('/').parse().ok().filter(|&id| id != 0)
+}
+
+/// What `steam://install/<appid>` or `steam://uninstall/<appid>` asks for, and of which game.
+fn asked_of(url: &str) -> Option<(&'static str, u32)> {
+    let rest = url.trim().strip_prefix("steam://")?;
+    let (verb, appid) = rest.trim_end_matches('/').split_once('/')?;
+    let verb = ["install", "uninstall"].into_iter().find(|&known| known == verb)?;
+    appid.parse().ok().filter(|&id| id != 0).map(|id| (verb, id))
 }
 
 /// Where the Steam install at `root` has `appid` installed, by its app manifest.
@@ -193,10 +207,15 @@ fn run(args: &[String]) -> i32 {
             }
         }
         Some("game") => parsed_game(&args[1..]),
-        Some("steam-url") => match args.get(1).and_then(|url| appid_of(url)) {
-            Some(appid) => steam_url(appid),
-            None => {
-                note(&format!("steam-url: not a steam://rungameid/<appid> address: {:?}", args.get(1)));
+        Some("steam-url") => match args.get(1).map(|url| (appid_of(url), asked_of(url), url)) {
+            Some((Some(appid), _, _)) => steam_url(appid),
+            // The stand-in Steam installs and uninstalls nothing: that it was asked is what a test looks for.
+            Some((None, Some((verb, appid)), url)) => {
+                note(&format!("steam-url: asked to {verb} {appid}: {}", url.trim()));
+                0
+            }
+            _ => {
+                note(&format!("steam-url: not an address the stand-in Steam knows: {:?}", args.get(1)));
                 2
             }
         },
@@ -243,13 +262,14 @@ mod tests {
     fn game_arguments() {
         assert_eq!(
             GameArgs::parse(&[]).unwrap(),
-            GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600 }
+            GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600, ignore_close: false }
         );
         assert_eq!(
             GameArgs::parse(&strings(&["--title", "Brass Meridian", "--splash-ms", "2500", "--seconds", "30"]))
                 .unwrap(),
-            GameArgs { title: "Brass Meridian".into(), splash_ms: 2500, seconds: 30 }
+            GameArgs { title: "Brass Meridian".into(), splash_ms: 2500, seconds: 30, ignore_close: false }
         );
+        assert!(GameArgs::parse(&strings(&["--ignore-close"])).unwrap().ignore_close);
         assert!(GameArgs::parse(&strings(&["--title"])).is_err());
         assert!(GameArgs::parse(&strings(&["--seconds", "soon"])).is_err());
         assert!(GameArgs::parse(&strings(&["--fullscreen"])).is_err());
@@ -275,6 +295,13 @@ mod tests {
         assert_eq!(appid_of("steam://rungameid/0"), None);
         assert_eq!(appid_of("steam://store/9100030"), None);
         assert_eq!(appid_of("https://example.com/rungameid/5"), None);
+        assert_eq!(asked_of("steam://install/9100040"), Some(("install", 9_100_040)));
+        assert_eq!(asked_of("steam://uninstall/9100010/"), Some(("uninstall", 9_100_010)));
+        assert_eq!(asked_of("steam://rungameid/9100030"), None);
+        assert_eq!(asked_of("steam://install/0"), None);
+        assert_eq!(asked_of("steam://install/"), None);
+        assert_eq!(run(&strings(&["steam-url", "steam://uninstall/9100010"])), 0);
+        assert_eq!(run(&strings(&["steam-url", "steam://store/9100010"])), 2);
     }
 
     #[test]

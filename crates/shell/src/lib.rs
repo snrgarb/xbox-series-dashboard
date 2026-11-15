@@ -2,16 +2,20 @@
 //! the Toast strip above it, launching a game through Steam and following it until it ends, and holding it still
 //! under the Guide. Anywhere but Windows there is no Overlay or strip, nothing can be launched and nothing is
 //! frozen, and the same calls say so or do nothing.
-//! Turning the machine off is behind a trait, so that only a run that means it can do it.
+//! Turning the machine off is behind a trait, so that only a run that means it can do it, and so is asking a store
+//! to install or uninstall a game.
+pub mod audio;
 pub mod freeze;
 mod launch;
 pub mod overlay;
 pub mod power;
+pub mod store;
 pub mod toast_strip;
 
 use std::sync::OnceLock;
 use std::time::Instant;
 
+pub use audio::{AudioControl, FakeAudio, SystemAudio};
 pub use freeze::Freezer;
 pub use launch::{Launch, Step};
 pub use overlay::{Key, Mode, Overlay};

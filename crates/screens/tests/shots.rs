@@ -1159,11 +1159,14 @@ fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
     stage.dashboard.game_booted();
     stage.press(&[Button::Left, Button::A]);
     assert!(stage.dashboard.take_effects().is_empty(), "not so much as a sound");
-    // The Guide over the game: Quit in the running game's menu quits it, and the Guide goes when the game has.
+    // The Guide over the game: Quit in the running game's menu quits it, and the Guide goes half a second after
+    // the game has.
     stage.press(&[Button::Guide, Button::Down, Button::Down, Button::Menu, Button::A]);
     assert_eq!(asked(&mut stage.dashboard), [Effect::QuitGame]);
     assert!(stage.dashboard.guide_open());
     stage.dashboard.game_ended();
+    assert!(stage.dashboard.guide_open());
+    stage.dashboard.advance(screens::CLOSE_AFTER_QUIT);
     assert!(!stage.dashboard.guide_open());
     assert_eq!(stage.dashboard.playing(), None);
     assert_eq!(stage.dashboard.home_focus(), Focus::Recent(2));
@@ -1530,6 +1533,73 @@ fn guide_running_game_menu() {
     assert_eq!(colour(&image, 1183, 500), [43, 43, 43]);
     assert!(within(colour(&image, 728, 590), GREEN, 8), "{:?}", colour(&image, 728, 590));
     stage.check_image("guide-game-menu", image);
+}
+
+// --- Games from the Guide (docs/spec/guide.md, 6.4, 7.3, 7.4). What the presses ask for is tests/guide_games.rs.
+// No picture of the Bundle shows a running game in the Guide: these are from its XAML and C#.
+
+/// "Quit X and start Y?": A on a game played before, while another runs. The prompt's title wraps; its first
+/// answer has focus.
+#[test]
+fn guide_quit_and_start_prompt() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down, Button::Down, Button::A]);
+    let image = stage.still_over(GAME);
+    // The points the end-to-end test looks at (e2e/payloads/guide-games/run.ps1): the menu panel beside its title,
+    // and the game under the Guide's dim and the dialog's.
+    assert_eq!(colour(&image, 745, 420), [43, 43, 43], "the menu panel");
+    assert!(within(colour(&image, 1230, 900), [2, 4, 11], 3), "the game: {:?}", colour(&image, 1230, 900));
+    stage.check_image("guide-quit-and-start", image);
+}
+
+/// "Force quit X?", ten seconds after Quit: the prompt with its message, focus on Force quit.
+#[test]
+fn guide_force_quit_prompt() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down, Button::Menu, Button::A]);
+    stage.dashboard.advance(screens::QUIT_TIMEOUT);
+    let image = stage.still_over(GAME);
+    assert_eq!(colour(&image, 745, 420), [43, 43, 43], "the menu panel");
+    stage.check_image("guide-force-quit", image);
+}
+
+/// The same with the Guide setting off, the game having been quit some other way: the prompt over the dim alone,
+/// with no panel, no hints and no Status area.
+#[test]
+fn guide_force_quit_prompt_with_the_guide_off() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down, Button::Menu, Button::A, Button::B]);
+    stage.still();
+    stage.dashboard.set_guide_enabled(false);
+    stage.dashboard.advance(screens::QUIT_TIMEOUT);
+    let image = stage.still_over(GAME);
+    // Where the panel would be there is the game, under the Guide's dim and the dialog's.
+    assert!(within(colour(&image, 270, 900), [2, 4, 11], 3), "no panel: {:?}", colour(&image, 270, 900));
+    stage.check_image("guide-force-quit-alone", image);
+}
+
+/// A game that ends by itself under the open Guide leaves the Guide open, over Home now, its list without the
+/// game and focus where it was.
+#[test]
+fn guide_after_the_game_under_it_ended() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down]);
+    stage.still();
+    stage.dashboard.game_ended();
+    assert!(stage.dashboard.guide_open());
+    stage.check("guide-game-ended");
+}
+
+/// Home chosen in the Guide over a game: Home's window draws again, in front of the game, and takes the pad.
+#[test]
+fn home_from_the_guide_over_a_game_draws_home_again() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    assert!(stage.dashboard.home_covered());
+    stage.press(&[Button::A]);
+    assert!(!stage.dashboard.home_covered() && stage.dashboard.in_front_of_game());
+    // Home as `home_with_art` has it, to the pixel.
+    stage.press(&[Button::Down, Button::Right]);
+    stage.check("home-art");
 }
 
 /// The panel behind a dialog is out of focus: an edge of it that is sharp with no dialog is soft with one, and
@@ -1917,4 +1987,111 @@ fn a_secret_is_drawn_as_dots_with_the_caret_among_them() {
     let image = stage.still();
     assert_eq!(caret_x(&image), Some(562));
     assert!(white(&image, 533) && white(&image, 551) && white(&image, 573));
+}
+
+/// The system's sound in the Bundle's picture of the Audio Flyout (54-guide-audio-flyout.jpg): one output and one
+/// input, their names too long for the box, volume 67. A second output for the list.
+fn bundle_audio() -> model::Audio {
+    use model::AudioDevice;
+    model::Audio {
+        outputs: vec![
+            AudioDevice::new("out-1", "Speakers (2- High Definition Audio Device)"),
+            AudioDevice::new("out-2", "TV (HD Audio Driver for Display Audio)"),
+        ],
+        output: Some(0),
+        inputs: vec![AudioDevice::new("in-1", "Microphone (2- High Definition Audio Device)")],
+        input: Some(0),
+        volume: 67,
+        muted: false,
+    }
+}
+
+/// The Guide at Home with focus on a Utility: `place` along the row.
+fn on_utility(place: usize) -> Stage {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_pad_connected(true);
+    stage.dashboard.set_audio(bundle_audio());
+    stage.press(&[Button::Guide]);
+    stage.press(&[Button::Down; 6]);
+    stage.press(&vec![Button::Right; place]);
+    stage
+}
+
+/// The Bundle's 53-guide-notifications-flyout.jpg: the Flyout over the dimmed panel, with nothing in it; the hints
+/// beside the panel hidden.
+#[test]
+fn guide_notifications_flyout_with_none() {
+    let mut stage = on_utility(0);
+    stage.press(&[Button::A]);
+    stage.check("guide-notifications-empty");
+}
+
+/// Notifications, newest first: a card as tall as its text, at least 87 and three lines at most.
+#[test]
+fn guide_notifications_flyout() {
+    let mut stage = on_utility(0);
+    stage.dashboard.record("Saltwind Rally is ready to play");
+    stage.dashboard.record(
+        "A long one, which says a good deal more than fits on two lines of the card and so is cut short at the end \
+         of its third line, where an ellipsis says that there was more of it to read",
+    );
+    stage.dashboard.record("Controller connected");
+    stage.press(&[Button::A, Button::Down]);
+    stage.check("guide-notifications");
+}
+
+/// The Bundle's 54-guide-audio-flyout.jpg: Output with focus, Input, Volume at 67, Mute off, and under a divider
+/// the line about music.
+#[test]
+fn guide_audio_flyout() {
+    let mut stage = on_utility(1);
+    stage.press(&[Button::A]);
+    let image = stage.still();
+    // The Flyout's flat grey at its foot, to the screen's last row, and no further right than x 691.
+    assert_eq!(image.get_pixel(400, 1079).0[..3], [0x1F, 0x1F, 0x1F]);
+    assert_ne!(image.get_pixel(700, 1079).0[..3], [0x1F, 0x1F, 0x1F], "the Flyout ends at x 691");
+    stage.check_image("guide-audio", image);
+}
+
+/// Output's list open: the dropdown ringed in the accent, its chevron up, and the list over the entries below, the
+/// default device ticked and focused.
+#[test]
+fn guide_audio_output_list() {
+    let mut stage = on_utility(1);
+    stage.press(&[Button::A, Button::A]);
+    stage.check("guide-audio-output-list");
+}
+
+/// Mute on, with focus: the switch filled in the accent, its knob at the right.
+#[test]
+fn guide_audio_muted() {
+    let mut stage = on_utility(1);
+    stage.dashboard.set_audio(model::Audio { muted: true, volume: 0, ..bundle_audio() });
+    stage.press(&[Button::A, Button::Down, Button::Down, Button::Down]);
+    stage.check("guide-audio-muted");
+}
+
+/// With no devices at all: "None" in both dropdowns, the volume at 0.
+#[test]
+fn guide_audio_with_no_devices() {
+    let mut stage = on_utility(1);
+    stage.dashboard.set_audio(model::Audio::default());
+    stage.press(&[Button::A]);
+    stage.check("guide-audio-none");
+}
+
+/// A Flyout comes in from 48 to the left, fading in, over 120 ms; closing it is at once.
+#[test]
+fn a_flyout_slides_in_from_the_left() {
+    let mut stage = on_utility(1);
+    stage.run(1.0, 0.05);
+    let lit = |image: &image::RgbaImage, x: u32| image.get_pixel(x, 900).0[..3] == [0x1F, 0x1F, 0x1F];
+    stage.press(&[Button::A]);
+    let early = stage.frame_after(0.03);
+    assert!(!lit(&early, 680), "its right edge has not arrived, and it is not yet opaque");
+    let settled = stage.frame_after(0.3);
+    assert!(lit(&settled, 680) && lit(&settled, 160) && !lit(&settled, 695));
+    stage.press(&[Button::B]);
+    let closed = stage.frame_after(0.01);
+    assert!(!lit(&closed, 680) && !lit(&closed, 400));
 }

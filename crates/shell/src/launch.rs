@@ -44,6 +44,22 @@ impl Launch {
     pub fn freeze(&self, _: &mut Freezer) {}
 
     pub fn quit_game(&mut self, _: &mut Freezer) {}
+
+    pub fn quitting(&mut self, _: bool) {}
+
+    pub fn force_quit(&mut self, _: &mut Freezer) -> bool {
+        false
+    }
+
+    pub fn game_window(&self) -> *mut c_void {
+        std::ptr::null_mut()
+    }
+
+    pub fn show_home(&mut self, _: bool) {}
+
+    pub fn show_game(&mut self, _: bool) -> bool {
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -58,7 +74,7 @@ mod win {
     use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, QueryFullProcessImageNameW, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
     };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -210,8 +226,16 @@ mod win {
                     if running || look.any {
                         self.gone_since = None;
                     } else if now - *self.gone_since.get_or_insert(now) >= GONE {
-                        log("the game has ended, Home back");
-                        unsafe { restore(self.home) };
+                        // Under the open Guide the foreground stays the Guide's, as in the Bundle: Home's window
+                        // comes back behind it, and gets the foreground when the Guide closes.
+                        if overlay.is_some_and(|overlay| overlay.mode() == Some(crate::Mode::Guide)) {
+                            log("the game has ended, Home back behind the Guide");
+                            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE;
+                            unsafe { SetWindowPos(self.home, HWND_NOTOPMOST, 0, 0, 0, 0, flags) };
+                        } else {
+                            log("the game has ended, Home back");
+                            unsafe { restore(self.home) };
+                        }
                         return Step::Ended;
                     }
                     Step::Same
@@ -312,14 +336,89 @@ mod win {
         }
 
         /// Asks the game to close, as its window's close button would. A frozen game can't answer: it is thawed
-        /// first, and stays so until it has gone.
+        /// first, and stays so until it has gone or the quit is given up (`quitting`).
         pub fn quit_game(&mut self, freezer: &mut Freezer) {
             freezer.thaw();
             self.quitting = true;
-            if let Some(game) = self.game {
-                unsafe { PostMessageW(game, WM_CLOSE, 0, 0) };
-                log("asked the game to quit");
+            match self.game {
+                Some(game) if unsafe { PostMessageW(game, WM_CLOSE, 0, 0) } != 0 => log("asked the game to quit"),
+                Some(_) => log("the game's window could not be asked to close"),
+                None => log("the game has no window to ask to close"),
             }
+        }
+
+        /// Says whether the game is still being quit: once the user has declined to force it, it is a game like
+        /// any other again, and held still under the Guide.
+        pub fn quitting(&mut self, quitting: bool) {
+            if self.quitting && !quitting {
+                log("the quit is over, the game left running");
+            }
+            self.quitting = quitting;
+        }
+
+        /// Ends the program that owns the game's window, as the Bundle does (Win32WindowSystem.ForceKill): the
+        /// game did not close when asked. False when there is no window, and so nothing to end.
+        pub fn force_quit(&mut self, freezer: &mut Freezer) -> bool {
+            freezer.thaw();
+            let Some(game) = self.game.filter(|&game| unsafe { IsWindow(game) } != 0) else {
+                log("force quit: the game has no window, so nothing to end");
+                return false;
+            };
+            let mut owner = 0u32;
+            unsafe {
+                GetWindowThreadProcessId(game, &mut owner);
+                let process = OpenProcess(PROCESS_TERMINATE, 0, owner);
+                if process.is_null() {
+                    // Gone already, or elevated beyond reach.
+                    log(&format!("force quit: process {owner} could not be opened to end it"));
+                    return true;
+                }
+                let ended = TerminateProcess(process, 1) != 0;
+                CloseHandle(process);
+                log(&format!("force quit: process {owner} ended: {ended}"));
+            }
+            true
+        }
+
+        /// The game's largest window when last looked for; null when it has none.
+        pub fn game_window(&self) -> *mut c_void {
+            self.game.filter(|&game| unsafe { IsWindow(game) } != 0).unwrap_or(std::ptr::null_mut())
+        }
+
+        /// Home's window in front of the running game, which runs on behind it: Home or a page was chosen in the
+        /// Guide. With `foreground` it takes the foreground too; without, the Overlay is about to hand it over.
+        pub fn show_home(&mut self, foreground: bool) {
+            unsafe {
+                if foreground {
+                    restore(self.home);
+                } else {
+                    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE;
+                    SetWindowPos(self.home, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+                }
+            }
+            log("Home in front of the game");
+        }
+
+        /// The game in front again and Home's window hidden behind it, as while it was played. With `foreground`
+        /// the game's window is given the foreground, which is Home's to give; without, the Overlay has just
+        /// handed it over. False when the game has no window to go back to: nothing is done.
+        pub fn show_game(&mut self, foreground: bool) -> bool {
+            let game = self.game_window();
+            if game.is_null() {
+                log("the game has no window to go back to");
+                return false;
+            }
+            unsafe {
+                if foreground {
+                    if IsIconic(game) != 0 {
+                        ShowWindow(game, SW_RESTORE);
+                    }
+                    SetForegroundWindow(game);
+                }
+                ShowWindow(self.home, SW_HIDE);
+            }
+            log("back to the game, Home hidden");
+            true
         }
     }
 
