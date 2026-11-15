@@ -745,6 +745,42 @@ What `crates/screens/src/guide/`, `menu_panel.rs` and `wide_dialog.rs` do that t
 - **A on Close in Power is `Enter.wav`**, as the Bundle's code has it; section 8 said `PromptClose.wav` before.
 - **The hints stay beside the panel under a dialog**; section 3.6 said none before. With no panel (Power by a hold) there are none, and no top shade or Status area, at once.
 - **A hold does nothing** with the Guide setting off, while a game is starting (the Dashboard takes no input then), or over a game with no Overlay to show Power on.
-- **The running game's menu** (6.3) is here as the menu panel's first user: Menu on the Running game opens it, its one row Quit asks the shell to quit the game and leaves the Guide open. The prompts of 6.4, the 10 s timeout and the Guide closing after a quit are #40's.
-- **A game stopping closes the Guide, and any dialog with it**, where the Bundle leaves Power up: that is how the core has treated a game's end since the Guide was first drawn, and #40 owns it.
-- **Not here:** bringing the Dashboard to the front before a prompt; a click on the dim.
+- **The running game's menu** (6.3) is here as the menu panel's first user: Menu on the Running game opens it, its one row Quit asks the shell to quit the game and leaves the Guide open. The prompts of 6.4, the 10 s timeout and the Guide closing after a quit are #40's: section 14.
+- ~~**A game stopping closes the Guide, and any dialog with it**~~: no longer. Since #40 the Guide stays, and Power with it, as in the Bundle (section 14).
+- **Not here:** a click on the dim.
+
+---
+
+## 14. Games from the Guide: what was built, and what was decided (#40)
+
+From the Bundle's C# (`C/ExtensionCore.cs` 500-746, 2040-2154, 2376-2493, 2576-2632; `E/Win32WindowSystem.cs` 126-151; `CT/GameExitTests.cs`). **No picture of the Bundle shows a running game in the Guide**, a prompt over it, or Home in front of a game: the reference runs could not start one. The prompts are the menu panel of 6.1, which was measured against the Tile menu's pictures; everything else here is from source.
+
+**What the core does** (`crates/screens/src/lib.rs`; `crates/screens/tests/guide_games.rs` has each line as a test):
+
+- **A on the Running game**: the Guide closes and the game's own window gets the foreground, whatever the Guide opened over (`Effect::ShowGame`; the Bundle's `ReturnToRunningGame`).
+- **A on a Recent game** with nothing running launches it as from Home. **With a game running**: the prompt "Quit {X} and start {Y}?", "Quit and start" (U+E768) and "Cancel" (U+E72B), over the Guide, which stays. "Quit and start" quits X as Quit does and, when X has stopped, closes the Guide at once and launches Y. Cancel, B and the Guide button drop it. **While a game is quitting or starting** A on another game plays `Enter.wav` and does nothing, as the Bundle's does (its `Select` sounds before `PlayGame` refuses).
+- **Quit**, from the running game's menu: no confirmation; the game is thawed and its window sent `WM_CLOSE`; the Guide stays open with the game still listed as Running. A second Quit while it is quitting asks nothing more.
+- **Ten seconds on** (`QUIT_TIMEOUT`) with the game still there: "Force quit {X}?", "It hasn't closed. Anything unsaved will be lost.", "Force quit" (U+E711) and "Cancel". It opens the Guide if that was closed meanwhile, with its panel, and with `PromptOpen.wav` only. Nothing is counted while the question stands. **Force quit** ends the process that owns the game's window (`TerminateProcess`: the Bundle's `Process.Kill` on that one process, not its tree) and asks again after another ten seconds if the game is somehow still there; with no window to find there is nothing to end and the quit is given up (`Dashboard::quit_given_up`). **Declining** (Cancel, B, the Guide closing, Power taking the prompt's place by a hold) leaves the game running, ends the quit and drops whatever was to start after it; the game is then held under the Guide again like any other.
+- **A game being quit is not frozen** (`Dashboard::quitting`, which the shell hands to `Launch::quitting`).
+- **The Guide closes 500 ms after a game quit from it has stopped** (`CLOSE_AFTER_QUIT`), in silence and with no button to wait for, onto Home. Not if it was closed and opened again meanwhile, nor if another game has started.
+- **A game that ends by itself under the open Guide leaves the Guide open.** Its list is made again without the game, focus at the same place in it; a menu or a prompt about the game goes in silence; **Power stays up**, from its entry or by a hold; the foreground stays the Guide's. Closing the Guide then lands on Home (the Bundle's `homeOwed`). The Bundle leaves it at that and so does the port: nothing closes the Guide for the user.
+- **Home from the Guide over a game** brings the Dashboard in front of the game, which runs on behind it (`Effect::ShowHome`; the Bundle's `BringToFront(Home)`): Home draws and takes the pad again, the Guide still lists the game as Running, and A on it there, or on its own tile on Home, goes back to it. **My games & apps, Settings and Search** do the same onto their pages. At Home in front of a game, A on another game's tile asks "Quit {X} and start {Y}?" too, the Guide opening for the prompt as the Bundle's `ShowDialog` opens it.
+- **With the Guide setting off** a prompt shows on the Overlay by itself, the dim and the menu panel with no panel, hints or Status area, and answering it closes the Overlay (7.5).
+- **Time is told, not read**: `Dashboard::advance(seconds)` counts the ten seconds and the half second, and `Dashboard::timer()` says how soon it has something to do, so the window's loop wakes for it and a test passes ten seconds in one call.
+
+**What the shell does** (`crates/shell/src/launch.rs`, `overlay.rs`; `crates/app/src/window.rs`):
+
+- Who gets the foreground as the Guide lets go of it is the Overlay's to carry out, once the button that closed the Guide is up (3.5): `Overlay::give_back_to` names Home's window (Home chosen, or a game that ended under the Guide) or the game's (the Running entry) in place of the window recorded as the Guide opened. Thawed first, then handed the foreground, as ever.
+- Home's window, hidden behind a running game since the Launch screen went, is shown again in front of it for Home (`Launch::show_home`) and hidden again when the game is gone back to (`Launch::show_game`), so behind a game it never draws.
+- A game ending under the open Guide brings Home's window back **without** the foreground (`launch: the game has ended, Home back behind the Guide`): the Guide keeps it, as the Bundle's test `A_game_exiting_under_the_open_Guide_leaves_the_foreground_with_the_Guide` has it.
+- The library is read again before the core is told a game ended, so the game that starts next is named by its place in the library as it then is.
+
+**The log**, for the VM test (`e2e/payloads/guide-games/run.ps1`): `guide:` lines now come for what time and a game ending change, not only presses; a menu or a prompt has its title after its focus (`dialog Menu { prompt: true, row: 0 } "Force quit Brass Meridian?"`), and the line ends `, quitting` or `, quitting, then {Y}` while a quit is under way. The stand-in game takes `--ignore-close` to be a game that does not close when asked.
+
+**Where the port differs from the Bundle, knowingly:**
+
+- "Launching" is the Launch screen being up: the port has no separate begin-of-launch state, so there is no 15 s `LaunchBeginTimeout`.
+- The Bundle's Home tile opens the Game hub and plays on a second A; the port's tile plays on A until the Game hub (M3) is there. What Play does with a game running is the same either way.
+- A prompt wanted over a game with no Overlay to show it on is not asked: the quit is given up, or the game not started.
+
+**Hooks for later tickets:** a page that asks for `Effect::Launch` or `Effect::QuitGame` (the Game hub's and the Tile menu's Play and Quit) already gets all of the above: the core routes them through `Dashboard::play` and `Dashboard::quit_game`. A launch that fails or needs the user is where #41's notifications post.

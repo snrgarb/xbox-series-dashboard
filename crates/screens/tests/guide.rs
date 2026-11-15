@@ -214,7 +214,8 @@ fn a_on_the_running_game_goes_back_to_it() {
     let mut guide = over_game(screens::fake_library(), 2);
     press(&mut guide, &[Down, Down, A]);
     assert!(!guide.guide_open());
-    assert_eq!(asked(&mut guide), [Effect::GuideClosed]);
+    // To the game's own window, whatever the Guide opened over.
+    assert_eq!(asked(&mut guide), [Effect::GuideClosed, Effect::ShowGame]);
     assert_eq!(guide.playing(), Some(2));
 }
 
@@ -231,16 +232,17 @@ fn only_the_running_game_has_a_menu_and_quitting_from_it_leaves_the_guide_until_
     assert!(guide.guide_open());
     press(&mut guide, &[Down, Menu]);
     assert!(guide.guide().dialog().is_none(), "nor has a recent game");
+    // The game gone, the Guide closes half a second later (tests/guide_games.rs has the rest of it).
     guide.game_ended();
+    assert!(guide.guide_open());
+    guide.advance(screens::CLOSE_AFTER_QUIT);
     assert!(!guide.guide_open());
 }
 
 #[test]
-fn over_a_game_what_needs_the_game_gone_first_does_nothing() {
+fn over_a_game_switch_profile_is_greyed_out_and_does_nothing() {
     let mut guide = over_game(screens::fake_library(), 2);
-    // Home, a recent game, Switch profile (greyed out, and still taking focus).
-    press(&mut guide, &[A, Down, Down, Down, A]);
-    assert_eq!(guide.guide().focus(), (LANDING, entry(3)));
+    // Greyed out, and still taking focus.
     press(&mut guide, &[RightBumper, Down]);
     assert!(!guide.guide().entries()[1].enabled);
     assert_eq!(after(&mut guide, &[A, Down, Down]), (PROFILE, entry(3)));

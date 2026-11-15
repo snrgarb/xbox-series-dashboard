@@ -65,6 +65,8 @@ impl Overlay {
 
     pub fn set(&mut self, _: Option<Mode>) {}
 
+    pub fn give_back_to(&mut self, _: *mut std::ffi::c_void) {}
+
     pub fn raise(&self) {}
 
     pub fn frame(&mut self, _: &Gpu) -> Option<wgpu::SurfaceTexture> {
@@ -411,6 +413,18 @@ mod win {
                 }
             }
             self.mode = mode;
+        }
+
+        /// While it is the Guide: the foreground goes to this window when it stops being the Guide, and not to
+        /// the one that had it when the Guide opened. Home's, for Home chosen over a game and for a game that
+        /// ended under the Guide; the game's, for the running game chosen with something else in front.
+        // An HWND is a handle Windows looks up, never a pointer this code follows.
+        #[allow(clippy::not_unsafe_ptr_arg_deref)]
+        pub fn give_back_to(&mut self, window: *mut std::ffi::c_void) {
+            if self.mode == Some(Mode::Guide) && !window.is_null() {
+                self.foreground_before = window;
+                log(&format!("the foreground will go to {}", unsafe { describe(window) }));
+            }
         }
 
         /// Passive or not: the two styles a passive window has and the Guide's doesn't.

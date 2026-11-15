@@ -36,8 +36,15 @@ pub enum Effect {
     Launch(usize),
     /// Ask the running game to close.
     QuitGame,
-    /// The Guide closed: over a game, the game gets the foreground back.
+    /// The running game was asked to close and has not: end it. The shell answers `quit_given_up` when it finds
+    /// nothing to end.
+    ForceQuitGame,
+    /// The Guide closed: the window that had the foreground gets it back, unless one of the two below says who does.
     GuideClosed,
+    /// The Dashboard in front of the running game, which runs on behind it: Home or a page chosen in the Guide.
+    ShowHome,
+    /// The running game in front again, whatever was in front when the Guide opened.
+    ShowGame,
     /// Leave to the desktop: Power's Exit to desktop.
     Exit,
     /// Play this sound, if there is a file for it.
@@ -56,6 +63,24 @@ pub const GUIDE_REPEAT: Repeat = Repeat::millis(700, 80);
 /// How long the Guide waits for the button that closed it to be let go before it hands the foreground back all the
 /// same (docs/spec/guide.md, 3.5). Timed by whoever has a clock, who then says `release_wait_over`.
 pub const RELEASE_FALLBACK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long a game asked to quit has to close by itself before "Force quit?" is asked, in seconds; and as long
+/// again after a force quit before it is asked anew (docs/spec/guide.md, 7.4).
+pub const QUIT_TIMEOUT: f32 = 10.0;
+
+/// How long after a game quit from the Guide has stopped the Guide closes, in seconds.
+pub const CLOSE_AFTER_QUIT: f32 = 0.5;
+
+/// The running game being quit (docs/spec/guide.md, 7.4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Quit {
+    /// The seconds it still has to close by itself.
+    left: f32,
+    /// Whether "Force quit?" is up: nothing is counted meanwhile.
+    asked: bool,
+    /// The game to start once it has stopped, by its place in the library: "Quit and start".
+    then: Option<usize>,
+}
 
 /// What the Overlay is wanted for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,6 +128,13 @@ pub struct Dashboard {
     has_overlay: bool,
     /// The game being launched or running, by its place in the library.
     playing: Option<usize>,
+    /// Whether the Dashboard is in front of the running game: Home or a page was chosen in the Guide over it. The
+    /// game runs on behind, first in the Guide's list, where A on it brings it back.
+    in_front: bool,
+    /// The quit of the running game that is under way.
+    quit: Option<Quit>,
+    /// The seconds until the Guide closes by itself: the game quit from it has stopped.
+    close_in: Option<f32>,
     effects: Vec<Effect>,
 }
 
@@ -126,6 +158,9 @@ impl Dashboard {
             launch: LaunchScreen::default(),
             has_overlay: true,
             playing: None,
+            in_front: false,
+            quit: None,
+            close_in: None,
             effects: Vec::new(),
         }
     }
@@ -146,6 +181,9 @@ impl Dashboard {
         let was = self.home.focused_game(&self.library).filter(|_| on_row);
         let focused = was.and_then(place);
         self.playing = self.playing.and_then(place);
+        if let Some(quit) = &mut self.quit {
+            quit.then = quit.then.and_then(place);
+        }
         self.user = library.user.clone().unwrap_or_else(|| "Player".into());
         self.library = library;
         // A focused game that has left the Recent row leaves focus on the tile where it was, or the row's last.
@@ -290,7 +328,143 @@ impl Dashboard {
             PadEvent::GuideHeld => {
                 self.guide_button_spent = true;
                 self.open_power();
+                self.settle_quit();
             }
+        }
+    }
+
+    /// Time has passed: `seconds` since the last call. What the Dashboard times itself is the quit of a game
+    /// (docs/spec/guide.md, 7.4): "Force quit?" once the game has had `QUIT_TIMEOUT` to close, and the Guide
+    /// closing `CLOSE_AFTER_QUIT` after a game quit from it has stopped. True when something came of it.
+    pub fn advance(&mut self, seconds: f32) -> bool {
+        let mut changed = false;
+        let due = self.quit.as_mut().filter(|quit| !quit.asked).is_some_and(|quit| {
+            quit.left -= seconds;
+            quit.left <= 0.0
+        });
+        if due {
+            self.offer_force_quit();
+            changed = true;
+        }
+        if let Some(left) = &mut self.close_in {
+            *left -= seconds;
+            if *left <= 0.0 {
+                self.close_in = None;
+                changed = self.guide.is_open();
+                self.close_guide();
+            }
+        }
+        changed
+    }
+
+    /// How soon `advance` has something to do, in seconds: None when nothing is being timed.
+    pub fn timer(&self) -> Option<f32> {
+        let quit = self.quit.filter(|quit| !quit.asked).map(|quit| quit.left);
+        [quit, self.close_in].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+    }
+
+    /// Whether the running game has been asked to quit and has not stopped yet, nor been given up on: it is not
+    /// frozen under the Guide meanwhile, so it is free to close.
+    pub fn quitting(&self) -> bool {
+        self.quit.is_some()
+    }
+
+    /// Whether the Dashboard is in front of the running game.
+    pub fn in_front_of_game(&self) -> bool {
+        self.playing.is_some() && self.in_front
+    }
+
+    /// The shell found nothing of the game to end: asking again would never help, so the quit is over and the game
+    /// left to itself.
+    pub fn quit_given_up(&mut self) {
+        self.quit = None;
+    }
+
+    /// Quits the running game: asked to close, as its window's close button would, with no confirmation. Nothing
+    /// while it is being quit already.
+    fn quit_game(&mut self) {
+        if self.playing.is_some() && self.quit.is_none() {
+            self.quit = Some(Quit { left: QUIT_TIMEOUT, asked: false, then: None });
+            self.effects.push(Effect::QuitGame);
+        }
+    }
+
+    /// The game has not closed by itself in time: "Force quit {X}?", over the Guide, which opens for it if it is
+    /// closed; with the Guide setting off, over the dim alone.
+    fn offer_force_quit(&mut self) {
+        let Some(name) = self.playing.and_then(|game| self.library.games.get(game)).map(|game| game.name.clone())
+        else {
+            self.quit = None;
+            return;
+        };
+        if !self.open_guide_for_a_prompt() {
+            self.quit = None;
+            return;
+        }
+        self.guide.ask_force_quit(&name);
+        if let Some(quit) = &mut self.quit {
+            quit.asked = true;
+        }
+        self.effects.push(Effect::Sound(Sound::PromptOpen));
+    }
+
+    /// A prompt needs the Guide: opened if it is closed, with its panel only if the Guide setting is on. False when
+    /// there is nowhere to show it: over a game with no Overlay.
+    fn open_guide_for_a_prompt(&mut self) -> bool {
+        if !self.guide.is_open() {
+            self.open_guide();
+            if !self.options.use_guide {
+                self.guide.without_panel();
+            }
+        }
+        self.guide.is_open()
+    }
+
+    /// "Force quit?" has gone unanswered with "Force quit": by Cancel, B, the Guide closing or another dialog taking
+    /// its place. Declined, the game is left running and the quit is over, with whatever was to start after it.
+    fn settle_quit(&mut self) {
+        let prompt = matches!(self.guide.dialog(), Some(DialogFocus::Menu { prompt: true, .. }));
+        if self.quit.is_some_and(|quit| quit.asked) && !prompt {
+            self.quit = None;
+        }
+    }
+
+    /// A on a game: started, or with another game running asked about first, "Quit {X} and start {Y}?"
+    /// (docs/spec/guide.md, 6.4), over the Guide, which opens for it. On the running game itself, back to it. Two
+    /// games are never started at once: while one is quitting or starting, nothing.
+    fn play(&mut self, game: usize) {
+        if self.playing == Some(game) {
+            self.show_game();
+            return;
+        }
+        if self.quit.is_some() || self.launch.up() {
+            return;
+        }
+        let Some(running) = self.playing else {
+            self.effects.push(Effect::Launch(game));
+            return;
+        };
+        let name = |game: usize| self.library.games.get(game).map_or("the game", |game| game.name.as_str()).to_string();
+        let (running, name) = (name(running), name(game));
+        if self.open_guide_for_a_prompt() {
+            self.guide.ask_quit_and_start(&running, game, &name);
+        }
+    }
+
+    /// The running game in front again.
+    fn show_game(&mut self) {
+        if self.playing.is_some() {
+            self.in_front = false;
+            self.effects.push(Effect::ShowGame);
+        }
+    }
+
+    /// The Dashboard in front of the running game, if one is running: Home or a page was chosen in the Guide over
+    /// it. The shell says so itself when the game it was to go back to has no window.
+    pub fn show_dashboard(&mut self) {
+        if self.playing.is_some() {
+            self.in_front = true;
+            self.effects.push(Effect::ShowHome);
         }
     }
 
@@ -321,6 +495,7 @@ impl Dashboard {
         let dialog = self.guide.dialog();
         let asked = self.effects.len();
         let activated = self.steer(press);
+        self.settle_quit();
         let select = activated.then_some(Sound::GuideSelect);
         let sounds = match (dialog, self.guide.dialog()) {
             (None, Some(_)) => [select, Some(Sound::PromptOpen)],
@@ -356,7 +531,7 @@ impl Dashboard {
     /// is. An open Guide's panel slides away under it. Not with the Guide setting off, nor while a game starts, nor
     /// over a game with no Overlay to show it on.
     fn open_power(&mut self) {
-        let nowhere = self.playing.is_some() && !self.has_overlay;
+        let nowhere = self.playing.is_some() && !self.has_overlay && !self.in_front;
         if !self.options.use_guide || nowhere || (self.launch.up() && !self.guide.is_open()) {
             return;
         }
@@ -391,7 +566,7 @@ impl Dashboard {
             return false;
         }
         // Behind a running game there is nothing to steer.
-        if self.playing.is_some() {
+        if self.playing.is_some() && !self.in_front {
             return false;
         }
         if !self.pages.is_empty() {
@@ -400,13 +575,17 @@ impl Dashboard {
                 Some(PageAction::Close) => self.close_page(),
                 Some(PageAction::Open(open)) => self.pages.open_over(open),
                 Some(PageAction::Effect(Effect::Set(change))) => self.set(change),
+                // A page's Play is Home's: with another game running it is asked about first.
+                Some(PageAction::Effect(Effect::Launch(game))) => self.play(game),
+                // And a page's Quit is the Guide's, with its ten seconds and "Force quit?".
+                Some(PageAction::Effect(Effect::QuitGame)) => self.quit_game(),
                 Some(PageAction::Effect(effect)) => self.effects.push(effect),
                 None => return false,
             }
             return press.button == Button::A;
         }
         match self.home.press(press.button, &self.library) {
-            Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
+            Some(HomeAction::Launch(game)) if !press.repeat => self.play(game),
             // The profile opens the Guide where the profile is.
             Some(HomeAction::OpenGuide) if !press.repeat && self.options.use_guide => {
                 self.open_guide_on(Tab::ProfileAndSystem);
@@ -476,15 +655,27 @@ impl Dashboard {
     /// The Guide's own line beside `focus_line`'s, written the same way and logged as `guide: ...` when it
     /// changes: `closed`, or the tab and focus (`ProfileAndSystem Entry(3)`), then `, no panel` when Power came by
     /// a hold, then the dialog up over it and its focus (`, dialog Power(Close)`).
+    ///
+    /// A menu or a prompt has its title after it (`, dialog Menu { prompt: true, row: 0 } "Force quit Hades II?"`),
+    /// and whatever the line is, it ends `, quitting` while the running game is being quit, and
+    /// `, quitting, then Celeste` when a game is to start after it.
     pub fn guide_line(&self) -> String {
+        let quitting = match self.quit {
+            Some(Quit { then: Some(next), .. }) => {
+                format!(", quitting, then {}", self.library.games.get(next).map_or("?", |game| game.name.as_str()))
+            }
+            Some(_) => ", quitting".into(),
+            None => String::new(),
+        };
         if !self.guide.is_open() {
-            return "closed".into();
+            return format!("closed{quitting}");
         }
         let (tab, focus) = self.guide.focus();
         let panel = if self.guide.panel_shown() { "" } else { ", no panel" };
+        let title = self.guide.dialog_title().map(|title| format!(" {title:?}")).unwrap_or_default();
         match self.guide.dialog() {
-            Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}"),
-            None => format!("{tab:?} {focus:?}{panel}"),
+            Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}{title}{quitting}"),
+            None => format!("{tab:?} {focus:?}{panel}{quitting}"),
         }
     }
 
@@ -511,21 +702,44 @@ impl Dashboard {
 
     fn guide_action(&mut self, action: GuideAction) {
         match action {
-            GuideAction::Close | GuideAction::Resume => self.close_guide(),
+            GuideAction::Close => self.close_guide(),
+            // To the game's own window, whatever the Guide opened over.
+            GuideAction::Resume => {
+                self.close_guide();
+                self.show_game();
+            }
+            // Over a running game, the Dashboard comes in front of it, as the Bundle brings Playnite.
             GuideAction::Home => {
                 self.close_pages();
                 self.close_guide();
+                self.show_dashboard();
             }
             GuideAction::MyGames => self.guide_opens(Open::MyGames(my_games::Entry::Games)),
             GuideAction::Settings => self.guide_opens(Open::Settings(settings::Entry::Rail)),
             GuideAction::Search => self.guide_opens(Open::Search),
-            // The Guide stays open over a game being quit, and goes when the game has ended.
-            GuideAction::QuitGame => self.effects.push(Effect::QuitGame),
-            GuideAction::Launch(game) => {
+            // The Guide stays open over a game being quit, and closes a moment after the game has stopped.
+            GuideAction::QuitGame => self.quit_game(),
+            // The game that was running is quit, and the one chosen starts when it has stopped.
+            GuideAction::QuitAndStart(game) => {
+                self.quit_game();
+                if let Some(quit) = &mut self.quit {
+                    quit.then = Some(game);
+                }
+            }
+            // Ended, not asked: and asked about again if it is somehow still there after as long again.
+            GuideAction::ForceQuit => {
+                if let Some(quit) = &mut self.quit {
+                    (quit.left, quit.asked) = (QUIT_TIMEOUT, false);
+                    self.effects.push(Effect::ForceQuitGame);
+                }
+            }
+            GuideAction::Launch(game) if self.playing.is_none() && !self.launch.up() => {
                 self.home.focus_recent(game, &self.library);
                 self.close_guide();
                 self.effects.push(Effect::Launch(game));
             }
+            // With a game running the Guide stays, under the question.
+            GuideAction::Launch(game) => self.play(game),
             GuideAction::Asked => {}
             // The Guide closes first; then what was chosen is the shell's to do.
             GuideAction::Power(choice) => {
@@ -539,10 +753,11 @@ impl Dashboard {
         }
     }
 
-    /// The Guide closes onto a page, which takes the place of any that is up.
+    /// The Guide closes onto a page, which takes the place of any that is up: in front of a running game, too.
     fn guide_opens(&mut self, open: Open) {
         self.close_guide();
         self.open_page(open);
+        self.show_dashboard();
     }
 
     /// Opens the Guide, whatever the Guide setting says: that is for the Guide button.
@@ -553,7 +768,7 @@ impl Dashboard {
     /// Opens the Guide on a tab.
     pub fn open_guide_on(&mut self, tab: Tab) {
         // Over a game the Guide is on the Overlay; with no Overlay there is nowhere to show it.
-        if self.playing.is_some() && !self.has_overlay {
+        if self.playing.is_some() && !self.has_overlay && !self.in_front {
             return;
         }
         let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
@@ -566,6 +781,7 @@ impl Dashboard {
     pub fn close_guide(&mut self) {
         if self.guide.is_open() {
             self.guide.close();
+            self.close_in = None;
             self.effects.push(Effect::GuideClosed);
         }
     }
@@ -635,7 +851,7 @@ impl Dashboard {
     /// Whether Home's window has nothing to show: a game is running in front of it, or its Launch screen has faded
     /// in over it.
     pub fn home_covered(&self) -> bool {
-        self.playing.is_some() && (!self.launch.up() || self.launch.covers())
+        self.playing.is_some() && !self.in_front && (!self.launch.up() || self.launch.covers())
     }
 
     /// The shell has asked the store for the game: its Launch screen comes up.
@@ -645,6 +861,7 @@ impl Dashboard {
                 self.launch.show(found);
             }
             self.playing = Some(game);
+            (self.in_front, self.quit, self.close_in) = (false, None, None);
             self.refresh_guide();
         }
     }
@@ -655,6 +872,11 @@ impl Dashboard {
     }
 
     /// The game ended, or never started: Home again, focus on its tile.
+    ///
+    /// An open Guide stays open, as the Bundle's does (docs/spec/guide.md, 3.4): its list is made again without the
+    /// game, a menu or a prompt about the game goes in silence, and Power stays up. Closing it then lands on Home.
+    /// Only a game that was quit from the Guide takes the Guide with it: `CLOSE_AFTER_QUIT` later, or at once when
+    /// another game was to start after it, which is then asked of the shell.
     pub fn game_ended(&mut self) {
         // A page that was up goes with it.
         self.close_pages();
@@ -662,7 +884,21 @@ impl Dashboard {
             self.home.focus_recent(game, &self.library);
         }
         self.launch.hide();
-        self.guide.close();
+        self.in_front = false;
+        let quit = self.quit.take();
+        // A prompt that was up on its own goes with the dim it showed over.
+        let alone = self.guide.is_open() && !self.guide.panel_shown() && self.guide.dialog_title().is_some();
+        self.refresh_guide();
+        if alone {
+            self.close_guide();
+        }
+        if let Some(next) = quit.and_then(|quit| quit.then).filter(|&next| next < self.library.games.len()) {
+            self.home.focus_recent(next, &self.library);
+            self.close_guide();
+            self.effects.push(Effect::Launch(next));
+        } else if quit.is_some() && self.guide.is_open() {
+            self.close_in = Some(CLOSE_AFTER_QUIT);
+        }
     }
 
     /// The game focus is on, by its place in the library.

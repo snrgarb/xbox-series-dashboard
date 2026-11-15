@@ -260,15 +260,33 @@ fn the_guides_home_closes_the_page_that_is_up() {
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Wide(1)));
 }
 
+/// Over a running game the Guide's entries open their pages all the same, the Dashboard coming in front of the
+/// game (docs/spec/guide.md, 3.3; tests/guide_games.rs has what is asked of the shell).
 #[test]
-fn over_a_game_the_guides_entries_open_no_page() {
-    let mut home = home();
-    home.launch_started(2);
-    home.game_booted();
-    press(&mut home, &[Guide, Down, A]);
-    press(&mut home, &[Down, Down, Down, Down, Down, Right, Right, A]);
+fn over_a_game_the_guides_entries_open_their_pages_in_front_of_it() {
+    let over_game = || {
+        let mut home = home();
+        home.launch_started(2);
+        home.game_booted();
+        press(&mut home, &[Guide]);
+        home
+    };
+    let mut home = over_game();
+    press(&mut home, &[Down, A]);
+    assert_eq!((home.guide_open(), home.page()), (false, Some("MyGames")));
+    assert!(home.in_front_of_game() && !home.home_covered());
+    // B on the page is Home, still in front of the game.
+    press(&mut home, &[B]);
+    assert_eq!(home.page(), None);
+    assert!(home.in_front_of_game());
+
+    let mut home = over_game();
+    press(&mut home, &[Down, Down, Down, Down, Down, Down, Right, Right, A]);
+    assert_eq!((home.guide_open(), home.page()), (false, Some("Search")));
+
+    let mut home = over_game();
     press(&mut home, &[RightBumper, Down, Down, A]);
-    assert!(home.guide_open() && home.page().is_none());
+    assert_eq!((home.guide_open(), home.page()), (false, Some("Settings")));
 }
 
 #[test]

@@ -200,7 +200,7 @@ fn while_a_game_starts_and_runs_only_the_guide_is_heard() {
     assert_eq!(press(&mut home, Button::Guide), [GUIDE_OPEN]);
     assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
     assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
-    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed]);
+    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed, Effect::ShowGame]);
     // Again, and Menu on the game is its menu, whose one option quits it.
     assert_eq!(press(&mut home, Button::Guide), [GUIDE_OPEN]);
     press(&mut home, Button::Down);
