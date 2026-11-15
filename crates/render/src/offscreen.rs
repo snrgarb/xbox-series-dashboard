@@ -1,7 +1,8 @@
 //! Drawing with no window: the target's format, waiting on the GPU and reading a texture back.
 use crate::gpu::Gpu;
 
-pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// Not an sRGB format: the renderer blends in gamma space, and what it writes are already sRGB values.
+pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 pub fn wait(gpu: &Gpu, submission_index: Option<wgpu::SubmissionIndex>) {
     gpu.device.poll(wgpu::PollType::Wait { submission_index, timeout: None }).expect("poll device");

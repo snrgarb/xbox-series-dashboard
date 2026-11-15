@@ -5,6 +5,8 @@ Start with `docs/HANDOVER.md`. The Rust port of the Xbox Series Theme (`~/projec
 ## Working here
 
 - Toolchain: `. ~/projects/.rust/env.sh` before any `cargo` command. Windows target: `x86_64-pc-windows-gnullvm`. The box has ~7 GB RAM: one cargo build at a time.
+- One build at a time means across worktrees too: run cargo as `flock ~/projects/.rust/build.lock cargo ... -j 6`, each worktree with its own `target/` (a shared target dir mixes worktrees' artifacts).
+- How screens are built: `docs/ui.md`. What they should look like: `docs/spec/`. Screenshot tests need `tools/test-fonts.sh` once.
 - Look at what you draw: `dashboard --screenshot <png>` (`cargo run -p app -- --screenshot <png>`) renders one frame offscreen (lavapipe here, DX12 on the TV PC over `ssh htpc-win`).
 - `data/` holds a copy of the user's real Steam files for testing. It is private and gitignored: never commit it, and keep it out of tests.
 - The TV PC (`ssh htpc-win`) is in daily use. Run only offscreen modes there unless asked to show something, and change nothing else on it.

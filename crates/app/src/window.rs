@@ -1,25 +1,30 @@
-//! The window: borderless fullscreen on the primary monitor, or 1280x720 with `--windowed`.
+//! The window: borderless fullscreen on the primary monitor, or 1280x720 with `--windowed`. It feeds the Dashboard
+//! the pad and the keyboard, draws it when something has changed, and carries out what it asks of the shell.
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use input::Pad;
 use model::Library;
+use render::gpu::{self, Gpu};
+use screens::{Dashboard, Effect};
+use shell::{Launch, Showing};
+use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
-use input::Pad;
-use render::gpu::{self, Gpu};
-use screens::scene::{GuideAction, RECENT_COUNT};
-use screens::{guide_entries, Home};
-use shell::{Launch, Showing};
-
 use crate::{since_start, Args};
 
+/// How often the pad is looked at while nothing is being drawn.
+const PAD_EVERY: Duration = Duration::from_millis(8);
+/// How often it is looked at behind a running game, for the Guide button.
+const PAD_EVERY_HIDDEN: Duration = Duration::from_millis(30);
+
 struct State {
-    home: Home,
+    host: Host,
     config: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
     gpu: Gpu,
@@ -29,26 +34,35 @@ struct State {
 
 struct App {
     windowed: bool,
-    focus: usize,
-    library: Library,
+    dashboard: Dashboard,
     pad: Pad,
+    /// Keys pressed since the pad was last looked at, as the buttons they stand for.
+    keys: Vec<Press>,
     state: Option<State>,
+    proxy: EventLoopProxy<()>,
     last_frame: Instant,
+    /// A frame is wanted whatever else: the first, or after a resize.
+    stale: bool,
     presented: bool,
     launch: Option<Launch>,
 }
 
 pub fn run(args: &Args, library: Library) {
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
-    // Drawn every vertical blank, which also polls the gamepad: a spike's loop, not one that idles.
-    event_loop.set_control_flow(ControlFlow::Poll);
+    let mut dashboard = Dashboard::new(library);
+    dashboard.set_clock(args.clock.clone());
+    for _ in 0..args.focus {
+        dashboard.press(Press { button: Button::Right, repeat: false });
+    }
     let mut app = App {
         windowed: args.windowed,
-        focus: args.focus,
-        library,
+        dashboard,
         pad: Pad::new(),
+        keys: Vec::new(),
         state: None,
+        proxy: event_loop.create_proxy(),
         last_frame: Instant::now(),
+        stale: true,
         presented: false,
         launch: None,
     };
@@ -56,66 +70,42 @@ pub fn run(args: &Args, library: Library) {
 }
 
 impl App {
-    /// A on a Recent row game: starts it through Steam, Home becoming its Launch screen.
-    fn launch_focused(&mut self) {
-        let Some(state) = &mut self.state else { return };
+    /// Starts a game through Steam, the Dashboard showing its Launch screen.
+    fn launch(&mut self, game: usize) {
+        let Some(state) = &self.state else { return };
         if self.launch.is_some() {
             return;
         }
-        let Some(game) = self.library.recent(RECENT_COUNT).get(state.home.scene.focus()) else { return };
-        let Some(dir) = &game.install_dir else {
-            eprintln!("launch: {} isn't installed", game.name);
+        let Some(found) = self.dashboard.library().games.get(game) else { return };
+        let Some(dir) = &found.install_dir else {
+            eprintln!("launch: {} isn't installed", found.name);
             return;
         };
-        if let Some(launch) = Launch::start(game.appid, &game.name, dir, window_handle(&state.window)) {
-            state.home.scene.set_launching(true);
+        if let Some(launch) = Launch::start(found.appid, &found.name, dir, window_handle(&state.window)) {
             self.launch = Some(launch);
+            self.dashboard.launch_started(game);
         }
     }
 
-    fn open_guide(&mut self) {
-        let Some(state) = &mut self.state else { return };
-        let playing = self.launch.is_some().then(|| state.home.scene.focus());
-        state.home.scene.open_guide(guide_entries(&self.library, playing));
-    }
-
-    /// Closes the Guide; over a game, the window hides at once and the game gets the foreground back.
-    fn close_guide(&mut self) {
-        let Some(state) = &mut self.state else { return };
-        state.home.scene.close_guide();
-        if let Some(launch) = &mut self.launch {
-            launch.close_guide();
-        }
-    }
-
-    fn guide_select(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(state) = &mut self.state else { return };
-        match state.home.scene.guide_action() {
-            Some(GuideAction::Close) | None => self.close_guide(),
-            Some(GuideAction::QuitGame) => {
-                if let Some(launch) = &self.launch {
-                    launch.quit_game();
-                }
-                self.close_guide();
-            }
-            Some(GuideAction::Launch(game)) => {
-                while state.home.scene.focus() != game {
-                    let by = if state.home.scene.focus() > game { -1 } else { 1 };
-                    if !state.home.scene.move_focus(by) {
-                        break;
+    fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
+        for effect in self.dashboard.take_effects() {
+            match effect {
+                Effect::Launch(game) => self.launch(game),
+                Effect::QuitGame => {
+                    if let Some(launch) = &self.launch {
+                        launch.quit_game();
                     }
                 }
-                self.close_guide();
-                self.launch_focused();
+                // Over a game, the window hides at once and the game gets the foreground back.
+                Effect::GuideClosed => {
+                    if let (Some(launch), Some(state)) = (&mut self.launch, &mut self.state) {
+                        launch.close_guide();
+                        state.host.store.clear();
+                    }
+                }
+                Effect::Exit => event_loop.exit(),
             }
-            Some(GuideAction::Exit) => event_loop.exit(),
         }
-    }
-}
-
-impl State {
-    fn size(&self) -> (u32, u32) {
-        (self.config.width, self.config.height)
     }
 }
 
@@ -124,7 +114,7 @@ impl ApplicationHandler for App {
         if self.state.is_some() {
             return;
         }
-        let attributes = Window::default_attributes().with_title("Home");
+        let attributes = Window::default_attributes().with_title("Xbox Series Dashboard");
         let attributes = if self.windowed {
             attributes.with_inner_size(PhysicalSize::new(1280, 720))
         } else {
@@ -140,108 +130,111 @@ impl ApplicationHandler for App {
         let mut config = surface
             .get_default_config(&gpu.adapter, size.width.max(1), size.height.max(1))
             .expect("the adapter can't draw to the window");
-        // An sRGB target, as the offscreen one is, so both blend alike.
+        // Not an sRGB target, as the offscreen one isn't: the renderer blends in gamma space.
         let formats = surface.get_capabilities(&gpu.adapter).formats;
-        config.format = formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(config.format);
+        config.format = formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(config.format);
         config.present_mode = wgpu::PresentMode::AutoVsync;
         surface.configure(&gpu.device, &config);
 
-        let home = Home::new(&gpu, config.format, (config.width, config.height), &self.library, self.focus, || {});
-        self.state = Some(State { home, config, surface, gpu, window });
+        // A piece of art decoded on another thread asks for a frame.
+        let proxy = self.proxy.clone();
+        let host = Host::new(&gpu, config.format, move || {
+            let _ = proxy.send_event(());
+        });
+        self.state = Some(State { host, config, surface, gpu, window });
+    }
+
+    fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
+        self.stale = true;
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let Some(state) = &mut self.state else { return };
-        let moves = self.pad.poll();
+        let mut presses = self.pad.poll();
+        presses.append(&mut self.keys);
+        let mut wait = PAD_EVERY;
+        let mut hidden = false;
+
         if let Some(launch) = &mut self.launch {
             match launch.tick() {
-                // While a game starts, Home takes no input.
-                Showing::LaunchScreen => {
-                    state.window.request_redraw();
-                    return;
-                }
+                // The Launch screen, or its fade: keep drawing.
+                Showing::LaunchScreen => self.stale = true,
                 // Nothing to draw behind a running game: sleep between looks at the pad, for the Guide button.
                 Showing::Nothing => {
-                    if moves.guide {
+                    self.dashboard.game_booted();
+                    presses.retain(|p| p.button == Button::Guide && !p.repeat);
+                    if presses.is_empty() {
+                        hidden = true;
+                        wait = PAD_EVERY_HIDDEN;
+                    } else {
                         launch.open_guide();
                         self.last_frame = Instant::now();
-                        event_loop.set_control_flow(ControlFlow::Poll);
-                        self.open_guide();
-                    } else if state.home.scene.guide_panel(state.size()) > 0 {
-                        // Its Guide still sliding away behind the game: let it finish, hidden.
-                        state.home.scene.update(1.0);
-                    } else {
-                        let next = Instant::now() + Duration::from_millis(30);
-                        event_loop.set_control_flow(ControlFlow::WaitUntil(next));
                     }
-                    return;
                 }
                 Showing::Guide => {
-                    launch.clip_to_guide(state.home.scene.guide_panel(state.size()));
+                    let size = (state.config.width, state.config.height);
+                    let panel = self.dashboard.guide_panel_width() * ui::scale_for(size);
+                    launch.clip_to_guide(panel.round() as u32);
                 }
                 Showing::Home => {
                     self.launch = None;
-                    state.home.scene.set_launching(false);
-                    state.home.scene.close_guide();
+                    self.dashboard.game_ended();
+                    state.host.store.clear();
                     self.last_frame = Instant::now();
-                    event_loop.set_control_flow(ControlFlow::Poll);
-                    state.window.request_redraw();
-                    return;
+                    self.stale = true;
                 }
             }
         }
-        if state.home.scene.guide_open() {
-            if moves.guide || moves.back {
-                self.close_guide();
-            } else if moves.select {
-                self.guide_select(event_loop);
-            } else if moves.down != 0 {
-                state.home.scene.guide_move(moves.down);
-            }
-        } else if moves.guide {
-            self.open_guide();
-        } else if moves.select {
-            self.launch_focused();
-        } else if moves.by != 0 {
-            state.home.scene.move_focus(moves.by.signum());
+
+        let pressed = !presses.is_empty();
+        for press in presses {
+            self.dashboard.press(press);
         }
-        if let Some(state) = &self.state {
+        self.carry_out(event_loop);
+
+        let Some(state) = &self.state else { return };
+        // Drawn when something changed or is moving, and once a second for the clock.
+        let due = self.last_frame.elapsed() >= Duration::from_secs(1);
+        if !hidden && (self.stale || pressed || due || state.host.animating()) {
             state.window.request_redraw();
         }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let Some(state) = &mut self.state else { return };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed && (self.launch.is_none() || state.home.scene.guide_open()) =>
-            {
-                let guide = state.home.scene.guide_open();
-                match event.logical_key {
-                    Key::Named(NamedKey::Escape) if guide => self.close_guide(),
-                    Key::Named(NamedKey::Enter) if guide => self.guide_select(event_loop),
-                    Key::Named(NamedKey::ArrowUp) if guide => state.home.scene.guide_move(-1),
-                    Key::Named(NamedKey::ArrowDown) if guide => state.home.scene.guide_move(1),
-                    _ if guide => {}
-                    Key::Named(NamedKey::Escape) => event_loop.exit(),
-                    Key::Named(NamedKey::Enter) => self.launch_focused(),
-                    Key::Named(NamedKey::ArrowLeft) => drop(state.home.scene.move_focus(-1)),
-                    Key::Named(NamedKey::ArrowRight) => drop(state.home.scene.move_focus(1)),
-                    _ => {}
-                }
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                let button = match event.logical_key {
+                    Key::Named(NamedKey::ArrowLeft) => Button::Left,
+                    Key::Named(NamedKey::ArrowRight) => Button::Right,
+                    Key::Named(NamedKey::ArrowUp) => Button::Up,
+                    Key::Named(NamedKey::ArrowDown) => Button::Down,
+                    Key::Named(NamedKey::Enter) => Button::A,
+                    Key::Named(NamedKey::Backspace) => Button::B,
+                    // Esc is B, and at Home with nothing open it is the way out.
+                    Key::Named(NamedKey::Escape) => {
+                        if !self.dashboard.guide_open() && self.dashboard.playing().is_none() {
+                            event_loop.exit();
+                        }
+                        Button::B
+                    }
+                    _ => return,
+                };
+                self.keys.push(Press { button, repeat: event.repeat });
             }
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 state.config.width = size.width;
                 state.config.height = size.height;
                 state.surface.configure(&state.gpu.device, &state.config);
+                self.stale = true;
             }
             WindowEvent::RedrawRequested => {
                 let now = Instant::now();
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
-                state.home.take_ready_art(&state.gpu);
-                state.home.scene.update(dt);
+                self.stale = false;
 
                 let frame = match state.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -250,12 +243,15 @@ impl ApplicationHandler for App {
                     wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
                     wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                         state.surface.configure(&state.gpu.device, &state.config);
+                        self.stale = true;
                         return;
                     }
                     wgpu::CurrentSurfaceTexture::Validation => panic!("surface validation error"),
                 };
                 let view = frame.texture.create_view(&Default::default());
-                state.home.draw(&state.gpu, &view, (state.config.width, state.config.height));
+                let size = (state.config.width, state.config.height);
+                let dashboard = &mut self.dashboard;
+                state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
                 state.gpu.queue.present(frame);
                 if !self.presented {
                     self.presented = true;

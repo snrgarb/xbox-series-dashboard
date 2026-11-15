@@ -1,37 +1,83 @@
-//! The gamepad, read through XInput so it works whether or not Home has the foreground: the Guide button has to open
-//! the Guide over a game. `XInputGetStateEx` (xinput1_4's ordinal 100) is the call that reports the Guide button, as
-//! docs/research/guide-button-capture.md found. Ctrl+Alt+G stands in for the Guide button on a keyboard.
+//! The gamepad, read through XInput so it works whether or not the Dashboard has the foreground: the Guide button
+//! has to open the Guide over a game. `XInputGetStateEx` (xinput1_4's ordinal 100) is the call that reports the Guide
+//! button, as the theme's docs/research/guide-button-capture.md found. Ctrl+Alt+G stands in for the Guide button on a
+//! keyboard.
 use std::time::{Duration, Instant};
 
-#[derive(Default)]
-pub struct Moves {
-    /// Left and right.
-    pub by: i32,
-    /// Up and down.
-    pub down: i32,
-    /// A.
-    pub select: bool,
-    /// B.
-    pub back: bool,
-    /// The Guide button.
-    pub guide: bool,
-}
+use ui::{Button, Press};
 
-const UP: u16 = 0x0001;
-const DOWN: u16 = 0x0002;
-const LEFT: u16 = 0x0004;
-const RIGHT: u16 = 0x0008;
-const GUIDE: u16 = 0x0400;
-const A: u16 = 0x1000;
-const B: u16 = 0x2000;
+/// XInput's button bits, and two of our own for the triggers.
+const BITS: [(u32, Button); 15] = [
+    (0x0001, Button::Up),
+    (0x0002, Button::Down),
+    (0x0004, Button::Left),
+    (0x0008, Button::Right),
+    (0x0010, Button::Menu),
+    (0x0020, Button::View),
+    (0x0100, Button::LeftBumper),
+    (0x0200, Button::RightBumper),
+    (0x0400, Button::Guide),
+    (0x1000, Button::A),
+    (0x2000, Button::B),
+    (0x4000, Button::X),
+    (0x8000, Button::Y),
+    (LEFT_TRIGGER, Button::LeftTrigger),
+    (RIGHT_TRIGGER, Button::RightTrigger),
+];
+const UP: u32 = 0x0001;
+const DOWN: u32 = 0x0002;
+const LEFT: u32 = 0x0004;
+const RIGHT: u32 = 0x0008;
+#[cfg_attr(not(windows), allow(dead_code))]
+const GUIDE: u32 = 0x0400;
+const LEFT_TRIGGER: u32 = 0x1_0000;
+const RIGHT_TRIGGER: u32 = 0x2_0000;
+const DIRECTIONS: u32 = UP | DOWN | LEFT | RIGHT;
 #[cfg_attr(not(windows), allow(dead_code))]
 const STICK: i16 = 20000;
+#[cfg_attr(not(windows), allow(dead_code))]
+const TRIGGER: u8 = 64;
+
+/// A held direction repeats after this long, then this often.
+const REPEAT_AFTER: Duration = Duration::from_millis(400);
+const REPEAT_EVERY: Duration = Duration::from_millis(120);
+
+/// Turns what is held, looked at again and again, into presses: one as a button goes down, and more as a
+/// direction stays held.
+#[derive(Default)]
+pub struct Presses {
+    held: u32,
+    repeat_at: Option<Instant>,
+}
+
+impl Presses {
+    pub fn update(&mut self, buttons: u32, now: Instant) -> Vec<Press> {
+        let pressed = buttons & !self.held;
+        let mut out: Vec<Press> = BITS
+            .iter()
+            .filter(|(bit, _)| pressed & bit != 0)
+            .map(|&(_, button)| Press { button, repeat: false })
+            .collect();
+        let directions = buttons & DIRECTIONS;
+        if pressed & DIRECTIONS != 0 {
+            self.repeat_at = Some(now + REPEAT_AFTER);
+        } else if directions == 0 {
+            self.repeat_at = None;
+        } else if self.repeat_at.is_some_and(|at| now >= at) {
+            out.extend(
+                BITS.iter().filter(|(bit, _)| directions & bit != 0).map(|&(_, button)| Press { button, repeat: true }),
+            );
+            self.repeat_at = Some(now + REPEAT_EVERY);
+        }
+        self.held = buttons;
+        out
+    }
+}
 
 pub struct Pad {
     #[cfg(windows)]
     get_state: Option<unsafe extern "system" fn(u32, *mut State) -> u32>,
-    held: u16,
-    repeat_at: Instant,
+    presses: Presses,
 }
 
 #[repr(C)]
@@ -70,15 +116,14 @@ impl Pad {
                 }
                 found.map(|f| std::mem::transmute(f))
             },
-            held: 0,
-            repeat_at: Instant::now(),
+            presses: Presses::default(),
         }
     }
 
     /// Every pad's buttons together, the left stick counting as the d-pad.
-    fn buttons(&self) -> u16 {
+    fn buttons(&self) -> u32 {
         #[allow(unused_mut)]
-        let mut buttons = 0u16;
+        let mut buttons = 0u32;
         #[cfg(windows)]
         unsafe {
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_MENU};
@@ -88,7 +133,7 @@ impl Pad {
                     if get_state(user, &mut state) != 0 {
                         continue;
                     }
-                    buttons |= state.buttons;
+                    buttons |= state.buttons as u32;
                     buttons |= if state.left_x > STICK {
                         RIGHT
                     } else if state.left_x < -STICK {
@@ -103,6 +148,8 @@ impl Pad {
                     } else {
                         0
                     };
+                    buttons |= if state.left_trigger > TRIGGER { LEFT_TRIGGER } else { 0 };
+                    buttons |= if state.right_trigger > TRIGGER { RIGHT_TRIGGER } else { 0 };
                 }
             }
             let down = |key: i32| GetAsyncKeyState(key) < 0;
@@ -113,26 +160,47 @@ impl Pad {
         buttons
     }
 
-    pub fn poll(&mut self) -> Moves {
+    /// What has been pressed since the last call.
+    pub fn poll(&mut self) -> Vec<Press> {
         let buttons = self.buttons();
-        let now = Instant::now();
-        let mut pressed = buttons & !self.held;
-        // A held direction repeats.
-        let directions = buttons & (UP | DOWN | LEFT | RIGHT);
-        if pressed & directions != 0 {
-            self.repeat_at = now + Duration::from_millis(400);
-        } else if directions != 0 && now >= self.repeat_at {
-            pressed |= directions;
-            self.repeat_at = now + Duration::from_millis(150);
-        }
-        self.held = buttons;
-        let on = |button: u16| pressed & button != 0;
-        Moves {
-            by: on(RIGHT) as i32 - on(LEFT) as i32,
-            down: on(DOWN) as i32 - on(UP) as i32,
-            select: on(A),
-            back: on(B),
-            guide: on(GUIDE),
-        }
+        self.presses.update(buttons, Instant::now())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_button_presses_once_however_long_it_is_held() {
+        let mut presses = Presses::default();
+        let start = Instant::now();
+        assert_eq!(presses.update(0x1000, start), [Press { button: Button::A, repeat: false }]);
+        assert!(presses.update(0x1000, start + Duration::from_secs(2)).is_empty());
+        assert!(presses.update(0, start + Duration::from_secs(3)).is_empty());
+        assert_eq!(presses.update(0x1000, start + Duration::from_secs(4)).len(), 1);
+    }
+
+    #[test]
+    fn a_held_direction_repeats_after_a_pause() {
+        let mut presses = Presses::default();
+        let start = Instant::now();
+        assert_eq!(presses.update(RIGHT, start), [Press { button: Button::Right, repeat: false }]);
+        assert!(presses.update(RIGHT, start + Duration::from_millis(300)).is_empty());
+        assert_eq!(presses.update(RIGHT, start + REPEAT_AFTER), [Press { button: Button::Right, repeat: true }]);
+        assert!(presses.update(RIGHT, start + REPEAT_AFTER + Duration::from_millis(50)).is_empty());
+        assert_eq!(presses.update(RIGHT, start + REPEAT_AFTER + REPEAT_EVERY).len(), 1);
+    }
+
+    #[test]
+    fn a_button_pressed_while_a_direction_is_held_does_not_restart_the_repeat() {
+        let mut presses = Presses::default();
+        let start = Instant::now();
+        presses.update(RIGHT, start);
+        assert_eq!(
+            presses.update(RIGHT | 0x1000, start + Duration::from_millis(200)),
+            [Press { button: Button::A, repeat: false }]
+        );
+        assert_eq!(presses.update(RIGHT | 0x1000, start + REPEAT_AFTER).len(), 1);
     }
 }

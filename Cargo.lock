@@ -94,8 +94,8 @@ dependencies = [
  "screens",
  "serde_json",
  "shell",
- "shots",
  "source-steam",
+ "ui",
  "wgpu",
  "winit",
 ]
@@ -813,6 +813,7 @@ dependencies = [
 name = "input"
 version = "0.0.0"
 dependencies = [
+ "ui",
  "windows-sys 0.61.2",
 ]
 
@@ -1831,6 +1832,8 @@ dependencies = [
  "image",
  "model",
  "render",
+ "shots",
+ "ui",
  "wgpu",
 ]
 
@@ -2239,6 +2242,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
+]
+
+[[package]]
+name = "ui"
+version = "0.0.0"
+dependencies = [
+ "image",
+ "render",
+ "wgpu",
 ]
 
 [[package]]

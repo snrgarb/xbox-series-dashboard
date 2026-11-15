@@ -2,11 +2,15 @@
 name = "screens"
 version = "0.0.0"
 edition = "2021"
-description = "The Dashboard's screens."
+description = "The Dashboard's screens, and the core that holds them: no window, no Windows."
 
 [dependencies]
 model = { path = "../model" }
-render = { path = "../render" }
-wgpu = "30"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ui = { path = "../ui" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[dev-dependencies]
+render = { path = "../render" }
+shots = { path = "../shots" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+wgpu = "30"

@@ -1,4 +1,6 @@
 target/
 data/
+artifacts/
 *.png
 !crates/*/tests/reference/*.png
+.claude/worktrees/
