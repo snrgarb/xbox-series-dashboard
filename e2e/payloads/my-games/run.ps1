@@ -122,10 +122,11 @@ try {
     Press Left 'MyGames: Games: Nav\(Games\)' '01-my-games-games-first-rows'
     Press Right 'MyGames: Games: Tile\(0\)' '02-my-games-games-tile-focused'
 
-    # The grid's edges stop. A and Menu have nothing to open until the Game hub and the Tile menu are there.
+    # The grid's edges stop. A has nothing to open until the Game hub is there; Menu is the game's Tile menu, and B closes it.
     Press-Stays Up 'nothing is over the first row'
     Press-Stays A 'no Game hub yet'
-    Press-Stays Start 'Menu: no Tile menu yet'
+    Press Start 'TileMenu: Menu\(.*'
+    Press B 'MyGames: Games: Tile\(0\)'
     $rowEnd = Walk-ToEdge Right 'MyGames: Games: Tile\([1-9]\d*\)'
     $columns = (Place $rowEnd) + 1
     Say "the grid has $columns columns, and $installed games are installed"
