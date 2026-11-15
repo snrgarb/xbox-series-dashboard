@@ -11,7 +11,7 @@
 mod entries;
 mod flyout;
 mod hints;
-mod marks;
+pub(crate) mod marks;
 mod panel;
 mod status;
 mod utilities;
@@ -354,6 +354,21 @@ impl Guide {
     /// Whether there is anything of it to draw: open, or still sliding away.
     pub fn showing(&self) -> bool {
         self.open || self.shown
+    }
+
+    /// Shows this tab, if the Guide has it, as it shows at once on opening: what a Toast about something on it
+    /// opens the Guide at.
+    pub fn show_tab(&mut self, tab: Tab, around: Around) {
+        if self.tabs.contains(&tab) {
+            self.show(tab, around);
+        }
+    }
+
+    /// Puts focus on this Utility, if the showing tab has it.
+    pub fn focus_utility(&mut self, utility: Utility) {
+        if let Some(at) = self.utilities.iter().position(|&u| u == utility) {
+            self.focus = Focus::Utility(at);
+        }
     }
 
     /// Shows a tab from its top, focus on its first entry.

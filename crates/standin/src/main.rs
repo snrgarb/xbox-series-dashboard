@@ -21,6 +21,9 @@
 //!       The stand-in Steam, registered as the `steam://` handler: starts the installed game's `game.exe`, and keeps
 //!       `HKCU\Software\Valve\Steam\Apps\<appid>\Running` at 1 while it runs, as Steam does. Exits 1, having done
 //!       nothing, when the game isn't installed.
+//!   standin toast <text>
+//!       Posts a notification to the running Dashboard, which shows its Toast (`model::post`). Exits 1 when no
+//!       Dashboard took it: none is running, or it has no Toast strip yet.
 //!   standin steam-url steam://install/<appid> | steam://uninstall/<appid>
 //!       Says in the log which it was asked, the address with it, and does nothing more: a test reads the line.
 //!
@@ -39,7 +42,8 @@ use source_steam::fixture::{self, Fixture};
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
-       standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>";
+       standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
+       standin toast <text>";
 
 /// The arguments a `game.exe` run with none takes instead, one a line.
 const GAME_ARGS_FILE: &str = "game-args.txt";
@@ -143,8 +147,14 @@ fn steam_url(_: u32) -> i32 {
     2
 }
 
+#[cfg(not(windows))]
+fn toast(_: &str) -> i32 {
+    note("toast: Windows only");
+    2
+}
+
 #[cfg(windows)]
-use win::{game, steam_url};
+use win::{game, steam_url, toast};
 
 fn run(args: &[String]) -> i32 {
     let parsed_game = |args: &[String]| match GameArgs::parse(args) {
@@ -206,6 +216,13 @@ fn run(args: &[String]) -> i32 {
             }
             _ => {
                 note(&format!("steam-url: not an address the stand-in Steam knows: {:?}", args.get(1)));
+                2
+            }
+        },
+        Some("toast") => match &args[1..] {
+            [text] => toast(text),
+            _ => {
+                note(USAGE);
                 2
             }
         },

@@ -158,6 +158,22 @@ impl<'a> Ui<'a> {
         }
     }
 
+    /// Starts declaring a frame for the part of an output of `whole` pixels that begins `top` pixels down it: a
+    /// window that covers a strip of the screen. Everything is laid out as on the whole, and what falls outside the
+    /// part is not seen.
+    pub fn part(
+        frame: &'a mut Frame,
+        text: &'a mut TextSys,
+        store: &'a mut Store,
+        art: &'a mut ArtCache,
+        whole: (u32, u32),
+        top: u32,
+    ) -> Self {
+        let mut ui = Self::new(frame, text, store, art, whole);
+        ui.offset.1 -= top as f32 / ui.px;
+        ui
+    }
+
     /// The whole output in design units: the canvas, and whatever of the output lies beside or below it. With no
     /// offset in force its `x` is 0 on a 16:9 output and negative on a wider one.
     pub fn screen(&self) -> Rect {

@@ -98,8 +98,9 @@ try {
     Say "sounds line: $(if ($sounds) { $sounds } else { 'none' })"
     if ($tones -lt 1 -or $sounds -notmatch "^audio: $tones sounds from ") { $failures += "the Dashboard did not load the $tones tones: $sounds" }
     if ($steam -notmatch "^steam: $(@($library.games).Count) games ") { $failures += "the Dashboard did not read the fake Steam's $(@($library.games).Count) games: $steam" }
-    # Art decodes after the first frame.
+    # Art decodes after the first frame, and the greeting's Toast comes and goes.
     Start-Sleep -Seconds 3
+    Wait-Greeting | Out-Null
     Save-Screen 'home'
     Say "Home up; foreground $(Front)"
     if ((Get-Foreground).Title -ne $dashboardTitle) {

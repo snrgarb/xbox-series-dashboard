@@ -81,7 +81,7 @@ impl Overlay {
 }
 
 #[cfg(windows)]
-mod win {
+pub(crate) mod win {
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
@@ -222,14 +222,14 @@ mod win {
     /// The window's composition tree: a device, a target on the window, one visual as its root. wgpu can make
     /// these itself, but only for every window of an instance, Home's included; made here, the Overlay alone is
     /// composed and Home's window keeps its ordinary swap chain on the same device.
-    struct Composition {
+    pub(crate) struct Composition {
         device: IDCompositionDevice,
         _target: IDCompositionTarget,
-        visual: IDCompositionVisual,
+        pub(crate) visual: IDCompositionVisual,
     }
 
     impl Composition {
-        unsafe fn new(hwnd: HWND) -> windows::core::Result<Self> {
+        pub(crate) unsafe fn new(hwnd: HWND) -> windows::core::Result<Self> {
             let device: IDCompositionDevice = DCompositionCreateDevice2(None::<&windows::core::IUnknown>)?;
             let target = device.CreateTargetForHwnd(windows::Win32::Foundation::HWND(hwnd), true)?;
             let visual = device.CreateVisual()?;
@@ -239,7 +239,7 @@ mod win {
 
         /// Makes the swap chain wgpu has just set as the visual's content take effect: wgpu sets it and leaves the
         /// commit to whoever owns the visual.
-        unsafe fn commit(&self) {
+        pub(crate) unsafe fn commit(&self) {
             if let Err(e) = self.device.Commit() {
                 log(&format!("IDCompositionDevice::Commit failed: {e}"));
             }
@@ -576,7 +576,11 @@ mod win {
     }
 
     /// Configures the surface, returning what went wrong rather than letting wgpu panic over it.
-    fn configure(gpu: &Gpu, surface: &wgpu::Surface<'_>, config: &wgpu::SurfaceConfiguration) -> Option<String> {
+    pub(crate) fn configure(
+        gpu: &Gpu,
+        surface: &wgpu::Surface<'_>,
+        config: &wgpu::SurfaceConfiguration,
+    ) -> Option<String> {
         let filters = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation];
         let scopes = filters.map(|filter| gpu.device.push_error_scope(filter));
         surface.configure(&gpu.device, config);

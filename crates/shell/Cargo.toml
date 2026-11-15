@@ -11,6 +11,7 @@ wgpu = "30"
 log = "0.4"
 
 [target.'cfg(windows)'.dependencies]
+model = { path = "../model" }
 pollster = "1"
 # DirectComposition is COM, which windows-sys leaves out. wgpu's DX12 backend already builds this crate.
 # Core Audio is COM too: the Audio Flyout's devices, volume and mute.
@@ -30,6 +31,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
     "Win32_System_Power",
     "Win32_System_Registry",

@@ -18,7 +18,7 @@ The Dashboard is a fixed set of 10-foot screens steered by a pad. Its navigation
 | `ui` | `Ui` (drawing in design units), `Store` (animated values), `ArtCache`, `Button`/`Press`, `Host` (renderer + cache + store) and `Offscreen`. |
 | `screens` | The screens and the `Dashboard` core that owns them. The theme's colours, type and measures (`theme`). |
 | `input` | The pad through XInput, turned into `PadEvent`s: presses (with direction repeat), releases, the Guide button's tap and hold. Whether a pad is connected and what powers it. |
-| `shell` | Windows itself: the Overlay window, launching a game and following it, and holding it still under the Guide. |
+| `shell` | Windows itself: the Overlay window, the Toast strip above it, launching a game and following it, and holding it still under the Guide. |
 | `audio` | Short sounds: WAV files decoded once, mixed on a thread of its own, played through WASAPI. Silent anywhere but Windows. |
 | `app` | The two windows and the wiring. |
 
@@ -141,11 +141,24 @@ It declares **two pictures**, one for each window (next section):
 - `overlay()` says what the Overlay is wanted for: `Nothing` (hidden), `Passive` (something to look at that takes no input: the Launch screen, the Guide sliding away) or `Guide` (it takes the foreground). The answer comes from the screens' own state, which is why each keeps how much of it showed when last drawn (`LaunchScreen::showing`, `Guide::showing`): the Overlay stays up until the fade or the slide has ended. It stays `Guide` after the Guide has closed for as long as the pad's button that closed it is down (`awaiting_release`): the foreground goes back as the button is let go, so the window that gets it never sees the press, or a second later (`RELEASE_FALLBACK`, which `app` times and reports with `release_wait_over`). A tap of the Guide button and a key hand back at once.
 - `guide_over_game()` says the Guide is open over a game: the game is then held still (below).
 - `home_covered()` says Home's window has nothing to show: a game is in front of it, or its Launch screen has faded in over it.
-- `draw_all(ui)` is both in one frame, the Overlay's over Home's: what `--screenshot` and the screenshot tests draw.
+- `draw_toasts(ui)` is the Toast on screen and nothing else: the Toast strip's picture, above both. Where there is no strip (`set_toast_strip(false)`, as until told otherwise) `draw` ends with it.
+- `draw_all(ui)` is all of them in one frame, the Overlay's over Home's and the Toast over both: what `--screenshot` and the screenshot tests draw.
 
 A press can ask the shell for something, returned as an `Effect` (`Launch(game)`, `QuitGame`, `GuideClosed`, `Exit`, `Sound(sound)`, `Power(command)`, `Favourite` and `Hidden` for the user's marks in the library database, `Install(game)` and `Uninstall(game)` for the game's store) that the window carries out; the shell reports back through methods (`launch_started`, `game_booted`, `game_ended`). The core never calls Windows, so the same core runs under a test. Where there is no Overlay (`set_overlay(false)`: it could not be made, or was lost) the core shows nothing that needs one: no Launch screen, and no Guide over a game. The Guide at Home is then drawn in Home's window.
 
 The games the screens show are a **snapshot** of the library database (`model::Library`, read by the `library` crate): the core never sees the database. When the database changes (Steam read in the background after the first frame, a Play session ending) the window hands the core a new snapshot with `set_library`, which keeps focus on the game it was on. A game is known across snapshots by its `id`; its place in the list is good for one snapshot only.
+
+## Toasts and time
+
+The Dashboard has no clock, and Toasts are timed: five seconds each, half a second between (docs/spec/guide.md, section 9). So it is told how much time has passed, `Dashboard::advance(seconds)`, by the window every turn of its loop and by a test as it likes. `Toasts::wake()` says how long until the queue next changes with nothing posted, and the loop sleeps no longer than that.
+
+It is also told what has reached the screen: `Dashboard::toasts_presented(seconds)`, after each frame with the Toasts' picture in it is presented and after the strip is hidden, with the time since it was last told the time. The queue goes by that. A Toast's five seconds begin with its first presented frame, its going with the first presented frame of that, and the next waits for a frame without the last. `Toasts::seen()` is what the screen has by those frames, which is what the log's `toasts: shown`, `going` and `gone` lines say. So whoever draws Toasts must say so, or the queue stands still (`Toasts::awaits_frame`): a test that steps time calls it as a loop would, before and after each step, with no seconds. One `advance` does one thing to a Toast (going, gone, the next shown), however much time it is told of.
+
+On a slow renderer Home gives way to a Toast (docs/spec/guide.md, 9.4). The window says which it is (`Dashboard::set_slow_renderer`: the adapter is the processor, or Home's last frame took longer than `SLOW_FRAME`). While `Dashboard::home_gives_way()`, the swirl holds still (`set_in_front`, as under the Guide) and the loop does not ask for Home's frame while the strip is moving or about to. On a GPU none of this happens.
+
+The banner is not animated through the store. It is drawn where its age puts it (`screens::toasts::banner::pose`: its size, its opacity, how far its tile has slid, which of its line and its prompt shows), so its coming, its turns of text and its going are one function of two numbers, tested without a frame. While it moves it asks for frames (`keep_animating`); at rest between its turns of text it asks to be woken for the next (`wake_in`) and nothing is drawn meanwhile. A settling frame shows it at rest.
+
+`Dashboard::notify(text)` posts a notification: it joins `Dashboard::notifications()`, the list the Guide's Notifications Flyout shows, and tells of itself in a Toast. `Dashboard::greet()` is the "Hi <user>!" Toast.
 
 ## Sounds
 
@@ -161,19 +174,21 @@ Turning the machine off is never the core's to do: it asks with `Effect::Power(c
 
 ## Two windows
 
-Home's window is winit's: borderless, opaque, an ordinary swap chain. It is never made topmost, layered or clipped (that was the proof of concept's Launch screen, and #23). The **Overlay** (`shell::Overlay`) is a second window above every other, a running game's included, drawn with premultiplied alpha through a composition swap chain; `docs/research/overlay-window.md` has why it is made the way it is. Toasts will be drawn on it too.
+Home's window is winit's: borderless, opaque, an ordinary swap chain. It is never made topmost, layered or clipped (that was the proof of concept's Launch screen, and #23). The **Overlay** (`shell::Overlay`) is a second window above every other, a running game's included, drawn with premultiplied alpha through a composition swap chain; `docs/research/overlay-window.md` has why it is made the way it is. The **Toast strip** (`shell::ToastStrip`) is a third, made the same way, above the Overlay along the foot of the screen: only ever passive, shown only while a Toast is on screen.
 
-| | Home's window | The Overlay |
-|---|---|---|
-| Shows | `Dashboard::draw` | `Dashboard::draw_overlay` |
-| Shown | Always, but hidden behind a running game | Only while `Dashboard::overlay()` wants it |
-| Where | The primary monitor | Each time it is shown, the monitor of the window that has the foreground then: the Guide opens on the screen the game is on |
-| Input | The keyboard, while it has the foreground | Passive: none, clicked through, never activated. Guide: it takes the foreground from the game (an Alt tap, then `SetForegroundWindow`) or from Home's window (no tap: the foreground is ours to move), and gives it back to that window when the Guide closes |
-| Cleared to | Black | Nothing (transparent) |
+| | Home's window | The Overlay | The Toast strip |
+|---|---|---|---|
+| Shows | `Dashboard::draw` | `Dashboard::draw_overlay` | `Dashboard::draw_toasts` |
+| Shown | Always, but hidden behind a running game | Only while `Dashboard::overlay()` wants it | Only while a Toast is on screen |
+| Where | The primary monitor | Each time it is shown, the monitor of the window that has the foreground then: the Guide opens on the screen the game is on | The foot of that same monitor, each time it is shown |
+| Input | The keyboard, while it has the foreground | Passive: none, clicked through, never activated. Guide: it takes the foreground from the game (an Alt tap, then `SetForegroundWindow`) or from Home's window (no tap: the foreground is ours to move), and gives it back to that window when the Guide closes | None, ever: clicked through, never activated |
+| Cleared to | Black | Nothing (transparent) | Nothing (transparent) |
+
+The strip covers the foot of the screen, the bottom 240 of 1080, and its frame is declared as the whole screen's: `Host::draw_part` lays the frame out for the whole output and draws the part the target is, so a Toast is at the same design units wherever it is drawn. The Overlay comes to be above the strip whenever it is shown, raised or given the foreground (of two topmost windows the one made so last is the upper), so each turn the strip looks for a window of the Dashboard's above it and goes back on top (`ToastStrip::keep_above`). The strip's window is also where another program posts a notification to (`model::post`, a `WM_COPYDATA` message), which is how a test makes a Toast in a running Dashboard: `standin toast <text>`. It takes one only in a Dashboard started with `--allow-toast-posts`.
 
 The pad is read through XInput whichever window is in front, so the Guide button works over a game.
 
-**One GPU, one renderer, one art cache.** Both windows are surfaces of the same `wgpu` instance and device, in the same format, and are drawn by the same `Host`: its renderer, its fonts and glyphs, and its `ArtCache`, so a piece of art is decoded once and is one texture whichever window shows it (the Launch screen's art is the art Home already has up behind the focused game). What the Overlay has of its own is a `Store`: animated values are forgotten when a frame doesn't ask for them, so two pictures can't share one. `Host::with_store` draws a frame with another store in place of the Host's.
+**One GPU, one renderer, one art cache.** All the windows are surfaces of the same `wgpu` instance and device, in the same format, and are drawn by the same `Host`: its renderer, its fonts and glyphs, and its `ArtCache`, so a piece of art is decoded once and is one texture whichever window shows it (the Launch screen's art is the art Home already has up behind the focused game). What the Overlay and the strip each have of their own is a `Store`: animated values are forgotten when a frame doesn't ask for them, so two pictures can't share one. `Host::with_store` draws a frame with another store in place of the Host's.
 
 The Overlay's composition tree (device, target, visual) is made by `shell`, and wgpu is handed the visual. wgpu can make it itself, but only for every window of an instance at once, which would change Home's swap chain too.
 
@@ -185,7 +200,7 @@ The Overlay's composition tree (device, target, visual) is made by `shell`, and 
 
 **What it costs.** Where there is no GPU every frame is drawn by the processor (WARP on the test VM), and an integrated GPU pays for one too, while a game is trying to start. So Home's window draws nothing once its Launch screen has faded in over it, nor behind a game, whoever asks for a frame. The Overlay draws only while something on it moves; the Launch screen's Spinner always does, so a frame that took longer than 50 ms (a slow renderer: with vsync a GPU's takes a refresh at most) is followed by three times as long with none, the loop turning meanwhile. A fade or a slide is not paced so, and moves by the clock: a frame is as far on as it is later than the last, so a slow renderer shows fewer frames of it, not a slower one. `shell::Launch` looks at the desktop by the clock, before anything is drawn in a turn. The Overlay is made once Home has come to rest after its first frame, or two seconds after it, or at a launch if that is sooner; `overlay: made in N ms` says what it took, and `start-up:` when each part of the start-up was ready.
 
-Anywhere but Windows there is no Overlay (`Overlay::new` makes none).
+Anywhere but Windows there is no Overlay and no Toast strip (`Overlay::new` and `ToastStrip::new` make none): Toasts are then drawn in Home's window.
 
 ## Art
 

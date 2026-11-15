@@ -110,6 +110,8 @@ try {
     $first = Wait-DashboardLog 'first frame presented' 60
     if (-not $first) { throw 'The Dashboard never presented a frame' }
     Say "started: $first"
+    # The greeting's Toast comes and goes: it is not in the pictures, and the Guide button is the Guide's again.
+    Wait-Greeting | Out-Null
     Start-Sleep -Seconds 4
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
 

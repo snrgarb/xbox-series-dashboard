@@ -62,6 +62,8 @@ try {
     Say "  $(Wait-DashboardLog '^start-up:' 2)"
     Say "  $(Wait-DashboardLog '^steam:' 5)"
     Start-Sleep -Seconds 4
+    # The greeting's Toast comes and goes: it is not in the pictures.
+    Wait-Greeting | Out-Null
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
     Save-Screen '01-start'
     Measure-Idle 'on the profile, the swirl moving'
@@ -117,6 +119,7 @@ try {
         $failures += "the second start did not read the $(@($library.games).Count) games from the database: $fromDatabase"
     }
     Start-Sleep -Seconds 3
+    Wait-Greeting | Out-Null
     Save-Screen '15-second-start'
 
     if ($failures.Count -eq 0) { $result = 'PASS' }

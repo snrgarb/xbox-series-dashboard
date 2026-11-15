@@ -120,6 +120,8 @@ try {
     # Quoted here: Start-Process joins its arguments with spaces and quotes none of them.
     $dashboard = Start-Dashboard @('--log-focus', '--notify', "`"$($notifications[0])`"", '--notify', "`"$($notifications[1])`"")
     if (-not (Wait-DashboardLog 'first frame presented' 60)) { throw 'The Dashboard never presented a frame' }
+    # The greeting's Toast comes and goes: it is not in the pictures, and the Guide button is the Guide's again.
+    Wait-Greeting | Out-Null
     Start-Sleep -Seconds 3
     if ((Get-Foreground).Title -ne $dashboardTitle) { Say "note: put in front: $(Set-Foreground $dashboardTitle)" }
     if (-not (Wait-DashboardLog '^overlay: configured' 15)) { throw 'The Overlay was not made' }

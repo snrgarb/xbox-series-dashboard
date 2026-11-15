@@ -1,5 +1,6 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod audio;
+pub mod post;
 pub mod sound;
 
 use serde::{Deserialize, Serialize};

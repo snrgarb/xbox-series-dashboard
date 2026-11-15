@@ -2030,12 +2030,12 @@ fn guide_notifications_flyout_with_none() {
 #[test]
 fn guide_notifications_flyout() {
     let mut stage = on_utility(0);
-    stage.dashboard.notify("Saltwind Rally is ready to play");
-    stage.dashboard.notify(
+    stage.dashboard.record("Saltwind Rally is ready to play");
+    stage.dashboard.record(
         "A long one, which says a good deal more than fits on two lines of the card and so is cut short at the end \
          of its third line, where an ellipsis says that there was more of it to read",
     );
-    stage.dashboard.notify("Controller connected");
+    stage.dashboard.record("Controller connected");
     stage.press(&[Button::A, Button::Down]);
     stage.check("guide-notifications");
 }

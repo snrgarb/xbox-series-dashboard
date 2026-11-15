@@ -1,7 +1,7 @@
-//! The windows: Home's, borderless fullscreen on the primary monitor or 1280x720 with `--windowed`, and the Overlay
-//! above every other window, which shows what the Dashboard wants over a game (docs/ui.md). This feeds the Dashboard
-//! the pad and the keyboard, draws each window when what it shows has changed, and carries out what the Dashboard
-//! asks of the shell.
+//! The windows: Home's, borderless fullscreen on the primary monitor or 1280x720 with `--windowed`, the Overlay
+//! above every other window, which shows what the Dashboard wants over a game, and the Toast strip above that
+//! (docs/ui.md). This feeds the Dashboard the pad, the keyboard and the time, draws each window when what it shows
+//! has changed, and carries out what the Dashboard asks of the shell.
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -9,11 +9,12 @@ use input::Pad;
 use model::{Library, Sound};
 use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
+use screens::toasts::Seen;
 use screens::{Dashboard, Effect, OverlayShows, Setting};
 use shell::audio::{self, AudioControl, SystemAudio};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::store::{Addresses, Ask, SystemAddresses};
-use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step};
+use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step, ToastStrip};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -38,6 +39,15 @@ const SLOW_FRAME: Duration = Duration::from_millis(50);
 /// What a slow renderer is held to while only the Spinner turns: a frame, then this many frames' time left to the
 /// game that is starting.
 const SLOW_FRAME_REST: u32 = 3;
+
+/// How long Home's window is kept waiting, at most, by a Toast on a slow renderer.
+const HOME_HELD: Duration = Duration::from_millis(1500);
+
+/// The seconds since the Dashboard was last told the time, which it is being told now.
+fn told(last: &mut Instant) -> f32 {
+    let now = Instant::now();
+    (now - std::mem::replace(last, now)).as_secs_f32()
+}
 
 struct State {
     host: Host,
@@ -70,6 +80,27 @@ struct App {
     overlay_moving: bool,
     /// The soonest the Overlay is drawn again for the Spinner alone: at once, but on a slow renderer.
     overlay_next: Instant,
+    /// The Toast strip, made with the Overlay. None before, anywhere but Windows, and where it could not be made:
+    /// Toasts are then drawn in Home's window. Before `state`, as the Overlay is.
+    toast_strip: Option<ToastStrip>,
+    /// The strip's own animated values, as the Overlay has its own.
+    toast_store: ui::Store,
+    toast_last_frame: Instant,
+    /// The strip wants a frame whatever else: it was just shown, the Toast on it changed.
+    toasts_stale: bool,
+    /// When the Dashboard was last told how much time had passed.
+    told_time: Instant,
+    /// `--toast`'s notifications, until Toasts have somewhere to show and the greeting has been asked for.
+    toasts_to_post: Option<Vec<String>>,
+    /// What the log last said of the Toasts: how many had been seen, and what the screen had of them.
+    toasts_said: (u64, Seen),
+    /// The renderer is the processor: there is no GPU. Its frames are slow whatever the last one took.
+    cpu_renderer: bool,
+    /// With --allow-toast-posts: other programs may post notifications to the strip's window.
+    toast_posts: bool,
+    /// How long Home's last frame took to draw, and when it was done: a slow one waits while a Toast moves.
+    home_took: Duration,
+    home_done: Instant,
     state: Option<State>,
     proxy: EventLoopProxy<()>,
     last_frame: Instant,
@@ -86,8 +117,6 @@ struct App {
     /// Who gets the foreground once the Guide has let go of it, when that is not the window that had it as the
     /// Guide opened (docs/spec/guide.md, 3.3).
     hand_back: Option<HandBack>,
-    /// When the Dashboard was last told how much time had passed.
-    turn: Instant,
     /// The library database: where a newer snapshot comes from, and where Play sessions go.
     store: Store,
     /// When the library had been read, in ms since the process started.
@@ -111,8 +140,9 @@ struct App {
     leaving: Duration,
     /// The minute of the day Home's last frame showed on its clock.
     minute: u64,
-    /// With --log-frames: the frames Home's window and the Overlay drew since they were last said, and when.
-    frames: Option<(u32, u32, Instant)>,
+    /// With --log-frames: the frames Home's window, the Overlay and the Toast strip drew since they were last
+    /// said, and when.
+    frames: Option<([u32; 3], Instant)>,
 }
 
 /// A key of the keyboard, as the Dashboard is given it.
@@ -160,7 +190,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
     }
     dashboard.set_options(options);
     for text in &args.notify {
-        dashboard.notify(text);
+        dashboard.record(text);
     }
     // A Dashboard that was killed with the Guide open over a game left the game frozen: it is let go first of all.
     let data_dir = args.data_dir.clone().or_else(library::data_dir);
@@ -191,6 +221,17 @@ pub fn run(args: &Args, library: Library, store: Store) {
         overlay_stale: false,
         overlay_moving: false,
         overlay_next: Instant::now(),
+        toast_strip: None,
+        toast_store: ui::Store::default(),
+        toast_last_frame: Instant::now(),
+        toasts_stale: false,
+        told_time: Instant::now(),
+        toasts_to_post: Some(args.toasts.clone()),
+        toasts_said: (0, Seen::Nothing),
+        cpu_renderer: false,
+        toast_posts: args.allow_toast_posts,
+        home_took: Duration::ZERO,
+        home_done: Instant::now(),
         state: None,
         proxy: event_loop.create_proxy(),
         last_frame: Instant::now(),
@@ -200,7 +241,6 @@ pub fn run(args: &Args, library: Library, store: Store) {
         freezer,
         release_wait: None,
         hand_back: None,
-        turn: Instant::now(),
         sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
@@ -213,14 +253,15 @@ pub fn run(args: &Args, library: Library, store: Store) {
         audio_read: None,
         leaving: Duration::ZERO,
         minute: minute(),
-        frames: args.log_frames.then(|| (0, 0, Instant::now())),
+        frames: args.log_frames.then(|| ([0; 3], Instant::now())),
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
 
 impl App {
-    /// Makes the Overlay, the first time it is called. Where there can't be one the Dashboard is told, and shows
-    /// nothing that would need it.
+    /// Makes the Overlay and the Toast strip, the first time it is called. Where there can't be an Overlay the
+    /// Dashboard is told, and shows nothing that would need it; with no strip it draws Toasts in Home's window.
+    /// Toasts have somewhere to show from here on: the greeting is asked for, and `--toast`'s notifications posted.
     fn make_overlay(&mut self) {
         let Some(state) = &self.state else { return };
         if self.overlay_tried {
@@ -239,6 +280,111 @@ impl App {
                 );
             }
         }
+        self.toast_strip = ToastStrip::new(&state.gpu, state.config.format, self.toast_posts);
+        self.dashboard.set_toast_strip(self.toast_strip.is_some());
+        if self.toast_strip.is_none() && cfg!(windows) {
+            eprintln!("toasts: no strip: Toasts show in Home's window, and not over a game");
+        }
+        self.dashboard.greet();
+        for text in self.toasts_to_post.take().unwrap_or_default() {
+            self.dashboard.notify(&text);
+        }
+        self.toasts_changed();
+    }
+
+    /// The Toast on screen may have changed: whichever window shows Toasts wants a frame.
+    fn toasts_changed(&mut self) {
+        self.toasts_stale = true;
+        self.stale |= self.toast_strip.is_none();
+    }
+
+    /// Says in the log what became of the Toasts since it last did: one shown, going, gone. Each is said of what
+    /// the screen has, by the frames presented: shown at a Toast's first frame, going at the first frame of its
+    /// going, gone at the first without it or when the strip is hidden. So the times are the screen's.
+    fn say_toasts(&mut self) {
+        let toasts = self.dashboard.toasts();
+        let now = (toasts.seen_count(), toasts.seen());
+        let (count, seen) = std::mem::replace(&mut self.toasts_said, now);
+        let at = since_start();
+        if seen == Seen::Showing && now.1 != Seen::Showing {
+            eprintln!("toasts: going at {at:.0} ms");
+        }
+        if seen != Seen::Nothing && (now.1 == Seen::Nothing || now.0 != count) {
+            eprintln!("toasts: gone at {at:.0} ms");
+        }
+        if now.0 != count {
+            if let Some(toast) = toasts.on_screen() {
+                let waiting = toasts.waiting();
+                eprintln!("toasts: shown {:?} ({:?}), {waiting} waiting at {at:.0} ms", toast.text, toast.kind);
+            }
+        }
+    }
+
+    /// Shows, hides and draws the Toast strip as the Dashboard's Toasts come and go, and tells the Dashboard what
+    /// has reached the screen, which its queue goes by. Returns how soon it wants another turn, None when it has
+    /// nothing more to draw.
+    fn follow_toasts(&mut self) -> Option<Duration> {
+        let (Some(strip), Some(state)) = (&mut self.toast_strip, &mut self.state) else {
+            // Toasts are in Home's window, which says what it presented. Behind a game it presents nothing: they
+            // pass unseen, in their time.
+            if self.toast_strip.is_none() && self.dashboard.home_covered() {
+                self.dashboard.toasts_presented(told(&mut self.told_time));
+            }
+            return None;
+        };
+        let wanted = self.dashboard.toasts().on_screen().is_some();
+        if wanted != strip.shown() {
+            if wanted {
+                self.toast_store.clear();
+                self.toast_last_frame = Instant::now();
+            }
+            strip.set(wanted);
+            self.toasts_stale = true;
+        }
+        if !wanted {
+            // Hidden: the last Toast is off the screen.
+            self.dashboard.toasts_presented(told(&mut self.told_time));
+            return None;
+        }
+        // The Overlay comes to be above it whenever it is shown, raised or given the foreground.
+        strip.keep_above();
+        // A Toast at rest between its turns of text asked to be woken, and draws nothing meanwhile.
+        let wake = self.toast_store.wake().map(Duration::from_secs_f32);
+        let rest = wake.map(|wake| wake.saturating_sub(self.toast_last_frame.elapsed()));
+        if !(self.toasts_stale || self.toast_store.animating() || rest == Some(Duration::ZERO)) {
+            return rest;
+        }
+        let Some(frame) = strip.frame(&state.gpu) else {
+            if strip.lost() {
+                // It said why. From here on Toasts are drawn in Home's window.
+                self.toast_strip = None;
+                self.dashboard.set_toast_strip(false);
+                self.stale = true;
+                return None;
+            }
+            return Some(OVERLAY_RETRY);
+        };
+        let now = Instant::now();
+        // The Toast is where its age puts it: only what the store itself times moves by this.
+        let dt = (now - self.toast_last_frame).as_secs_f32().min(1.0);
+        self.toast_last_frame = now;
+        self.toasts_stale = false;
+        if let Some((frames, _)) = &mut self.frames {
+            frames[2] += 1;
+        }
+        let view = frame.texture.create_view(&Default::default());
+        let (gpu, dashboard) = (&state.gpu, &mut self.dashboard);
+        // The strip is the foot of the screen: the frame is laid out for the whole screen, and cleared to nothing.
+        let (size, part) = (strip.size(), (strip.screen(), strip.top()));
+        state.host.with_store(&mut self.toast_store, |host| {
+            host.draw_part(gpu, &view, size, part, dt, wgpu::Color::TRANSPARENT, |ui| dashboard.draw_toasts(ui))
+        });
+        strip.present(gpu, frame);
+        self.dashboard.toasts_presented(told(&mut self.told_time));
+        if self.toast_store.animating() {
+            return Some(Duration::ZERO);
+        }
+        self.toast_store.wake().map(Duration::from_secs_f32)
     }
 
     /// Starts a game through Steam, the Dashboard showing its Launch screen.
@@ -314,8 +460,8 @@ impl App {
         let dt = (now - self.overlay_last_frame).as_secs_f32().min(if self.overlay_moving { 1.0 } else { 0.1 });
         self.overlay_last_frame = now;
         self.overlay_stale = false;
-        if let Some((_, overlay, _)) = &mut self.frames {
-            *overlay += 1;
+        if let Some((frames, _)) = &mut self.frames {
+            frames[1] += 1;
         }
         let view = frame.texture.create_view(&Default::default());
         let (gpu, size, dashboard) = (&state.gpu, overlay.size(), &mut self.dashboard);
@@ -506,6 +652,7 @@ impl ApplicationHandler for App {
         let instance = gpu::instance(Some(Box::new(event_loop.owned_display_handle())));
         let surface = instance.create_surface(window.clone()).expect("create surface");
         let gpu = gpu::init(instance, Some(&surface));
+        self.cpu_renderer = gpu.adapter.get_info().device_type == wgpu::DeviceType::Cpu;
         let size = window.inner_size();
         let mut config = surface
             .get_default_config(&gpu.adapter, size.width.max(1), size.height.max(1))
@@ -536,6 +683,11 @@ impl ApplicationHandler for App {
         if self.state.is_none() {
             return;
         }
+        // Toasts are timed by the time the Dashboard is told has passed: told first, so that one posted this turn
+        // starts from its start.
+        let mut toasts_changed = self.dashboard.advance(told(&mut self.told_time));
+        // A slow renderer, by the Overlay's test or by its kind: Home gives way to a Toast on one.
+        self.dashboard.set_slow_renderer(self.cpu_renderer || self.home_took > SLOW_FRAME);
         // After Home's first frame, and once Home has come to rest or a while has passed, so the Overlay costs
         // neither the start-up nor the first art its time. A launch that comes sooner makes it then.
         if let (Some(presented), Some(state)) = (self.presented, &self.state) {
@@ -547,9 +699,17 @@ impl ApplicationHandler for App {
         // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
         let focus = self.dashboard.focus_line();
         let guide = self.dashboard.guide_line();
+        if let Some(strip) = &mut self.toast_strip {
+            for text in strip.take_posts() {
+                eprintln!("toasts: posted {text:?} at {:.0} ms", since_start());
+                self.dashboard.notify(&text);
+                toasts_changed = true;
+                // The open Guide counts it, on its Notifications Utility.
+                self.overlay_stale = true;
+            }
+        }
         // What the Dashboard times itself: a game that was asked to quit and has not, the Guide closing after one.
-        let passed = std::mem::replace(&mut self.turn, Instant::now()).elapsed();
-        if self.dashboard.advance(passed.as_secs_f32()) {
+        if self.dashboard.take_timed() {
             self.stale = true;
             self.overlay_stale = true;
         }
@@ -643,6 +803,10 @@ impl ApplicationHandler for App {
         // A held direction repeats at the pace of whatever has the pad now.
         self.pad.set_repeat(self.dashboard.repeat());
         self.overlay_stale |= pressed;
+        // A press that opens the Guide sends the Toast away.
+        if toasts_changed || pressed {
+            self.toasts_changed();
+        }
         self.carry_out(event_loop);
         let audio_wants = self.follow_audio();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
@@ -667,6 +831,8 @@ impl ApplicationHandler for App {
         }
         let home_hides = self.hand_back();
         let overlay_wants = self.follow_overlay();
+        let toasts_want = self.follow_toasts();
+        self.say_toasts();
         if let Some(launch) = &mut self.launch {
             // The game has the foreground again, from the Overlay: Home's window goes behind it as it was.
             if home_hides {
@@ -686,10 +852,12 @@ impl ApplicationHandler for App {
         }
 
         let Some(state) = &self.state else { return };
-        if let Some((home, overlay, since)) = &mut self.frames {
+        if let Some((frames, since)) = &mut self.frames {
             if since.elapsed() >= FRAMES_EVERY {
-                eprintln!("frames: home {home}, overlay {overlay} in {:.1} s", since.elapsed().as_secs_f32());
-                (*home, *overlay, *since) = (0, 0, Instant::now());
+                let [home, overlay, toasts] = *frames;
+                let seconds = since.elapsed().as_secs_f32();
+                eprintln!("frames: home {home}, overlay {overlay}, toasts {toasts} in {seconds:.1} s");
+                (*frames, *since) = ([0; 3], Instant::now());
             }
         }
         // Home's window is drawn when something changed or is moving, and when the minute changes for the clock; not
@@ -701,16 +869,34 @@ impl ApplicationHandler for App {
         let wake = state.host.wake().filter(|_| !covered).map(Duration::from_secs_f32);
         let woken = wake.is_some_and(|wake| self.last_frame.elapsed() >= wake);
         let mut home_wants = None;
+        // The strip is drawn before Home, above. On a slow renderer Home also gives way to a Toast (its swirl holds
+        // still, which the Dashboard sees to), and a frame of Home that does come is not begun while the Toast is
+        // moving, nor when the Toast would move, or the queue change, before that frame was done: a frame of Home
+        // keeps the renderer from the strip for as long as it takes. Home is not kept longer than HOME_HELD after
+        // its last frame.
+        let frame_takes = self.home_took.mul_f32(1.25);
+        let queue = self.dashboard.toasts().wake().map(Duration::from_secs_f32);
+        let toast_soon = [toasts_want, queue].into_iter().flatten().any(|wait| wait < frame_takes);
+        let toast_soon = toast_soon || self.dashboard.toasts().awaits_frame();
+        let held = HOME_HELD.saturating_sub(self.home_done.elapsed());
         if !covered && (self.stale || pressed || due || woken || state.host.animating()) {
-            state.window.request_redraw();
+            if self.dashboard.home_gives_way() && toast_soon && !held.is_zero() {
+                self.stale |= pressed || due;
+                home_wants = Some(held);
+            } else {
+                state.window.request_redraw();
+            }
         } else if let Some(wake) = wake {
             home_wants = Some(wake.saturating_sub(self.last_frame.elapsed()));
         }
         // Woken sooner by the pad's thread, the art cache and the windows' messages. During a launch, in time for
         // its next look at the desktop.
         let launch = self.launch.as_ref().map(|launch| launch.wait());
+        // And in time for the Toasts' next change: one goes, the next shows.
+        let toasts = queue;
         let timer = self.dashboard.timer().map(Duration::from_secs_f32);
-        let wants = [Some(IDLE), launch, overlay_wants, home_wants, release_wants, timer, audio_wants];
+        let wants =
+            [Some(IDLE), launch, overlay_wants, toasts_want, toasts, home_wants, release_wants, timer, audio_wants];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
@@ -769,15 +955,21 @@ impl ApplicationHandler for App {
                 self.last_frame = now;
                 self.stale = false;
                 self.minute = minute();
-                if let Some((home, ..)) = &mut self.frames {
-                    *home += 1;
+                if let Some((frames, _)) = &mut self.frames {
+                    frames[0] += 1;
                 }
 
                 let frame = match state.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                         frame
                     }
-                    wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
+                    wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                        // Nothing of the window shows: a Toast drawn in it passes unseen, in its time.
+                        if self.toast_strip.is_none() {
+                            self.dashboard.toasts_presented(told(&mut self.told_time));
+                        }
+                        return;
+                    }
                     wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                         state.surface.configure(&state.gpu.device, &state.config);
                         self.stale = true;
@@ -790,6 +982,11 @@ impl ApplicationHandler for App {
                 let dashboard = &mut self.dashboard;
                 state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
                 state.gpu.queue.present(frame);
+                (self.home_took, self.home_done) = (now.elapsed(), Instant::now());
+                // Without a strip the Toast was in that frame.
+                if self.toast_strip.is_none() {
+                    self.dashboard.toasts_presented(told(&mut self.told_time));
+                }
                 self.moving = state.host.animating();
                 if self.presented.is_none() {
                     self.presented = Some(Instant::now());

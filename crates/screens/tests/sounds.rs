@@ -39,11 +39,12 @@ fn every_sound_is_one_of_the_bundles_files() {
     assert_eq!(files(Sound::PromptOpen), ["PromptOpen.wav"]);
     assert_eq!(files(Sound::PromptClose), ["PromptClose.wav"]);
     assert_eq!(files(Sound::PowerOff), ["PowerOff.wav"]);
+    assert_eq!(files(Sound::Notification), ["Notification.wav"]);
     let mut all = Sound::all_files();
-    assert_eq!(all.len(), 11);
+    assert_eq!(all.len(), 12);
     all.sort_unstable();
     all.dedup();
-    assert_eq!(all.len(), 11, "no file is two sounds");
+    assert_eq!(all.len(), 12, "no file is two sounds");
 }
 
 #[test]

@@ -25,7 +25,7 @@ All numbers are design units = px on a 1920x1080 canvas.
 
 They were taken with builds of 4 and 10 November, **before** the type was set at 26 (#229, commit `4c69cf3`): in them titles are 24 or 25, detail lines 22, hints 24, the badge 16, menu labels 22, and the clock sits 12 higher. Geometry is otherwise unchanged and was measured against the XAML (panel, tab strip, underline, entries, rings, Utilities, hints, Status area, dim, menu panel all agree to the pixel). Where pictures and source disagree, this spec follows the source.
 
-**There is no picture of the Bundle showing** a Flyout, a Toast, Power, a prompt over the Guide, or the landing tab with games in it. Those sections are from the XAML alone. The console captures the XAML's comments cite (`docs/reference/console/G-guide`) are not in the repository; only `docs/reference/notifications/IMG_2336.jpg`, `IMG_2337.jpg` (photos of a console's Toast) are.
+**There is no picture of the Bundle showing** a Flyout, a Toast, Power, a prompt over the Guide, or the landing tab with games in it. Those sections are from the XAML alone. (Since then `port-reference-20261115-200355/` has pictures of the Flyouts, Power and the greeting's Toast: `docs/spec/pictures.md`. The Toast's is measured in 9.2.) The console captures the XAML's comments cite (`docs/reference/console/G-guide`) are not in the repository; only `docs/reference/notifications/IMG_2336.jpg`, `IMG_2337.jpg` (photos of a console's Toast) are.
 
 The later set `port-reference-20261115-200355/` (Bundle 0.4.2) has the Guide at 50 to 58. Two of its names say more than its pictures show: `56-guide-profile-power-focused.jpg` has focus on **Settings**, and `57-guide-power.jpg` is the **Settings page** that A opened from there (the run was one Down short). The set after it, `port-reference-20261115-215324/`, has them right: `56-guide-profile-power-focused.jpg` (focus on Power), `57-guide-power.jpg` (Power from its entry, focus on Close, the panel out of focus behind), `59-guide-power-option-focused.jpg` (focus on Turn off PC) and `62-guide-power-held.jpg` (by the hold: no panel). **Power is measured against those** (section 13). There is no picture of a menu or prompt over the Guide; the menu panel itself is in `port-reference-20261115-192720/23-tile-menu-installed.jpg` and `26-tile-menu-remove-prompt.jpg`.
 
@@ -572,6 +572,8 @@ E/ToastWindow.xaml, E/ToastWindow.xaml.cs, C/ToastState.cs.
 
 A separate window from the Overlay: topmost, never activated, click-through (`WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`), covering only the bottom 240 of the 1080 (y 840..1080) of the monitor holding the foreground window, shown without taking focus (E/ToastWindow.xaml:6-17; E/ToastWindow.xaml.cs:26, 79-87, 233-246). It never takes the pad from a game and never freezes one. Z-order: Toast above the Idle dim above the Overlay and the Launch screen (E/XboxSeriesPlugin.cs:228-233).
 
+**In the port (#42).** Two windows, as the Bundle (open question 7): `shell::ToastStrip` is a second window made as the Overlay is (no redirection bitmap, a composition swap chain, premultiplied alpha), always passive, along the foot of the monitor of the window that has the foreground when it is shown, as the Bundle's is and as the Overlay is (open question 9). It is shown only while a Toast is on screen. Its frame is laid out as the whole screen's and shows the foot of it (`Host::draw_part`), so a Toast is placed by the same numbers wherever it is drawn. The Overlay comes to be above it whenever the Overlay is shown, raised or given the foreground, so each turn of the loop the strip looks for a window of the Dashboard's above it and, finding one, goes back on top. Where the strip can't be made (and anywhere but Windows) Toasts are drawn in Home's window, and so are not seen over a game.
+
 ### 9.2 The banner
 
 One banner, centred horizontally, its foot 64 above the screen's (E/ToastWindow.xaml:74-154):
@@ -584,6 +586,8 @@ One banner, centred horizontally, its foot 64 above the screen's (E/ToastWindow.
 | Line | Segoe UI 34 white, one line, ellipsis, centred vertically | 168-180 |
 | Detail (Library updated only) | Segoe UI 26 under the line | 181-186 |
 | Prompt | "Press", the Xbox mark 32 x 32 (12 either side, 2 down), "to view"; Segoe UI 34 white | 187-214 |
+
+**Against the Bundle's picture** (`port-reference-20261115-200355/60-toast-greeting.jpg`, the greeting over Home): the card is x 756..1164, y 888..1016. It is 408 wide for a line about 140 wide: the card is as wide as the longer of the line and the prompt even for a Toast whose prompt never shows, since the prompt is laid out, unseen, in the line's place. The greeting's tile is the profile's picture, round and 80 across, bare on the card with no lighter square (the square is only under a kind's own icon); the port draws the same stand-in picture Home's top bar has until Profiles have pictures (M5). The Guide button's mark in the prompt is the plain disc the Guide's hint has (open question 5).
 
 **Text cycle.** When the Guide is on, the banner alternates between its line and the prompt, in place: line for 2.2 s, a 0.3 s linear cross-fade, prompt for 2.2 s, 0.3 s back; a 5 s loop, so a Toast shows each once (48-63). With the Guide off there is only the line.
 
@@ -598,6 +602,8 @@ E/ToastWindow.xaml.cs:29-58, 249-335.
 | Out | scale 1 to 1.1 over 120 ms (cubic ease-out), then to 0.9 over 180 ms (ease-in-out); opacity to 0 over 200 ms starting at 210 ms | 410 ms | |
 | Reduce motion | no scale, no slide; the fades only | | |
 
+A sliding kind's text starts where its tile will be, at the card's left padding, and the card is cut to its bounds so the tile comes out from behind its left edge. The text cycle runs on from the Toast's start through its going, so a Toast that has had its five seconds goes on its line. In the port the banner is where its age puts it (`screens::toasts::banner`): nothing is started or stopped, and a frame at rest (a screenshot) shows it in, in place and on its line.
+
 ### 9.4 Queue and timing
 
 C/ExtensionCore.cs:100-101, 313-423.
@@ -608,14 +614,29 @@ C/ExtensionCore.cs:100-101, 313-423.
 - **Opening the Guide drops the Toast showing and all waiting** (1977-2008). Toasts are dropped only at that moment: a notification arriving while the Guide is open, with the Notifications Flyout closed, is queued as usual and shows over the Guide, in the Toast window above the Overlay (from the code at 313-337 and the z-order; **UNVERIFIED** by picture).
 - Over a fullscreen game: the same, with the limits of 7.2 (nothing shows over true exclusive fullscreen).
 
+Decided for the port (#42):
+
+- **The greeting is in M2**, since the Bundle shows it as it starts (`60-toast-greeting.jpg`): "Hi <first word of the user's name>!", asked for once the Toast strip has been made, which is when Home has come to rest after its first frame. Until there is a Start-up (M5) that is the moment a profile "signs in". It is the queue's first Toast like any other: notifications posted meanwhile wait behind it and follow it half a second after it goes. It is not a notification and is not listed.
+- **A Toast that goes with none waiting leaves no gap**, as in the Bundle: one posted a moment later shows at once, over the going of the last.
+- **The queue goes by what is on the screen, not by what it has asked for.** Whoever shows the Toasts says when their picture has been presented (`Dashboard::toasts_presented`, after each frame and after the strip is hidden). A Toast's five seconds begin when its first frame is presented. Its going begins with the first presented frame of its going, once its time is seen to be up, so it is seen to go however late that was. The next does not show until the last is gone and a frame without it has been presented (or the strip hidden), and no sooner than half a second after the last began to go. The time told with a presented frame is the time then, not when that turn of the loop began: the turn that makes the Overlay and the strip takes over a second. One step of time does one of these things to a Toast, so a loop that stood still (a game starting, a slow renderer) swallows none of them. This was found on the VM, where Home's first seconds take the software renderer most of a second a frame: the queue ran on the clock alone and a Toast "showed" and went that was never drawn.
+- **On a slow renderer Home gives way to a Toast.** The strip is drawn first each turn of the loop, but a frame of Home, once begun, keeps the renderer for as long as it takes: most of a second with the swirl moving where the renderer is the processor. So where the renderer is slow (the adapter is the processor, or Home's last frame took more than 50 ms, the Overlay's test) and a Toast is on screen or coming:
+  - Home's swirl holds still, as it does under the Guide, so Home has nothing to draw but what the player does;
+  - a frame of Home that is wanted (a press, the clock, art coming in) is not begun while the Toast is moving, nor when the Toast would move or the queue change before that frame was done (1.25 times what Home's last frame took). It is begun in the Toast's next rest, and is never kept more than 1.5 s after Home's last frame.
+
+  On a GPU nothing changes: the swirl moves under a Toast and Home is drawn when it asks.
+- **The queue is timed by time the Dashboard is told has passed** (`Dashboard::advance`), not by a clock of its own, so tests step it. `Toasts::wake` says when it next changes, which the window's loop sleeps until.
+- **Where Toasts have no strip** they are in Home's frame, which says it was presented. Behind a game Home presents nothing: Toasts then pass unseen, in their time.
+
 ### 9.5 The Guide button while a Toast shows
 
 A tap opens the Guide on what the Toast was about (C/ExtensionCore.cs:953-983). The press records which Toast was showing, since opening drops it.
 
+In the port the Guide button says nothing as it goes down: a tap is told 300 ms after the press (7.1). So the Toast a tap opens the Guide on is the one **on screen** when the tap is told, one that began to go meanwhile included (its going takes 410 ms, longer than the wait). Until the Notifications Flyout exists (#41) a notification's tap opens the Guide with focus on the Notifications Utility; `Dashboard::open_notifications` is where the Flyout opens instead. Opening the Guide any other way (the profile on Home) drops the Toasts and opens it as ever.
+
 | Toast | Tap opens |
 |---|---|
 | Notification, Screenshot | the Guide with the Notifications Flyout open |
-| Greeting (M5), Achievement (M6) | Profile & system |
+| Greeting (M2 in the port), Achievement (M6) | Profile & system |
 | Call (M6) | the Discord tab |
 | Queued (M4) | Manage Queue (not the Guide) |
 | Installed (M4) | starts the game ("Press ... to start") |
@@ -625,12 +646,21 @@ A tap opens the Guide on what the Toast was about (C/ExtensionCore.cs:953-983). 
 | Kind | Tile | Milestone | Source |
 |---|---|---|---|
 | Notification | icon U+E91C | **M2** | E/ToastImages.xaml |
-| Screenshot (a notification whose id or text mentions "screenshot") | icon U+E722; slides | M2 if the port has such a notification, else drop | C/Notification.cs:18 |
+| Screenshot (a notification whose id or text mentions "screenshot") | icon U+E722; slides | Dropped (#42): the port has no such notification | C/Notification.cs:18 |
 | Queued / Installed / Uninstalled | the game's cover, else U+E896 / U+E768 / U+E74D | M4 | |
 | Library updated | U+E895, with a detail line | M4 or drop | |
-| Greeting | round picture 80 x 80; slides | M5 | |
+| Greeting | round picture 80 x 80; slides | **M2** (#42); the picture itself M5 | |
 | Call | the Discord mark at 48 | M6 | |
 | Achievement | its own pill (E/AchievementToast.xaml), 8.5 s | M6 | |
+
+### 9.7 Notifications in the port
+
+Decided in #42. The Dashboard core keeps the notifications itself (`screens::toasts`):
+
+- `Dashboard::notify(text) -> id` adds one to the list and shows its Toast (not while the Notifications Flyout is open, once there is one: `Dashboard::notifications_open` is the hook). `Dashboard::notifications()` is the list, oldest first, each an `id` (1 for the first, counting up) and its `text`. There is no time: the Flyout (5.2) shows none. The list lives as long as the Dashboard runs; nothing clears it, as nothing does in the Bundle. The Notifications Utility's badge counts it.
+- **Where they come from.** Nothing in the Dashboard posts one yet (open question 1 stays open for what should). Two ways in exist, for tests: `dashboard --toast <text>` (repeatable) posts as the Dashboard starts, behind the greeting; and another program posts to a running Dashboard with a `WM_COPYDATA` message to the Toast strip's window (`model::post`: the window's class, the message's id, the text as UTF-8, one line of 200 characters at most), which is what `standin toast <text>` does.
+- **Posts from other programs are off unless asked for.** The strip's window takes such a message only in a Dashboard started with `--allow-toast-posts`, which the tests pass. Started any other way, as it is on the TV, it answers that it took nothing and nothing is listed or shown: no other program can put text on the screen through the Dashboard. `e2e/payloads/toast` checks both.
+- The sound is `Sound::Notification` (`Notification.wav`), asked for as each Toast begins to show, the greeting's too.
 
 ---
 
@@ -638,7 +668,7 @@ A tap opens the Guide on what the Toast was about (C/ExtensionCore.cs:953-983). 
 
 | In the Bundle | In the port |
 |---|---|
-| Playnite's notification list feeds the Notifications Flyout and Toasts | A notification list of our own in `services`: an id, a text, a time. What posts to it in M2 is an open question (1) |
+| Playnite's notification list feeds the Notifications Flyout and Toasts | A notification list of our own in the Dashboard core: an id and a text (9.7). What posts to it in M2 is an open question (1) |
 | Playnite's controller events for the Guide button | Our own `XInputGetStateEx` polling in `input` (exists); add the tap/hold timing |
 | "Exit Playnite" in Power | "Exit to desktop": the Dashboard itself exits (section 13) |
 | Playnite's interface volume for sounds | Our own setting (#28) |
@@ -663,15 +693,15 @@ A tap opens the Guide on what the Toast was about (C/ExtensionCore.cs:953-983). 
 4. **Exclusive fullscreen and elevated games.** **Decided (#38): the Bundle's limits are accepted** and said in the log when they are met: `overlay: Windows says a Direct3D program has the screen to itself (exclusive fullscreen)` as the Guide opens over such a game, `overlay: Windows did not give the Overlay the foreground` over a game that runs elevated, and `freeze: Windows won't let <name> (<id>) be frozen` for a process it can't suspend. Nothing is done to work around either.
 5. **The Xbox mark** on the landing tab, the Guide hint and the Toast prompt, and the store badges: what is drawn in a repository that may go public?
 6. ~~**Power.** The fourth option's name ("Exit", "Exit to desktop"); whether "Turn off PC" keeps the hybrid shutdown; whether Exit plays `PowerOff.wav` when the media folder has it.~~ Decided in #39: section 13.
-7. **One window or two.** The Bundle has an Overlay window (activatable) and a Toast window (passive, a strip). The port's Overlay window has both modes (#27) but a Toast must stay passive while the Guide is active and must show while the Guide is closed. Two windows as the Bundle is the recommendation. **One Guide (#38):** the Guide is on the Overlay over Home as it is over a game, as in the Bundle; only where no Overlay can be made is it drawn in Home's window.
-8. **Layered window not updating on the VM** (#23) blocks checking Toasts there if the passive window is the layered kind.
+7. **One window or two.** The Bundle has an Overlay window (activatable) and a Toast window (passive, a strip). The port's Overlay window has both modes (#27) but a Toast must stay passive while the Guide is active and must show while the Guide is closed. Two windows as the Bundle is the recommendation. **One Guide (#38):** the Guide is on the Overlay over Home as it is over a game, as in the Bundle; only where no Overlay can be made is it drawn in Home's window. **Two windows (#42):** the Toast has its own, as the Bundle (9.1).
+8. **Layered window not updating on the VM** (#23) blocks checking Toasts there if the passive window is the layered kind. The strip is made as the Overlay is, whose picture does show on the VM; `e2e/payloads/toast` checks the Toast by the screen's pixels.
 9. **Which monitor.** The Bundle covers the monitor of the foreground window. **Decided (#38): the same.** Each time the Overlay is shown it goes over the monitor of the window that has the foreground then (`overlay: over the monitor at (x, y), WxH`), the Launch screen's showing included, as the Bundle's Launch screen does. Home's own window stays on the primary monitor.
 10. **Game Bar and Steam** also react to the Guide button. Document turning them off, or detect and warn?
 11. **The 300 ms wait before a tap opens the Guide.** Kept as is? It is the price of the hold not flashing the Guide.
 12. ~~**Blur behind dialogs.** `render` has no blur of a layer yet; is unblurred-under-dim acceptable for M2?~~ `render` has it (#39): section 13.
 13. **Font metrics.** Line heights are assumed (2.1). The first screenshot test on Windows should be compared with the Bundle's pictures at the entries' text baselines.
 14. **The badge's 26-px figure in a 24-high pill** (2.8): confirm on the TV PC how the Bundle draws it today.
-15. **A Toast over the open Guide** (9.4): confirm on the Bundle.
+15. **A Toast over the open Guide** (9.4): confirm on the Bundle. The port does as the Bundle's code reads, and `e2e/payloads/toast` checks it.
 
 ---
 

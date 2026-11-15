@@ -5,6 +5,7 @@
 //! It declares two pictures: Home's window's (`draw`) and the Overlay's (`draw_overlay`), the window above every
 //! other that shows the Launch screen and the Guide, over a running game and over Home alike. `overlay` says what
 //! the Overlay is wanted for, which the executable follows by showing and hiding it.
+//! Toasts are a third (`draw_toasts`), for the strip above both.
 pub mod guide;
 pub mod hint_bar;
 pub mod home;
@@ -18,6 +19,7 @@ pub mod settings;
 pub mod spinner;
 pub mod theme;
 pub mod tile_menu;
+pub mod toasts;
 pub mod wide_dialog;
 
 use model::{Audio, Flow, Library};
@@ -29,6 +31,8 @@ use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
 pub use crate::settings::{Options, Setting};
+pub use crate::toasts::Notification;
+use crate::toasts::{Toast, ToastKind, Toasts};
 
 /// What the Dashboard asks of the shell.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,14 +94,6 @@ pub const QUIT_TIMEOUT: f32 = 10.0;
 /// How long after a game quit from the Guide has stopped the Guide closes, in seconds.
 pub const CLOSE_AFTER_QUIT: f32 = 0.5;
 
-/// Something the Dashboard has told the user of: what the Notifications Flyout lists.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Notification {
-    /// Its number among all posted since the Dashboard started, from 1.
-    pub id: u64,
-    pub text: String,
-}
-
 /// The running game being quit (docs/spec/guide.md, 7.4).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Quit {
@@ -155,6 +151,12 @@ pub struct Dashboard {
     has_overlay: bool,
     /// The game being launched or running, by its place in the library.
     playing: Option<usize>,
+    /// The Toasts showing and waiting, and the notifications list.
+    toasts: Toasts,
+    /// Whether Toasts have a window of their own: if not they are drawn in Home's.
+    toast_strip: bool,
+    /// Whether frames come slowly: Home then gives way to a Toast.
+    slow_renderer: bool,
     /// Whether the Dashboard is in front of the running game: Home or a page was chosen in the Guide over it. The
     /// game runs on behind, first in the Guide's list, where A on it brings it back.
     in_front: bool,
@@ -162,13 +164,13 @@ pub struct Dashboard {
     quit: Option<Quit>,
     /// The seconds until the Guide closes by itself: the game quit from it has stopped.
     close_in: Option<f32>,
+    /// Whether the time told has changed what the Guide shows, since `take_timed` last asked.
+    timed: bool,
     /// The buttons pressed while a dialog page (the Tile menu) was up and not let go since: held on after it has
     /// closed, they do nothing to what was under it (docs/spec/tile-menu.md, section 6).
     held: Vec<Button>,
     /// The system's sound as the shell last read it, which the Audio Flyout shows.
     audio: Audio,
-    /// Every notification posted since the Dashboard started, oldest first.
-    notifications: Vec<Notification>,
     effects: Vec<Effect>,
 }
 
@@ -192,12 +194,15 @@ impl Dashboard {
             launch: LaunchScreen::default(),
             has_overlay: true,
             playing: None,
+            toasts: Toasts::default(),
+            toast_strip: false,
+            slow_renderer: false,
             in_front: false,
             quit: None,
             close_in: None,
+            timed: false,
             held: Vec::new(),
             audio: Audio::default(),
-            notifications: Vec::new(),
             effects: Vec::new(),
         }
     }
@@ -240,7 +245,7 @@ impl Dashboard {
                 playing: self.playing,
                 discord: self.status.discord,
                 audio: &self.audio,
-                notifications: &self.notifications,
+                notifications: self.toasts.notifications(),
             };
             self.guide.refresh(around);
         }
@@ -274,21 +279,6 @@ impl Dashboard {
         self.guide.flyout(self.guide_around()).filter(|_| self.guide.is_open())
     }
 
-    /// Posts a notification: it joins the list the Notifications Flyout shows, which follows if it is open. Gives
-    /// its id in the list.
-    pub fn notify(&mut self, text: &str) -> u64 {
-        let id = self.notifications.last().map_or(1, |last| last.id + 1);
-        self.notifications.push(Notification { id, text: text.to_string() });
-        self.refresh_guide();
-        id
-    }
-
-    /// Every notification posted since the Dashboard started, oldest first: what the Notifications Flyout lists,
-    /// newest first.
-    pub fn notifications(&self) -> &[Notification] {
-        &self.notifications
-    }
-
     /// Notifications, in the open Guide: its Flyout opens, where the showing tab has the Utility (the landing
     /// tab, which the Guide opens on). What the Guide shows when it was opened while a Toast told of a
     /// notification (docs/spec/guide.md, 9.5).
@@ -304,7 +294,7 @@ impl Dashboard {
             playing: self.playing,
             discord: self.status.discord,
             audio: &self.audio,
-            notifications: &self.notifications,
+            notifications: self.toasts.notifications(),
         }
     }
 
@@ -434,28 +424,46 @@ impl Dashboard {
         }
     }
 
-    /// Time has passed: `seconds` since the last call. What the Dashboard times itself is the quit of a game
-    /// (docs/spec/guide.md, 7.4): "Force quit?" once the game has had `QUIT_TIMEOUT` to close, and the Guide
-    /// closing `CLOSE_AFTER_QUIT` after a game quit from it has stopped. True when something came of it.
+    /// Time has passed: `seconds` since the Dashboard was last told the time, by this or by `toasts_presented`.
+    /// Toasts are timed by it, since the Dashboard has no clock: one that begins to show asks for its sound. True
+    /// when what `draw_toasts` draws may have changed.
+    ///
+    /// The quit of a game is timed by it too (docs/spec/guide.md, 7.4): "Force quit?" once the game has had
+    /// `QUIT_TIMEOUT` to close, and the Guide closing `CLOSE_AFTER_QUIT` after a game quit from it has stopped.
+    /// Whether anything came of that is `take_timed`'s to say.
     pub fn advance(&mut self, seconds: f32) -> bool {
-        let mut changed = false;
+        let before = (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some());
+        if self.toasts.advance(seconds) {
+            self.effects.push(Effect::Sound(Sound::Notification));
+        }
+        self.pass(seconds);
+        before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
+    }
+
+    /// The time the quit of a game goes by.
+    fn pass(&mut self, seconds: f32) {
         let due = self.quit.as_mut().filter(|quit| !quit.asked).is_some_and(|quit| {
             quit.left -= seconds;
             quit.left <= 0.0
         });
         if due {
             self.offer_force_quit();
-            changed = true;
+            self.timed = true;
         }
         if let Some(left) = &mut self.close_in {
             *left -= seconds;
             if *left <= 0.0 {
                 self.close_in = None;
-                changed = self.guide.is_open();
+                self.timed |= self.guide.is_open();
                 self.close_guide();
             }
         }
-        changed
+    }
+
+    /// Whether the time told since this was last asked changed what the Guide shows: "Force quit?" came up, or
+    /// the Guide closed after a quit.
+    pub fn take_timed(&mut self) -> bool {
+        std::mem::take(&mut self.timed)
     }
 
     /// How soon `advance` has something to do, in seconds: None when nothing is being timed.
@@ -664,7 +672,7 @@ impl Dashboard {
             playing: self.playing,
             discord: self.status.discord,
             audio: &self.audio,
-            notifications: &self.notifications,
+            notifications: self.toasts.notifications(),
         });
         self.effects.push(Effect::Sound(Sound::PromptOpen));
     }
@@ -677,7 +685,7 @@ impl Dashboard {
                 playing: self.playing,
                 discord: self.status.discord,
                 audio: &self.audio,
-                notifications: &self.notifications,
+                notifications: self.toasts.notifications(),
             };
             let action = self.guide.press(press, around);
             if let Some(action) = action {
@@ -693,7 +701,12 @@ impl Dashboard {
         }
         if press.button == Button::Guide {
             if !press.repeat && self.options.use_guide {
+                // A tap while a Toast is on screen opens the Guide on what the Toast is about. Opening drops it.
+                let toast = self.toasts.on_screen().map(|toast| toast.kind);
                 self.open_guide();
+                if let Some(toast) = toast.filter(|_| self.guide.is_open()) {
+                    self.show_what_toast_told(toast);
+                }
             }
             return false;
         }
@@ -961,12 +974,114 @@ impl Dashboard {
             playing: self.playing,
             discord: self.status.discord,
             audio: &self.audio,
-            notifications: &self.notifications,
+            notifications: self.toasts.notifications(),
         };
         self.guide.open_on(tab, around);
         self.guide_overlaid = self.has_overlay;
         // Opened again before the foreground went back: the Overlay still has it, and keeps it.
         self.release_awaited = None;
+        // What the Toasts told of is in the Guide now.
+        self.toasts.drop_all();
+    }
+
+    /// The Guide, just opened by a tap while a Toast of this kind was on screen, shows what the Toast was about
+    /// (docs/spec/guide.md, 9.5).
+    fn show_what_toast_told(&mut self, toast: ToastKind) {
+        match toast {
+            ToastKind::Notification => self.open_notifications(),
+            ToastKind::Greeting => {
+                let around = Around {
+                    library: &self.library,
+                    playing: self.playing,
+                    discord: self.status.discord,
+                    audio: &self.audio,
+                    notifications: self.toasts.notifications(),
+                };
+                self.guide.show_tab(guide::Tab::ProfileAndSystem, around);
+            }
+        }
+    }
+
+    /// Whether the Guide's Notifications Flyout is open: a notification that comes meanwhile is listed there and
+    /// makes no Toast.
+    fn notifications_open(&self) -> bool {
+        matches!(self.flyout(), Some((Flyout::Notifications, _)))
+    }
+
+    /// Adds a notification to the list the Notifications Flyout shows, which follows if it is open, with no Toast:
+    /// one that was there before the Dashboard started. Gives its id in the list.
+    pub fn record(&mut self, text: &str) -> u64 {
+        let id = self.toasts.record(text);
+        self.refresh_guide();
+        id
+    }
+
+    /// Posts a notification: it joins the list the Notifications Flyout shows, and tells of itself in a Toast.
+    /// Gives its id in the list.
+    pub fn notify(&mut self, text: &str) -> u64 {
+        let id = self.record(text);
+        if !self.notifications_open() {
+            // With the Guide off the Guide button does nothing, and the Toast does not say to press it.
+            self.toast(Toast { kind: ToastKind::Notification, text: text.to_string(), prompt: self.options.use_guide });
+        }
+        id
+    }
+
+    /// Every notification posted since the Dashboard started, oldest first: what the Notifications Flyout lists,
+    /// newest first.
+    pub fn notifications(&self) -> &[Notification] {
+        self.toasts.notifications()
+    }
+
+    /// Greets the user, as the Dashboard starts: "Hi <first name>!" in a Toast with no prompt.
+    pub fn greet(&mut self) {
+        let name = self.user.split_whitespace().next().unwrap_or(&self.user);
+        self.toast(Toast { kind: ToastKind::Greeting, text: format!("Hi {name}!"), prompt: false });
+    }
+
+    fn toast(&mut self, toast: Toast) {
+        if self.toasts.post(toast) {
+            self.effects.push(Effect::Sound(Sound::Notification));
+        }
+    }
+
+    /// The Toasts' picture as it is now has been put on the screen, or taken off it: said by whoever shows it,
+    /// after each frame and after hiding it. The queue goes by it (`toasts::Toasts::presented`).
+    /// `seconds` is the time since the Dashboard was last told the time, by this or by `advance`: a frame is out
+    /// well into a turn of the loop.
+    pub fn toasts_presented(&mut self, seconds: f32) {
+        self.toasts.tick(seconds);
+        self.pass(seconds);
+        self.toasts.presented();
+    }
+
+    /// Says whether the renderer is a slow one: the processor, where there is no GPU, which takes long over a
+    /// frame of Home with the swirl moving. On one, the swirl holds still while a Toast is on screen or coming, as
+    /// it does under the Guide, so the Toast's own frames are not kept waiting (docs/spec/guide.md, 9.4).
+    pub fn set_slow_renderer(&mut self, slow: bool) {
+        self.slow_renderer = slow;
+    }
+
+    /// Whether Home's window gives way to the Toasts: on a slow renderer, while one is on screen or coming.
+    pub fn home_gives_way(&self) -> bool {
+        self.slow_renderer && self.toasts.busy()
+    }
+
+    /// The Toasts: which is on screen, how many wait, how many have shown.
+    pub fn toasts(&self) -> &Toasts {
+        &self.toasts
+    }
+
+    /// Says whether Toasts have a window of their own, above every other: the shell's strip. Without one, as until
+    /// told otherwise, they are drawn in Home's window, and so are not seen over a game.
+    pub fn set_toast_strip(&mut self, there: bool) {
+        self.toast_strip = there;
+    }
+
+    /// The Toast on screen, alone: what the strip shows. Drawn over nothing, as the Overlay is.
+    pub fn draw_toasts(&mut self, ui: &mut Ui) {
+        ui.store.reduce_motion = self.options.reduce_motion;
+        self.toasts.draw(ui);
     }
 
     pub fn close_guide(&mut self) {
@@ -1118,7 +1233,7 @@ impl Dashboard {
             playing: self.playing,
             discord: self.status.discord,
             audio: &self.audio,
-            notifications: &self.notifications,
+            notifications: self.toasts.notifications(),
         };
         // The pad's own word on its charge, unless the shell has said otherwise. One on a cable shows its glyph.
         let charge = match self.pad.battery {
@@ -1126,14 +1241,28 @@ impl Dashboard {
             _ => None,
         };
         let show_percent = self.status.show_percent && self.options.show_battery_percent;
-        let status = Status { pad_battery: self.status.pad_battery.or(charge), show_percent, ..self.status.clone() };
+        // The badge counts the notifications the Dashboard itself holds, unless the shell has told of more.
+        let notifications = self.status.notifications.max(self.toasts.notifications().len() as u32);
+        let status = Status {
+            pad_battery: self.status.pad_battery.or(charge),
+            show_percent,
+            notifications,
+            ..self.status.clone()
+        };
         let face = Face { user: &self.user, clock: &clock, pad: self.pad.connected, status: &status };
         self.guide.draw(ui, around, &face);
     }
 
     /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to
-    /// draw it on.
+    /// draw it on; and the Toast, where Toasts have no window of their own.
     pub fn draw(&mut self, ui: &mut Ui) {
+        self.draw_home(ui);
+        if !self.toast_strip {
+            self.draw_toasts(ui);
+        }
+    }
+
+    fn draw_home(&mut self, ui: &mut Ui) {
         ui.store.reduce_motion = self.options.reduce_motion;
         let clock = self.clock();
         // A wireless pad's charge, as the Guide's Status area has it; one on a cable shows its glyph.
@@ -1150,8 +1279,9 @@ impl Dashboard {
         };
         // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn.
         if !self.pages.hides_home() {
-            // Under a page that leaves it showing (the Tile menu) Home goes on as it was.
-            self.home.set_in_front(!self.guide.is_open());
+            // Under a page that leaves it showing (the Tile menu) Home goes on as it was; and it holds still
+            // while it gives way to a Toast.
+            self.home.set_in_front(!self.guide.is_open() && !self.home_gives_way());
             self.home.draw(ui, &self.library, &status);
         }
         self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing, options: self.options });
@@ -1172,10 +1302,12 @@ impl Dashboard {
         }
     }
 
-    /// Both in one frame, the Overlay's picture over Home's window's: what an offscreen frame shows.
+    /// All in one frame, the Overlay's picture over Home's window's and the Toast over both: what an offscreen
+    /// frame shows.
     pub fn draw_all(&mut self, ui: &mut Ui) {
-        self.draw(ui);
+        self.draw_home(ui);
         self.draw_overlay(ui);
+        self.draw_toasts(ui);
     }
 }
 

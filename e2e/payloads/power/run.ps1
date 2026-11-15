@@ -46,6 +46,8 @@ try {
     $script:dashboard = Start-Dashboard $arguments
     if (-not (Wait-DashboardLog 'first frame presented' 60)) { throw 'The Dashboard never presented a frame' }
     Start-Sleep -Seconds 4
+    # The greeting's Toast comes and goes: it is not in the pictures, and the Guide button is the Guide's again.
+    Wait-Greeting | Out-Null
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
 
     # Home starts on the profile, and A on it opens the Guide on Profile & system.
