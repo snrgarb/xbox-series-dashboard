@@ -26,6 +26,9 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
     for button in crate::focus_presses(on_row) {
         press(&mut dashboard, button);
     }
+    if let Some(page) = args.page {
+        dashboard.open_page(page);
+    }
     for &button in &args.press {
         press(&mut dashboard, button);
     }

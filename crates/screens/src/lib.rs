@@ -8,6 +8,7 @@
 pub mod guide;
 pub mod hint_bar;
 pub mod home;
+pub mod keyboard;
 pub mod launch;
 pub mod menu_panel;
 pub mod my_games;
@@ -227,9 +228,26 @@ impl Dashboard {
     pub fn repeat(&self) -> Repeat {
         if self.guide.is_open() {
             GUIDE_REPEAT
+        } else if self.page_has_pad() {
+            self.pages.repeat().unwrap_or_default()
         } else {
             Repeat::default()
         }
+    }
+
+    /// Whether a page over Home is what a press goes to now.
+    fn page_has_pad(&self) -> bool {
+        !self.guide.is_open() && !self.launch.up() && self.playing.is_none() && !self.pages.is_empty()
+    }
+
+    /// What a physical keyboard typed that is text's: letters, Space, Backspace. It goes to the page that has the
+    /// pad, if that takes text now (text entry; Search). False if nothing took it: Backspace is then B, as it is
+    /// everywhere else, and anything else nothing.
+    pub fn typed(&mut self, typed: keyboard::Typed) -> bool {
+        self.page_has_pad()
+            && self
+                .pages
+                .typed(typed, pages::Around { library: &self.library, playing: self.playing, options: self.options })
     }
 
     /// What a pad says happened. A button going down is a `press`. The Guide button is a tap or a hold
@@ -240,7 +258,12 @@ impl Dashboard {
         match event {
             PadEvent::Press(press) => {
                 let was_open = self.guide.is_open();
+                let page = self.page_has_pad().then(|| self.pages.depth());
                 self.press(press);
+                // The page that took the press is told the button is down, for what it draws while it is.
+                if !press.repeat && page == Some(self.pages.depth()) {
+                    self.pages.pad(press.button, true);
+                }
                 // Closed by this press: the Overlay keeps the foreground until the button is up again.
                 if was_open && !self.guide.is_open() && self.guide_overlaid {
                     self.release_awaited = Some(press.button);
@@ -254,6 +277,7 @@ impl Dashboard {
                 }
             }
             PadEvent::Release(button) => {
+                self.pages.pad(button, false);
                 if self.release_awaited == Some(button) {
                     self.release_awaited = None;
                 }
@@ -293,7 +317,7 @@ impl Dashboard {
         let (was_open, guide) = (self.guide.is_open(), self.guide.focus());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
-        let (depth, focus) = (self.pages.depth(), self.focus_line());
+        let (depth, focus) = (self.pages.depth(), self.focus_place());
         let dialog = self.guide.dialog();
         let asked = self.effects.len();
         let activated = self.steer(press);
@@ -319,7 +343,7 @@ impl Dashboard {
             (None, None) if self.guide.is_open() => [Some(Sound::GuideOpen), None],
             (None, None) if activated => [Some(Sound::Activate), None],
             (None, None) => {
-                let moved = self.pages.depth() == depth && self.focus_line() != focus;
+                let moved = self.pages.depth() == depth && self.focus_place() != focus;
                 [moved.then_some(Sound::Move), None]
             }
         };
@@ -440,9 +464,9 @@ impl Dashboard {
     }
 
     /// What is on top of Home's window, the Guide aside, and where its focus is: Home's focus as it is written
-    /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail: Theme settings`). This is `--log-focus`'s
-    /// line, which tests on the VM judge by.
-    pub fn focus_line(&self) -> String {
+    /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail: Theme settings`). A press that
+    /// changes this moved focus.
+    fn focus_place(&self) -> String {
         match self.pages.top() {
             Some(page) => format!("{}: {}", page.name(), page.focus()),
             None => format!("{:?}", self.home.focus()),
@@ -461,6 +485,16 @@ impl Dashboard {
         match self.guide.dialog() {
             Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}"),
             None => format!("{tab:?} {focus:?}{panel}"),
+        }
+    }
+
+    /// `--log-focus`'s line, which tests on the VM judge by: where focus is (`Recent(2)`, `Settings: Rail`), and
+    /// after it what the page says of its state beyond focus, if it says any (`TextEntry: A; "Ha|" lower letters`).
+    pub fn focus_line(&self) -> String {
+        let place = self.focus_place();
+        match self.pages.top().map(|page| page.state()) {
+            Some(state) if !state.is_empty() => format!("{place}; {state}"),
+            _ => place,
         }
     }
 
