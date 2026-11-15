@@ -4,3 +4,4 @@ artifacts/
 *.png
 !crates/*/tests/reference/*.png
 .claude/worktrees/
+!docs/reports/**/*.png
