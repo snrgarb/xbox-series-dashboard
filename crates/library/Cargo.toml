@@ -1,0 +1,15 @@
+[package]
+name = "library"
+version = "0.0.0"
+edition = "2021"
+description = "The library database: every source's games in one SQLite file, with what the user did with them."
+
+[dependencies]
+model = { path = "../model" }
+anyhow = "1"
+# SQLite built from the source rusqlite carries: nothing to install on Windows, and the same one everywhere.
+rusqlite = { version = "0.42", features = ["bundled"] }
+
+[dev-dependencies]
+source-steam = { path = "../source-steam" }
+tempfile = "3"

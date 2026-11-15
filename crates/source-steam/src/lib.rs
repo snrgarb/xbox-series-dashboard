@@ -53,6 +53,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
             let find =
                 |asset: &str, legacy: Option<&str>, names: &[&str]| art.as_ref()?.find(common, asset, legacy, names);
             Some(Game {
+                id: 0,
                 appid,
                 name,
                 last_played: played.max(manifest_played.unwrap_or(0)),
@@ -62,6 +63,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                 cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),
                 hero: find("library_hero", None, &["library_hero.jpg"]),
                 header: find("library_header", Some("header_image"), &["header.jpg", "library_header.jpg"]),
+                favourite: false,
             })
         })
         .collect();
