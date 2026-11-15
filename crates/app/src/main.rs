@@ -30,6 +30,8 @@ pub struct Args {
     media: Option<PathBuf>,
     /// Every sound played is a line in the log.
     log_sounds: bool,
+    /// Say every few seconds how many frames were drawn: what an idle Dashboard is checked by.
+    log_frames: bool,
 }
 
 impl Args {
@@ -46,7 +48,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 }
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
-                 [--media <dir>] [--log-sounds]
+                 [--media <dir>] [--log-sounds] [--log-frames]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>]";
@@ -94,6 +96,7 @@ fn parse_args() -> Result<Args, String> {
             "--clock" => args.clock = Some(value()?),
             "--media" => args.media = Some(value()?.into()),
             "--log-sounds" => args.log_sounds = true,
+            "--log-frames" => args.log_frames = true,
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
