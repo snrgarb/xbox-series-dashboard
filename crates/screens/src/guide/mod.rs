@@ -57,6 +57,10 @@ pub enum GuideAction {
     Close,
     /// Home was chosen: close, onto Home.
     Home,
+    /// My games & apps, Settings or the Search Utility was chosen: close, onto that page.
+    MyGames,
+    Settings,
+    Search,
     /// The running game was chosen: close, back to it.
     Resume,
     /// Launch the game at this place in the library.
@@ -214,7 +218,11 @@ impl Guide {
             (Button::LeftBumper, _) => self.turn(-1, around),
             (Button::RightBumper, _) => self.turn(1, around),
             (Button::A, Focus::Entry(at)) => return self.entries.get(at).and_then(|entry| select(entry, around)),
-            // The Utilities' Flyouts (#41) and Search (M3) are yet to come.
+            // Search opens its page, at Home: bringing the Dashboard in front of a running game is #40's.
+            (Button::A, Focus::Utility(at)) if self.utilities.get(at) == Some(&Utility::Search) => {
+                return around.playing.is_none().then_some(GuideAction::Search);
+            }
+            // The Utilities' Flyouts (#41) are yet to come.
             (Button::A, Focus::Utility(_)) => {}
             // The running game's menu (#40) is yet to come: until it does, Menu is its one option, Quit.
             (Button::Menu, Focus::Entry(at)) if self.entries.get(at).is_some_and(Entry::has_menu) => {
@@ -343,8 +351,8 @@ impl Guide {
     }
 }
 
-/// What A does on an entry, if anything. Entries whose pages or dialogs are yet to come are drawn and do nothing:
-/// My games & apps and Settings (M3), Switch profile (M5), the Profile entry (which never does).
+/// What A does on an entry, if anything. Entries whose dialogs are yet to come are drawn and do nothing: Switch
+/// profile (M5), the Profile entry (which never does).
 fn select(entry: &Entry, around: Around) -> Option<GuideAction> {
     let playing = around.playing.is_some();
     match entry.kind {
@@ -355,7 +363,10 @@ fn select(entry: &Entry, around: Around) -> Option<GuideAction> {
         Kind::Recent(game) => (!playing).then_some(GuideAction::Launch(game)),
         // Power's dialog (#39) is yet to come: until it does, Power at Home is its last option, the way out.
         Kind::Power => (!playing).then_some(GuideAction::Exit),
-        Kind::MyGames | Kind::Profile | Kind::SwitchProfile | Kind::Settings => None,
+        // As Home: these open their pages at Home.
+        Kind::MyGames => (!playing).then_some(GuideAction::MyGames),
+        Kind::Settings => (!playing).then_some(GuideAction::Settings),
+        Kind::Profile | Kind::SwitchProfile => None,
     }
 }
 

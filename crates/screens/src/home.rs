@@ -21,7 +21,10 @@ use self::groups::Group;
 use self::recent::Row;
 pub use self::tile::cover_art;
 pub use self::top_bar::{profile_picture, Status, TopButton};
+use crate::hint_bar::{self, Hint};
+use crate::pages::Open;
 use crate::theme::ROW_SCALE as S;
+use crate::{my_games, settings};
 
 /// How many games the Recent row holds, before its Play history tile.
 pub const RECENT_GAMES: usize = recent::GAMES;
@@ -51,8 +54,12 @@ pub enum Focus {
 pub enum HomeAction {
     /// Launch the game at this place in the library.
     Launch(usize),
-    /// Open the Guide: the profile was chosen.
+    /// Open the Guide: the profile was chosen, or the Achievements tile.
     OpenGuide,
+    /// Open this page over Home.
+    Open(Open),
+    /// The Discord tile was chosen: the Guide's Discord tab while there is one, else Settings on Discord.
+    Discord,
 }
 
 /// Where the page rests: how far it has risen (the Recent row, the wide tiles and the Groups together), and how
@@ -132,6 +139,36 @@ impl Home {
         }
     }
 
+    /// A page that was over Home has gone: Home is as it was left, at the same rest, and its rows take focus back
+    /// where they had it (docs/spec/home.md, 7.4). With focus on a wide tile or a Group's card, See all too, it is
+    /// there still. With it on the Recent row or the top bar, it is on the Recent row's game last focused: nothing
+    /// gives the top bar focus back, nor the Play history tile. But Search and Settings give it back to the button
+    /// that opened them, which `to_button` says this was (docs/spec/search.md, 4.2; docs/spec/settings.md, 8.2).
+    pub fn uncovered(&mut self, to_button: bool, library: &Library) {
+        let row = Row::of(library);
+        self.keep_focus_in(&row, &groups::of(library));
+        let before = self.focus;
+        match self.focus {
+            Focus::TopBar(_) if to_button => {}
+            Focus::TopBar(_) | Focus::Recent(_) => self.go_recent(self.last_game_tile(&row), &row),
+            Focus::Wide(_) | Focus::Group { .. } => {}
+        }
+        if self.focus != before {
+            self.background.focus_moved();
+        }
+    }
+
+    /// The hint bar's hints with focus where it is: More options and Search on a Group's game card, and nowhere
+    /// else on Home, though Menu works on a Recent tile and Y everywhere (docs/spec/home.md, 10.4).
+    pub fn hints(&self, library: &Library) -> &'static [Hint] {
+        match self.focus {
+            Focus::Group { group, card } if groups::of(library).get(group).is_some_and(|g| card < g.games.len()) => {
+                hint_bar::MORE_OPTIONS_AND_SEARCH
+            }
+            _ => hint_bar::NONE,
+        }
+    }
+
     /// The game focus is on, by its place in the library.
     pub fn focused_game(&self, library: &Library) -> Option<usize> {
         match self.focus {
@@ -154,7 +191,11 @@ impl Home {
         let row = Row::of(library);
         let groups = groups::of(library);
         self.keep_focus_in(&row, &groups);
+        let open = |page: Open| Some(HomeAction::Open(page));
         match (self.focus, button) {
+            // Y is Search, wherever focus is.
+            (_, Button::Y) => return open(Open::Search),
+
             // The top bar: along its buttons, stopping at the ends; down to the Recent tile under the button.
             (Focus::TopBar(at), Button::Left) => self.focus = Focus::TopBar(at.left().unwrap_or(at)),
             (Focus::TopBar(at), Button::Right) => self.focus = Focus::TopBar(at.right().unwrap_or(at)),
@@ -163,6 +204,9 @@ impl Home {
                 self.go_recent(nearest(at.rect().center().0, tiles.iter().map(|r| r.center().0)), &row);
             }
             (Focus::TopBar(TopButton::Profile), Button::A) => return Some(HomeAction::OpenGuide),
+            (Focus::TopBar(TopButton::MyGames), Button::A) => return open(Open::MyGames(my_games::Entry::Games)),
+            (Focus::TopBar(TopButton::Search), Button::A) => return open(Open::Search),
+            (Focus::TopBar(TopButton::Settings), Button::A) => return open(Open::Settings(settings::Entry::Rail)),
 
             // The Recent row: along its tiles; up to the top bar's button over the tile; down to the wide tile
             // under it, remembering the tile for the way back.
@@ -174,6 +218,8 @@ impl Home {
                 self.go_wide(wide::nearest(tile_middle(&row, i)));
             }
             (Focus::Recent(i), Button::A) if i < row.games.len() => return self.choose(i),
+            // The Play history tile, at once: it has no double tap to wait for.
+            (Focus::Recent(_), Button::A) => return open(Open::MyGames(my_games::Entry::PlayHistory)),
 
             // The wide tiles: along them; up to the Recent tile Down left; down into the first Group, at its start.
             (Focus::Wide(i), Button::Left) if i > 0 => self.go_wide(i - 1),
@@ -183,6 +229,11 @@ impl Home {
                 self.go_recent(tile, &row);
             }
             (Focus::Wide(_), Button::Down) if !groups.is_empty() => self.focus = Focus::Group { group: 0, card: 0 },
+            (Focus::Wide(wide::DISCORD), Button::A) => return Some(HomeAction::Discord),
+            (Focus::Wide(wide::SETTINGS), Button::A) => return open(Open::Settings(settings::Entry::Tile)),
+            // As the profile: the achievements are the Guide's.
+            (Focus::Wide(wide::ACHIEVEMENTS), Button::A) => return Some(HomeAction::OpenGuide),
+            (Focus::Wide(wide::DOWNLOADS), Button::A) => return open(Open::MyGames(my_games::Entry::Queue)),
 
             // The Groups: along a Group's cards; up and down to the same place in the next Group, or its last
             // card if it is shorter; up from the first to the wide tile last focused; B back to the Recent row.
@@ -199,8 +250,12 @@ impl Home {
             }
             (Focus::Group { .. }, Button::B) => self.go_recent(self.last_game_tile(&row), &row),
             (Focus::Group { group, card }, Button::A) => {
+                let Some(game) = groups[group].games.get(card) else {
+                    // See all: Full library on this Group's tab.
+                    return open(Open::MyGames(my_games::Entry::FullLibrary { filter: groups[group].filter }));
+                };
                 // A hidden game's card (the Hidden Group, where the user shows it) has no place to launch from.
-                if let Some(game) = groups[group].games.get(card).and_then(|game| place(library, game)) {
+                if let Some(game) = place(library, game) {
                     return self.choose(game);
                 }
             }

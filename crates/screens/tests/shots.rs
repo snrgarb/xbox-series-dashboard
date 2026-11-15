@@ -639,6 +639,80 @@ fn on_a_group_its_header_is_64_down_and_the_top_bar_has_gone() {
     assert!((64..80).contains(&first) && (88..103).contains(&last), "the header's ink is at {first}..{last}");
 }
 
+/// The hint bar on a Group's game card is in the screen's bottom right corner, 60 in and 52 up, 63 tall, a
+/// near-black a little of the page shows through (E/HintBarControl.xaml:17-19): a white ring for Menu and "More
+/// options", then the yellow ring for Y and "Search". It is not there on See all, and it does not move with the
+/// page.
+#[test]
+fn the_hint_bar_stands_in_the_bottom_right_corner_on_a_groups_game_card() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.press(&[Button::Down, Button::Down]);
+    let image = stage.still();
+    let dark = |image: &image::RgbaImage, x: u32, y: u32| image.get_pixel(x, y).0[..3].iter().all(|&c| c < 45);
+    let yellow = |x: u32, y: u32| {
+        let [r, g, b, _] = image.get_pixel(x, y).0;
+        r > 200 && (150..215).contains(&g) && b < 90
+    };
+    // The bar's back, just inside its right edge at 1860 and its top and foot at 965 and 1028.
+    for (x, y) in [(1856, 996), (1700, 968), (1700, 1025), (1480, 996)] {
+        assert!(dark(&image, x, y), "the bar's back at {x}, {y}: {:?}", image.get_pixel(x, y));
+    }
+    // Its hints, right to left from the padding: "Search", 12, the Y's ring 36 across, 26, "More options", 12,
+    // Menu's ring. Selawik is as wide as Segoe UI, so the rings are where the Bundle's picture has them: Y's
+    // from 1715 and Menu's from 1486, both on the bar's middle, 996.5.
+    let search = ink_rows(&image, (1764, 1840), (965, 1028)).expect("Search");
+    assert!((975..990).contains(&search.0) && (1000..1012).contains(&search.1), "Search's ink: {search:?}");
+    let about = |x: u32, is: &dyn Fn(u32, u32) -> bool| (x - 2..=x + 2).any(|x| is(x, 996));
+    assert!(about(1716, &yellow) && about(1750, &yellow), "the Y's ring is 36 across from 1715");
+    assert!(!about(1705, &yellow), "the bar is not yellow beside the ring");
+    let white = |x: u32, y: u32| ink(&image, x, y);
+    assert!(about(1487, &white) && about(1521, &white), "Menu's ring is 36 across from 1486");
+    assert!(ink_rows(&image, (1535, 1690), (965, 1028)).is_some(), "More options");
+
+    // On the second Group the page has risen by a Group and the bar has not moved.
+    stage.press(&[Button::Down]);
+    let image = stage.still();
+    assert!(dark(&image, 1856, 996) && dark(&image, 1480, 996), "the bar stays in its corner");
+    // See all has no menu: no bar.
+    stage.press(&[Button::Right; 6]);
+    let image = stage.still();
+    assert!(ink_rows(&image, (1764, 1840), (975, 1012)).is_none(), "no hint on See all");
+}
+
+/// A page is there at once in Home's place, top bar and all, and at once gone: Home is drawn as it was left, the
+/// page at the Group's rest and nothing sliding there (docs/spec/search.md, 6).
+#[test]
+fn a_page_takes_homes_place_at_once_and_b_shows_home_at_the_rest_it_was_left_at() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    let pale = |image: &image::RgbaImage| image.get_pixel(120, 100).0[..3].iter().all(|&c| c > 200);
+    stage.run(1.0, TICK);
+    assert!(pale(&stage.frame()), "the profile's picture is at the top left of Home");
+    // The first frame after Y is the page alone: one flat colour where the top bar and the rows were.
+    stage.press(&[Button::Y]);
+    let image = stage.frame();
+    let fill = image.get_pixel(120, 100).0;
+    assert!(!pale(&image), "the top bar hides while a page is up");
+    for (x, y) in [(960, 114), (1700, 114), (300, 700), (960, 950), (1800, 1000)] {
+        assert_eq!(image.get_pixel(x, y).0, fill, "nothing of Home shows at {x}, {y}");
+    }
+    // And the first frame after B is Home at rest, the top bar back.
+    stage.press(&[Button::B]);
+    assert!(pale(&stage.frame()), "Home is back in the next frame");
+
+    // From a Group: Home comes back risen to the Group's rest in the first frame, its header 64 down.
+    stage.press(&[Button::Down, Button::Down]);
+    stage.run(1.0, TICK);
+    let header = |image: &image::RgbaImage| ink_rows(image, (105, 300), (0, 110)).expect("the Group's header");
+    let at_rest = header(&stage.frame());
+    assert!((64..80).contains(&at_rest.0), "the header's ink starts at {}", at_rest.0);
+    stage.press(&[Button::Y]);
+    stage.run(0.2, TICK);
+    stage.press(&[Button::B]);
+    let back = stage.frame();
+    assert_eq!(header(&back), at_rest, "Home is at the Group's rest in the first frame back");
+    assert!(!pale(&back), "and its top bar is still up off the screen");
+}
+
 /// A wide tile's caption stands 14 (of the rows' units) off the tile's foot, in lines of Segoe UI 26: a lone title
 /// in 994.2..1028.7, and with a subtitle under it the title in 959.6..994.2 (E/PromoRow.xaml:44-58). Achievements
 /// and Downloads have the second line.
@@ -867,13 +941,12 @@ fn focus_moves_along_the_top_bar_and_stops_at_its_ends() {
 }
 
 #[test]
-fn a_on_the_profile_opens_the_guide_and_on_a_button_with_no_page_yet_does_nothing() {
+fn a_on_the_profile_opens_the_guide_and_on_notifications_does_nothing() {
     let mut home = core();
-    press(&mut home, &[Up]);
-    for _ in 0..4 {
-        press(&mut home, &[Right, A]);
-        assert!(!home.guide_open() && asked(&mut home).is_empty(), "{:?}", home.home_focus());
-    }
+    // What the three round buttons open is tests/pages.rs.
+    press(&mut home, &[Up, Right, Right, Right, Right, A]);
+    assert_eq!(home.home_focus(), Focus::TopBar(TopButton::Notifications));
+    assert!(!home.guide_open() && home.page().is_none() && asked(&mut home).is_empty());
     assert_eq!(after(&mut home, &[Left, Left, Left, Left, A]), Focus::TopBar(TopButton::Profile));
     assert!(home.guide_open());
 }
@@ -935,9 +1008,11 @@ fn with_no_group_to_show_favourites_is_there_empty_and_down_from_the_wide_tiles_
         press(&mut home, &[Down]);
         assert_eq!(after(&mut home, &[Down, Down]), card(0, 0));
         assert_eq!(home.focused_game(), None);
-        assert_eq!(after(&mut home, &[Right, Down, A]), card(0, 0), "See all is its only card, and the only Group");
-        assert!(asked(&mut home).is_empty());
-        assert_eq!(after(&mut home, &[Up]), Focus::Wide(0));
+        assert_eq!(after(&mut home, &[Right, Down]), card(0, 0), "See all is its only card, and the only Group");
+        // A on it is Full library, and B there is See all again.
+        press(&mut home, &[A]);
+        assert!(asked(&mut home).is_empty() && home.page() == Some("MyGames"));
+        assert_eq!(after(&mut home, &[B, Up]), Focus::Wide(0));
     }
 }
 
@@ -1032,21 +1107,20 @@ fn b_on_a_group_goes_back_to_the_recent_rows_game_last_focused() {
 }
 
 #[test]
-fn a_on_a_groups_card_launches_its_game_and_on_see_all_or_play_history_nothing() {
+fn a_on_a_groups_card_launches_its_game_and_on_see_all_or_play_history_none() {
     let mut home = core();
     // Most played's first card is the game played longest, Stardew Valley, tenth in the library.
     press(&mut home, &[Down, Down, Down]);
     assert_eq!(home.focused_game(), Some(9));
     press(&mut home, &[A]);
     assert_eq!(asked(&mut home), [Effect::Launch(9)]);
+    // See all and the Play history tile open pages (tests/pages.rs) and launch nothing.
     press(&mut home, &[Right, Right, Right, Right, Right, Right, A]);
     assert_eq!(home.focused_game(), None);
-    assert!(asked(&mut home).is_empty(), "See all's page is yet to come");
-    press(&mut home, &[B, Right, Right, Right, Right, Right, Right, Right, A]);
+    assert!(asked(&mut home).is_empty() && home.page().is_some());
+    press(&mut home, &[B, B, Right, Right, Right, Right, Right, Right, Right, A]);
     assert_eq!(home.home_focus(), Focus::Recent(7));
-    assert!(asked(&mut home).is_empty(), "Play history's page is yet to come");
-    press(&mut home, &[Down, A]);
-    assert!(asked(&mut home).is_empty(), "nor have the wide tiles'");
+    assert!(asked(&mut home).is_empty() && home.page().is_some());
 }
 
 #[test]

@@ -89,7 +89,8 @@ struct App {
     sounds: Sounds,
     /// Whether Home's last frame left something moving.
     moving: bool,
-    /// With --log-focus: say where Home's focus went, for a test that must know before it presses on.
+    /// With --log-focus: say where focus went, on Home or on the page over it (`Dashboard::focus_line`), for a test
+    /// that must know before it presses on.
     log_focus: bool,
     /// The minute of the day Home's last frame showed on its clock.
     minute: u64,
@@ -406,15 +407,15 @@ impl ApplicationHandler for App {
         }
 
         let pressed = !presses.is_empty() || !events.is_empty();
-        let focus = self.dashboard.home_focus();
+        let focus = self.dashboard.focus_line();
         for event in events {
             self.dashboard.pad_event(event);
         }
         for press in presses {
             self.dashboard.press(press);
         }
-        if self.log_focus && self.dashboard.home_focus() != focus {
-            eprintln!("focus: {:?}", self.dashboard.home_focus());
+        if self.log_focus && self.dashboard.focus_line() != focus {
+            eprintln!("focus: {}", self.dashboard.focus_line());
         }
         // A held direction repeats at the pace of whatever has the pad now.
         self.pad.set_repeat(self.dashboard.repeat());

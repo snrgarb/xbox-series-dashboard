@@ -95,7 +95,7 @@ fn a_on_a_tile_is_the_activation_sound_then_the_launch() {
 #[test]
 fn b_on_home_and_buttons_that_do_nothing_are_silent() {
     let mut home = dashboard();
-    for button in [Button::B, Button::X, Button::Y] {
+    for button in [Button::B, Button::X, Button::View] {
         assert!(press(&mut home, button).is_empty(), "{button:?}");
     }
 }
@@ -167,11 +167,8 @@ fn a_in_the_guide_is_the_select_sound_then_what_the_entry_does() {
 fn a_on_something_that_does_nothing_is_silent() {
     let mut home = dashboard();
     press(&mut home, Button::Guide);
-    // My games & apps, whose page is yet to come.
-    press(&mut home, Button::Down);
-    assert!(press(&mut home, Button::A).is_empty());
     // A Utility, whose Flyout is yet to come.
-    for _ in 0..5 {
+    for _ in 0..6 {
         press(&mut home, Button::Down);
     }
     assert!(press(&mut home, Button::A).is_empty());
