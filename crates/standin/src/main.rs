@@ -21,6 +21,8 @@
 //!       The stand-in Steam, registered as the `steam://` handler: starts the installed game's `game.exe`, and keeps
 //!       `HKCU\Software\Valve\Steam\Apps\<appid>\Running` at 1 while it runs, as Steam does. Exits 1, having done
 //!       nothing, when the game isn't installed.
+//!   standin steam-url steam://install/<appid> | steam://uninstall/<appid>
+//!       Says in the log which it was asked, the address with it, and does nothing more: a test reads the line.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -37,7 +39,7 @@ use source_steam::fixture::{self, Fixture};
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
-       standin steam-url steam://rungameid/<appid>";
+       standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>";
 
 /// The arguments a `game.exe` run with none takes instead, one a line.
 const GAME_ARGS_FILE: &str = "game-args.txt";
@@ -75,6 +77,14 @@ impl GameArgs {
 fn appid_of(url: &str) -> Option<u32> {
     let rest = url.trim().strip_prefix("steam://rungameid/")?;
     rest.trim_end_matches('/').parse().ok().filter(|&id| id != 0)
+}
+
+/// What `steam://install/<appid>` or `steam://uninstall/<appid>` asks for, and of which game.
+fn asked_of(url: &str) -> Option<(&'static str, u32)> {
+    let rest = url.trim().strip_prefix("steam://")?;
+    let (verb, appid) = rest.trim_end_matches('/').split_once('/')?;
+    let verb = ["install", "uninstall"].into_iter().find(|&known| known == verb)?;
+    appid.parse().ok().filter(|&id| id != 0).map(|id| (verb, id))
 }
 
 /// Where the Steam install at `root` has `appid` installed, by its app manifest.
@@ -187,10 +197,15 @@ fn run(args: &[String]) -> i32 {
             }
         }
         Some("game") => parsed_game(&args[1..]),
-        Some("steam-url") => match args.get(1).and_then(|url| appid_of(url)) {
-            Some(appid) => steam_url(appid),
-            None => {
-                note(&format!("steam-url: not a steam://rungameid/<appid> address: {:?}", args.get(1)));
+        Some("steam-url") => match args.get(1).map(|url| (appid_of(url), asked_of(url), url)) {
+            Some((Some(appid), _, _)) => steam_url(appid),
+            // The stand-in Steam installs and uninstalls nothing: that it was asked is what a test looks for.
+            Some((None, Some((verb, appid)), url)) => {
+                note(&format!("steam-url: asked to {verb} {appid}: {}", url.trim()));
+                0
+            }
+            _ => {
+                note(&format!("steam-url: not an address the stand-in Steam knows: {:?}", args.get(1)));
                 2
             }
         },
@@ -263,6 +278,13 @@ mod tests {
         assert_eq!(appid_of("steam://rungameid/0"), None);
         assert_eq!(appid_of("steam://store/9100030"), None);
         assert_eq!(appid_of("https://example.com/rungameid/5"), None);
+        assert_eq!(asked_of("steam://install/9100040"), Some(("install", 9_100_040)));
+        assert_eq!(asked_of("steam://uninstall/9100010/"), Some(("uninstall", 9_100_010)));
+        assert_eq!(asked_of("steam://rungameid/9100030"), None);
+        assert_eq!(asked_of("steam://install/0"), None);
+        assert_eq!(asked_of("steam://install/"), None);
+        assert_eq!(run(&strings(&["steam-url", "steam://uninstall/9100010"])), 0);
+        assert_eq!(run(&strings(&["steam-url", "steam://store/9100010"])), 2);
     }
 
     #[test]

@@ -40,7 +40,8 @@ pub fn open(args: &Args) -> (Library, Store) {
     if let Some(path) = &args.library {
         let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
         let library = serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
-        return (with_filters(library), Store::default());
+        let (library, database) = with_filters(library);
+        return (library, Store { database, ..Store::default() });
     }
     let window = args.screenshot.is_none();
     let dir = args.data_dir.clone().or_else(|| if window { library::data_dir() } else { None });
@@ -81,25 +82,29 @@ pub fn open(args: &Args) -> (Library, Store) {
         (Some(library), None) => library,
         (None, None) => screens::fake_library(),
     };
-    (with_filters(library), Store { database, path: path.unwrap_or_default(), steam: later, ..Store::default() })
+    // The marks the user makes (a favourite, a hidden game) go to the database the Library on screen came from.
+    let (library, memory) = with_filters(library);
+    let database = memory.or(database);
+    (library, Store { database, path: path.unwrap_or_default(), steam: later, ..Store::default() })
 }
 
 /// The Library with the saved filters and their games, if it has none: one read from a file, the fake one, or
 /// Steam's with no database to keep it in. A database in memory takes it in as Steam's and gives its snapshot, so
 /// the built-in filters and Steam's collections are there as they would be from the real one. Its games are given
-/// ids, which last as long as the snapshot.
-fn with_filters(library: Library) -> Library {
+/// ids, which last as long as that database, which is given too: what the user marks while the Dashboard runs
+/// (a favourite, a hidden game) is kept there, and gone with it.
+fn with_filters(library: Library) -> (Library, Option<Database>) {
     if !library.filters.is_empty() {
-        return library;
+        return (library, None);
     }
-    let through = || -> Result<Library> {
+    let through = || -> Result<(Library, Option<Database>)> {
         let mut database = Database::in_memory()?;
         database.sync(library::STEAM, &library, library::now())?;
-        database.snapshot()
+        Ok((database.snapshot()?, Some(database)))
     };
     through().unwrap_or_else(|e| {
         eprintln!("library: no filters: {e:#}");
-        library
+        (library, None)
     })
 }
 
@@ -176,6 +181,31 @@ impl Store {
         self.snapshot()
     }
 
+    /// Marks a game as a favourite, or as one no longer: the user's own mark, which no sync touches. Gives the
+    /// snapshot after, in which the Favourites filter has the game or has lost it; None when nothing was changed.
+    pub fn set_favourite(&mut self, game: i64, on: bool) -> Option<Library> {
+        self.mark(game, if on { "a favourite" } else { "no longer a favourite" }, |db| db.set_favourite(game, on))
+    }
+
+    /// Hides a game from every list but the Hidden filter's, or shows it again. Gives the snapshot after.
+    pub fn set_hidden(&mut self, game: i64, on: bool) -> Option<Library> {
+        self.mark(game, if on { "hidden" } else { "shown again" }, |db| db.set_hidden(game, on))
+    }
+
+    fn mark(&mut self, game: i64, what: &str, set: impl FnOnce(&Database) -> Result<()>) -> Option<Library> {
+        // A game with no id is in no database: there is nowhere to keep the mark.
+        let database = self.database.as_ref().filter(|_| game != 0)?;
+        let name = database.game(game).ok().flatten().map(|game| game.name)?;
+        match set(database) {
+            Ok(()) => eprintln!("library: {name} is {what}"),
+            Err(e) => {
+                eprintln!("library: {e:#}");
+                return None;
+            }
+        }
+        self.snapshot()
+    }
+
     /// A setting as the database has it; none with no database, or when it has never been set.
     pub fn setting(&self, key: &str) -> Option<String> {
         self.database.as_ref()?.setting(key).map_err(|e| eprintln!("library: {e:#}")).ok()?
@@ -208,12 +238,14 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use super::with_filters;
+    use super::{open, with_filters};
+    use crate::Args;
 
     #[test]
     fn a_library_from_no_database_is_given_the_built_in_filters() {
         let fake = screens::fake_library();
-        let library = with_filters(fake.clone());
+        let (library, database) = with_filters(fake.clone());
+        assert!(database.is_some());
         let names = |games: &[model::Game]| games.iter().map(|g| g.name.clone()).collect::<Vec<_>>();
         assert_eq!(names(&library.games), names(&fake.games));
         assert_eq!(library.user, fake.user);
@@ -222,6 +254,50 @@ mod tests {
         let most_played = library.groups().next().unwrap();
         assert_eq!(library.game(most_played.games[0]).unwrap().name, "Stardew Valley");
         // One that has its filters keeps them, and its games their ids.
-        assert_eq!(with_filters(library.clone()), library);
+        let (again, database) = with_filters(library.clone());
+        assert!(again == library && database.is_none());
+    }
+
+    /// The fake library, as the Dashboard has it with no Steam and no database of its own.
+    fn fake() -> (model::Library, super::Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("library.json");
+        std::fs::write(&file, serde_json::to_string(&screens::fake_library()).unwrap()).unwrap();
+        open(&Args { library: Some(file), ..Args::default() })
+    }
+
+    #[test]
+    fn a_favourite_is_in_the_next_snapshot_and_in_the_favourites_filter() {
+        let (library, mut store) = fake();
+        let game = library.games[2].clone();
+        let favourites = |library: &model::Library| {
+            let filter = library.filters.iter().find(|f| f.key.as_deref() == Some("favourites")).unwrap();
+            (filter.shown, filter.games.clone())
+        };
+        assert_eq!(favourites(&library), (true, vec![]));
+        let after = store.set_favourite(game.id, true).expect("a new snapshot");
+        assert!(after.game(game.id).unwrap().favourite);
+        assert_eq!(favourites(&after), (true, vec![game.id]));
+        let after = store.set_favourite(game.id, false).expect("a new snapshot");
+        assert_eq!(favourites(&after), (true, vec![]));
+    }
+
+    #[test]
+    fn a_hidden_game_leaves_the_games_for_the_hidden_ones_and_comes_back() {
+        let (library, mut store) = fake();
+        let game = library.games[0].clone();
+        let after = store.set_hidden(game.id, true).expect("a new snapshot");
+        assert!(after.games.iter().all(|g| g.id != game.id));
+        assert_eq!(after.hidden.iter().map(|g| g.id).collect::<Vec<_>>(), [game.id]);
+        let after = store.set_hidden(game.id, false).expect("a new snapshot");
+        assert!(after.hidden.is_empty() && after.games.iter().any(|g| g.id == game.id));
+    }
+
+    #[test]
+    fn a_game_that_is_in_no_database_takes_no_mark() {
+        let (_, mut store) = fake();
+        assert!(store.set_favourite(0, true).is_none());
+        assert!(store.set_hidden(987_654, true).is_none());
+        assert!(super::Store::default().set_favourite(1, true).is_none());
     }
 }
