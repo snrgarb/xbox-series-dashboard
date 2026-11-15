@@ -2013,6 +2013,7 @@ dependencies = [
  "log",
  "pollster",
  "render",
+ "tempfile",
  "wgpu",
  "windows",
  "windows-sys 0.61.2",

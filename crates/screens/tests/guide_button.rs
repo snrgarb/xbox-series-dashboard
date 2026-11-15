@@ -4,11 +4,12 @@
 use std::time::{Duration, Instant};
 
 use input::Presses;
-use screens::{Dashboard, Effect, Sound, GUIDE_REPEAT};
+use screens::{Dashboard, Effect, OverlayShows, Sound, GUIDE_REPEAT};
 use ui::{Button, Press, Repeat};
 
 /// XInput's bits for the buttons held here.
 const DOWN: u32 = 0x0002;
+const B: u32 = 0x2000;
 const GUIDE: u32 = 0x0400;
 
 const GUIDE_OPEN: Effect = Effect::Sound(Sound::GuideOpen);
@@ -171,4 +172,79 @@ fn a_held_direction_repeats_at_the_guides_pace_in_the_guide_and_at_homes_at_home
     assert_eq!(pad.at(4400, DOWN), [moved]);
     assert_eq!(pad.at(4519, DOWN), []);
     assert_eq!(pad.at(4520, DOWN), [moved]);
+}
+
+/// docs/spec/guide.md, 3.5: closed with B, the Guide keeps the foreground until B is let go, so the window that
+/// gets it back never sees the press; closed with a tap of the Guide button, it hands back at once.
+#[test]
+fn the_guide_closed_with_b_keeps_the_foreground_until_b_is_let_go() {
+    let mut pad = Pad::new();
+    pad.dashboard.launch_started(0);
+    pad.dashboard.game_booted();
+    pad.open_guide(0);
+    assert_eq!(pad.dashboard.overlay(), OverlayShows::Guide);
+
+    assert_eq!(pad.at(1000, B), [Effect::GuideClosed]);
+    assert!(!pad.dashboard.guide_open());
+    assert!(!pad.dashboard.guide_over_game());
+    assert!(pad.dashboard.awaiting_release());
+    assert_eq!(pad.dashboard.overlay(), OverlayShows::Guide, "the foreground is not handed back under a held B");
+    pad.at(1100, B);
+    assert_eq!(pad.dashboard.overlay(), OverlayShows::Guide);
+    pad.at(1120, 0);
+    assert!(!pad.dashboard.awaiting_release());
+    assert_ne!(pad.dashboard.overlay(), OverlayShows::Guide);
+
+    // A B that is never seen let go: whoever has the clock says when a second is up.
+    pad.open_guide(2000);
+    pad.at(3000, B);
+    assert!(pad.dashboard.awaiting_release());
+    pad.dashboard.release_wait_over();
+    assert_ne!(pad.dashboard.overlay(), OverlayShows::Guide);
+    pad.at(3500, 0);
+
+    // The Guide button's tap closes it as the button is let go: there is nothing to wait for.
+    pad.open_guide(4000);
+    pad.at(5000, GUIDE);
+    pad.at(5120, 0);
+    assert!(!pad.dashboard.guide_open());
+    assert!(!pad.dashboard.awaiting_release());
+    assert_ne!(pad.dashboard.overlay(), OverlayShows::Guide);
+
+    // Nor for a key: the keyboard tells no releases.
+    pad.open_guide(6000);
+    pad.dashboard.press(Press { button: Button::B, repeat: false });
+    assert!(!pad.dashboard.guide_open());
+    assert!(!pad.dashboard.awaiting_release());
+}
+
+/// Opened again before the foreground went back, the Guide keeps the Overlay as it is: the window it first opened
+/// over is still the one that gets the foreground back.
+#[test]
+fn the_guide_opened_again_under_a_held_b_keeps_the_foreground() {
+    let mut pad = Pad::new();
+    pad.open_guide(0);
+    assert_eq!(pad.dashboard.overlay(), OverlayShows::Guide, "at Home the Guide is on the Overlay too");
+    pad.at(1000, B);
+    assert!(pad.dashboard.awaiting_release());
+    // The keyboard's Guide button, B still down.
+    pad.dashboard.press(Press { button: Button::Guide, repeat: false });
+    assert!(pad.dashboard.guide_open());
+    assert!(!pad.dashboard.awaiting_release());
+    assert_eq!(pad.dashboard.overlay(), OverlayShows::Guide);
+    // B let go now closes nothing and hands nothing back.
+    pad.at(1500, 0);
+    assert!(pad.dashboard.guide_open());
+    assert_eq!(pad.dashboard.overlay(), OverlayShows::Guide);
+}
+
+/// With no Overlay the Guide at Home is in Home's window, which has the foreground all along: nothing is waited for.
+#[test]
+fn with_no_overlay_the_guide_closed_with_b_waits_for_nothing() {
+    let mut pad = Pad::new();
+    pad.dashboard.set_overlay(false);
+    pad.open_guide(0);
+    pad.at(1000, B);
+    assert!(!pad.dashboard.guide_open());
+    assert!(!pad.dashboard.awaiting_release());
 }

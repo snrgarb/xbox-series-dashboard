@@ -1,12 +1,15 @@
-//! Windows itself: the Overlay, the window above every other that the Launch screen and the Guide over a game are
-//! drawn on, and launching a game through Steam and following it until it ends. Anywhere but Windows there is no
-//! Overlay and nothing can be launched, and the same calls say so or do nothing.
+//! Windows itself: the Overlay, the window above every other that the Launch screen and the Guide are drawn on,
+//! launching a game through Steam and following it until it ends, and holding it still under the Guide. Anywhere
+//! but Windows there is no Overlay, nothing can be launched and nothing is frozen, and the same calls say so or do
+//! nothing.
+pub mod freeze;
 mod launch;
 pub mod overlay;
 
 use std::sync::OnceLock;
 use std::time::Instant;
 
+pub use freeze::Freezer;
 pub use launch::{Launch, Step};
 pub use overlay::{Key, Mode, Overlay};
 
@@ -70,12 +73,23 @@ unsafe fn describe(hwnd: windows_sys::Win32::Foundation::HWND) -> String {
 /// Takes the foreground from another program's window; whether Windows allowed it. Windows lets a program do that
 /// only after input it received, so tap Alt first (xbox-series-theme docs/research/topmost-overlay.md §4, and
 /// docs/research/overlay-window.md: without the tap it is refused).
+///
+/// Never tapped while a window of ours has the foreground, as Home's has when the Guide opens over it: the
+/// foreground is then ours to move, and the tap would land in our own window (the Bundle's rule, NativeMethods.cs
+/// BringToForeground).
 #[cfg(windows)]
 unsafe fn take_foreground(hwnd: windows_sys::Win32::Foundation::HWND) -> bool {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_MENU,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+    };
+    let mut front = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &mut front);
+    if front == std::process::id() {
+        return SetForegroundWindow(hwnd) != 0;
+    }
     let key = |flags| INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_MENU, wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },

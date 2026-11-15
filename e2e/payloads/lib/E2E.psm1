@@ -288,4 +288,49 @@ function Stop-StandInGame {
     Get-StandInGame | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
+# The stand-in game's pulse: a square of its window, x 1700..1820 and y 900..1020 of a 1920x1080 screen, that is one of
+# two colours and changes four times a second while the game runs (crates/standin/src/win.rs, PULSE_COLOURS). A frozen
+# game paints nothing, so its pulse stands still. Under the Guide's dim, black at 56%, each colour is 0.44 of itself.
+$script:PulseColours = @(@(200, 200, 40), @(40, 200, 200))
+
+# Whether a pixel is one of the pulse's two colours, as they are under the Guide's dim with $Dimmed.
+function Test-PulseColour($Pixel, [bool] $Dimmed = $false) {
+    foreach ($colour in $script:PulseColours) {
+        $expected = if ($Dimmed) { @($colour | ForEach-Object { [int] [Math]::Round($_ * (1 - 0x8F / 255)) }) } else { $colour }
+        if (Test-Colour $Pixel $expected 8) { return $true }
+    }
+    return $false
+}
+
+# Looks at the middle of the pulse every 100 ms for $Seconds and returns each different colour it showed: two for a
+# game that is running, one for a game that is frozen. Callers wrap the call in @( ) to count what comes back.
+function Watch-Pulse([double] $Seconds = 3) {
+    $seen = @()
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $slept = 0
+    do {
+        $pixel = Get-DesignPixel 1760 960
+        if (-not @($seen | Where-Object { Test-Colour $pixel $_ 8 }).Count) { $seen += $pixel }
+        Start-Sleep -Milliseconds 100
+        $slept += 100
+    } while (Test-StillWaiting $watch $slept $Seconds)
+    $seen
+}
+
+# How many times the stand-in games have said, in standin.log, that they stood still: a game says so at the first
+# beat of its pulse after it was frozen for more than a second and a half.
+function Get-StoodStill {
+    @(Get-Content (Join-Path $script:Out 'standin.log') -ErrorAction SilentlyContinue | Where-Object { $_ -match 'game: stood still for \d+ ms' })
+}
+
+# Whether every thread of the process $Id is suspended, as all are of one that is frozen. $false for a process that
+# has ended.
+function Test-Suspended([int] $Id) {
+    $process = Get-Process -Id $Id -ErrorAction SilentlyContinue
+    if (-not $process) { return $false }
+    $threads = @($process.Threads)
+    if (-not $threads.Count) { return $false }
+    -not @($threads | Where-Object { $_.ThreadState -ne 'Wait' -or $_.WaitReason -ne 'Suspended' }).Count
+}
+
 Export-ModuleMember -Function * -Variable Out, Payload, DashboardLog

@@ -503,6 +503,17 @@ Limits the Bundle accepts (`docs/research/topmost-overlay.md`): windowed, border
 
 A game that starts while the Guide is open is frozen at once and appears as Running (552-556).
 
+**The freeze in full** (E/GameFreezer.cs; C/ExtensionCore.cs:2014-2034, 693-710, 2576-2587; CT/GuideFreezeTests.cs):
+
+- **No setting.** The Bundle has no switch for the freeze: it comes with the Guide, whose own setting (`IsGuideOn`, on by default, C/SettingsState.cs:146-171) is the only one. The port is the same: `guide.enabled`, on unless set, and no other.
+- **Which processes.** Every process whose program is under the game's install folder (the folder as given and as it is past junctions and `subst` drives), and the process that owns the game's window. Never the Bundle's own process, a process of Windows' (a path under the Windows folder: Explorer, or a host owning a store game's window), or one whose path can't be read. A game installed at a drive's root is not frozen at all.
+- **How.** `NtSuspendProcess` on a handle opened with `PROCESS_SUSPEND_RESUME | PROCESS_QUERY_LIMITED_INFORMATION`; `NtResumeProcess` to thaw. A process Windows won't open or suspend, or one that has ended, is skipped and logged.
+- **Order.** Opening: the Overlay takes the foreground, then the game is frozen. Closing: the game is thawed, then handed the foreground, when the button that closed the Guide is let go (3.5).
+- **Not frozen:** a game being quit (it is thawed before `WM_CLOSE` and stays thawed until it has gone), a game with no install folder, and nothing at all with no game running. A game that exits under the Guide is let go of. The program leaving thaws the game.
+- **The record.** Before anything is suspended, `frozen-game.txt` in the extension's data folder is written: a line a process, `<id> <start time as a FILETIME> <name>`. It is deleted once all are resumed. What it still lists at the next start is resumed then, a process being touched only if it has that id and that start time. Without the record nothing is frozen.
+
+**In the port:** `shell::Freezer`, the same in each of these, the record in the Dashboard's data folder under the same name and in the same form. The order is `app`'s (`crates/app/src/window.rs`).
+
 ### 7.3 Launching from the Guide
 
 A on a Recent game with nothing running: the Guide closes, the recorded window gets the foreground back, then the game launches exactly as from Home (Launch screen, `home.md`). With a game running: the prompt "Quit {X} and start {Y}?"; on "Quit and start", X is quit (7.4), and when it has stopped the Guide closes and Y launches (2479-2493). If X does not stop, the Force quit prompt follows.
@@ -643,13 +654,13 @@ A tap opens the Guide on what the Toast was about (C/ExtensionCore.cs:953-983). 
 
 1. **What makes a notification in M2.** Without Playnite nothing posts any. Candidates: a library read finishing with changes, a launch failing, a force quit. Without a source the Flyout always says "No new notifications" and no Toast ever shows outside tests.
 2. **Entries whose pages do not exist yet.** My games & apps, Search (M3), Settings (M3), Switch profile (M5). Draw them and make A inert, or leave them out until their page exists? Leaving out changes the layout the screenshots are compared with.
-3. **Freezing the game.** The Bundle suspends the game's processes while the Guide is open. Keep it (it stops the game reacting to the pad and saves power, but anti-cheat and online games may object), make it a setting, or drop it?
-4. **Exclusive fullscreen and elevated games.** Accept the Bundle's limits (plan question 7) for M2?
+3. **Freezing the game.** **Decided (#38): kept, as the Bundle has it**, with no setting of its own, since the Bundle has none (7.2). A game an anti-cheat guards refuses to be opened and is left running, which is said in the log.
+4. **Exclusive fullscreen and elevated games.** **Decided (#38): the Bundle's limits are accepted** and said in the log when they are met: `overlay: Windows says a Direct3D program has the screen to itself (exclusive fullscreen)` as the Guide opens over such a game, `overlay: Windows did not give the Overlay the foreground` over a game that runs elevated, and `freeze: Windows won't let <name> (<id>) be frozen` for a process it can't suspend. Nothing is done to work around either.
 5. **The Xbox mark** on the landing tab, the Guide hint and the Toast prompt, and the store badges: what is drawn in a repository that may go public?
 6. **Power.** The fourth option's name ("Exit", "Exit to desktop"); whether "Turn off PC" keeps the hybrid shutdown; whether Exit plays `PowerOff.wav` when the media folder has it.
-7. **One window or two.** The Bundle has an Overlay window (activatable) and a Toast window (passive, a strip). The port's Overlay window has both modes (#27) but a Toast must stay passive while the Guide is active and must show while the Guide is closed. Two windows as the Bundle is the recommendation.
+7. **One window or two.** The Bundle has an Overlay window (activatable) and a Toast window (passive, a strip). The port's Overlay window has both modes (#27) but a Toast must stay passive while the Guide is active and must show while the Guide is closed. Two windows as the Bundle is the recommendation. **One Guide (#38):** the Guide is on the Overlay over Home as it is over a game, as in the Bundle; only where no Overlay can be made is it drawn in Home's window.
 8. **Layered window not updating on the VM** (#23) blocks checking Toasts there if the passive window is the layered kind.
-9. **Which monitor.** The Bundle covers the monitor of the foreground window. Same?
+9. **Which monitor.** The Bundle covers the monitor of the foreground window. **Decided (#38): the same.** Each time the Overlay is shown it goes over the monitor of the window that has the foreground then (`overlay: over the monitor at (x, y), WxH`), the Launch screen's showing included, as the Bundle's Launch screen does. Home's own window stays on the primary monitor.
 10. **Game Bar and Steam** also react to the Guide button. Document turning them off, or detect and warn?
 11. **The 300 ms wait before a tap opens the Guide.** Kept as is? It is the price of the hold not flashing the Guide.
 12. **Blur behind dialogs.** `render` has no blur of a layer yet; is unblurred-under-dim acceptable for M2?

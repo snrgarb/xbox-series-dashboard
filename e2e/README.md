@@ -68,7 +68,10 @@ the TV PC, not for here.
 - **The stand-in game.** Every installed game's folder holds a copy of `standin.exe` named `game.exe`, which shows a
   borderless, full-screen, dark-blue window titled with the game's name (from `game-args.txt` beside it) until it is
   closed, Esc is pressed, or ten minutes pass. So "a program in the game's install folder has a window covering the
-  screen", which is how the Dashboard knows a game has booted, is true of it. A test that wants a launcher or splash
+  screen", which is how the Dashboard knows a game has booted, is true of it. Its **pulse**, a square at x 1700..1820,
+  y 900..1020 of a 1920x1080 screen, is one of two colours and changes four times a second while the game runs: a
+  frozen game paints nothing, so its pulse stands still, and when a beat comes more than 1.5 s late the game says
+  `game: stood still for <n> ms` in `standin.log`. A test that wants a launcher or splash
   first adds `--splash-ms` and its length on two lines of `game-args.txt`: a small window titled "<name> launcher" then
   shows for that long before the game's.
 - **The stand-in Steam**, `standin steam-url steam://rungameid/<appid>`: finds the game's folder from its app manifest
@@ -94,9 +97,12 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Start-Dashboard [-Arguments ...]`, `Stop-Dashboard` | the Dashboard, its stderr to `dashboard.log` |
 | `Get-DashboardLog`, `Get-DashboardLogLength`, `Wait-DashboardLog <pattern> <seconds> [-After <lines>]` | what it logged |
 | `Initialize-FakeSteam`, `Get-StandInGame`, `Stop-StandInGame` | the fake Steam and its games |
+| `Watch-Pulse <seconds>`, `Test-PulseColour`, `Test-Suspended <pid>` | the colours the stand-in game's pulse showed (two when it runs, one when it is frozen); whether a pixel is the pulse, dimmed or not; whether every thread of a process is suspended |
 
 The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again), `needs-user` (a
-launcher that stays: the Launch screen steps aside for it), and `overlay` and `video` for the spikes.
+launcher that stays: the Launch screen steps aside for it), `guide-hold` (the Guide on the Overlay at Home and over
+the game, on the monitor of the window in front; the game frozen while it is open, thawed as it closes, and thawed at
+the next start after the Dashboard is killed with the Guide open), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets
