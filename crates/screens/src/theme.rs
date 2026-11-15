@@ -30,7 +30,11 @@ pub mod glyph {
     pub const LIBRARY: char = '\u{E8F1}';
     pub const SEARCH: char = '\u{E721}';
     pub const SETTINGS: char = '\u{E713}';
+    /// The gear filled in: the Settings button with focus.
+    pub const SETTINGS_SOLID: char = '\u{F8B0}';
     pub const NOTIFICATIONS: char = '\u{E91C}';
+    /// A pad, connected.
+    pub const GAMEPAD: char = '\u{E7FC}';
     pub const DOWNLOAD: char = '\u{E896}';
     pub const HISTORY: char = '\u{E81C}';
     pub const TROPHY: char = '\u{E7C1}';

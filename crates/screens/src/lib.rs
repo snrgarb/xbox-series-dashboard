@@ -31,6 +31,8 @@ pub struct Dashboard {
     user: String,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
     clock: Option<String>,
+    /// Whether a pad is connected, which the top bar shows.
+    pad: bool,
     home: Home,
     guide: Guide,
     launch: LaunchScreen,
@@ -46,6 +48,7 @@ impl Dashboard {
             library,
             user,
             clock: None,
+            pad: false,
             home: Home::default(),
             guide: Guide::default(),
             launch: LaunchScreen::default(),
@@ -65,7 +68,9 @@ impl Dashboard {
             let game = self.library.games.get(at)?;
             library.games.iter().position(|g| (g.id, g.appid) == (game.id, game.appid))
         };
-        let was = self.home.focused_game(&self.library);
+        // Only a Recent tile follows its game: a Group's card keeps its place in the Group, whatever is there now.
+        let on_row = matches!(self.home.focus(), home::Focus::Recent(_));
+        let was = self.home.focused_game(&self.library).filter(|_| on_row);
         let focused = was.and_then(place);
         self.playing = self.playing.and_then(place);
         self.user = library.user.clone().unwrap_or_else(|| "Player".into());
@@ -84,6 +89,11 @@ impl Dashboard {
 
     pub fn set_clock(&mut self, text: Option<String>) {
         self.clock = text;
+    }
+
+    /// A pad was connected, or the last one went.
+    pub fn set_pad_connected(&mut self, connected: bool) {
+        self.pad = connected;
     }
 
     /// What the shell is asked to do since the last call.
@@ -114,6 +124,7 @@ impl Dashboard {
         }
         match self.home.press(press.button, &self.library) {
             Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
+            Some(HomeAction::OpenGuide) if !press.repeat => self.open_guide(),
             _ => {}
         }
     }
@@ -191,33 +202,40 @@ impl Dashboard {
 
     pub fn draw(&mut self, ui: &mut Ui) {
         let clock = self.clock.clone().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string());
-        self.home.draw(ui, &self.library, &self.user, &clock);
+        let status = home::Status { user: &self.user, clock: &clock, pad: self.pad };
+        self.home.draw(ui, &self.library, &status);
         self.launch.draw(ui);
         self.guide.draw(ui, &self.library, &self.user);
     }
 }
 
-/// Ten games with no art, so Home always has something to show.
+/// Fourteen games with no art, so Home always has something to show: ten played, most recently first, then four
+/// never played; some not installed.
 pub fn fake_library() -> Library {
-    let names = [
-        "Halo Infinite",
-        "Forza Horizon 5",
-        "Sea of Thieves",
-        "Starfield",
-        "Hades II",
-        "Baldur's Gate 3",
-        "Hollow Knight: Silksong",
-        "Microsoft Flight Simulator",
-        "Cyberpunk 2077",
-        "Stardew Valley",
+    // Name, minutes played, installed.
+    let games = [
+        ("Halo Infinite", 600, true),
+        ("Forza Horizon 5", 1250, true),
+        ("Sea of Thieves", 90, true),
+        ("Starfield", 2400, true),
+        ("Hades II", 310, true),
+        ("Baldur's Gate 3", 45, false),
+        ("Hollow Knight: Silksong", 780, true),
+        ("Microsoft Flight Simulator", 1500, true),
+        ("Cyberpunk 2077", 20, false),
+        ("Stardew Valley", 3600, true),
+        ("Age of Empires IV", 0, true),
+        ("Celeste", 0, false),
+        ("Ori and the Will of the Wisps", 0, true),
+        ("Psychonauts 2", 0, false),
     ];
-    let games = names.iter().enumerate().map(|(i, name)| model::Game {
+    let games = games.iter().enumerate().map(|(i, &(name, playtime_minutes, installed))| model::Game {
         id: 0,
         appid: 1000 + i as u32,
         name: name.to_string(),
-        last_played: 1_790_000_000 - i as u64 * 86_400,
-        playtime_minutes: 600 - i as u32 * 50,
-        installed: true,
+        last_played: if playtime_minutes > 0 { 1_790_000_000 - i as u64 * 86_400 } else { 0 },
+        playtime_minutes,
+        installed,
         install_dir: None,
         cover: None,
         hero: None,
@@ -241,7 +259,7 @@ mod tests {
     #[test]
     fn a_new_snapshot_keeps_focus_and_the_game_playing_on_the_same_games() {
         let mut dashboard = Dashboard::new(fake_library());
-        press(&mut dashboard, &[Button::Right, Button::Right]);
+        press(&mut dashboard, &[Button::Down, Button::Right, Button::Right]);
         dashboard.launch_started(4);
         let (focused, playing) = (dashboard.library().games[2].appid, dashboard.library().games[4].appid);
 
@@ -262,7 +280,7 @@ mod tests {
     #[test]
     fn a_new_snapshot_without_the_focused_game_leaves_focus_in_its_place() {
         let mut dashboard = Dashboard::new(fake_library());
-        press(&mut dashboard, &[Button::Right, Button::Right, Button::Right]);
+        press(&mut dashboard, &[Button::Down, Button::Right, Button::Right, Button::Right]);
         let mut next = fake_library();
         next.games.remove(3);
         dashboard.set_library(next);
@@ -278,8 +296,9 @@ mod tests {
     #[test]
     fn a_new_snapshot_leaves_focus_on_a_wide_tile() {
         let mut dashboard = Dashboard::new(fake_library());
-        press(&mut dashboard, &[Button::Down]);
+        press(&mut dashboard, &[Button::Down, Button::Down]);
         let focus = dashboard.home_focus();
+        assert!(matches!(focus, Focus::Wide(_)));
         let mut next = fake_library();
         next.games.reverse();
         dashboard.set_library(next);

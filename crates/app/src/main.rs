@@ -17,16 +17,52 @@ pub struct Args {
     guide: bool,
     screenshot: Option<PathBuf>,
     size: Option<(u32, u32)>,
-    focus: usize,
+    /// The Recent tile to put focus on, from the left. Home starts with focus on the profile.
+    focus: Option<usize>,
+    /// Buttons to press before the picture is taken, in order.
+    press: Vec<ui::Button>,
     bench: bool,
     windowed: bool,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
     clock: Option<String>,
 }
 
+impl Args {
+    /// The presses that carry out `--focus`.
+    pub fn focus_presses(&self) -> Vec<ui::Button> {
+        focus_presses(self.focus)
+    }
+}
+
+/// The presses that take focus from the profile, where Home starts, to this Recent tile: Down, then along.
+pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
+    let along = |tile| std::iter::repeat_n(ui::Button::Right, tile);
+    tile.map_or(Vec::new(), |tile| std::iter::once(ui::Button::Down).chain(along(tile)).collect())
+}
+
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
-       dashboard --screenshot <out.png> [--size WxH] [--focus N] [--guide] [--launch-screen] [--bench]
-                 [--clock <text>] [--steam <steam root> | --library <file.json>] [--data-dir <dir>]";
+       dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,...] [--guide]
+                 [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
+                 [--data-dir <dir>]";
+
+/// A button by its name on the pad, for `--press`.
+fn button(name: &str) -> Result<ui::Button, String> {
+    use ui::Button::*;
+    Ok(match name.to_ascii_lowercase().as_str() {
+        "up" => Up,
+        "down" => Down,
+        "left" => Left,
+        "right" => Right,
+        "a" => A,
+        "b" => B,
+        "x" => X,
+        "y" => Y,
+        "menu" => Menu,
+        "view" => View,
+        "guide" => Guide,
+        _ => return Err(format!("bad --press: no button {name}")),
+    })
+}
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args::default();
@@ -45,7 +81,8 @@ fn parse_args() -> Result<Args, String> {
                 let size = value.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
                 args.size = Some(size.filter(|&(w, h)| w > 0 && h > 0).ok_or(format!("bad --size {value}"))?);
             }
-            "--focus" => args.focus = value()?.parse().map_err(|e| format!("bad --focus: {e}"))?,
+            "--focus" => args.focus = Some(value()?.parse().map_err(|e| format!("bad --focus: {e}"))?),
+            "--press" => args.press = value()?.split(',').map(button).collect::<Result<_, _>>()?,
             "--bench" => args.bench = true,
             "--windowed" => args.windowed = true,
             "--clock" => args.clock = Some(value()?),

@@ -18,6 +18,8 @@ This spec describes Home **with the extension installed** (the full Bundle). The
 
 Everything inside those three Viewboxes (tile sizes, gaps, corner radii, focus ring, glow, fonts, badges) is multiplied by `s`. The top bar, the hero, the scrim and the hint bar are **not** inside a Viewbox and are 1:1. Confirmed by the comment at E/HomeTiles.xaml:31-40 ("1700 / 1526 = 1.1140").
 
+**Pictures of the real thing.** `~/projects/xbox-series-theme/artifacts/e2e/` holds screenshots of the Bundle running in Playnite on the test VM (`see-all-*/0-home.jpg`, `1-play-history-tile.jpg`, `2-see-all.jpg`; `background-follows-selection-*/home.jpg`, `groups.jpg`). The newest, of 10 November, were taken with build 0.2.0, **before** Home became one page that scrolls (#219) and before the type was set at 26 (#229): in them a Group with focus rests about 230 down with the top bar still showing, the wide tiles' rest does not rise, and text is smaller. Where they and the source at `f11e4f9` disagree on those, this spec follows the source. They are good for what did not change: the top bar's parts, the Recent row with nothing focused, the badges, the wide tiles' faces, the Play history and See all tiles, and where focus starts.
+
 Things marked **NOT FOUND** were looked for and are absent; things marked **UNVERIFIED** depend on Playnite or font internals that are not in this repository.
 
 ---
@@ -81,7 +83,7 @@ Style `XboxTopBarProfile`, T/Views/Main.xaml:179-295. Left-aligned at x = 105.
 
 | Part | Value | Line |
 |---|---|---|
-| Picture | 56 x 56 circle (x 105..161, y 86..142). Under it: ellipse `#FF107C10` (GlyphBrush) with glyph U+E77B (Contact) in the icon font, 26 px, white. Over it: the profile picture, `UniformToFill`, clipped to a circle r = 28. A picture that fails to load leaves the glyph. | 190-198 |
+| Picture | 56 x 56 circle (x 105..161, y 86..142). Under it: ellipse `#FF107C10` (GlyphBrush) with glyph U+E77B (Contact) in the icon font, 26 px, white. Over it: the profile picture, `UniformToFill`, clipped to a circle r = 28. A picture that fails to load leaves the glyph. A Profile with no picture of its own shows the Windows account's (C/ExtensionCore.Startup.cs:425), and an account with none shows Windows' default, `user-192.png` (E/WindowsUserAccount.cs:90-115): a grey figure, head and shoulders, on a pale disc. That, not the green disc, is what the pictures show. | 190-198 |
 | Focus ring | Round border `Margin="-7"`, `BorderThickness="3"`, `CornerRadius="999"`, brush `#FF2CA243`, no fill. So ring outer diameter 70, inner 64: 4 px clear of the picture. Glow: `XboxFocusGlowRound` with `Margin="-7"` (section 4.3). Hidden unless focused. | 199-206 |
 | Name block | 16 px right of the picture (`Margin="16,0,0,0"`), translated Y -2 | 212-215 |
 | Gamertag | Segoe UI 26, white (`XboxText`, lines 23-27). Text = profile gamertag, fallback the Windows user name. | 218-219 |
@@ -115,7 +117,7 @@ Focused state of a round button (lines 102-164):
 T/Views/Main.xaml:578-664.
 
 1. **Progress indicator** (`PART_ElemProgressIndicator`, Playnite shows it only while it updates the library; not focusable): status text (`PART_TextProgressTooltip`, Segoe UI 26, `#B3FFFFFF`, Y -2, `Margin="0,0,12,0"`) then a 26 x 26 **Spinner** (section 10.1); the pair has `Margin="0,0,20,0"`. Lines 579-590.
-2. **Update button** (`PART_ButtonProgramUpdate`, Playnite shows it only when a Playnite update exists; focusable `XboxTopBarButton`, Tag "Update"): glyph U+E896 in `#FF2CA243`. Not relevant to a standalone port. Lines 592-594.
+2. **Update button** (`PART_ButtonProgramUpdate`, Playnite shows it only when a Playnite update exists; focusable `XboxTopBarButton`, Tag "Update"): glyph U+E896 in `#FF2CA243`. Not relevant to a standalone port. Lines 592-594. It is the green down arrow left of the pad's glyph in the pictures (about x 1541); it has nothing to do with the Queue.
 3. **Status area** (`XboxSeries_Status`, `Margin="10,0,10,0"`, not focusable, not hit-testable): section 2.4. Its right edge is at x = 1725.
 4. **Notifications button** (`PART_ButtonNotifications`, focusable `XboxTopBarButton`, Tag "Notifications"), x 1745..1805: glyph U+E91C (ActionCenter) outline; focused, the filled path `XboxActionCenterSolid` (line 77). A 10 x 10 dot `#FF2CA243` at the icon's top right (`Margin="0,-4,-6,0"`) while Playnite's notification count is not 0. Action: Playnite's own notifications menu. Lines 646-663.
 
@@ -186,6 +188,8 @@ All authored units (multiply by s). E/HomeTiles.xaml.
 | Title band (focused) | Bottom, full width, `#E6000000`, at rest `Opacity="0"`. Stack with `Margin="8"`: the title, Segoe UI 23.34 (26 on screen), white, wraps, `MaxHeight="64"` (two lines; Segoe line = 1.33 em), character ellipsis on the second; then, if any, the install status on one line, same font. Fade in: opacity to 1 over 150 ms after a 50 ms delay, linear. Fade out: to 0 over 100 ms, linear. | 57-63, 86-97 |
 | Focus ring | Section 4 | 106-111 |
 
+The source icons are the stores' own logos: NOTICE.md lists `source-steam-shadow.png` as "The Steam logo", Valve's, and `source-xbox-shadow.png` as Microsoft's; the vector paths are Simple Icons' drawings of the same marks. In the pictures the Steam mark shows as a white disc about 22 across with the logo cut out of it. Neither the paths nor the shadow pictures are the theme author's to license, so a port does not copy them.
+
 There is **no "installed" badge** on Home tiles: only the source icon, the Running badge and the Queued / Installing... status (NOT FOUND otherwise). A not-installed game looks like any other.
 
 ### 3.4 Play history tile
@@ -194,6 +198,8 @@ E/RecentRowControl.xaml:55-62; E/HomeTiles.xaml:227-265.
 
 - A `HomeTile`-styled tile (same size, growth, ring, title band reading "Play history"), last in the row, right margin 0.
 - Face: a 2 x 2 grid of up to 4 covers; grid inset 4 from the tile edge, each cover with a 3 margin (so 7 from the edge, 6 between covers), each `UniformToFill`, top-aligned, decoded at 150 wide. No per-cover rounding (only the tile's clip).
+- The grid's inset and the covers' margins are not in the cover's Viewbox: they stay 4 and 3 (authored) as the tile grows, and the four cells share what is left.
+- A game in the collage with no cover leaves its cell empty (the tile's `#FF1A1A1A` shows); the glyph is only for a collage with no games at all (`HasItems` false, E/HomeTiles.xaml:258-260).
 - With no covers: glyph U+E81C (History), icon font 40, white, centred.
 - No source badge, no Running badge, no status.
 
@@ -361,13 +367,15 @@ Applied as `Scroll.Y = -PageOffset`, `TopBarScroll.Y = -TopBarOffset` (E/HomeRow
 ### 7.4 Navigation summary and focus memory
 
 - Vertical order: top bar <-> Recent row <-> wide tiles <-> Group 0 <-> Group 1 ...
+- Only a game's tile sets `lastFocusedGame` (E/RecentRowControl.xaml.cs `OnTileFocused`, which the Play history tile does not have): B on a Group after the Play history tile had focus goes to the game's tile focused before it. The tile Down left (`leftForPromos`) is whichever tile it was, the Play history tile included.
+- Between Groups the place kept is the focused card's index now (E/GroupsControl.xaml.cs:201-209): after a shorter Group has clamped it, Up or Down carries the clamped place on, not the one before.
 - Recent row remembers the last focused **game id** (`lastFocusedGame`); wide tiles remember the last focused **index** (`lastPromo`) and the Recent tile that Down left (`leftForPromos`); Groups remember the last Group index, game id and whether it was See all (E/RecentRowControl.xaml.cs:31-44; E/GroupsControl.xaml.cs:35-39).
 - Down from the Recent row: nearest wide tile by centre x (not the remembered one). Up from the wide tiles: the remembered Recent tile.
 - Down from the wide tiles: always Group 0, first card (memory reset; E/GroupsControl.xaml.cs:124-130). Up from Group 0: the wide tile last focused.
 - B on any Group card: Recent row, last focused game's tile (page slides back to offset 0). B elsewhere on Home: nothing.
 - Returning to Home from a Game hub, My games & apps, Settings or Search: focus goes back to whichever of the Recent row / wide tiles / Groups had it, at the remembered place, and the page is still at that rest (E/RecentRowControl.xaml.cs:249-265; E/GroupsControl.xaml.cs:136-151).
 - A game exiting: Home comes to the front, the page rests on the Recent row, focus on that game's tile (C/ExtensionCore.cs:637-670; E/RecentRowControl.xaml.cs:159-167).
-- First focus on Home: the last focused game's tile, else the first tile, else the Play history tile (E/RecentRowControl.xaml.cs:333-346).
+- First focus on Home: the code asks for the last focused game's tile, else the first tile, else the Play history tile (E/RecentRowControl.xaml.cs:333-346). What happens after Start-up is otherwise: **Home starts with focus on the profile**, the window's first focusable element, with the page at rest on the Recent row and no tile grown. The pictures show it (`0-home.jpg`, `home.jpg`) and the Bundle's own test expects it ("Down from the profile, where Home starts, onto the Recent row", e2e/payloads/seeded-home/run.ps1:8, 68). Down from there lands on the row's first tile.
 - D-pad repeat on Home is Playnite's own, every 80 ms when held (stated at C/ExtensionCore.cs:45-46; the repeat itself is Playnite's, UNVERIFIED).
 
 ---
@@ -571,3 +579,23 @@ Font resources: T/Constants.xaml:228-235. 26 px body text is deliberate (Xbox Ac
 - A on a tile is delayed 300 ms before the Game hub opens (double-tap detection).
 - `IsRunning` tile is always first in the Recent row.
 - The console's own reference notes (docs/research/xbox-dashboard-reference.md:142-172) record that focus ring metrics, motion timings, type sizes and the sound catalogue are **not publicly documented**; the Bundle's values come from its own console captures, and the only reference image of Home in the repo is docs/reference/startup/4-home.jpg (no notes file accompanies docs/reference/).
+
+---
+
+## 11. Where the Dashboard's Home differs, for now
+
+What `crates/screens/src/home*` does that the sections above do not say, or does differently until the pages it needs exist.
+
+- **Top bar, Up and Down.** The Bundle leaves these to WPF's directional navigation (section 2.5, UNVERIFIED). The Dashboard's rule: Up from a Recent tile goes to the top bar button whose centre x is nearest the focused tile's; Down from a button goes to the Recent tile whose centre x is nearest the button's, with the row laid out as it is with no tile focused.
+- **A on a game** launches it at once: there is no Game hub to open (M3). A second A on the same tile within the 300 ms double-tap window asks for nothing, so a double tap, which plays in the Bundle too, launches once.
+- **Home starts on the profile**, as the Bundle does in practice (section 7.4).
+- **The profile's picture** is drawn: the pale disc and grey figure of Windows' default account picture, which is what the Bundle shows for an account with none. Real pictures come with Profiles.
+- **The source badge** is a plain white disc on the theme's shadow, for every game (Steam is the only source): the stores' logos are not ours to ship. `home/tile.rs` `source_badge` is the one place to draw the real mark.
+- **The pad's glyph** (U+E7FC, left of the clock) shows when the core is told a pad is connected (`Dashboard::set_pad_connected`). Nothing tells it yet: the input crate does not report connection. The battery cell and percent wait for that too.
+- **Wide tiles.** "Settings" stands for "Playnite settings". Downloads says "Nothing queued" until there is a Queue. Achievements has no subtitle until there are achievements (M6). Discord shows the chat glyph, not Discord's logo.
+- **A on the profile** opens the Guide. A on My games & apps, Search, Settings, Notifications, the Play history tile, a wide tile or See all does nothing until its page exists. Menu and Y do nothing; the hint bar (section 10.4), which names them, is not drawn.
+- **Groups** are worked out from the library until there are saved filters (M3): **Installed** (by name) and **Most played** (by time played, most first). A Group with no games is left out rather than shown empty. "Recently added" waits for the library to record when a game was added.
+- **Recent row.** Always seven games and the Play history tile (there is no Show Play history setting yet). Never-played games pad it in the library's order, by name: there is no date added.
+- **Focused top bar glyphs.** Settings swaps to U+F8B0. My games & apps and Notifications keep their outline glyph (the Bundle's filled ones are vector paths) and Search is not emboldened.
+- **Not drawn yet:** the Running badge, the install status band, the Score line and the name swap, the PC's battery and the Discord mark in the status area.
+- **Another screen shape.** The rests use the screen's own height in design units (1200 at 16:10), so the wide tiles' rest rises less on a taller screen.
