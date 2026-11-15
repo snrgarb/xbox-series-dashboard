@@ -10,11 +10,13 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
-use crate::gpu::{self, Gpu};
-use crate::launch::{Launch, Showing};
-use crate::pad::Pad;
-use crate::scene::{GuideAction, GuideEntry, RECENT_COUNT};
-use crate::{since_start, Args, Home};
+use input::Pad;
+use render::gpu::{self, Gpu};
+use screens::scene::{GuideAction, RECENT_COUNT};
+use screens::{guide_entries, Home};
+use shell::{Launch, Showing};
+
+use crate::{since_start, Args};
 
 struct State {
     home: Home,
@@ -65,7 +67,7 @@ impl App {
             eprintln!("launch: {} isn't installed", game.name);
             return;
         };
-        if let Some(launch) = Launch::start(game.appid, &game.name, dir, &state.window) {
+        if let Some(launch) = Launch::start(game.appid, &game.name, dir, window_handle(&state.window)) {
             state.home.scene.set_launching(true);
             self.launch = Some(launch);
         }
@@ -115,32 +117,6 @@ impl State {
     fn size(&self) -> (u32, u32) {
         (self.config.width, self.config.height)
     }
-}
-
-/// The Guide's landing tab. Over a game (`playing`, its place in the Recent row): the game, to go back to it, and
-/// Quit. Over Home: Home, the Recent row's first games, and the way out to the desktop.
-pub fn guide_entries(library: &Library, playing: Option<usize>) -> Vec<GuideEntry> {
-    let recent = library.recent(RECENT_COUNT);
-    let entry = |title: &str, detail: Option<&str>, game, action| GuideEntry {
-        title: title.into(),
-        detail: detail.map(Into::into),
-        game,
-        action,
-    };
-    if let Some(playing) = playing {
-        let name = recent.get(playing).map_or("Game", |g| g.name.as_str());
-        return vec![
-            entry(name, Some("Running"), Some(playing), GuideAction::Close),
-            entry("Quit", None, None, GuideAction::QuitGame),
-        ];
-    }
-    let mut entries = vec![entry("Home", None, None, GuideAction::Close)];
-    entries.extend(recent.iter().take(4).enumerate().map(|(i, game)| {
-        let detail = (!game.installed).then_some("Not installed");
-        entry(&game.name, detail, Some(i), GuideAction::Launch(i))
-    }));
-    entries.push(entry("Exit to desktop", None, None, GuideAction::Exit));
-    entries
 }
 
 impl ApplicationHandler for App {
@@ -288,5 +264,14 @@ impl ApplicationHandler for App {
             }
             _ => {}
         }
+    }
+}
+
+/// The window's HWND; null anywhere but Windows.
+fn window_handle(window: &Window) -> *mut std::ffi::c_void {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().map(|h| h.as_raw()) {
+        Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get() as *mut std::ffi::c_void,
+        _ => std::ptr::null_mut(),
     }
 }

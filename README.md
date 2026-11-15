@@ -11,9 +11,9 @@ An unofficial fan project, not affiliated with Microsoft or Valve.
 Rust with the `x86_64-pc-windows-gnullvm` target and llvm-mingw as its linker. On the development box: `. ~/projects/.rust/env.sh`.
 
 ```sh
-cargo test                                                   # parsers, on Linux
-cargo build --release --target x86_64-pc-windows-gnullvm     # home.exe for Windows
-cargo run -p home -- --screenshot out.png --steam data/steam # one frame, no window (lavapipe on Linux)
+cargo test                                                   # parsers and screenshot tests, on Linux
+cargo build --release --target x86_64-pc-windows-gnullvm     # dashboard.exe for Windows
+cargo run -p app -- --screenshot out.png --steam data/steam  # one frame, no window (lavapipe on Linux)
 ```
 
-`home.exe` with no arguments finds Steam from the registry and opens fullscreen. Guide button or Ctrl+Alt+G opens the Guide; Esc quits.
+`dashboard.exe` with no arguments finds Steam from the registry and opens fullscreen. Guide button or Ctrl+Alt+G opens the Guide; Esc quits.

@@ -84,6 +84,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "app"
+version = "0.0.0"
+dependencies = [
+ "image",
+ "input",
+ "model",
+ "render",
+ "screens",
+ "serde_json",
+ "shell",
+ "shots",
+ "source-steam",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -744,24 +761,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
-name = "home"
-version = "0.0.0"
-dependencies = [
- "bytemuck",
- "chrono",
- "glyphon",
- "image",
- "model",
- "pollster",
- "serde_json",
- "shots",
- "steam",
- "wgpu",
- "windows-sys 0.61.2",
- "winit",
-]
-
-[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -808,6 +807,13 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+]
+
+[[package]]
+name = "input"
+version = "0.0.0"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1721,6 +1727,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "render"
+version = "0.0.0"
+dependencies = [
+ "bytemuck",
+ "glyphon",
+ "image",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1807,6 +1824,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "screens"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "image",
+ "model",
+ "render",
+ "wgpu",
+]
+
+[[package]]
 name = "sctk-adwaita"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1872,6 +1900,13 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "shell"
+version = "0.0.0"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1991,6 +2026,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eeb7109d23f319619d4cc0de5464613c8b7b1a09db2774a58101459cf6be2f10"
 
 [[package]]
+name = "source-steam"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "model",
+ "serde_json",
+]
+
+[[package]]
 name = "spirv"
 version = "0.4.0+sdk-1.4.341.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2004,15 +2048,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "steam"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "model",
- "serde_json",
-]
 
 [[package]]
 name = "strict-num"
