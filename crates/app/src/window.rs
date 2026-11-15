@@ -49,6 +49,17 @@ fn told(last: &mut Instant) -> f32 {
     (now - std::mem::replace(last, now)).as_secs_f32()
 }
 
+/// When the Overlay may next be drawn while only the Spinner turns, after a frame the loop began at `began` and
+/// was `took` over, all of it: the wait for the swap chain to have a frame to draw on, the drawing, the present.
+/// The wait is where a slow renderer's time shows: the frame is drawn after it is handed over, and the next cannot
+/// be had until it is, so the loop stands still there and not in the drawing. A frame timed without it looks quick
+/// however slow it was, the next follows at once, and the loop does nothing but frames: a launch then looks at the
+/// desktop once a frame, every look late (`shell::launch`, LATE), and a window that wants the user is never seen
+/// to. Timed with it, a slow frame is followed by its rest, in which the loop goes round as often as it is asked.
+fn overlay_due(began: Instant, took: Duration) -> Instant {
+    began + if took > SLOW_FRAME { took * (1 + SLOW_FRAME_REST) } else { took }
+}
+
 struct State {
     host: Host,
     config: wgpu::SurfaceConfiguration,
@@ -442,6 +453,7 @@ impl App {
                 return Some(wait);
             }
         }
+        let began = Instant::now();
         let Some(frame) = overlay.frame(&state.gpu) else {
             if overlay.lost() {
                 // It said why. From here on the Dashboard shows nothing that needs it: the game is let go, and
@@ -470,8 +482,7 @@ impl App {
             host.draw(gpu, &view, size, dt, wgpu::Color::TRANSPARENT, |ui| dashboard.draw_overlay(ui))
         });
         overlay.present(gpu, frame);
-        let took = now.elapsed();
-        self.overlay_next = now + if took > SLOW_FRAME { took * (1 + SLOW_FRAME_REST) } else { Duration::ZERO };
+        self.overlay_next = overlay_due(began, began.elapsed());
         // At once if something is moving, or if that frame was the last of something: the Overlay is then hidden
         // without waiting out the loop's sleep.
         self.overlay_moving = self.overlay_store.animating() || state.host.art.pending() > 0;
@@ -698,6 +709,9 @@ impl ApplicationHandler for App {
         if self.state.is_none() {
             return;
         }
+        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
+        let focus = self.dashboard.focus_line();
+        let guide = self.dashboard.guide_line();
         // Toasts are timed by the time the Dashboard is told has passed: told first, so that one posted this turn
         // starts from its start.
         let mut toasts_changed = self.dashboard.advance(told(&mut self.told_time));
@@ -711,9 +725,6 @@ impl ApplicationHandler for App {
                 self.make_overlay();
             }
         }
-        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
-        let focus = self.dashboard.focus_line();
-        let guide = self.dashboard.guide_line();
         if let Some(strip) = &mut self.toast_strip {
             for text in strip.take_posts() {
                 eprintln!("toasts: posted {text:?} at {:.0} ms", since_start());
@@ -820,6 +831,7 @@ impl ApplicationHandler for App {
         if toasts_changed || pressed {
             self.toasts_changed();
         }
+        self.stale |= self.dashboard.focus_line() != focus;
         let said = self.dashboard.focus_line();
         self.carry_out(event_loop);
         // What was carried out may have changed what the page says (a Group shown or not, from the snapshot after).
@@ -1035,5 +1047,63 @@ fn window_handle(window: &Window) -> *mut std::ffi::c_void {
     match window.window_handle().map(|h| h.as_raw()) {
         Ok(RawWindowHandle::Win32(handle)) => handle.hwnd.get() as *mut std::ffi::c_void,
         _ => std::ptr::null_mut(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A launch's looks at the desktop (`shell::launch`): one a turn of the loop, 200 ms after the last at the
+    /// soonest, and one that comes 500 ms or more after the last counts for nothing.
+    const LOOK_EVERY: Duration = Duration::from_millis(200);
+    const LATE: Duration = Duration::from_millis(500);
+
+    /// The loop while the Launch screen is up and only its Spinner turns, on a renderer whose every frame holds
+    /// the loop for `frame`: how many looks came on time, of how many, in `run`. `timed` is what the frame is
+    /// said to have taken.
+    fn looks(frame: Duration, timed: impl Fn(Duration) -> Duration, run: Duration) -> (u32, u32) {
+        let start = Instant::now();
+        let (mut now, mut looked, mut next_look, mut due) = (start, start, start, start);
+        let (mut on_time, mut all) = (0, 0);
+        while now - start < run {
+            // The turn: the look, if it is time for one, then the frame, if it is time for one.
+            if now >= next_look {
+                all += 1;
+                on_time += (now - looked < LATE) as u32;
+                (looked, next_look) = (now, now + LOOK_EVERY);
+            }
+            if now >= due {
+                let began = now;
+                now += frame;
+                due = overlay_due(began, timed(frame));
+            }
+            // Asleep until the next of the two.
+            now = now.max(next_look.min(due));
+        }
+        (on_time, all)
+    }
+
+    #[test]
+    fn a_slow_renderers_frames_leave_the_loop_its_looks_at_the_desktop() {
+        // The software renderer on the test VM: 600 ms a frame, nearly all of it the wait for the swap chain.
+        let frame = Duration::from_millis(600);
+        let (on_time, all) = looks(frame, |took| took, Duration::from_secs(12));
+        // A frame, late, then its rest: nine looks of every ten are on time, and 5 s of them (twenty-five) come
+        // in well under ten.
+        assert!(on_time >= 40 && on_time * 10 >= all * 8, "{on_time} of {all} looks on time");
+        // Timed by its drawing alone, as it was: the frames follow one another, and no look is on time but the
+        // first, which nothing came before.
+        let (on_time, all) = looks(frame, |_| Duration::from_millis(5), Duration::from_secs(12));
+        assert_eq!((on_time, all), (1, 20));
+    }
+
+    #[test]
+    fn a_quick_frame_is_followed_at_once_and_a_slow_one_by_its_rest() {
+        let began = Instant::now();
+        let quick = Duration::from_millis(16);
+        assert_eq!(overlay_due(began, quick), began + quick);
+        let slow = Duration::from_millis(600);
+        assert_eq!(overlay_due(began, slow), began + slow * 4);
     }
 }

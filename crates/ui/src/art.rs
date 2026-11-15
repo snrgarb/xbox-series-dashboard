@@ -19,6 +19,10 @@ pub enum Kind {
     Full(u32),
     /// A background made of a cover: 120 wide, blurred. Drawn stretched far past the screen.
     Blurred,
+    /// A picture for behind a panel, as the Game hub's band has one: cut about its middle to 128 by 72 (a fifteenth
+    /// of the screen), and blurred there by this radius as WPF's `BlurEffect` blurs. Drawn stretched over the
+    /// screen, which smooths it further.
+    Soft(u32),
     /// A picture this function draws, not one read from a file. The key's path is its name: it is what tells one
     /// painted picture from another. It is drawn on a decoding thread, so it may take its time.
     Painted(Painter),
@@ -241,6 +245,11 @@ fn decode(key: &ArtKey) -> image::ImageResult<Vec<RgbaImage>> {
             // As the theme: decoded 120 wide and blurred by an eighth of that.
             let small = fit(image, 120, FilterType::Triangle);
             vec![image::imageops::blur(&small, 7.5)]
+        }
+        Kind::Soft(radius) => {
+            let small = image::DynamicImage::ImageRgba8(image).resize_to_fill(128, 72, FilterType::Triangle);
+            // WPF's blur reaches its radius at three deviations.
+            vec![image::imageops::blur(&small.into_rgba8(), (radius as f32 / 3.0).max(0.01))]
         }
         Kind::Painted(_) => unreachable!("painted above"),
     })

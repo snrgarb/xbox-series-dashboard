@@ -240,13 +240,20 @@ fn the_favourites_row_marks_the_game_and_reads_the_other_way_for_a_favourite() {
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Favourite { game: game.id, on: false }]);
 }
 
-/// Until the Game hub is a page (#51), Manage game closes the menu and no more.
+/// Manage game opens the game's Game hub in the menu's place, and B there is Home again, focus on the tile.
 #[test]
-fn manage_game_closes_the_menu() {
+fn manage_game_opens_the_game_hub_in_the_menus_place() {
     let mut menu = menu_on(0);
     down_to(&mut menu, "Manage game");
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER]);
+    assert_eq!((menu.page(), menu.pages_up()), (Some("GameHub"), 1));
+    assert!(menu.focus_line().starts_with("GameHub: "), "{}", menu.focus_line());
+    // Its own Tile menu has no Manage game row: Favourites, then the next.
+    press(&mut menu, &[Menu, Down, Down]);
+    assert!(menu.focus_line().starts_with("TileMenu: Menu("), "{}", menu.focus_line());
+    assert!(!menu.focus_line().contains("Manage game"), "{}", menu.focus_line());
+    press(&mut menu, &[B, B]);
     assert_eq!((menu.page(), menu.home_focus()), (None, Focus::Recent(0)));
 }
 

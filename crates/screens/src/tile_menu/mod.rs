@@ -16,7 +16,7 @@ use ui::{Ease, Press, Ui};
 
 use crate::menu_panel::{self, icon, Answer, MenuPanel, Row, DIM, FLY};
 use crate::pages::{Around, Dialog, Open, Page, PageAction};
-use crate::{settings, Effect};
+use crate::{game_hub, settings, Effect};
 
 /// The flyout hangs from the menu's top left corner, this far in, and comes in from this far to its left.
 const FLYOUT_IN: f32 = 77.0;
@@ -58,10 +58,19 @@ pub fn entry(game: &Game, opener: Opener) -> Open {
     Open::TileMenu(Entry { game: (game.id, game.appid), opener })
 }
 
-/// The Game hub of a game, which Manage game opens over whatever the menu was over. **A hook for #51:** when the
-/// hub is a page, this gives its `Open` variant for the game; until then Manage game closes the menu and no more.
-fn game_hub(_game: &Game) -> Option<Open> {
-    None
+/// The Game hub of a game, which Manage game opens in the menu's place, over whatever the menu was over.
+fn game_hub(game: &Game) -> Option<Open> {
+    Some(Open::GameHub(game_hub::Entry::of(game)))
+}
+
+/// Install, as the menu's row and the Game hub's main action both answer it: what asked closes, and the game's
+/// store is asked for it. A game that is installed by now, or is in no library database, asks nothing, and what
+/// asked closes all the same.
+pub fn install(game: &Game) -> PageAction {
+    match game {
+        game if !game.installed && game.id != 0 => PageAction::CloseWith(Effect::Install(game.id)),
+        _ => PageAction::Close,
+    }
 }
 
 /// What a row of the menu means.
@@ -195,9 +204,7 @@ impl TileMenu {
             // With a game running nothing more is started. The Guide's "Quit X and start Y?" is #40's.
             Choice::Play => then(place.filter(|_| around.playing.is_none()).map(Effect::Launch)),
             Choice::Quit => then((around.playing.is_some() && around.playing == place).then_some(Effect::QuitGame)),
-            Choice::Install => {
-                then(game.filter(|game| !game.installed && game.id != 0).map(|game| Effect::Install(game.id)))
-            }
+            Choice::Install => Some(game.as_ref().map_or(PageAction::Close, install)),
             Choice::Favourite(on) => then(Some(Effect::Favourite { game: self.game.0, on })),
             Choice::Manage => Some(game.as_ref().and_then(game_hub).map_or(PageAction::Close, PageAction::Replace)),
             Choice::Uninstall => {
@@ -435,7 +442,8 @@ mod tests {
         assert!(find(&library, (8, 441)).is_some_and(|game| !game.hidden));
         assert_eq!((place(&library, (8, 441)), place(&library, (7, 440))), (Some(0), None));
         assert!(find(&library, (9, 442)).is_none());
-        let around = Around { library: &library, playing: None, options: Default::default() };
+        let around =
+            Around { library: &library, playing: None, options: Default::default(), now: std::time::Instant::now() };
         assert!(TileMenu::open(Entry { game: (9, 442), opener: Opener::Home }, around).is_none());
     }
 }

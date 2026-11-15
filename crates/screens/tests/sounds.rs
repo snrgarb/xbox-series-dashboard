@@ -16,6 +16,14 @@ fn press(dashboard: &mut Dashboard, button: Button) -> Vec<Effect> {
     dashboard.take_effects()
 }
 
+/// A twice at one moment, a double tap, and everything the two asked for.
+fn double_tap(dashboard: &mut Dashboard) -> Vec<Effect> {
+    for _ in 0..2 {
+        dashboard.press(Press { button: Button::A, repeat: false });
+    }
+    dashboard.take_effects()
+}
+
 /// The same for a button held down.
 fn hold(dashboard: &mut Dashboard, button: Button) -> Vec<Effect> {
     dashboard.press(Press { button, repeat: true });
@@ -88,12 +96,52 @@ fn on_home_the_move_sound_is_heard_exactly_when_focus_moved() {
 }
 
 #[test]
-fn a_on_a_tile_is_the_activation_sound_then_the_launch() {
+fn a_on_a_tile_is_the_activation_sound_and_a_second_at_once_the_launch() {
     let mut home = dashboard();
     press(&mut home, Button::Right);
-    assert_eq!(press(&mut home, Button::A), [ACTIVATE, Effect::Launch(1)]);
-    // A still held starts nothing more and says nothing more.
+    let a = Press { button: Button::A, repeat: false };
+    home.press(a);
+    assert_eq!(home.take_effects(), [ACTIVATE]);
+    // A still held is no second A, and says nothing more.
     assert!(hold(&mut home, Button::A).is_empty());
+    // The second of a double tap plays the game: the pair is one choice, which has sounded.
+    home.press(a);
+    assert_eq!(home.take_effects(), [Effect::Launch(1)]);
+}
+
+#[test]
+fn the_game_hub_opens_and_closes_in_silence_and_sounds_as_any_page_between() {
+    let mut home = dashboard();
+    home.press(Press { button: Button::A, repeat: false });
+    assert_eq!(home.take_effects(), [ACTIVATE]);
+    // The double tap's time is up: the hub is there, with no sound of its own.
+    home.advance(screens::home::DOUBLE_TAP.as_secs_f32());
+    assert_eq!((home.page(), home.take_effects()), (Some("GameHub"), vec![]));
+    // Focus moving is the move sound, onto a card as onto an action; into an edge it is silent.
+    assert_eq!(press(&mut home, Button::Left), []);
+    assert_eq!(press(&mut home, Button::Up), [MOVE]);
+    assert_eq!(press(&mut home, Button::A), [], "a card does nothing");
+    assert_eq!(press(&mut home, Button::Down), [MOVE]);
+    assert_eq!(press(&mut home, Button::Right), [MOVE]);
+    assert_eq!(press(&mut home, Button::Right), [MOVE]);
+    // The toggle turns the page, which is what focus is on changing.
+    assert_eq!(press(&mut home, Button::A), [MOVE]);
+    // Menu is the Tile menu, which comes up as a dialog does, and B closes it as one does, onto the hub.
+    let (prompt_open, prompt_close) = (Effect::Sound(Sound::PromptOpen), Effect::Sound(Sound::PromptClose));
+    assert_eq!(press(&mut home, Button::Menu), [prompt_open.clone()]);
+    assert_eq!(press(&mut home, Button::B), [prompt_close.clone()]);
+    assert_eq!(home.page(), Some("GameHub"));
+    // A on Manage is a choice that brings it up.
+    assert_eq!(press(&mut home, Button::Left), [MOVE]);
+    assert_eq!(press(&mut home, Button::A), [ACTIVATE, prompt_open]);
+    assert_eq!(press(&mut home, Button::B), [prompt_close]);
+    assert_eq!(press(&mut home, Button::B), []);
+    assert_eq!(home.page(), None);
+    // Play is a choice, and sounds as one.
+    home.press(Press { button: Button::A, repeat: false });
+    home.advance(screens::home::DOUBLE_TAP.as_secs_f32());
+    home.take_effects();
+    assert_eq!(press(&mut home, Button::A), [ACTIVATE, Effect::Launch(0)]);
 }
 
 #[test]
@@ -183,7 +231,7 @@ fn a_on_something_that_does_nothing_is_silent() {
 #[test]
 fn while_a_game_starts_and_runs_only_the_guide_is_heard() {
     let mut home = dashboard();
-    assert_eq!(press(&mut home, Button::A), [ACTIVATE, Effect::Launch(0)]);
+    assert_eq!(double_tap(&mut home), [ACTIVATE, Effect::Launch(0)]);
     home.launch_started(0);
     for button in [Button::Right, Button::A, Button::Guide] {
         assert!(press(&mut home, button).is_empty(), "{button:?} behind the Launch screen");

@@ -606,7 +606,7 @@ Not confirmed by any picture (older build, or no picture exists): the header as 
 
 ### 14.1 The fields the hub binds, and where the port gets them
 
-The hub reads Playnite's game model. The Dashboard's library (`crates/library/src/lib.rs`, schema version 1; `crates/model` `Game`) holds per game: `source`, `source_id`, `name`, `sort_name`, `installed`, `install_dir`, `last_played`, `playtime_minutes`, `added`, `hidden`, `favourite`, `gone`; art by kind (`cover`, `background`, `header`; `logo` and `icon` are allowed kinds but not filled); and `play_sessions` (started, ended). Nothing else. "Steam has it" below means Steam's local files are believed to carry it (`appinfo.vdf`, `appmanifest_*.acf`); that is from general knowledge of those files, not from this repository, and the `source-steam` crate does not read any of them yet: **to be confirmed when the column is added**.
+(Written before the hub was built: section 16.1 says which of these the library has since gained.) The hub reads Playnite's game model. The Dashboard's library (`crates/library/src/lib.rs`, schema version 1; `crates/model` `Game`) holds per game: `source`, `source_id`, `name`, `sort_name`, `installed`, `install_dir`, `last_played`, `playtime_minutes`, `added`, `hidden`, `favourite`, `gone`; art by kind (`cover`, `background`, `header`; `logo` and `icon` are allowed kinds but not filled); and `play_sessions` (started, ended). Nothing else. "Steam has it" below means Steam's local files are believed to carry it (`appinfo.vdf`, `appmanifest_*.acf`); that is from general knowledge of those files, not from this repository, and the `source-steam` crate does not read any of them yet: **to be confirmed when the column is added**.
 
 | Bundle's binding | Where shown | In our library now | From Steam's files | Without it |
 |---|---|---|---|---|
@@ -664,6 +664,8 @@ Consequence for M3 with today's schema: the header is the title and "Steam"; the
 
 ## 15. Open questions
 
+Each was decided for M3 when the hub was built: section 16 says how, under the question's number.
+
 1. **Bahnschrift's line height.** 1.2 or 1.25 em (the Bundle's tests use both)? It moves the facts line, the cards and the actions by 2.35. Measure a 47 px Bahnschrift line on Windows, or accept 1.2 as home.md does.
 2. **The feature pills' second row** is cut in half by `MaxHeight="80"` at 26 px type, against the source's own comment. Reproduce the cut, show one row only (limit 50.58), or two whole rows (limit 101.16, taking 21 from the description)?
 3. **The name chip over Manage and Queue** overlaps the focus ring's top stroke and sits partly under the stats card's foot, by the source's arithmetic (48 above, 44.58 tall). Reproduce exactly, or lift it clear of the ring (for example 56 above)? No picture exists to say how it looks on the real thing.
@@ -678,3 +680,43 @@ Consequence for M3 with today's schema: the header is the title and "Steam"; the
 12. **The Achievements page's entry point (M6).** The Bundle never built it. A on the stats card (where the Achievements row is), a fifth action, or a card of its own? M3 only needs to know whether to keep A on the stats card free.
 13. **The trailer card without video.** With no Extra Metadata Loader the details page's first card is 889 wide of plain art. Keep the page as it is, or leave the Game details page out of M3 until there is a description to put on it (with today's schema it holds nothing the hub page does not)?
 14. **Up and Down between cards and actions.** The Bundle leaves the choice to WPF; only Up from Play is known (the cover card). Accept the nearest-by-centre-x rule of section 14.2?
+
+---
+
+## 16. The Dashboard's Game hub: what was decided, and where it differs
+
+What `crates/screens/src/game_hub/` does (ticket #51), where the sections above left a choice or where it does otherwise. "Q" is an open question of section 15.
+
+### 16.1 Decided
+
+- **Only what Steam's own files on the machine hold; nothing is fetched** (Q7). The library gained (schema version 3; `model::Game`) `released`, `developers`, `publishers`, `size_on_disk`, `critic_score`, `community_score`, read by `source-steam` from `appinfo.vdf` (`common/associations` by type, else `extended/developer` and `extended/publisher`; `common/original_release_date`, else `steam_release_date`; `common/metacritic_score`; `common/review_percentage`) and from the game's `appmanifest` (`SizeOnDisk`). A fact Steam does not have for a game is missing, and what would show it is left out. Not added: genres, store categories (the Bundle's features) and the franchise (its series), which are in `appinfo.vdf` as numbers that need a table of names; the platform; the age rating; and the description, which no local file holds.
+- **A card with nothing to show is left out**, as in the Bundle (5.1). With today's library: the hub page is Cover, Your game stats (a game that has been played) and Info (a game Steam names a developer or a score for); Game details is Cover, the wide card and Info. **About and Description never show**, and so no feature pills (Q2 does not arise).
+- **The Game details page ships** with what the library has (Q13): its wide card shows the game's art where the Bundle plays a trailer (background art about its middle, else the cover; with neither, the card's fill).
+- **The facts line** is the publishers, the release year, the size on disk of an installed game, and "Steam". The Bundle's platform, features and age rating box are not drawn.
+- **Bahnschrift's line is 1.2 em** (Q1), as on Home: the title's line is 56.4 and the cards' top 270.4, which is where the Bundle's picture `19-game-hub-play-focused.jpg` has it.
+- **The name chip is as the source's arithmetic has it** (Q3): its top 48 above the action, over the ring's top stroke. The picture `20-game-hub-manage-focused.jpg` shows it **over** the cards' foot, not under it as section 6.1 reasons from the element order: it is drawn last.
+- **LB and RB are not built** (Q4). In the Bundle they walk Playnite's main list, which is whatever was filtered when the hub opened; here a hub is opened for one game from a row of Home, and nothing says what "next" would be. They do nothing, like X, Y and View.
+- **A hub always opens on the Game hub page** with focus on the main action (Q5): the page is made anew each time it opens, and remembers nothing.
+- **The game status view is not ported** (Q6). The Launch screen covers the hub while a game starts; the hub stays under it, its main action Running, and goes when the game ends, which is Home again with focus on the game's tile (9.3).
+- **Times played** counts the Play sessions the Dashboard has recorded (Q8): 0, and so no row, for a game only ever played before the Dashboard.
+- **Completion and Your score are dropped** (Q9): Playnite's notions, with no store behind them.
+- **Recent Play sessions are left out**, as the Bundle leaves them out (Q10).
+- **Install is the Tile menu's Install** (Q11). The action is drawn, with the store's name under it, and takes focus; A on it closes the hub and asks Steam for the game with `steam://install/<appid>` (`tile_menu::install`, which the menu's row answers with too). Steam's own window does the rest: there is no Queue until M4. A game in no library database asks nothing, and the hub closes all the same.
+- **The Achievements row (M6) is a place, and nothing is drawn in it** (Q12): the foot of Your game stats, under the rows that show. A on the stats card is left free for the Achievements page's way in.
+- **Up and Down go by the nearest middle, across** (Q14): Up from the main action is the cover card; from Manage or the toggle the card whose middle is nearest the action's; Down from a card the action whose middle is nearest the card's. No column is remembered.
+
+### 16.2 Differs
+
+- **Opening** (9.1). A on a Recent tile or a Group's game card starts the double tap's 300 ms: with no second A the hub opens when they are up, timed on the Dashboard's clock (`Dashboard::advance`, docs/ui.md); a second A on the same tile within them plays the game and no hub opens. Menu within them, or anything that takes the pad from Home (the Guide, a page, a launch), drops the pending hub; moving focus does not, and the hub of the tile that was chosen opens. A hidden game's card opens its hub too, where Play does nothing: a launch names a game by its place among the library's games, and a hidden one has none. My games & apps' grid opens it at once on A, and Play history after the same double tap; the Tile menu's Manage game opens it in the menu's place, so B there goes back to what the menu was over. Search's way in is its ticket's: it opens `pages::Open::GameHub(Entry::of(game))`.
+- **The screen behind** (2.3) is a picture of what was under the hub the first time the hub is drawn: Home (or the page under it) drawn once more to a texture, halved down to an eighth each way and blurred there by 2 (`Ui::snapshot`). It has what Home showed then, the focused tile's ring included, and not the hint bar. It is kept while the hub is drawn and freed after. A picture that cannot be taken leaves the art in the strips.
+- **The art behind the band** (2.1) is cut about its middle to 128 x 72 and blurred there by a Gaussian of deviation a third of the Bundle's radius (2, or 4 for a cover), then stretched over the screen (`Kind::Soft`). A cover is drawn 1.15 times the screen. For want of a cover the header stands in for it, as on Home. **It does not fade in**: the screen behind the band is black until the art is read, and then it is there.
+- **The darkening gradient and the green** (2.2, 1.1) have three stops, where the renderer's gradients have two: each is a small picture painted once (`Kind::Painted`) and stretched over the screen.
+- **A game with no cover** shows its name on the dark tile, as Home's tiles do, where the Bundle shows Playnite's default cover.
+- **The source's mark** on the cover is the plain white disc Home's tiles carry, on the Bundle's chip: the stores' marks are not ours to ship. `home/tile.rs` `source_mark` is the one place to draw the real thing.
+- **The date last played** is always month/day/year, as the Bundle's pictures have it, whatever the user's short date format.
+- **The row of cards never needs its second place** (5.4): without Description, Game details fits the screen. The rule is built all the same (`cards::rects`).
+- **Main action.** Play, Running or Install. Running shows from the moment the game is launched, there being no "Launching"; Queued, Installing and Uninstalling come with the Queue (M4).
+- **Manage, and Menu anywhere in the hub,** open the game's Tile menu (`tile_menu::open(game, Opener::GameHub)`), without its Manage game row, over the hub; focus stays where it was, and B on the menu comes back to it. Its Customise row says "Customise Home" wherever the hub was opened from (section 7's "Customise games & apps" over My games & apps is not followed). The hint bar says "More options", as it does on Home's cards.
+- **The Queue action** (6.4) is not drawn; its place is between Manage and the toggle (`actions::ALL`).
+- **Sounds** (12). Every move of focus in the hub is the move sound, and a move into an edge is silent. The hub opens and closes in silence. **A on the toggle plays the move sound**, where the Bundle is silent: the Dashboard takes a press that changed where focus is said to be for a move. **A on Play plays the activation sound**, as A on any tile that chose something does; the Bundle plays none. A on a tile plays the activation sound once, at the first A, whether a hub or a double tap's launch follows.
+- **`--log-focus`** says `focus: GameHub: <appid> <Hub|Details> <where>`, where is `Play`, `Running` or `Install` for the main action (what it is now), `Manage`, `Toggle`, `Cover`, `Stats`, `Info` or `Trailer`.

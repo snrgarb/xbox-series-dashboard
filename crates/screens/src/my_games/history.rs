@@ -10,7 +10,7 @@ use super::nav;
 use super::{open_game_hub, open_tile_menu, Look, Outcome, Pane};
 use crate::hint_bar::{self, Hint};
 use crate::home::cover_art;
-use crate::pages::{Around, PageAction};
+use crate::pages::{Around, PageAction, Tick};
 use crate::{theme, Effect};
 
 /// The list's top: the content row's, under the header.
@@ -121,6 +121,25 @@ impl Pane for History {
         Some(format!("Row({})", self.focus))
     }
 
+    /// The row A chose, once the double tap's time has passed with no second A: its game's hub opens, wherever
+    /// focus has gone on the list since, as on Home.
+    fn tick(&mut self, around: Around) -> Tick {
+        let Some((at, chosen)) = self.chosen else { return Tick::Nothing };
+        let since = around.now.saturating_duration_since(at);
+        if since < DOUBLE_TAP {
+            return Tick::Wait(DOUBLE_TAP - since);
+        }
+        self.chosen = None;
+        // Long over, with the pane not asked meanwhile: something else was shown or had the pad, and the choice
+        // went with it.
+        if since > DOUBLE_TAP * 3 {
+            return Tick::Nothing;
+        }
+        // A game that has left the library since has no hub to show.
+        let game = around.library.games.iter().find(|game| game.id == chosen);
+        game.and_then(open_game_hub).map_or(Tick::Nothing, Tick::Act)
+    }
+
     fn press(&mut self, press: Press, around: Around) -> Outcome {
         let rows = &around.library.history;
         if !self.keep(rows) {
@@ -129,6 +148,11 @@ impl Pane for History {
         let row = rows[self.focus];
         let place = around.library.games.iter().position(|game| game.id == row.game);
         let once = !press.repeat;
+        // Anything but A and a move along the list drops the row A chose: its hub does not open over what the
+        // press brought.
+        if press.button != Button::A && !matches!(press.button, Button::Up | Button::Down) {
+            self.chosen = None;
+        }
         match press.button {
             // Across the sections, stopping at the ends.
             Button::Up => self.focus = self.focus.saturating_sub(1),
@@ -136,7 +160,7 @@ impl Pane for History {
             Button::Left => return Outcome::Nav,
             Button::A if once => {
                 let Some(place) = place else { return Outcome::Stay };
-                let now = Instant::now();
+                let now = around.now;
                 let again = self
                     .chosen
                     .is_some_and(|(at, game)| game == row.game && now.saturating_duration_since(at) < DOUBLE_TAP);
@@ -145,10 +169,8 @@ impl Pane for History {
                     self.chosen = None;
                     return Outcome::Action(PageAction::Effect(Effect::Launch(place)));
                 }
-                // The first opens its Game hub, once the hub is there to open (and then only when the double tap's
-                // time has passed with no second A: that wait is the hub's ticket's to keep).
+                // The first opens its Game hub when the double tap's time has passed with no second A (`tick`).
                 self.chosen = Some((now, row.game));
-                return open_game_hub(&around.library.games[place]).map_or(Outcome::Stay, Outcome::Action);
             }
             Button::Menu if once => {
                 let menu = place.and_then(|place| open_tile_menu(&around.library.games[place]));

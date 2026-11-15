@@ -918,7 +918,7 @@ mod tests {
             .unwrap();
         }
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.version().unwrap(), 2);
+        assert_eq!(db.version().unwrap(), crate::MIGRATIONS.len());
         assert_eq!(names(&db, &keyed(&db, MOST_PLAYED)), ["Alder"]);
         assert_eq!(db.snapshot().unwrap().games[0].added, 1_600_000_000);
     }
