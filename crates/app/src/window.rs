@@ -10,6 +10,7 @@ use model::{Library, Sound};
 use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
 use screens::{Dashboard, Effect, OverlayShows, Setting};
+use shell::audio::{self, AudioControl, SystemAudio};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::store::{Addresses, Ask, SystemAddresses};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step};
@@ -101,6 +102,11 @@ struct App {
     power: Box<dyn Power>,
     /// What opens a store's address for a game: Steam's, to install or uninstall it.
     addresses: Box<dyn Addresses>,
+    /// The system's sound, which the Guide's Audio Flyout shows and changes.
+    audio: Box<dyn AudioControl>,
+    /// When it was last read while the Audio Flyout is open: it is read as the Flyout opens and every `AUDIO_EVERY`
+    /// after, so that the Flyout follows what is changed elsewhere.
+    audio_read: Option<Instant>,
     /// How long the sound of leaving has still to play: Exit waits for it.
     leaving: Duration,
     /// The minute of the day Home's last frame showed on its clock.
@@ -136,6 +142,9 @@ fn minute() -> u64 {
 /// The longest Exit waits for the sound of leaving.
 const LEAVING_AT_MOST: Duration = Duration::from_secs(4);
 
+/// How often the system's sound is read while the Audio Flyout is open.
+const AUDIO_EVERY: Duration = Duration::from_millis(250);
+
 /// How often --log-frames says what was drawn.
 const FRAMES_EVERY: Duration = Duration::from_secs(5);
 
@@ -150,6 +159,9 @@ pub fn run(args: &Args, library: Library, store: Store) {
         eprintln!("guide: off ({}): the Guide button does nothing", Setting::UseGuide.key());
     }
     dashboard.set_options(options);
+    for text in &args.notify {
+        dashboard.notify(text);
+    }
     // A Dashboard that was killed with the Guide open over a game left the game frozen: it is let go first of all.
     let data_dir = args.data_dir.clone().or_else(library::data_dir);
     let mut freezer = Freezer::new(data_dir.as_deref());
@@ -197,6 +209,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
         // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
         power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
         addresses: Box::new(SystemAddresses),
+        audio: Box::new(SystemAudio),
+        audio_read: None,
         leaving: Duration::ZERO,
         minute: minute(),
         frames: args.log_frames.then(|| (0, 0, Instant::now())),
@@ -362,6 +376,36 @@ impl App {
         }
     }
 
+    /// Reads the system's sound and tells the Dashboard, if it is not as the Dashboard has it. With --log-focus,
+    /// what was read is said whenever it is news: `audio: volume 67, muted false, output "Speakers" of 2, ...`.
+    fn read_audio(&mut self) {
+        let read = self.audio.read();
+        self.audio_read = Some(Instant::now());
+        if read != *self.dashboard.audio() {
+            self.dashboard.set_audio(read);
+            self.stale = true;
+            self.overlay_stale = true;
+        }
+    }
+
+    /// Reads the system's sound as the Audio Flyout opens and every `AUDIO_EVERY` while it is open. How soon it
+    /// is to be read again.
+    fn follow_audio(&mut self) -> Option<Duration> {
+        if !self.dashboard.audio_shown() {
+            self.audio_read = None;
+            return None;
+        }
+        let opened = self.audio_read.is_none();
+        if self.audio_read.is_none_or(|read| read.elapsed() >= AUDIO_EVERY) {
+            let was = self.dashboard.audio().clone();
+            self.read_audio();
+            if self.log_focus && (opened || was != *self.dashboard.audio()) {
+                eprintln!("audio: {}", audio::describe(self.dashboard.audio()));
+            }
+        }
+        self.audio_read.map(|read| AUDIO_EVERY.saturating_sub(read.elapsed()))
+    }
+
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
         for effect in self.dashboard.take_effects() {
             match effect {
@@ -397,6 +441,22 @@ impl App {
                     }
                 }
                 Effect::Power(command) => self.power.carry_out(command),
+                // The Audio Flyout's: done, and read back at once, so the Flyout shows what the system made of it.
+                Effect::Volume(level) => {
+                    self.audio.set_volume(level);
+                    self.audio_read = None;
+                }
+                Effect::Mute(muted) => {
+                    self.audio.set_muted(muted);
+                    self.audio_read = None;
+                }
+                Effect::DefaultDevice(flow, device) => {
+                    let id = self.dashboard.audio().devices(flow).0.get(device).map(|device| device.id.clone());
+                    if let Some(id) = id {
+                        self.audio.set_default(flow, &id);
+                    }
+                    self.audio_read = None;
+                }
                 // In force already: saved, so that it is still so the next time.
                 Effect::Set(change) => self.store.set(change),
                 // The user's marks go to the library database, and what it says then is what the screens show.
@@ -584,6 +644,7 @@ impl ApplicationHandler for App {
         self.pad.set_repeat(self.dashboard.repeat());
         self.overlay_stale |= pressed;
         self.carry_out(event_loop);
+        let audio_wants = self.follow_audio();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
         // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
         let mut release_wants = None;
@@ -649,7 +710,7 @@ impl ApplicationHandler for App {
         // its next look at the desktop.
         let launch = self.launch.as_ref().map(|launch| launch.wait());
         let timer = self.dashboard.timer().map(Duration::from_secs_f32);
-        let wants = [Some(IDLE), launch, overlay_wants, home_wants, release_wants, timer];
+        let wants = [Some(IDLE), launch, overlay_wants, home_wants, release_wants, timer, audio_wants];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }

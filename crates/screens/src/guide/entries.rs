@@ -263,7 +263,16 @@ mod tests {
     #[test]
     fn the_landing_tab_lays_out_as_the_bundle_measures() {
         let library = crate::fake_library();
-        let entries = of(Tab::Landing, Around { library: &library, playing: None, discord: false });
+        let entries = of(
+            Tab::Landing,
+            Around {
+                library: &library,
+                playing: None,
+                discord: false,
+                audio: &model::Audio::default(),
+                notifications: &[],
+            },
+        );
         let placed = layout(Tab::Landing, &entries);
         let tops: Vec<(f32, f32)> = placed.iter().map(|p| (p.rect.y, p.rect.bottom())).collect();
         assert_eq!(
@@ -279,7 +288,16 @@ mod tests {
     #[test]
     fn profile_and_system_lays_out_under_its_heading() {
         let library = crate::fake_library();
-        let entries = of(Tab::ProfileAndSystem, Around { library: &library, playing: None, discord: false });
+        let entries = of(
+            Tab::ProfileAndSystem,
+            Around {
+                library: &library,
+                playing: None,
+                discord: false,
+                audio: &model::Audio::default(),
+                notifications: &[],
+            },
+        );
         let placed = layout(Tab::ProfileAndSystem, &entries);
         let near = |a: f32, b: f32| (a - b).abs() < 0.01;
         assert!(near(placed[0].rect.y, 212.6) && near(placed[0].rect.h, 96.0));
