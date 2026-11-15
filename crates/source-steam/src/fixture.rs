@@ -1,0 +1,504 @@
+//! Writes a fake Steam install: the files `load` reads, in the formats a current Steam client writes, with made-up
+//! games and generated art. Test support, for the unit tests here and for the end-to-end tests' stand-in Steam
+//! (`crates/standin`), which runs it on a test VM that has no Steam.
+//!
+//! Besides the fixture's games it writes three apps `load` must leave out: a tool and a piece of DLC the account's
+//! packages grant, and a game only package 0 grants, which everyone "has" and nobody owns.
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use image::{ImageFormat, Rgb, RgbImage};
+
+/// A fake Steam install to write.
+#[derive(Debug, Clone)]
+pub struct Fixture {
+    /// The signed-in user's persona name.
+    pub persona: String,
+    /// The user's folder under `userdata`.
+    pub user_id: u64,
+    pub games: Vec<FixtureGame>,
+    /// A program copied into every installed game's folder as `game.exe`. Without one the folders are empty.
+    pub game_exe: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FixtureGame {
+    pub appid: u32,
+    pub name: String,
+    /// The game's folder under `steamapps/common`, written only for an installed game.
+    pub install_dir: String,
+    pub installed: bool,
+    /// Unix seconds; 0 = never played.
+    pub last_played: u64,
+    pub playtime_minutes: u32,
+    pub art: Art,
+}
+
+/// How a game's cover, hero and header are stored under `appcache/librarycache/<appid>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Art {
+    /// The older layout: `library_600x900.jpg`, `library_hero.jpg` and `header.jpg` in the folder itself.
+    Flat,
+    /// The newer one: each in a folder named for its hash, which appinfo's `library_assets_full` names.
+    Hashed,
+    /// As `Flat`, but the files are PNGs under their `.jpg` names, as some of Steam's are.
+    PngNamedJpg,
+    /// No art on disk.
+    None,
+}
+
+/// The newest last-played time in `Fixture::standard`; each played game after the first was played a day earlier.
+pub const NEWEST_PLAY: u64 = 1_790_000_000;
+
+const TOOL: u32 = 9_100_900;
+const DLC: u32 = 9_100_901;
+const EVERYONES: u32 = 9_100_902;
+
+impl Fixture {
+    /// Fourteen invented games, by appid 9100010, 9100020, ...
+    ///
+    /// The first six were played, a day apart, so they are the Recent row in this order:
+    ///
+    /// | # | game             | installed | art                 |
+    /// |---|------------------|-----------|---------------------|
+    /// | 0 | Ashfall Courier  | yes       | hashed folders      |
+    /// | 1 | Lanternfish Deep | yes       | flat                |
+    /// | 2 | Brass Meridian   | yes       | hashed folders      |
+    /// | 3 | Quiet Orbit      | no        | flat                |
+    /// | 4 | Thimble & Thorn  | yes       | a PNG named `.jpg`  |
+    /// | 5 | Saltwind Rally   | no        | hashed folders      |
+    ///
+    /// The other eight were never played and come after, by name; every second one is installed, and Ember Choir and
+    /// Hollow Pines Motel have no art.
+    pub fn standard() -> Fixture {
+        let games = [
+            ("Ashfall Courier", true, true, Art::Hashed),
+            ("Lanternfish Deep", true, true, Art::Flat),
+            ("Brass Meridian", true, true, Art::Hashed),
+            ("Quiet Orbit", false, true, Art::Flat),
+            ("Thimble & Thorn", true, true, Art::PngNamedJpg),
+            ("Saltwind Rally", false, true, Art::Hashed),
+            ("Copperhead Station", true, false, Art::Flat),
+            ("Dune Cartographer", false, false, Art::Hashed),
+            ("Ember Choir", true, false, Art::None),
+            ("Fathom Nine", false, false, Art::Flat),
+            ("Glasswing Atlas", true, false, Art::Hashed),
+            ("Hollow Pines Motel", false, false, Art::None),
+            ("Marrow Street", true, false, Art::Flat),
+            ("Nightjar Protocol", false, false, Art::Hashed),
+        ];
+        let games = games.iter().enumerate().map(|(i, &(name, installed, played, art))| FixtureGame {
+            appid: 9_100_010 + i as u32 * 10,
+            name: name.to_string(),
+            install_dir: name.replace(" & ", " and "),
+            installed,
+            last_played: if played { NEWEST_PLAY - i as u64 * 86_400 } else { 0 },
+            playtime_minutes: if played { 90 + (6 - i as u32) * 240 } else { 0 },
+            art,
+        });
+        Fixture { persona: "Tester".into(), user_id: 100_200_300, games: games.collect(), game_exe: None }
+    }
+}
+
+/// Writes `spec` as a Steam install at `root`, making the folder. Files already there are written over.
+pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
+    let root = std::path::absolute(root)?;
+    let appcache = root.join("appcache");
+    let steamapps = root.join("steamapps");
+    let config = root.join("userdata").join(spec.user_id.to_string()).join("config");
+    for dir in [&appcache, &steamapps, &config] {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(appcache.join("appinfo.vdf"), appinfo(spec))?;
+    fs::write(appcache.join("packageinfo.vdf"), packageinfo(spec))?;
+    fs::write(config.join("localconfig.vdf"), localconfig(spec))?;
+    fs::write(steamapps.join("libraryfolders.vdf"), libraryfolders(&root, spec))?;
+    for game in &spec.games {
+        if game.installed {
+            fs::write(steamapps.join(format!("appmanifest_{}.acf", game.appid)), manifest(game))?;
+            let dir = steamapps.join("common").join(&game.install_dir);
+            fs::create_dir_all(&dir)?;
+            if let Some(exe) = &spec.game_exe {
+                fs::copy(exe, dir.join("game.exe"))?;
+            }
+        }
+        for (asset, image) in art(game) {
+            let file = appcache.join("librarycache").join(game.appid.to_string()).join(asset.path(game));
+            fs::create_dir_all(file.parent().expect("an art file is in a folder"))?;
+            let format = if game.art == Art::PngNamedJpg { ImageFormat::Png } else { ImageFormat::Jpeg };
+            image.save_with_format(&file, format).map_err(io::Error::other)?;
+        }
+    }
+    Ok(())
+}
+
+// ------------------------------------------------------------------ KeyValues
+
+/// A KeyValues tree to write, as text or as binary.
+enum Kv {
+    Map(Vec<(String, Kv)>),
+    Str(String),
+    Int(u32),
+}
+
+fn map<const N: usize>(entries: [(&str, Kv); N]) -> Kv {
+    Kv::Map(entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+}
+
+fn s(value: impl ToString) -> Kv {
+    Kv::Str(value.to_string())
+}
+
+impl Kv {
+    /// The entries of a map in binary, then its end marker. `key` writes a key: inline, or as an index into a table.
+    fn binary(&self, out: &mut Vec<u8>, key: &mut dyn FnMut(&str, &mut Vec<u8>)) {
+        let Kv::Map(entries) = self else { panic!("only a map has a binary body") };
+        for (k, v) in entries {
+            match v {
+                Kv::Map(_) => {
+                    out.push(0);
+                    key(k, out);
+                    v.binary(out, key);
+                }
+                Kv::Str(text) => {
+                    out.push(1);
+                    key(k, out);
+                    out.extend(text.as_bytes());
+                    out.push(0);
+                }
+                Kv::Int(n) => {
+                    out.push(2);
+                    key(k, out);
+                    out.extend(n.to_le_bytes());
+                }
+            }
+        }
+        out.push(8);
+    }
+
+    /// The entries of a map as text, as Steam lays its files out: tabs, a brace a line.
+    fn text(&self, out: &mut String, depth: usize) {
+        let Kv::Map(entries) = self else { panic!("only a map has entries") };
+        let quoted = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""));
+        let indent = "\t".repeat(depth);
+        for (k, v) in entries {
+            match v {
+                Kv::Map(_) => {
+                    out.push_str(&format!("{indent}{}\n{indent}{{\n", quoted(k)));
+                    v.text(out, depth + 1);
+                    out.push_str(&format!("{indent}}}\n"));
+                }
+                Kv::Str(text) => out.push_str(&format!("{indent}{}\t\t{}\n", quoted(k), quoted(text))),
+                Kv::Int(n) => out.push_str(&format!("{indent}{}\t\t{}\n", quoted(k), quoted(&n.to_string()))),
+            }
+        }
+    }
+
+    fn to_text(&self) -> String {
+        let mut out = String::new();
+        self.text(&mut out, 0);
+        out
+    }
+}
+
+// ---------------------------------------------------------------------- files
+
+/// `appcache/appinfo.vdf`, version 29: keys are indexes into a string table at the end of the file.
+fn appinfo(spec: &Fixture) -> Vec<u8> {
+    let mut apps: Vec<(u32, Kv)> = spec.games.iter().map(|g| (g.appid, game_info(g))).collect();
+    let other = |appid: u32, name: &str, ty: &str| {
+        (appid, map([("appid", Kv::Int(appid)), ("common", map([("name", s(name)), ("type", s(ty))]))]))
+    };
+    apps.push(other(TOOL, "Fixture Redistributables", "Tool"));
+    apps.push(other(DLC, "Ashfall Courier: The Long Road", "DLC"));
+    apps.push(other(EVERYONES, "Everyone's Sandbox", "Game"));
+
+    let mut table: Vec<String> = Vec::new();
+    let mut key = |k: &str, out: &mut Vec<u8>| {
+        let index = table.iter().position(|t| t == k).unwrap_or_else(|| {
+            table.push(k.to_string());
+            table.len() - 1
+        });
+        out.extend((index as u32).to_le_bytes());
+    };
+    let mut entries = Vec::new();
+    for (appid, info) in &apps {
+        let mut body = Vec::new();
+        body.push(0);
+        key("appinfo", &mut body);
+        info.binary(&mut body, &mut key);
+        body.push(8);
+
+        let mut header = Vec::with_capacity(60);
+        header.extend(2u32.to_le_bytes()); // info state: available
+        header.extend((NEWEST_PLAY as u32).to_le_bytes()); // last updated
+        header.extend(0u64.to_le_bytes()); // PICS token
+        header.extend([0x11; 20]); // SHA-1 of the text form
+        header.extend(1000u32.to_le_bytes()); // change number
+        header.extend([0x22; 20]); // SHA-1 of the binary form
+        entries.extend(appid.to_le_bytes());
+        entries.extend(((header.len() + body.len()) as u32).to_le_bytes());
+        entries.extend(header);
+        entries.extend(body);
+    }
+
+    let mut file = 0x0756_4429u32.to_le_bytes().to_vec();
+    file.extend(1u32.to_le_bytes()); // universe: public
+    file.extend(((16 + entries.len() + 4) as u64).to_le_bytes());
+    file.extend(entries);
+    file.extend(0u32.to_le_bytes());
+    file.extend((table.len() as u32).to_le_bytes());
+    for k in &table {
+        file.extend(k.as_bytes());
+        file.push(0);
+    }
+    file
+}
+
+fn game_info(game: &FixtureGame) -> Kv {
+    let mut common = vec![("name".to_string(), s(&game.name)), ("type".to_string(), s("Game"))];
+    if game.art == Art::Hashed {
+        let asset = |a: Asset| map([("image", map([("english", s(a.path(game)))]))]);
+        common.push((
+            "library_assets_full".to_string(),
+            map([
+                ("library_capsule", asset(Asset::Cover)),
+                ("library_hero", asset(Asset::Hero)),
+                ("library_header", asset(Asset::Header)),
+            ]),
+        ));
+    }
+    common.push(("gameid".to_string(), Kv::Int(game.appid)));
+    map([("appid", Kv::Int(game.appid)), ("common", Kv::Map(common))])
+}
+
+/// `appcache/packageinfo.vdf`, version 28. The games are split over two packages, as bought one by one and in a
+/// bundle; the second also grants the tool and the DLC. Package 0 grants the game nobody owns.
+fn packageinfo(spec: &Fixture) -> Vec<u8> {
+    let ids: Vec<u32> = spec.games.iter().map(|g| g.appid).collect();
+    let (first, rest) = ids.split_at(ids.len() / 2);
+    let packages = [(0u32, vec![EVERYONES]), (510_001, first.to_vec()), (510_002, [rest, &[TOOL, DLC][..]].concat())];
+
+    let mut inline = |k: &str, out: &mut Vec<u8>| {
+        out.extend(k.as_bytes());
+        out.push(0);
+    };
+    let mut file = 0x0656_5528u32.to_le_bytes().to_vec();
+    file.extend(1u32.to_le_bytes());
+    for (id, apps) in packages {
+        file.extend(id.to_le_bytes());
+        file.extend([0x33; 20]); // SHA-1
+        file.extend(1000u32.to_le_bytes()); // change number
+        file.extend(0u64.to_le_bytes()); // PICS token
+        let appids = Kv::Map(apps.iter().enumerate().map(|(i, &a)| (i.to_string(), Kv::Int(a))).collect());
+        let body = map([("packageid", Kv::Int(id)), ("billingtype", Kv::Int(10)), ("appids", appids)]);
+        Kv::Map(vec![(id.to_string(), body)]).binary(&mut file, &mut inline);
+    }
+    file.extend(u32::MAX.to_le_bytes());
+    file
+}
+
+/// `userdata/<id>/config/localconfig.vdf`: the persona name, and when and how long each played game was played. A
+/// game never played has an entry too, as one Steam has synced saves for does.
+fn localconfig(spec: &Fixture) -> Vec<u8> {
+    let apps = spec.games.iter().map(|g| {
+        let entry = if g.last_played > 0 {
+            map([("LastPlayed", s(g.last_played)), ("Playtime", s(g.playtime_minutes))])
+        } else {
+            map([("cloud", map([("last_sync_state", s("synchronized"))]))])
+        };
+        (g.appid.to_string(), entry)
+    });
+    let friends = map([
+        ("76500000000000001", map([("name", s("Someone Else")), ("NameHistory", map([("0", s("Someone Else"))]))])),
+        ("PersonaName", s(&spec.persona)),
+    ]);
+    let steam = map([("apps", Kv::Map(apps.collect()))]);
+    let store = map([("friends", friends), ("Software", map([("Valve", map([("Steam", steam)]))]))]);
+    map([("UserLocalConfigStore", store)]).to_text().into_bytes()
+}
+
+/// `steamapps/libraryfolders.vdf`: one library, the Steam root itself.
+fn libraryfolders(root: &Path, spec: &Fixture) -> Vec<u8> {
+    let apps = spec.games.iter().filter(|g| g.installed).map(|g| (g.appid.to_string(), s(1_048_576)));
+    let library = map([("path", s(root.display())), ("label", s("")), ("apps", Kv::Map(apps.collect()))]);
+    map([("libraryfolders", map([("0", library)]))]).to_text().into_bytes()
+}
+
+/// `steamapps/appmanifest_<appid>.acf`.
+fn manifest(game: &FixtureGame) -> Vec<u8> {
+    let state = map([
+        ("appid", s(game.appid)),
+        ("universe", s(1)),
+        ("name", s(&game.name)),
+        ("StateFlags", s(4)),
+        ("installdir", s(&game.install_dir)),
+        ("LastPlayed", s(game.last_played)),
+        ("SizeOnDisk", s(1_048_576)),
+    ]);
+    map([("AppState", state)]).to_text().into_bytes()
+}
+
+// ------------------------------------------------------------------------ art
+
+#[derive(Clone, Copy)]
+enum Asset {
+    Cover,
+    Hero,
+    Header,
+}
+
+impl Asset {
+    /// Where the asset is under the game's `librarycache` folder.
+    fn path(self, game: &FixtureGame) -> String {
+        let (index, name) = match self {
+            Asset::Cover => (1u64, "library_600x900.jpg"),
+            Asset::Hero => (2, "library_hero.jpg"),
+            Asset::Header => (3, "header.jpg"),
+        };
+        if game.art == Art::Hashed {
+            // Forty hex digits, as a SHA-1 is: not one, only different for every picture.
+            let n = (game.appid as u64 * 4 + index).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            format!("{n:016x}{:016x}{:08x}/{name}", n.rotate_left(21), (n >> 7) as u32)
+        } else {
+            name.to_string()
+        }
+    }
+}
+
+/// The game's pictures, at the sizes Steam's are: a 600x900 cover, a 1920x620 hero and a 460x215 header, each a
+/// gradient of the game's own colour, so every game and every kind of picture can be told apart on a screenshot.
+fn art(game: &FixtureGame) -> Vec<(Asset, RgbImage)> {
+    if game.art == Art::None {
+        return Vec::new();
+    }
+    let top = colour(game.appid);
+    let shade = |by: f32| top.map(|c| (c as f32 * by) as u8);
+    // Top to bottom for the cover, left to right for the hero, and the header flat.
+    let cover = RgbImage::from_fn(600, 900, |_, y| Rgb(mix(top, shade(0.35), y as f32 / 899.0)));
+    let hero = RgbImage::from_fn(1920, 620, |x, _| Rgb(mix(shade(0.25), top, x as f32 / 1919.0)));
+    let header = RgbImage::from_pixel(460, 215, Rgb(shade(0.7)));
+    vec![(Asset::Cover, cover), (Asset::Hero, hero), (Asset::Header, header)]
+}
+
+fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    std::array::from_fn(|i| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t) as u8)
+}
+
+/// A strong colour whose hue follows from the appid, neighbouring appids getting hues far apart.
+fn colour(appid: u32) -> [u8; 3] {
+    let hue = (appid / 10 * 137 % 360) as f32 / 60.0;
+    let x = 1.0 - (hue % 2.0 - 1.0).abs();
+    let (r, g, b) = match hue as u32 {
+        0 => (1.0, x, 0.0),
+        1 => (x, 1.0, 0.0),
+        2 => (0.0, 1.0, x),
+        3 => (0.0, x, 1.0),
+        4 => (x, 0.0, 1.0),
+        _ => (1.0, 0.0, x),
+    };
+    // Kept off pure primaries: 0.2 of white mixed in, then 0.85 of full brightness.
+    [r, g, b].map(|c: f32| ((0.2 + 0.8 * c) * 0.85 * 255.0) as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::load;
+
+    fn decoded(path: &Path) -> (ImageFormat, (u32, u32)) {
+        let reader = image::ImageReader::open(path).unwrap().with_guessed_format().unwrap();
+        let format = reader.format().unwrap();
+        (format, reader.into_dimensions().unwrap())
+    }
+
+    #[test]
+    fn the_standard_fixture_reads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let spec = Fixture::standard();
+        write(&root, &spec).unwrap();
+        let library = load(&root).unwrap();
+
+        assert_eq!(library.user.as_deref(), Some("Tester"));
+        // The games only: not the tool, the DLC or package 0's game. Played ones first, the latest first, then the
+        // rest by name, which is the order the fixture lists them in.
+        let names: Vec<&str> = library.games.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, spec.games.iter().map(|g| g.name.as_str()).collect::<Vec<_>>());
+        let recent: Vec<&str> = library.recent(8).iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(
+            recent,
+            [
+                "Ashfall Courier",
+                "Lanternfish Deep",
+                "Brass Meridian",
+                "Quiet Orbit",
+                "Thimble & Thorn",
+                "Saltwind Rally"
+            ]
+        );
+        // The end-to-end tests press Right twice and launch what is there.
+        assert!(library.recent(8)[2].installed);
+
+        for (game, want) in library.games.iter().zip(&spec.games) {
+            let name = &game.name;
+            assert_eq!(game.appid, want.appid, "{name}");
+            assert_eq!(game.installed, want.installed, "{name}");
+            assert_eq!(game.last_played, want.last_played, "{name}");
+            assert_eq!(game.playtime_minutes, want.playtime_minutes, "{name}");
+            let dir = want.installed.then(|| root.join("steamapps").join("common").join(&want.install_dir));
+            assert_eq!(game.install_dir, dir, "{name}");
+            assert!(dir.is_none_or(|d| d.is_dir()), "{name}");
+
+            let art = [(&game.cover, (600, 900)), (&game.hero, (1920, 620)), (&game.header, (460, 215))];
+            for (path, size) in art {
+                if want.art == Art::None {
+                    assert_eq!(*path, None, "{name}");
+                    continue;
+                }
+                let path = path.as_ref().unwrap_or_else(|| panic!("{name} has art missing"));
+                assert!(path.extension().is_some_and(|e| e == "jpg"), "{name}");
+                let hashed = path.parent().unwrap().file_name().unwrap() != want.appid.to_string().as_str();
+                assert_eq!(hashed, want.art == Art::Hashed, "{name}");
+                let format = if want.art == Art::PngNamedJpg { ImageFormat::Png } else { ImageFormat::Jpeg };
+                assert_eq!(decoded(path), (format, size), "{name}");
+            }
+        }
+        let played = spec.games.iter().filter(|g| g.last_played > 0);
+        assert!(played.clone().count() == 6 && played.map(|g| g.last_played).is_sorted_by(|a, b| a > b));
+    }
+
+    #[test]
+    fn the_game_exe_is_copied_into_installed_games_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("standin");
+        fs::write(&exe, b"not really a program").unwrap();
+        let mut spec = Fixture::standard();
+        spec.games.truncate(4);
+        spec.games.iter_mut().for_each(|g| g.art = Art::None);
+        spec.game_exe = Some(exe);
+        let root = dir.path().join("steam");
+        write(&root, &spec).unwrap();
+
+        let common = root.join("steamapps").join("common");
+        assert_eq!(fs::read(common.join("Brass Meridian").join("game.exe")).unwrap(), b"not really a program");
+        assert!(!common.join("Quiet Orbit").exists());
+        assert_eq!(load(&root).unwrap().games.len(), 4);
+    }
+
+    #[test]
+    fn text_values_are_escaped() {
+        let text = map([("libraryfolders", map([("0", map([("path", s(r#"C:\e2e\"steam""#))]))]))]).to_text();
+        let read = crate::vdf::parse_text(&text).unwrap();
+        assert_eq!(read.str_at(&["libraryfolders", "0", "path"]), Some(r#"C:\e2e\"steam""#));
+    }
+
+    #[test]
+    fn neighbouring_games_have_different_colours() {
+        let games = Fixture::standard().games;
+        for pair in games.windows(2) {
+            assert_ne!(colour(pair[0].appid), colour(pair[1].appid));
+        }
+    }
+}

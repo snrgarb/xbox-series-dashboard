@@ -7,6 +7,7 @@
 //! - `steamapps/appmanifest_*.acf`: what is installed.
 //! - `appcache/librarycache/<appid>/`: cover, hero and header art.
 pub mod appcache;
+pub mod fixture;
 pub mod vdf;
 
 use anyhow::{Context, Result};
