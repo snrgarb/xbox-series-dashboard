@@ -6,9 +6,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use input::Pad;
-use model::Library;
+use model::{Library, Sound};
 use render::gpu::{self, Gpu};
 use screens::{Dashboard, Effect, OverlayShows};
+use shell::power::{DryPower, Power, SystemPower};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
@@ -89,9 +90,13 @@ struct App {
     sounds: Sounds,
     /// Whether Home's last frame left something moving.
     moving: bool,
-    /// With --log-focus: say where focus went, on Home or on the page over it (`Dashboard::focus_line`), for a test
-    /// that must know before it presses on.
+    /// With --log-focus: say where focus went, on Home or on the page over it (`Dashboard::focus_line`) and in the
+    /// Guide (`Dashboard::guide_line`), for a test that must know before it presses on.
     log_focus: bool,
+    /// What turns the machine off, restarts it and puts it to sleep: for real, or with --dry-power in the log only.
+    power: Box<dyn Power>,
+    /// How long the sound of leaving has still to play: Exit waits for it.
+    leaving: Duration,
     /// The minute of the day Home's last frame showed on its clock.
     minute: u64,
     /// With --log-frames: the frames Home's window and the Overlay drew since they were last said, and when.
@@ -102,6 +107,9 @@ struct App {
 fn minute() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs() / 60)
 }
+
+/// The longest Exit waits for the sound of leaving.
+const LEAVING_AT_MOST: Duration = Duration::from_secs(4);
 
 /// How often --log-frames says what was drawn.
 const FRAMES_EVERY: Duration = Duration::from_secs(5);
@@ -155,6 +163,9 @@ pub fn run(args: &Args, library: Library, store: Store) {
         library_ready: since_start(),
         moving: false,
         log_focus: args.log_focus,
+        // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
+        power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
+        leaving: Duration::ZERO,
         minute: minute(),
         frames: args.log_frames.then(|| (0, 0, Instant::now())),
     };
@@ -292,10 +303,19 @@ impl App {
                 // The Overlay follows what the Dashboard shows: it gives the foreground back as the Guide closes,
                 // once the button that closed it is up, and hides once the panel has slid away.
                 Effect::GuideClosed => {}
-                Effect::Exit => event_loop.exit(),
-                Effect::Sound(sound) => self.sounds.play(sound),
-                // Power is not here yet (#39).
-                Effect::PowerHold => eprintln!("guide button: held, which is Power: nothing yet"),
+                // The sound of leaving is played to its end first, as the Bundle plays it.
+                Effect::Exit => {
+                    eprintln!("power: exit to desktop at {:.0} ms", since_start());
+                    std::thread::sleep(self.leaving.min(LEAVING_AT_MOST));
+                    event_loop.exit();
+                }
+                Effect::Sound(sound) => {
+                    let seconds = self.sounds.play(sound);
+                    if sound == Sound::PowerOff {
+                        self.leaving = Duration::from_secs_f32(seconds.max(0.0));
+                    }
+                }
+                Effect::Power(command) => self.power.carry_out(command),
             }
         }
     }
@@ -408,6 +428,7 @@ impl ApplicationHandler for App {
 
         let pressed = !presses.is_empty() || !events.is_empty();
         let focus = self.dashboard.focus_line();
+        let guide = self.dashboard.guide_line();
         for event in events {
             self.dashboard.pad_event(event);
         }
@@ -416,6 +437,9 @@ impl ApplicationHandler for App {
         }
         if self.log_focus && self.dashboard.focus_line() != focus {
             eprintln!("focus: {}", self.dashboard.focus_line());
+        }
+        if self.log_focus && self.dashboard.guide_line() != guide {
+            eprintln!("guide: {}", self.dashboard.guide_line());
         }
         // A held direction repeats at the pace of whatever has the pad now.
         self.pad.set_repeat(self.dashboard.repeat());

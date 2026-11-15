@@ -14,6 +14,7 @@ const GUIDE: u32 = 0x0400;
 
 const GUIDE_OPEN: Effect = Effect::Sound(Sound::GuideOpen);
 const GUIDE_MOVE: Effect = Effect::Sound(Sound::GuideMove);
+const PROMPT_OPEN: Effect = Effect::Sound(Sound::PromptOpen);
 
 struct Pad {
     dashboard: Dashboard,
@@ -84,28 +85,35 @@ fn a_tap_closes_an_open_guide_as_the_button_is_let_go() {
 }
 
 #[test]
-fn a_hold_asks_for_power_and_does_not_open_the_guide() {
+fn a_hold_opens_power_with_no_panel_and_its_release_does_nothing() {
     let mut pad = Pad::new();
     assert_eq!(pad.at(0, GUIDE), []);
     assert_eq!(pad.at(300, GUIDE), []);
     assert_eq!(pad.at(699, GUIDE), []);
-    assert_eq!(pad.at(700, GUIDE), [Effect::PowerHold]);
+    assert!(!pad.dashboard.guide_open(), "nothing shows until the hold is a hold");
+    assert_eq!(pad.at(700, GUIDE), [PROMPT_OPEN]);
+    assert!(pad.dashboard.guide().dialog().is_some() && !pad.dashboard.guide().panel_shown());
     assert_eq!(pad.at(1500, GUIDE), []);
     assert_eq!(pad.at(1600, 0), []);
     assert_eq!(pad.at(3000, 0), []);
+    assert!(pad.dashboard.guide().dialog().is_some(), "letting go leaves Power up");
+    // A tap after it is a tap: with Power up it closes everything, and the next opens the Guide.
+    pad.at(4000, GUIDE);
+    assert_eq!(pad.at(4100, 0), [Effect::GuideClosed]);
     assert!(!pad.dashboard.guide_open());
-    // A tap after it is a tap.
-    pad.open_guide(4000);
+    pad.open_guide(5000);
+    assert!(pad.dashboard.guide().dialog().is_none() && pad.dashboard.guide().panel_shown());
 }
 
 #[test]
-fn a_hold_with_the_guide_open_asks_for_power_and_its_release_does_not_close_the_guide() {
+fn a_hold_with_the_guide_open_opens_power_and_its_release_does_not_close_the_guide() {
     let mut pad = Pad::new();
     pad.open_guide(0);
     pad.at(1000, GUIDE);
-    assert_eq!(pad.at(1700, GUIDE), [Effect::PowerHold]);
+    assert_eq!(pad.at(1700, GUIDE), [PROMPT_OPEN]);
     assert_eq!(pad.at(1900, 0), []);
     assert!(pad.dashboard.guide_open());
+    assert!(pad.dashboard.guide().dialog().is_some() && !pad.dashboard.guide().panel_shown());
     // A tap after it closes the Guide.
     pad.at(3000, GUIDE);
     assert_eq!(pad.at(3100, 0), [Effect::GuideClosed]);

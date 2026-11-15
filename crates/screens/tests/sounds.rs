@@ -36,11 +36,14 @@ fn every_sound_is_one_of_the_bundles_files() {
     assert_eq!(files(Sound::GuideOpen), ["OpenMenu.wav"]);
     assert_eq!(files(Sound::GuideMove), ["Navigate1.wav", "Navigate2.wav", "Navigate3.wav", "Navigate4.wav"]);
     assert_eq!(files(Sound::GuideSelect), ["Enter.wav"]);
+    assert_eq!(files(Sound::PromptOpen), ["PromptOpen.wav"]);
+    assert_eq!(files(Sound::PromptClose), ["PromptClose.wav"]);
+    assert_eq!(files(Sound::PowerOff), ["PowerOff.wav"]);
     let mut all = Sound::all_files();
-    assert_eq!(all.len(), 8);
+    assert_eq!(all.len(), 11);
     all.sort_unstable();
     all.dedup();
-    assert_eq!(all.len(), 8, "no file is two sounds");
+    assert_eq!(all.len(), 11, "no file is two sounds");
 }
 
 #[test]
@@ -198,11 +201,12 @@ fn while_a_game_starts_and_runs_only_the_guide_is_heard() {
     assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
     assert_eq!(press(&mut home, Button::Down), [GUIDE_MOVE]);
     assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed]);
-    // Again, and Menu on the game quits it: the menu's one option chosen.
+    // Again, and Menu on the game is its menu, whose one option quits it.
     assert_eq!(press(&mut home, Button::Guide), [GUIDE_OPEN]);
     press(&mut home, Button::Down);
     press(&mut home, Button::Down);
-    assert_eq!(press(&mut home, Button::Menu), [GUIDE_SELECT, Effect::QuitGame]);
+    assert_eq!(press(&mut home, Button::Menu), [Effect::Sound(Sound::PromptOpen)]);
+    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::QuitGame]);
     // The game ending puts focus back on its tile in silence.
     home.game_ended();
     assert!(home.take_effects().is_empty());

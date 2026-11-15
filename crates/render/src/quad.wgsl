@@ -2,7 +2,9 @@
 // clip rectangle, and turned about its middle.
 // Colours are sRGB values with straight alpha and are blended as they are, in gamma space, as WPF blends: the theme's
 // colours and alphas carry over unchanged.
-struct Globals { size: vec2<f32>, pad: vec2<f32> }
+// The target's size in pixels, and where its top left corner is in the frame's own pixels: the origin, but for a layer
+// drawn to a texture of its own to be blurred, which holds a part of the frame.
+struct Globals { size: vec2<f32>, origin: vec2<f32> }
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var samp: sampler;
 @group(1) @binding(0) var tex: texture_2d<f32>;
@@ -35,7 +37,7 @@ fn vs(@builtin(vertex_index) vi: u32, i: Inst) -> VOut {
     // Wider than the shape by its soft edge.
     let local = (corner * 2.0 - 1.0) * (half + max(i.params.w, 1.0));
     let turned = vec2<f32>(local.x * i.turn.x - local.y * i.turn.y, local.x * i.turn.y + local.y * i.turn.x);
-    let p = i.rect.xy + half + turned;
+    let p = i.rect.xy + half + turned - g.origin;
     var o: VOut;
     o.pos = vec4<f32>(p.x / g.size.x * 2.0 - 1.0, 1.0 - p.y / g.size.y * 2.0, 0.0, 1.0);
     o.local = local;
@@ -75,7 +77,8 @@ fn shade(in: VOut, texel: vec4<f32>) -> vec4<f32> {
         }
         a = clamp(0.5 - (along - stroke) / feather, 0.0, 1.0);
     }
-    let cut = min(in.pos.xy - in.clip.xy, in.clip.zw - in.pos.xy);
+    let at = in.pos.xy + g.origin;
+    let cut = min(at - in.clip.xy, in.clip.zw - at);
     a *= clamp(min(cut.x, cut.y) + 0.5, 0.0, 1.0);
 
     let unit = clamp((in.local + in.half) / (2.0 * in.half), vec2<f32>(0.0), vec2<f32>(1.0));

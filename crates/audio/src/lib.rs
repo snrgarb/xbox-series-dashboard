@@ -106,16 +106,18 @@ impl Audio {
 
     /// Starts the clip called `name`, over whatever else is playing; the same clip can play over itself. Returns
     /// at once: the mixer thread does the rest. A name with no clip is silent, as is everything when muted or with
-    /// no device.
-    pub fn play(&mut self, name: &str) {
+    /// no device. Says how many seconds of sound it started, for whoever must wait for its end: 0 when silent.
+    pub fn play(&mut self, name: &str) -> f32 {
         if self.level() <= 0.0 {
-            return;
+            return 0.0;
         }
-        let Some((id, name, clip)) = self.clips.get(name) else { return };
+        let Some((id, name, clip)) = self.clips.get(name) else { return 0.0 };
         let (level, log_plays) = (self.level(), self.log_plays);
         let mixer = self.mixer.get_or_insert_with(|| start_mixer(level, log_plays));
-        if let Some(mixer) = mixer {
-            let _ = mixer.send(Command::Play { id: *id, name: name.clone(), clip: clip.clone() });
+        let Some(mixer) = mixer else { return 0.0 };
+        match mixer.send(Command::Play { id: *id, name: name.clone(), clip: clip.clone() }) {
+            Ok(()) => clip.seconds(),
+            Err(_) => 0.0,
         }
     }
 }

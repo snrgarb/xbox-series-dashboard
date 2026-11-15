@@ -32,8 +32,10 @@ pub struct Args {
     log_sounds: bool,
     /// Say every few seconds how many frames were drawn: what an idle Dashboard is checked by.
     log_frames: bool,
-    /// Say where Home's focus goes.
+    /// Say where focus goes: Home's, the Guide's, a dialog's.
     log_focus: bool,
+    /// Turning off, restarting and sleeping are said in the log and not done.
+    dry_power: bool,
 }
 
 impl Args {
@@ -50,7 +52,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 }
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
-                 [--media <dir>] [--log-sounds] [--log-frames] [--log-focus]
+                 [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>]";
@@ -102,6 +104,7 @@ fn parse_args() -> Result<Args, String> {
             "--log-sounds" => args.log_sounds = true,
             "--log-frames" => args.log_frames = true,
             "--log-focus" => args.log_focus = true,
+            "--dry-power" => args.dry_power = true,
             _ => return Err(format!("unknown argument {arg}")),
         }
     }

@@ -6,6 +6,16 @@ use std::path::PathBuf;
 
 pub use sound::Sound;
 
+/// What Power can do to the machine (`docs/spec/guide.md`, section 6.2). The Dashboard's core only ever asks for
+/// one; carrying it out is the shell's, behind `shell::Power`. Leaving to the desktop is not one of them: that is
+/// the Dashboard's own to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PowerCommand {
+    TurnOff,
+    Restart,
+    Sleep,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Game {
     /// The game's row in the library database, the same for as long as the database lives. 0 for a game that is in

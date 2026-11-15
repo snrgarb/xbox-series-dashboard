@@ -3,6 +3,9 @@
 //! the screen's top right, the Status area. Over Home it is drawn in Home's window; over a running game on the
 //! Overlay, where its dim is over the game. The same code draws both.
 //!
+//! Over it come its dialogs, which take the pad while they are up: Power, a band across the screen, and the menu
+//! panel, the running game's menu. Behind one the panel is out of focus under a second dim.
+//!
 //! This file is where focus is and where it goes, and how the Guide comes and goes; each part draws itself in its
 //! own module.
 mod entries;
@@ -12,13 +15,15 @@ mod panel;
 mod status;
 mod utilities;
 
-use model::Library;
+use model::{Library, PowerCommand};
 use ui::{Button, Color, Ease, Gradient, Press, Rect, TextStyle, Ui};
 
 pub use self::entries::{Entry, Kind};
 pub use self::status::{PcBattery, Status};
 pub use self::utilities::Utility;
+use crate::menu_panel::{self, Answer, MenuPanel, Row};
 use crate::theme::ACCENT_LIGHT;
+use crate::wide_dialog::{self, Tile, WideDialog};
 
 /// The panel slides in over 120 ms and out over 150; what is on it comes in 50 ms behind it.
 const OPEN_SECONDS: f32 = 0.12;
@@ -32,6 +37,11 @@ const TAB_SECONDS: f32 = 0.12;
 /// The dim over everything behind the Guide: black at 56%.
 const DIM: Color = Color::argb(0x8F000000);
 const HEADING: TextStyle = TextStyle::new(ui::Font::Display, 33.0, 400);
+/// The dim under a dialog, over everything else of the Guide: black at 70%.
+const DIALOG_DIM: Color = Color::argb(0xB3000000);
+/// How far out of focus the panel is behind a dialog: WPF's blur radius. Nothing of it shows further than that
+/// outside the panel.
+const BEHIND_BLUR: f32 = 12.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -67,7 +77,54 @@ pub enum GuideAction {
     Launch(usize),
     /// Quit the running game.
     QuitGame,
+    /// A opened a dialog over the Guide: there is nothing to carry out.
+    Asked,
+    /// A Power option was chosen: close, then carry it out.
+    Power(PowerChoice),
+}
+
+/// Power's options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerChoice {
+    /// Something asked of the machine.
+    Machine(PowerCommand),
+    /// Leave to the desktop: the Bundle's Exit Playnite.
     Exit,
+}
+
+/// What a row of one of the Guide's menus stands for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuChoice {
+    QuitGame,
+}
+
+/// A dialog over the Guide. It takes every press but the Guide button's.
+#[derive(Debug, Clone, PartialEq)]
+enum Dialog {
+    Power(WideDialog<PowerChoice>),
+    Menu(MenuPanel<MenuChoice>),
+}
+
+/// Which dialog is up over the Guide and where focus is in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogFocus {
+    Power(wide_dialog::Focus),
+    /// A menu panel: whether it is a prompt, and its focused row from the top.
+    Menu {
+        prompt: bool,
+        row: usize,
+    },
+}
+
+fn power() -> WideDialog<PowerChoice> {
+    let machine = PowerChoice::Machine;
+    let tiles = vec![
+        Tile::new('\u{E7E8}', "Turn off PC", machine(PowerCommand::TurnOff)),
+        Tile::new('\u{E72C}', "Restart PC", machine(PowerCommand::Restart)),
+        Tile::new('\u{E708}', "Sleep", machine(PowerCommand::Sleep)),
+        Tile::new('\u{F3B1}', "Exit to desktop", PowerChoice::Exit),
+    ];
+    WideDialog::new("What do you want to do?", tiles)
 }
 
 /// What the Guide's lists are made from.
@@ -96,6 +153,12 @@ pub struct Guide {
     utilities: Vec<Utility>,
     focus: Focus,
     open: bool,
+    /// Whether the panel shows while the Guide is open. It does not when Power came by a hold of the Guide button:
+    /// then there is the dim and Power, and closing Power closes the Guide.
+    panel: bool,
+    /// The dialog up over the Guide, and how many have come up: each comes in once.
+    dialog: Option<Dialog>,
+    asked: u32,
     /// Whether any of it showed when last drawn: the panel still sliding away, or the dim still fading.
     shown: bool,
     /// How many times the tab has changed since the Guide opened, and which way the last change went: -1 for the
@@ -116,6 +179,9 @@ impl Default for Guide {
             utilities: Vec::new(),
             focus: Focus::Entry(0),
             open: false,
+            panel: true,
+            dialog: None,
+            asked: 0,
             shown: false,
             turns: (0, 0.0),
             lag: 0.0,
@@ -127,13 +193,53 @@ impl Default for Guide {
 impl Guide {
     /// Opens on the landing tab with focus on Home, always: the Guide remembers nothing from the last time.
     pub fn open(&mut self, around: Around) {
+        self.open_on(Tab::Landing, around);
+    }
+
+    /// Opens on a tab, focus on its first entry: Home's profile opens the Guide on Profile & system.
+    pub fn open_on(&mut self, tab: Tab, around: Around) {
         self.open = true;
+        self.panel = true;
+        self.dialog = None;
         self.turns = (0, 0.0);
-        self.show(Tab::Landing, around);
+        self.show(tab, around);
+    }
+
+    /// Power, by a hold of the Guide button: over the dim alone. An open Guide's panel slides away under it and a
+    /// dialog that was up is gone; a closed Guide opens with no panel. Closing Power then closes the Guide.
+    pub fn open_power(&mut self, around: Around) {
+        if !self.open {
+            self.open(around);
+        }
+        self.panel = false;
+        self.ask_power();
+    }
+
+    /// Puts Power up, focus on Close. Power taking its own place is the same showing of it: it does not come in
+    /// again.
+    fn ask_power(&mut self) {
+        if !matches!(self.dialog, Some(Dialog::Power(_))) {
+            self.asked += 1;
+        }
+        self.dialog = Some(Dialog::Power(power()));
     }
 
     pub fn close(&mut self) {
         self.open = false;
+        self.dialog = None;
+    }
+
+    /// The dialog up over the Guide, if one is, and where its focus is.
+    pub fn dialog(&self) -> Option<DialogFocus> {
+        match self.dialog.as_ref()? {
+            Dialog::Power(power) => Some(DialogFocus::Power(power.focus())),
+            Dialog::Menu(menu) => Some(DialogFocus::Menu { prompt: menu.is_prompt(), row: menu.focus() }),
+        }
+    }
+
+    /// Whether the panel shows: not when Power came by a hold.
+    pub fn panel_shown(&self) -> bool {
+        self.panel
     }
 
     pub fn is_open(&self) -> bool {
@@ -190,14 +296,22 @@ impl Guide {
         if let Focus::Entry(at) = self.focus {
             self.focus = Focus::Entry(at.min(self.entries.len().saturating_sub(1)));
         }
+        // A menu whose game has stopped by itself goes, in silence.
+        if matches!(self.dialog, Some(Dialog::Menu(_))) && around.playing.is_none() {
+            self.dialog = None;
+        }
         self.scroll_to_focus();
     }
 
     /// The pad while the Guide is open. What a press asks for beyond the Guide itself is returned for the Dashboard
-    /// to carry out. Only a direction held down repeats.
+    /// to carry out. Only a direction held down repeats. A dialog that is up takes every press but the Guide
+    /// button's, which closes the Guide whatever is up.
     pub fn press(&mut self, press: Press, around: Around) -> Option<GuideAction> {
         if press.repeat && !press.button.is_direction() {
             return None;
+        }
+        if self.dialog.is_some() {
+            return if press.button == Button::Guide { Some(GuideAction::Close) } else { self.answer(press) };
         }
         let last = self.entries.len().checked_sub(1);
         match (press.button, self.focus) {
@@ -217,22 +331,50 @@ impl Guide {
             }
             (Button::LeftBumper, _) => self.turn(-1, around),
             (Button::RightBumper, _) => self.turn(1, around),
-            (Button::A, Focus::Entry(at)) => return self.entries.get(at).and_then(|entry| select(entry, around)),
+            (Button::A, Focus::Entry(at)) => {
+                let action = self.entries.get(at).and_then(|entry| select(entry, around));
+                if action == Some(GuideAction::Asked) {
+                    self.ask_power();
+                }
+                return action;
+            }
             // Search opens its page, at Home: bringing the Dashboard in front of a running game is #40's.
             (Button::A, Focus::Utility(at)) if self.utilities.get(at) == Some(&Utility::Search) => {
                 return around.playing.is_none().then_some(GuideAction::Search);
             }
             // The Utilities' Flyouts (#41) are yet to come.
             (Button::A, Focus::Utility(_)) => {}
-            // The running game's menu (#40) is yet to come: until it does, Menu is its one option, Quit.
+            // The running game's menu: its name, and Quit.
             (Button::Menu, Focus::Entry(at)) if self.entries.get(at).is_some_and(Entry::has_menu) => {
-                return Some(GuideAction::QuitGame);
+                let rows = vec![Row::new(menu_panel::icon::QUIT, "Quit", MenuChoice::QuitGame)];
+                self.dialog = Some(Dialog::Menu(MenuPanel::menu(&self.entries[at].title, rows)));
+                self.asked += 1;
             }
             (Button::B | Button::Guide, _) => return Some(GuideAction::Close),
             _ => {}
         }
         self.scroll_to_focus();
         None
+    }
+
+    /// A press while a dialog is up. Choosing an option closes the dialog and is the Dashboard's to carry out.
+    /// B, and Close in Power, close it onto the Guide where it was, or close the Guide with it when there is no
+    /// panel to go back to.
+    fn answer(&mut self, press: Press) -> Option<GuideAction> {
+        let action = match self.dialog.as_mut()? {
+            Dialog::Power(power) => match power.press(press) {
+                Answer::Chose(Some(choice)) => Some(GuideAction::Power(choice)),
+                Answer::Chose(None) | Answer::Declined => (!self.panel).then_some(GuideAction::Close),
+                Answer::Moved | Answer::Nothing => return None,
+            },
+            Dialog::Menu(menu) => match menu.press(press) {
+                Answer::Chose(MenuChoice::QuitGame) => Some(GuideAction::QuitGame),
+                Answer::Declined => (!self.panel).then_some(GuideAction::Close),
+                Answer::Moved | Answer::Nothing => return None,
+            },
+        };
+        self.dialog = None;
+        action
     }
 
     /// The tab `by` places along, stopping at either end; focus goes to its first entry.
@@ -259,15 +401,22 @@ impl Guide {
         }
         // The panel slides in fast and settling, and out slowly then fast; the dim fades evenly with it, and not
         // at all under Reduce motion, as in the Bundle.
+        // The panel is in while the Guide is open, unless Power came by a hold: then it slides away, or never
+        // comes, under a dim that stays.
+        let panel = self.open && self.panel;
         let (to, seconds, ease) =
-            if self.open { (0.0, OPEN_SECONDS, Ease::CubicOut) } else { (OFFSCREEN, CLOSE_SECONDS, Ease::CubicIn) };
+            if panel { (0.0, OPEN_SECONDS, Ease::CubicOut) } else { (OFFSCREEN, CLOSE_SECONDS, Ease::CubicIn) };
         let slide = ui.slide_from("guide slide", OFFSCREEN, to, seconds, ease);
-        let fade = if ui.store.reduce_motion { 0.0 } else { seconds };
+        let fade = match (ui.store.reduce_motion, self.open) {
+            (true, _) => 0.0,
+            (false, true) => OPEN_SECONDS,
+            (false, false) => CLOSE_SECONDS,
+        };
         let dim = ui.tween_from("guide dim", 0.0, if self.open { 1.0 } else { 0.0 }, fade, Ease::Linear);
         // What is on the panel comes in a moment behind it, and goes out with it, held where it is: a close
         // before it has started never brings it in after.
         let whole = CONTENT_LAG_SECONDS + OPEN_SECONDS;
-        self.lag = if self.open {
+        self.lag = if panel {
             ui.slide_from("guide contents", 0.0, 1.0, whole, Ease::Linear)
         } else {
             ui.tween("guide contents", self.lag, 0.0, Ease::Linear)
@@ -286,17 +435,45 @@ impl Guide {
         ui.layer();
         ui.with_alpha(dim, |ui| {
             ui.fill(screen, DIM, 0.0);
-            top_shade(ui, screen);
-            ui.with_offset(screen.x, 0.0, |ui| hints::draw(ui, focused.is_some_and(Entry::has_menu)));
-            status::draw(ui, face.status, face.clock, face.pad);
+            // What stands beside the panel goes with it, at once. A dialog over the panel leaves it be.
+            if self.panel {
+                top_shade(ui, screen);
+                ui.with_offset(screen.x, 0.0, |ui| hints::draw(ui, focused.is_some_and(Entry::has_menu)));
+                status::draw(ui, face.status, face.clock, face.pad);
+            }
         });
-        // The panel stays at the screen's left, whatever the screen's shape.
-        ui.with_offset(screen.x + slide, 0.0, |ui| {
-            panel::background(ui);
-            ui.with_offset(behind, 0.0, |ui| {
-                panel::tabs(ui, &self.tabs, self.tab);
-                self.content(ui, around, face);
+        // The panel stays at the screen's left, whatever the screen's shape. Behind a dialog it is one picture,
+        // out of focus.
+        if slide > OFFSCREEN {
+            ui.with_offset(screen.x + slide, 0.0, |ui| {
+                if self.dialog.is_some() {
+                    let bounds = panel::PANEL.grow(BEHIND_BLUR);
+                    ui.group(bounds, BEHIND_BLUR, 1.0, |ui| self.panel(ui, behind, around, face));
+                } else {
+                    self.panel(ui, behind, around, face);
+                }
             });
+        }
+        // The dialog, over a dim of its own that is there at once, as the dialog is.
+        if let Some(dialog) = self.dialog.as_ref().filter(|_| self.open) {
+            ui.layer();
+            ui.fill(screen, DIALOG_DIM, 0.0);
+            match dialog {
+                Dialog::Power(power) => power.draw(ui, self.asked),
+                Dialog::Menu(menu) => {
+                    let at = menu.centred(ui);
+                    menu.draw(ui, at);
+                }
+            }
+        }
+    }
+
+    /// The panel and what is on it, which is `behind` to its left while it comes in.
+    fn panel(&self, ui: &mut Ui, behind: f32, around: Around, face: &Face) {
+        panel::background(ui);
+        ui.with_offset(behind, 0.0, |ui| {
+            panel::tabs(ui, &self.tabs, self.tab);
+            self.content(ui, around, face);
         });
     }
 
@@ -361,8 +538,7 @@ fn select(entry: &Entry, around: Around) -> Option<GuideAction> {
         Kind::Running(_) => Some(GuideAction::Resume),
         // With a game running, a recent game asks "Quit X and start Y?" first (#40).
         Kind::Recent(game) => (!playing).then_some(GuideAction::Launch(game)),
-        // Power's dialog (#39) is yet to come: until it does, Power at Home is its last option, the way out.
-        Kind::Power => (!playing).then_some(GuideAction::Exit),
+        Kind::Power => Some(GuideAction::Asked),
         // As Home: these open their pages at Home.
         Kind::MyGames => (!playing).then_some(GuideAction::MyGames),
         Kind::Settings => (!playing).then_some(GuideAction::Settings),

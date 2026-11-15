@@ -2011,6 +2011,7 @@ name = "shell"
 version = "0.0.0"
 dependencies = [
  "log",
+ "model",
  "pollster",
  "render",
  "tempfile",

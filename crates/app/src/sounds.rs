@@ -135,12 +135,14 @@ impl Sounds {
         Sounds { audio, turns: [0; Sound::ALL.len()] }
     }
 
-    /// Plays the sound's file, or of several the one whose turn it is. Returns at once.
-    pub fn play(&mut self, sound: Sound) {
+    /// Plays the sound's file, or of several the one whose turn it is. Returns at once, with how many seconds of
+    /// sound it started: 0 when there is no file, no device or no volume.
+    pub fn play(&mut self, sound: Sound) -> f32 {
         let files = sound.files();
         let turn = &mut self.turns[Sound::ALL.iter().position(|s| *s == sound).unwrap_or(0)];
-        self.audio.play(files[*turn % files.len()]);
+        let seconds = self.audio.play(files[*turn % files.len()]);
         *turn = (*turn + 1) % files.len();
+        seconds
     }
 }
 
@@ -166,10 +168,9 @@ mod tests {
         // The Bundle's two folders, as Playnite lays them out.
         let extension = playnite.join("Extensions").join(BUNDLE_EXTENSION).join("Sounds");
         let theme = playnite.join("Themes").join("Fullscreen").join(BUNDLE_THEME).join("audio");
-        tones(
-            &extension,
-            &["Navigate1.wav", "Navigate2.wav", "Navigate3.wav", "Navigate4.wav", "Enter.wav", "OpenMenu.wav"],
-        );
+        let navigate = ["Navigate1.wav", "Navigate2.wav", "Navigate3.wav", "Navigate4.wav"];
+        tones(&extension, &navigate);
+        tones(&extension, &["Enter.wav", "OpenMenu.wav", "PromptOpen.wav", "PromptClose.wav", "PowerOff.wav"]);
         tones(&theme, &["navigation.wav", "activation.wav"]);
 
         // Nothing in the data folder: the Bundle's, every one.

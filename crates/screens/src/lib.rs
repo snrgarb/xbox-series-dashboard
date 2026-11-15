@@ -9,18 +9,20 @@ pub mod guide;
 pub mod hint_bar;
 pub mod home;
 pub mod launch;
+pub mod menu_panel;
 pub mod my_games;
 pub mod pages;
 pub mod search;
 pub mod settings;
 pub mod spinner;
 pub mod theme;
+pub mod wide_dialog;
 
 use model::Library;
-pub use model::Sound;
+pub use model::{PowerCommand, Sound};
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
-use crate::guide::{Around, Face, Guide, GuideAction, Status};
+use crate::guide::{Around, DialogFocus, Face, Guide, GuideAction, PowerChoice, Status, Tab};
 use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
@@ -34,12 +36,13 @@ pub enum Effect {
     QuitGame,
     /// The Guide closed: over a game, the game gets the foreground back.
     GuideClosed,
-    /// Leave to the desktop.
+    /// Leave to the desktop: Power's Exit to desktop.
     Exit,
     /// Play this sound, if there is a file for it.
     Sound(Sound),
-    /// The Guide button was held: Power (docs/spec/guide.md, 7.1).
-    PowerHold,
+    /// Turn the machine off, restart it or put it to sleep: chosen in Power (docs/spec/guide.md, 6.2). Whoever
+    /// carries effects out decides whether that is for real; nothing in this crate can do it.
+    Power(PowerCommand),
 }
 
 /// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
@@ -202,7 +205,7 @@ impl Dashboard {
 
     /// What a pad says happened. A button going down is a `press`. The Guide button is a tap or a hold
     /// (docs/spec/guide.md, 7.1): a tap closes an open Guide as the button is let go, and opens a closed one when
-    /// the tap is told, 300 ms after the button went down; a hold asks for Power and opens nothing.
+    /// the tap is told, 300 ms after the button went down; a hold opens Power, with no panel.
     pub fn pad_event(&mut self, event: PadEvent) {
         let guide = Press { button: Button::Guide, repeat: false };
         match event {
@@ -233,9 +236,7 @@ impl Dashboard {
             }
             PadEvent::GuideHeld => {
                 self.guide_button_spent = true;
-                if self.guide_enabled {
-                    self.effects.push(Effect::PowerHold);
-                }
+                self.open_power();
             }
         }
     }
@@ -254,29 +255,64 @@ impl Dashboard {
     /// the keyboard's, and a test's. A pad's is told by `pad_event`. The sound is asked for before anything else the press
     /// asks of the shell, and is decided here for every screen, by what the press changed: a move that went
     /// nowhere, B, and the Guide closing are silent, as they are in the Bundle.
+    ///
+    /// A dialog over the Guide has sounds of its own: one for its coming up, after A's if A brought it; a move's;
+    /// A's on an option, which in a prompt is the sound of its closing; and B's, the closing's. A tap of the Guide
+    /// button closes whatever is up in silence.
     pub fn press(&mut self, press: Press) {
         let (was_open, guide) = (self.guide.is_open(), self.guide.focus());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
         let (depth, focus) = (self.pages.depth(), self.focus_line());
+        let dialog = self.guide.dialog();
         let asked = self.effects.len();
         let activated = self.steer(press);
-        let sound = if was_open {
-            if activated {
-                Some(Sound::GuideSelect)
-            } else {
-                (self.guide.is_open() && self.guide.focus() != guide).then_some(Sound::GuideMove)
+        let select = activated.then_some(Sound::GuideSelect);
+        let sounds = match (dialog, self.guide.dialog()) {
+            (None, Some(_)) => [select, Some(Sound::PromptOpen)],
+            (Some(was), Some(now)) => [(was != now).then_some(Sound::GuideMove), None],
+            (Some(was), None) => {
+                let chose = match was {
+                    DialogFocus::Menu { prompt: true, .. } => Sound::PromptClose,
+                    _ => Sound::GuideSelect,
+                };
+                match press.button {
+                    Button::A => [Some(chose), None],
+                    Button::B => [Some(Sound::PromptClose), None],
+                    _ => [None, None],
+                }
             }
-        } else if self.guide.is_open() {
-            Some(Sound::GuideOpen)
-        } else if activated {
-            Some(Sound::Activate)
-        } else {
-            (self.pages.depth() == depth && self.focus_line() != focus).then_some(Sound::Move)
+            (None, None) if was_open => {
+                let moved = self.guide.is_open() && self.guide.focus() != guide;
+                [select.or(moved.then_some(Sound::GuideMove)), None]
+            }
+            (None, None) if self.guide.is_open() => [Some(Sound::GuideOpen), None],
+            (None, None) if activated => [Some(Sound::Activate), None],
+            (None, None) => {
+                let moved = self.pages.depth() == depth && self.focus_line() != focus;
+                [moved.then_some(Sound::Move), None]
+            }
         };
-        if let Some(sound) = sound {
-            self.effects.insert(asked, Effect::Sound(sound));
+        for (at, sound) in sounds.into_iter().flatten().enumerate() {
+            self.effects.insert(asked + at, Effect::Sound(sound));
         }
+    }
+
+    /// Power, by a hold of the Guide button (docs/spec/guide.md, 7.1): over the dim alone, wherever the Dashboard
+    /// is. An open Guide's panel slides away under it. Not with the Guide setting off, nor while a game starts, nor
+    /// over a game with no Overlay to show it on.
+    fn open_power(&mut self) {
+        let nowhere = self.playing.is_some() && !self.has_overlay;
+        if !self.guide_enabled || nowhere || (self.launch.up() && !self.guide.is_open()) {
+            return;
+        }
+        if !self.guide.is_open() {
+            // As the Guide opens: on the Overlay where there is one, which keeps the foreground if it still has it.
+            self.guide_overlaid = self.has_overlay;
+            self.release_awaited = None;
+        }
+        self.guide.open_power(Around { library: &self.library, playing: self.playing, discord: self.status.discord });
+        self.effects.push(Effect::Sound(Sound::PromptOpen));
     }
 
     /// Gives the press to whatever takes input now. True when it was A and it chose something.
@@ -316,17 +352,20 @@ impl Dashboard {
         }
         match self.home.press(press.button, &self.library) {
             Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
-            Some(HomeAction::OpenGuide) if !press.repeat && self.guide_enabled => self.open_guide(),
+            // The profile opens the Guide where the profile is.
+            Some(HomeAction::OpenGuide) if !press.repeat && self.guide_enabled => {
+                self.open_guide_on(Tab::ProfileAndSystem);
+            }
             Some(HomeAction::Open(open)) if !press.repeat => {
                 let on_button = matches!(self.home.focus(), Focus::TopBar(TopButton::Search | TopButton::Settings));
                 self.pages.open(open);
                 self.back_to_button = on_button && press.button == Button::A;
             }
-            // The Guide on its Discord tab while Discord is connected (M6, which is when the Guide learns to open
-            // on a tab); with no such tab, or the Guide off, Settings on Discord.
+            // The Guide on its Discord tab while Discord is connected (M6); with no such tab, or the Guide off,
+            // Settings on Discord.
             Some(HomeAction::Discord) if !press.repeat => {
                 if self.status.discord && self.guide_enabled {
-                    self.open_guide();
+                    self.open_guide_on(Tab::Discord);
                 } else {
                     self.open_page(Open::Settings(settings::Entry::Discord));
                 }
@@ -379,6 +418,21 @@ impl Dashboard {
         }
     }
 
+    /// The Guide's own line beside `focus_line`'s, written the same way and logged as `guide: ...` when it
+    /// changes: `closed`, or the tab and focus (`ProfileAndSystem Entry(3)`), then `, no panel` when Power came by
+    /// a hold, then the dialog up over it and its focus (`, dialog Power(Close)`).
+    pub fn guide_line(&self) -> String {
+        if !self.guide.is_open() {
+            return "closed".into();
+        }
+        let (tab, focus) = self.guide.focus();
+        let panel = if self.guide.panel_shown() { "" } else { ", no panel" };
+        match self.guide.dialog() {
+            Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}"),
+            None => format!("{tab:?} {focus:?}{panel}"),
+        }
+    }
+
     /// The hints the hint bar shows now: those of whatever has the pad, and none under the Guide.
     pub fn hints(&self) -> &'static [hint_bar::Hint] {
         if self.guide.is_open() {
@@ -407,7 +461,16 @@ impl Dashboard {
                 self.close_guide();
                 self.effects.push(Effect::Launch(game));
             }
-            GuideAction::Exit => self.effects.push(Effect::Exit),
+            GuideAction::Asked => {}
+            // The Guide closes first; then what was chosen is the shell's to do.
+            GuideAction::Power(choice) => {
+                self.close_guide();
+                match choice {
+                    PowerChoice::Machine(command) => self.effects.push(Effect::Power(command)),
+                    // Leaving has a sound of its own, which whoever leaves lets play out first.
+                    PowerChoice::Exit => self.effects.extend([Effect::Sound(Sound::PowerOff), Effect::Exit]),
+                }
+            }
         }
     }
 
@@ -419,11 +482,17 @@ impl Dashboard {
 
     /// Opens the Guide, whatever the Guide setting says: that is for the Guide button.
     pub fn open_guide(&mut self) {
+        self.open_guide_on(Tab::Landing);
+    }
+
+    /// Opens the Guide on a tab.
+    pub fn open_guide_on(&mut self, tab: Tab) {
         // Over a game the Guide is on the Overlay; with no Overlay there is nowhere to show it.
         if self.playing.is_some() && !self.has_overlay {
             return;
         }
-        self.guide.open(Around { library: &self.library, playing: self.playing, discord: self.status.discord });
+        let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+        self.guide.open_on(tab, around);
         self.guide_overlaid = self.has_overlay;
         // Opened again before the foreground went back: the Overlay still has it, and keeps it.
         self.release_awaited = None;

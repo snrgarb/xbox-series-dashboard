@@ -2,9 +2,11 @@
 //! launching a game through Steam and following it until it ends, and holding it still under the Guide. Anywhere
 //! but Windows there is no Overlay, nothing can be launched and nothing is frozen, and the same calls say so or do
 //! nothing.
+//! Turning the machine off is behind a trait, so that only a run that means it can do it.
 pub mod freeze;
 mod launch;
 pub mod overlay;
+pub mod power;
 
 use std::sync::OnceLock;
 use std::time::Instant;
