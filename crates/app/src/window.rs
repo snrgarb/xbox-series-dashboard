@@ -79,6 +79,8 @@ struct App {
     /// When the library had been read, in ms since the process started.
     library_ready: f64,
     sounds: Sounds,
+    /// With --log-focus: say where Home's focus went, for a test that must know before it presses on.
+    log_focus: bool,
     /// The minute of the day Home's last frame showed on its clock.
     minute: u64,
     /// With --log-frames: the frames Home's window and the Overlay drew since they were last said, and when.
@@ -129,6 +131,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
+        log_focus: args.log_focus,
         minute: minute(),
         frames: args.log_frames.then(|| (0, 0, Instant::now())),
     };
@@ -361,8 +364,12 @@ impl ApplicationHandler for App {
         }
 
         let pressed = !presses.is_empty();
+        let focus = self.dashboard.home_focus();
         for press in presses {
             self.dashboard.press(press);
+        }
+        if self.log_focus && self.dashboard.home_focus() != focus {
+            eprintln!("focus: {:?}", self.dashboard.home_focus());
         }
         self.overlay_stale |= pressed;
         self.carry_out(event_loop);

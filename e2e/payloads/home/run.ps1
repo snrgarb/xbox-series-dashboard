@@ -53,7 +53,7 @@ try {
     $library = Initialize-FakeSteam
     $media = Join-Path $Out 'media'
     & (Join-Path $PSScriptRoot 'standin.exe') make-tones $media | Out-Null
-    $arguments = @('--media', "`"$media`"", '--log-sounds', '--log-frames')
+    $arguments = @('--media', "`"$media`"", '--log-sounds', '--log-frames', '--log-focus')
 
     $script:dashboard = Start-Dashboard $arguments
     $first = Wait-DashboardLog 'first frame presented' 60
@@ -79,9 +79,18 @@ try {
     Step Up '09-up-group-1'
     Step Up '10-up-wide-tiles'
     Step Down ''
-    # Down from a wide tile lands on the Group's first tile; See all is its seventh.
-    1..5 | ForEach-Object { Step Right '' 500 }
-    Step Right '11-see-all' 4000
+    # Along the Group to See all, its seventh card, a press at a time by what --log-focus says: a press held
+    # 120 ms can repeat where the VM's clock jumps.
+    $seeAll = 'focus: Group { group: 0, card: 6 }'
+    $at = { @(Get-Content $DashboardLog | Select-String '^focus:') | Select-Object -Last 1 | ForEach-Object Line }
+    foreach ($press in 1..12) {
+        if ((& $at) -eq $seeAll) { break }
+        Step Right '' 800
+    }
+    if ((& $at) -ne $seeAll) { $script:failures += "See all was not reached: $(& $at)" }
+    Start-Sleep -Milliseconds 4000
+    Save-Screen '11-see-all'
+    Say "at See all: $(& $at)"
     Push-Button B
     Start-Sleep -Milliseconds 2500
     Save-Screen '12-b-recent'
