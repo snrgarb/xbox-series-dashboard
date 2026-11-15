@@ -6,6 +6,7 @@
 //! other that shows the Launch screen and the Guide, over a running game and over Home alike. `overlay` says what
 //! the Overlay is wanted for, which the executable follows by showing and hiding it.
 //! Toasts are a third (`draw_toasts`), for the strip above both.
+pub mod game_hub;
 pub mod guide;
 pub mod hint_bar;
 pub mod home;
@@ -21,6 +22,8 @@ pub mod theme;
 pub mod tile_menu;
 pub mod toasts;
 pub mod wide_dialog;
+
+use std::time::{Duration, Instant};
 
 use model::{Audio, Flow, Library};
 pub use model::{PowerCommand, Sound};
@@ -171,6 +174,11 @@ pub struct Dashboard {
     held: Vec<Button>,
     /// The system's sound as the shell last read it, which the Audio Flyout shows.
     audio: Audio,
+    /// The Dashboard's clock: where the time it is told (`advance`, `toasts_presented`) has brought it. Nothing in
+    /// the Dashboard reads the system's.
+    now: Instant,
+    /// How long from `now` until the double tap's wait is over, if one is waited out (`wait_out`).
+    waiting: Option<Duration>,
     effects: Vec<Effect>,
 }
 
@@ -203,6 +211,8 @@ impl Dashboard {
             timed: false,
             held: Vec::new(),
             audio: Audio::default(),
+            now: Instant::now(),
+            waiting: None,
             effects: Vec::new(),
         }
     }
@@ -348,7 +358,7 @@ impl Dashboard {
     }
 
     fn around(&self) -> pages::Around<'_> {
-        pages::Around { library: &self.library, playing: self.playing, options: self.options }
+        pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now }
     }
 
     /// How a held direction repeats now, for whoever times the pad: in the Guide and in a dialog at their pace
@@ -373,9 +383,10 @@ impl Dashboard {
     /// everywhere else, and anything else nothing.
     pub fn typed(&mut self, typed: keyboard::Typed) -> bool {
         self.page_has_pad()
-            && self
-                .pages
-                .typed(typed, pages::Around { library: &self.library, playing: self.playing, options: self.options })
+            && self.pages.typed(
+                typed,
+                pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now },
+            )
     }
 
     /// What a pad says happened. A button going down is a `press`. The Guide button is a tap or a hold
@@ -428,6 +439,9 @@ impl Dashboard {
     /// Toasts are timed by it, since the Dashboard has no clock: one that begins to show asks for its sound. True
     /// when what `draw_toasts` draws may have changed.
     ///
+    /// It is the Dashboard's one clock (docs/ui.md, "The pad's timing"), with `toasts_presented`: a press is at the
+    /// time the two have brought it to. Besides Toasts, what it times is the double tap of A on a game's tile, whose
+    /// Game hub opens once it is over with no second A (docs/spec/game-hub.md, 9.1), and Play history's the same.
     /// The quit of a game is timed by it too (docs/spec/guide.md, 7.4): "Force quit?" once the game has had
     /// `QUIT_TIMEOUT` to close, and the Guide closing `CLOSE_AFTER_QUIT` after a game quit from it has stopped.
     /// Whether anything came of that is `take_timed`'s to say.
@@ -440,8 +454,11 @@ impl Dashboard {
         before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
     }
 
-    /// The time the quit of a game goes by.
+    /// The time the double tap and the quit of a game go by.
     fn pass(&mut self, seconds: f32) {
+        // To the microsecond: steps a test adds up land where it says, not a hair short.
+        self.now += Duration::from_micros((f64::from(seconds) * 1e6).round().max(0.0) as u64);
+        self.timed |= self.wait_out();
         let due = self.quit.as_mut().filter(|quit| !quit.asked).is_some_and(|quit| {
             quit.left -= seconds;
             quit.left <= 0.0
@@ -460,8 +477,8 @@ impl Dashboard {
         }
     }
 
-    /// Whether the time told since this was last asked changed what the Guide shows: "Force quit?" came up, or
-    /// the Guide closed after a quit.
+    /// Whether the time told since this was last asked changed what is shown: "Force quit?" came up, the Guide
+    /// closed after a quit, or a Game hub opened at the end of the double tap's wait.
     pub fn take_timed(&mut self) -> bool {
         std::mem::take(&mut self.timed)
     }
@@ -469,7 +486,48 @@ impl Dashboard {
     /// How soon `advance` has something to do, in seconds: None when nothing is being timed.
     pub fn timer(&self) -> Option<f32> {
         let quit = self.quit.filter(|quit| !quit.asked).map(|quit| quit.left);
-        [quit, self.close_in].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+        let tap = self.waiting.map(|left| left.as_secs_f32());
+        [quit, self.close_in, tap].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+    }
+
+    /// The double tap's wait, at `now`: the Game hub of the game whose tile A chose on Home once its time has
+    /// passed with no second A, or what the top page's own wait brings (Play history's, for the same double tap).
+    /// What its time brings while something else has the pad is dropped. Keeps how long is left in `waiting`, and
+    /// is true when something opened.
+    fn wait_out(&mut self) -> bool {
+        let now = self.now;
+        let free = !self.guide.is_open() && !self.launch.up() && (self.playing.is_none() || self.in_front);
+        self.waiting = None;
+        if !self.pages.is_empty() {
+            // A page over Home has the pad: a tile's A is forgotten.
+            self.home.tap(now, false);
+            let around =
+                pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+            return match self.pages.tick(around) {
+                pages::Tick::Wait(left) if free => {
+                    self.waiting = Some(left);
+                    false
+                }
+                pages::Tick::Act(action) if free => {
+                    self.page_asks(action);
+                    true
+                }
+                _ => false,
+            };
+        }
+        match self.home.tap(now, free) {
+            home::Tap::None => false,
+            home::Tap::Waiting(left) => {
+                self.waiting = Some(left);
+                false
+            }
+            // A game that has left the library since has no hub to show.
+            home::Tap::Hub(game) if game.in_library(&self.library) => {
+                self.open_page(Open::GameHub(game));
+                true
+            }
+            home::Tap::Hub(_) => false,
+        }
     }
 
     /// Whether the running game has been asked to quit and has not stopped yet, nor been given up on: it is not
@@ -601,6 +659,7 @@ impl Dashboard {
     /// opening, after the sound of what opened it; a move along its rows; A on a row, which in a prompt is the
     /// sound of its closing; B at every level. A move with nowhere to go is silent there too.
     pub fn press(&mut self, press: Press) {
+        let now = self.now;
         let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
@@ -608,7 +667,7 @@ impl Dashboard {
         let dialog = self.guide.dialog();
         let page_dialog = self.pages.dialog();
         let asked = self.effects.len();
-        let activated = self.steer(press);
+        let activated = self.steer(press, now);
         self.settle_quit();
         let select = activated.then_some(Sound::GuideSelect);
         let moved = self.pages.depth() == depth && self.focus_place() != focus;
@@ -645,6 +704,43 @@ impl Dashboard {
         for (at, sound) in sounds.into_iter().flatten().enumerate() {
             self.effects.insert(asked + at, Effect::Sound(sound));
         }
+        // What the press set waiting: a tile's A, the double tap's time.
+        self.wait_out();
+    }
+
+    /// Does what the top page asked for.
+    fn page_asks(&mut self, action: PageAction) {
+        let around =
+            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        match action {
+            PageAction::Close => self.close_page(),
+            PageAction::Open(open) => {
+                self.pages.open_over(open, around);
+            }
+            PageAction::Effect(Effect::Set(change)) => self.set(change),
+            // A page's Play is Home's: with another game running it is asked about first.
+            PageAction::Effect(Effect::Launch(game)) => self.play(game),
+            // And a page's Quit is the Guide's, with its ten seconds and "Force quit?".
+            PageAction::Effect(Effect::QuitGame) => self.quit_game(),
+            PageAction::Effect(effect) => self.effects.push(effect),
+            PageAction::CloseWith(effect) => {
+                self.close_page();
+                self.effects.push(effect);
+            }
+            // What was under the page is under the new one: B there comes back to it.
+            PageAction::Replace(open) => {
+                self.pages.close();
+                let around = pages::Around {
+                    library: &self.library,
+                    playing: self.playing,
+                    options: self.options,
+                    now: self.now,
+                };
+                if !self.pages.open_over(open, around) {
+                    self.close_page();
+                }
+            }
+        }
     }
 
     /// Where the Guide's focus is, and the volume: a press that changed any of it moved something.
@@ -678,7 +774,7 @@ impl Dashboard {
     }
 
     /// Gives the press to whatever takes input now. True when it was A and it chose something.
-    fn steer(&mut self, press: Press) -> bool {
+    fn steer(&mut self, press: Press, now: Instant) -> bool {
         if self.guide.is_open() {
             let around = Around {
                 library: &self.library,
@@ -727,44 +823,42 @@ impl Dashboard {
             self.held.retain(|&held| held != press.button);
         }
         if !self.pages.is_empty() {
-            let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
+            let around =
+                pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
             match self.pages.press(press, around) {
-                Some(PageAction::Close) => self.close_page(),
-                Some(PageAction::Open(open)) => {
-                    self.pages.open_over(open, around);
-                }
-                Some(PageAction::Effect(Effect::Set(change))) => self.set(change),
-                // A page's Play is Home's: with another game running it is asked about first.
-                Some(PageAction::Effect(Effect::Launch(game))) => self.play(game),
-                // And a page's Quit is the Guide's, with its ten seconds and "Force quit?".
-                Some(PageAction::Effect(Effect::QuitGame)) => self.quit_game(),
-                Some(PageAction::Effect(effect)) => self.effects.push(effect),
-                Some(PageAction::CloseWith(effect)) => {
-                    self.close_page();
-                    self.effects.push(effect);
-                }
-                // What was under the page is under the new one: B there comes back to it.
-                Some(PageAction::Replace(open)) => {
-                    self.pages.close();
-                    let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
-                    if !self.pages.open_over(open, around) {
-                        self.close_page();
-                    }
-                }
+                Some(action) => self.page_asks(action),
                 None => return false,
             }
             return press.button == Button::A;
         }
-        match self.home.press(press.button, &self.library) {
-            Some(HomeAction::Launch(game)) if !press.repeat => self.play(game),
+        // A held A is one A, not a double tap.
+        if press.repeat && press.button == Button::A {
+            return false;
+        }
+        match self.home.press(press.button, &self.library, now) {
+            // The first A of a double tap, or the only one: the tile is chosen, and sounds so.
+            Some(HomeAction::Chosen) => {}
+            // The second: the pair is one choice, which has sounded. With another game running it is asked about
+            // first.
+            Some(HomeAction::Launch(game)) => {
+                self.play(game);
+                return false;
+            }
             // The profile opens the Guide where the profile is.
             Some(HomeAction::OpenGuide) if !press.repeat && self.options.use_guide => {
                 self.open_guide_on(Tab::ProfileAndSystem);
             }
             Some(HomeAction::Open(open)) if !press.repeat => {
                 let on_button = matches!(self.home.focus(), Focus::TopBar(TopButton::Search | TopButton::Settings));
-                self.pages
-                    .open(open, pages::Around { library: &self.library, playing: self.playing, options: self.options });
+                self.pages.open(
+                    open,
+                    pages::Around {
+                        library: &self.library,
+                        playing: self.playing,
+                        options: self.options,
+                        now: self.now,
+                    },
+                );
                 self.back_to_button = on_button && press.button == Button::A;
             }
             // The Guide on its Discord tab while Discord is connected (M6); with no such tab, or the Guide off,
@@ -784,7 +878,10 @@ impl Dashboard {
     /// Opens a page over Home, in place of any that is up: from the Guide, or by whoever drives the Dashboard.
     /// B on it goes to Home, its rows taking focus where they last had it.
     pub fn open_page(&mut self, open: Open) {
-        self.pages.open(open, pages::Around { library: &self.library, playing: self.playing, options: self.options });
+        self.pages.open(
+            open,
+            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now },
+        );
         self.back_to_button = false;
     }
 
@@ -1277,14 +1374,18 @@ impl Dashboard {
             pad_battery,
             show_percent: self.status.show_percent && self.options.show_battery_percent,
         };
-        // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn.
+        // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn, but for
+        // the picture a page takes of the screen it was opened over. Under a page that leaves it showing (the Tile
+        // menu) Home goes on as it was.
+        // On a slow renderer it holds still while it gives way to a Toast.
+        self.home.set_in_front(!self.guide.is_open() && !self.pages.hides_home() && !self.home_gives_way());
         if !self.pages.hides_home() {
-            // Under a page that leaves it showing (the Tile menu) Home goes on as it was; and it holds still
-            // while it gives way to a Toast.
-            self.home.set_in_front(!self.guide.is_open() && !self.home_gives_way());
             self.home.draw(ui, &self.library, &status);
         }
-        self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing, options: self.options });
+        let around =
+            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        let (home, library) = (&mut self.home, &self.library);
+        self.pages.draw(ui, around, &mut |ui| home.draw(ui, library, &status));
         // The hint bar, once for whatever has the pad, over all of it.
         hint_bar::draw(ui, self.hints());
         if !self.guide_overlaid {

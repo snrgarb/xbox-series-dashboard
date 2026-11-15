@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use crate::snap::Snaps;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Ease {
     Linear,
@@ -60,6 +62,8 @@ pub struct Store {
     animating: bool,
     /// The soonest anything asked to be drawn again, in seconds from this frame.
     wake: Option<f32>,
+    /// The pictures taken of part of a frame and kept while they are asked for (`Ui::snapshot`).
+    pub(crate) snaps: Snaps,
 }
 
 impl Store {
@@ -82,6 +86,12 @@ impl Store {
     pub fn end(&mut self) {
         let frame = self.frame;
         self.values.retain(|_, v| v.seen == frame);
+        self.snaps.end(frame);
+    }
+
+    /// The frame being declared, counted from the first.
+    pub(crate) fn frame(&self) -> u64 {
+        self.frame
     }
 
     /// Until told otherwise, every animation is at its end as soon as it is asked for.
@@ -185,6 +195,7 @@ impl Store {
     /// Forgets every value: what is drawn next starts afresh. For a window that was hidden mid-animation.
     pub fn clear(&mut self) {
         self.values.clear();
+        self.snaps.clear();
     }
 
     /// The value under `id` closing on `target` exponentially, by 63% every `tau` seconds: no fixed duration, and

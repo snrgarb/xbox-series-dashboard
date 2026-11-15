@@ -5,6 +5,7 @@ pub mod anim;
 pub mod art;
 pub mod host;
 pub mod input;
+pub mod snap;
 
 use std::hash::Hash;
 
@@ -14,6 +15,7 @@ pub use host::Host;
 pub use input::{Battery, Button, PadEvent, PadStatus, Press, Repeat};
 pub use render::{Font, Gradient, HAlign, Rect, TexId};
 use render::{Frame, Layer, Measured, Quad, Rgba, Text, TextKey, TextSys, WHITE};
+pub use snap::Snapshot;
 
 /// Every screen is laid out on a canvas this size, scaled to fit the output whole. On an output of another shape the
 /// canvas sits centred across and at the top, and [`Ui::screen`] is the larger rectangle a background fills.
@@ -122,6 +124,8 @@ pub struct Ui<'a> {
     pub art: &'a mut ArtCache,
     /// Pixels per design unit.
     px: f32,
+    /// The output's size in pixels.
+    output: (u32, u32),
     width: f32,
     height: f32,
     alpha: f32,
@@ -150,6 +154,7 @@ impl<'a> Ui<'a> {
             store,
             art,
             px,
+            output,
             width,
             height: output.1 as f32 / px,
             alpha: 1.0,
@@ -217,6 +222,34 @@ impl<'a> Ui<'a> {
         // Even if it drew nothing, what follows is not part of it.
         self.frame.layers.push(Layer::default());
         result
+    }
+
+    /// A picture of what `body` draws on a screen of its own, this one's size: taken the first frame `key` is asked
+    /// for, and kept, the same picture, for as long as some frame asks for it again (here, or with
+    /// [`Self::snapshot_taken`]); `body` is not run again while it is kept. It is `shrink` times smaller each way
+    /// than the screen and blurred there by `blur` of its own pixels, as WPF's `BlurEffect` blurs: draw it with
+    /// [`Self::image`], stretched back over the screen. Nothing `body` draws is in this frame. `body` starts from
+    /// no offset, clip or fade, and draws with the same animated values and art as the frame.
+    ///
+    /// This is how a panel shows what it was opened over, as it was then, without that being drawn again. None when
+    /// no picture can be taken in this frame (a second new one in the same frame): ask again in the next.
+    pub fn snapshot(&mut self, key: impl Hash, shrink: u32, blur: f32, body: impl FnOnce(&mut Ui)) -> Option<Snapshot> {
+        let (id, now) = (anim::id(key), self.store.frame());
+        if let Some(taken) = self.store.snaps.taken(id, now) {
+            return Some(taken);
+        }
+        let tex = self.store.snaps.take_spare()?;
+        let mut frame = Frame::default();
+        body(&mut Ui::new(&mut frame, &mut *self.text, &mut *self.store, &mut *self.art, self.output));
+        let size = ((self.output.0 / shrink.max(1)).max(1), (self.output.1 / shrink.max(1)).max(1));
+        let job = snap::Job { tex, frame, output: self.output, shrink, blur };
+        Some(self.store.snaps.take(id, now, Snapshot { tex, size }, job))
+    }
+
+    /// The picture kept under `key`, if one is: asking keeps it for another frame.
+    pub fn snapshot_taken(&mut self, key: impl Hash) -> Option<Snapshot> {
+        let now = self.store.frame();
+        self.store.snaps.taken(anim::id(key), now)
     }
 
     /// A soft shadow round the rounded rectangle `rect`, as WPF's `DropShadowEffect` with no offset casts it:

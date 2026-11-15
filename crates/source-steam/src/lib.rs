@@ -1,10 +1,11 @@
 //! Reads a Steam install into a `model::Library`.
 //!
 //! Sources, all under the Steam root (same layout on Windows and in the fixture):
-//! - `appcache/appinfo.vdf`: name, app type and art file names per app.
+//! - `appcache/appinfo.vdf`: name, app type and art file names per app; and who made and published it, when it
+//!   came out and its scores, where Steam has cached them (`credits`, `released`, `score`).
 //! - `appcache/packageinfo.vdf`: which apps the account's packages grant (ownership).
 //! - `userdata/<id>/config/localconfig.vdf`: persona name, last played, playtime.
-//! - `steamapps/appmanifest_*.acf`: what is installed.
+//! - `steamapps/appmanifest_*.acf`: what is installed, where, and how much of the disk it takes.
 //! - `appcache/librarycache/<appid>/`: cover, hero and header art.
 //! - `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json`: the user's collections, Steam's Favourites
 //!   and its hidden games (`collections`).
@@ -54,14 +55,15 @@ pub fn load(steam_root: &Path) -> Result<Library> {
     let mut games: Vec<Game> = owned
         .into_iter()
         .filter_map(|appid| {
-            let common = appinfo.get(&appid)?.get("common")?;
+            let info = appinfo.get(&appid)?;
+            let common = info.get("common")?;
             if !common.str_at(&["type"])?.eq_ignore_ascii_case("game") {
                 return None;
             }
             let name = common.str_at(&["name"])?.to_string();
             let (played, minutes) = local.apps.get(&appid).copied().unwrap_or((0, 0));
             let manifest = installed.get(&appid);
-            let manifest_played = manifest.map(|m| m.0);
+            let manifest_played = manifest.map(|m| m.played);
             let art = art_root.as_deref().and_then(|r| child(r, &appid.to_string())).map(|d| ArtDir::scan(&d));
             let find =
                 |asset: &str, legacy: Option<&str>, names: &[&str]| art.as_ref()?.find(common, asset, legacy, names);
@@ -74,12 +76,19 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                 playtime_minutes: minutes,
                 added: 0,
                 installed: manifest_played.is_some(),
-                install_dir: manifest.and_then(|m| m.1.clone()),
+                install_dir: manifest.and_then(|m| m.folder.clone()),
                 cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),
                 hero: find("library_hero", None, &["library_hero.jpg"]),
                 header: find("library_header", Some("header_image"), &["header.jpg", "library_header.jpg"]),
                 favourite: marked(favourites, appid),
                 hidden: marked(hidden, appid),
+                released: released(common),
+                developers: credits(info, "developer"),
+                publishers: credits(info, "publisher"),
+                size_on_disk: manifest.map_or(0, |m| m.size),
+                critic_score: score(common, "metacritic_score"),
+                community_score: score(common, "review_percentage"),
+                play_count: 0,
             })
         })
         .collect();
@@ -137,9 +146,50 @@ fn parse_localconfig(v: &Value) -> LocalConfig {
     out
 }
 
-/// appid -> the manifest's LastPlayed and the game's folder, for every `appmanifest_*.acf` in the
-/// Steam root's `steamapps` and in any other library folder that exists here.
-fn installed_apps(steam_root: &Path) -> HashMap<u32, (u64, Option<PathBuf>)> {
+/// When the game came out, in Unix seconds, or 0: `common/original_release_date` where Steam has one (a game
+/// that came to Steam after it came out), else `common/steam_release_date`.
+fn released(common: &Value) -> u64 {
+    let date = |key: &str| common.u64_at(&[key]).filter(|&date| date > 0);
+    date("original_release_date").or_else(|| date("steam_release_date")).unwrap_or(0)
+}
+
+/// The game's developers or its publishers (`kind` is `developer` or `publisher`), in Steam's order: the names in
+/// `common/associations` of that type, or with none there the one name in `extended/<kind>`.
+fn credits(info: &Value, kind: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let associations = info.path(&["common", "associations"]).map_or(&[][..], Value::entries);
+    for (_, association) in associations {
+        let of_kind = association.str_at(&["type"]).is_some_and(|ty| ty.eq_ignore_ascii_case(kind));
+        let name = association.str_at(&["name"]).map(str::trim).filter(|name| of_kind && !name.is_empty());
+        if let Some(name) = name.filter(|name| !names.iter().any(|known| known == name)) {
+            names.push(name.to_string());
+        }
+    }
+    if names.is_empty() {
+        let name = info.str_at(&["extended", kind]).map(str::trim).filter(|name| !name.is_empty());
+        names.extend(name.map(str::to_string));
+    }
+    names
+}
+
+/// One of `common`'s scores, when it is there and is 0 to 100.
+fn score(common: &Value, key: &str) -> Option<u8> {
+    common.u64_at(&[key]).and_then(|score| u8::try_from(score).ok()).filter(|&score| score <= 100)
+}
+
+/// What an `appmanifest_*.acf` says of an installed game.
+struct Manifest {
+    /// Its LastPlayed, in Unix seconds.
+    played: u64,
+    /// The game's folder.
+    folder: Option<PathBuf>,
+    /// Its SizeOnDisk, in bytes.
+    size: u64,
+}
+
+/// appid -> its manifest, for every `appmanifest_*.acf` in the Steam root's `steamapps` and in any other library
+/// folder that exists here.
+fn installed_apps(steam_root: &Path) -> HashMap<u32, Manifest> {
     let mut dirs = Vec::new();
     if let Some(main) = child(steam_root, "steamapps") {
         let folders = child(&main, "libraryfolders.vdf")
@@ -169,7 +219,8 @@ fn installed_apps(steam_root: &Path) -> HashMap<u32, (u64, Option<PathBuf>)> {
                 .as_ref()
                 .and_then(|v| v.str_at(&["AppState", "installdir"]))
                 .map(|name| dir.join("common").join(name));
-            out.insert(id, (played, folder));
+            let size = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "SizeOnDisk"])).unwrap_or(0);
+            out.insert(id, Manifest { played, folder, size });
         }
     }
     out
@@ -345,5 +396,42 @@ mod tests {
         let header = art.find(&common, "library_header", Some("header_image"), &["header.jpg"]);
         assert_eq!(header, Some(PathBuf::from("lc/70").join("header.jpg")));
         assert_eq!(art.find(&common, "library_logo", None, &["logo.png"]), None);
+    }
+
+    #[test]
+    fn credits_come_from_the_associations_and_else_from_extended() {
+        let info = vdf::parse_text(
+            r#""common" { "associations" {
+                    "0" { "type" "developer" "name" "Tin Lantern" }
+                    "1" { "type" "publisher" "name" "Harbour & Hull" }
+                    "2" { "type" "Developer" "name" "Second Kettle" }
+                    "3" { "type" "franchise" "name" "Lanterns" }
+                    "4" { "type" "developer" "name" "Tin Lantern" }
+                    "5" { "type" "developer" "name" " " } } }
+               "extended" { "developer" "Ignored" "publisher" "Ignored too" }"#,
+        )
+        .unwrap();
+        assert_eq!(credits(&info, "developer"), ["Tin Lantern", "Second Kettle"]);
+        assert_eq!(credits(&info, "publisher"), ["Harbour & Hull"]);
+
+        let old = r#""common" { "name" "Old" } "extended" { "developer" "Lone Dev" "publisher" "" }"#;
+        let old = vdf::parse_text(old).unwrap();
+        assert_eq!(credits(&old, "developer"), ["Lone Dev"]);
+        assert!(credits(&old, "publisher").is_empty());
+    }
+
+    #[test]
+    fn the_release_date_is_the_original_one_where_there_is_one_and_scores_are_out_of_a_hundred() {
+        let common = |text: &str| vdf::parse_text(text).unwrap();
+        let both = common(r#""steam_release_date" "1700000000" "original_release_date" "1200000000""#);
+        assert_eq!(released(&both), 1_200_000_000);
+        let steams = common(r#""steam_release_date" "1700000000" "original_release_date" "0""#);
+        assert_eq!(released(&steams), 1_700_000_000);
+        assert_eq!(released(&common(r#""name" "No date""#)), 0);
+
+        let scores = common(r#""metacritic_score" "87" "review_percentage" "250""#);
+        assert_eq!(score(&scores, "metacritic_score"), Some(87));
+        assert_eq!(score(&scores, "review_percentage"), None);
+        assert_eq!(score(&scores, "review_score"), None);
     }
 }
