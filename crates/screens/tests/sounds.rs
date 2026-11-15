@@ -170,11 +170,6 @@ fn a_in_the_guide_is_the_select_sound_then_what_the_entry_does() {
 fn a_on_something_that_does_nothing_is_silent() {
     let mut home = dashboard();
     press(&mut home, Button::Guide);
-    // A Utility, whose Flyout is yet to come.
-    for _ in 0..6 {
-        press(&mut home, Button::Down);
-    }
-    assert!(press(&mut home, Button::A).is_empty());
     // The Profile entry, which never does anything.
     press(&mut home, Button::RightBumper);
     assert!(press(&mut home, Button::A).is_empty());

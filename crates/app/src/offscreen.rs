@@ -19,6 +19,9 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
     let mut host = Host::new(&gpu, FORMAT, || {});
     let mut dashboard = Dashboard::new(library);
     dashboard.set_options(options);
+    for text in &args.notify {
+        dashboard.notify(text);
+    }
     dashboard.set_clock(args.clock.clone());
     let press = |dashboard: &mut Dashboard, button| dashboard.press(Press { button, repeat: false });
     // Home starts with focus on the profile: a game to launch or a row to walk is on the Recent row.

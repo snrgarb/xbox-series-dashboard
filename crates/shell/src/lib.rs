@@ -4,6 +4,7 @@
 //! nothing.
 //! Turning the machine off is behind a trait, so that only a run that means it can do it, and so is asking a store
 //! to install or uninstall a game.
+pub mod audio;
 pub mod freeze;
 mod launch;
 pub mod overlay;
@@ -13,6 +14,7 @@ pub mod store;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+pub use audio::{AudioControl, FakeAudio, SystemAudio};
 pub use freeze::Freezer;
 pub use launch::{Launch, Step};
 pub use overlay::{Key, Mode, Overlay};

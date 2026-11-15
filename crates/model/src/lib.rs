@@ -1,9 +1,11 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
+pub mod audio;
 pub mod sound;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub use audio::{Audio, AudioDevice, Flow};
 pub use sound::Sound;
 
 /// What Power can do to the machine (`docs/spec/guide.md`, section 6.2). The Dashboard's core only ever asks for

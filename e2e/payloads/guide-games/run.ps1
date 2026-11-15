@@ -58,13 +58,23 @@ function Open-Guide([string] $Name = '') {
     if (-not (Step Guide 'Landing Entry\(0\)$' $Name)) { throw "The Guide did not open (it is at: $(Get-GuideLine))" }
 }
 
+# One press while walking to somewhere named: the `guide:` line it should bring. A press that brings none is said
+# and is no failure by itself: a loaded VM now and then never shows the Dashboard a 120 ms press, and the walk, which
+# goes by where the log says focus is, presses again.
+function Walk([string] $Button, [string] $Guide) {
+    $mark = Get-DashboardLogLength
+    Push-Button $Button
+    $line = Wait-DashboardLog "^guide: $Guide" 5 $mark
+    Say "$Button`: $(if ($line) { $line } else { "note: no line 'guide: $Guide' of this press (the Guide is at: $(Get-GuideLine)); the walk goes on" })"
+}
+
 # Walks Down, a press at a time, until focus is on the Guide's entry $Entry.
 function Move-ToEntry([int] $Entry) {
     for ($i = 0; $i -lt 12; $i++) {
         if ((Get-GuideLine) -match "^Landing Entry\($Entry\)") { return }
         if ((Get-GuideLine) -notmatch '^Landing Entry\((\d+)\)') { throw "The Guide is not on its list: $(Get-GuideLine)" }
         $next = [int] $Matches[1] + 1
-        Step Down "Landing Entry\($next\)" | Out-Null
+        Walk Down "Landing Entry\($next\)"
     }
     throw "Focus never reached entry $Entry of the Guide: $(Get-GuideLine)"
 }

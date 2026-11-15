@@ -20,11 +20,11 @@ pub mod theme;
 pub mod tile_menu;
 pub mod wide_dialog;
 
-use model::Library;
+use model::{Audio, Flow, Library};
 pub use model::{PowerCommand, Sound};
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
-use crate::guide::{Around, DialogFocus, Face, Guide, GuideAction, PowerChoice, Status, Tab};
+use crate::guide::{Around, DialogFocus, Face, Flyout, FlyoutFocus, Guide, GuideAction, PowerChoice, Status, Tab};
 use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
@@ -53,6 +53,14 @@ pub enum Effect {
     /// Turn the machine off, restart it or put it to sleep: chosen in Power (docs/spec/guide.md, 6.2). Whoever
     /// carries effects out decides whether that is for real; nothing in this crate can do it.
     Power(PowerCommand),
+    /// Audio's Volume moved: the system's master volume to this, 0 to 100. The Dashboard shows the new level
+    /// already, and takes the system's word for it at the next `set_audio`.
+    Volume(u8),
+    /// Audio's Mute: the system's master mute on or off.
+    Mute(bool),
+    /// A device chosen in one of Audio's dropdowns, by its place among `audio()`'s of that flow: make it Windows'
+    /// default.
+    DefaultDevice(Flow, usize),
     /// Settings changed an option. The Dashboard has taken the change already: this is for whoever keeps the
     /// settings to save it.
     Set(settings::Change),
@@ -81,6 +89,14 @@ pub const QUIT_TIMEOUT: f32 = 10.0;
 
 /// How long after a game quit from the Guide has stopped the Guide closes, in seconds.
 pub const CLOSE_AFTER_QUIT: f32 = 0.5;
+
+/// Something the Dashboard has told the user of: what the Notifications Flyout lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notification {
+    /// Its number among all posted since the Dashboard started, from 1.
+    pub id: u64,
+    pub text: String,
+}
 
 /// The running game being quit (docs/spec/guide.md, 7.4).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -149,6 +165,10 @@ pub struct Dashboard {
     /// The buttons pressed while a dialog page (the Tile menu) was up and not let go since: held on after it has
     /// closed, they do nothing to what was under it (docs/spec/tile-menu.md, section 6).
     held: Vec<Button>,
+    /// The system's sound as the shell last read it, which the Audio Flyout shows.
+    audio: Audio,
+    /// Every notification posted since the Dashboard started, oldest first.
+    notifications: Vec<Notification>,
     effects: Vec<Effect>,
 }
 
@@ -176,6 +196,8 @@ impl Dashboard {
             quit: None,
             close_in: None,
             held: Vec::new(),
+            audio: Audio::default(),
+            notifications: Vec::new(),
             effects: Vec::new(),
         }
     }
@@ -213,7 +235,13 @@ impl Dashboard {
 
     fn refresh_guide(&mut self) {
         if self.guide.is_open() {
-            let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+            let around = Around {
+                library: &self.library,
+                playing: self.playing,
+                discord: self.status.discord,
+                audio: &self.audio,
+                notifications: &self.notifications,
+            };
             self.guide.refresh(around);
         }
     }
@@ -222,6 +250,62 @@ impl Dashboard {
     pub fn set_status(&mut self, status: Status) {
         self.status = status;
         self.refresh_guide();
+    }
+
+    /// The system's sound, as the shell has just read it. An open Audio Flyout follows.
+    pub fn set_audio(&mut self, audio: Audio) {
+        self.audio = audio;
+        self.refresh_guide();
+    }
+
+    /// The system's sound as the Dashboard has it: `Effect::DefaultDevice` names a device by its place here.
+    pub fn audio(&self) -> &Audio {
+        &self.audio
+    }
+
+    /// Whether the Audio Flyout is open: the shell reads the system's sound as it opens and keeps reading while
+    /// it is, so that it follows what is changed elsewhere.
+    pub fn audio_shown(&self) -> bool {
+        self.flyout().is_some_and(|(which, _)| which == Flyout::Audio)
+    }
+
+    /// The Flyout open over the Guide's panel, and where focus is in it.
+    pub fn flyout(&self) -> Option<(Flyout, FlyoutFocus)> {
+        self.guide.flyout(self.guide_around()).filter(|_| self.guide.is_open())
+    }
+
+    /// Posts a notification: it joins the list the Notifications Flyout shows, which follows if it is open. Gives
+    /// its id in the list.
+    pub fn notify(&mut self, text: &str) -> u64 {
+        let id = self.notifications.last().map_or(1, |last| last.id + 1);
+        self.notifications.push(Notification { id, text: text.to_string() });
+        self.refresh_guide();
+        id
+    }
+
+    /// Every notification posted since the Dashboard started, oldest first: what the Notifications Flyout lists,
+    /// newest first.
+    pub fn notifications(&self) -> &[Notification] {
+        &self.notifications
+    }
+
+    /// Notifications, in the open Guide: its Flyout opens, where the showing tab has the Utility (the landing
+    /// tab, which the Guide opens on). What the Guide shows when it was opened while a Toast told of a
+    /// notification (docs/spec/guide.md, 9.5).
+    pub fn open_notifications(&mut self) {
+        if self.guide.is_open() {
+            self.guide.open_flyout(Flyout::Notifications);
+        }
+    }
+
+    fn guide_around(&self) -> Around<'_> {
+        Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: &self.notifications,
+        }
     }
 
     pub fn set_clock(&mut self, text: Option<String>) {
@@ -509,7 +593,7 @@ impl Dashboard {
     /// opening, after the sound of what opened it; a move along its rows; A on a row, which in a prompt is the
     /// sound of its closing; B at every level. A move with nowhere to go is silent there too.
     pub fn press(&mut self, press: Press) {
-        let (was_open, guide) = (self.guide.is_open(), self.guide.focus());
+        let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
         let (depth, focus) = (self.pages.depth(), self.focus_place());
@@ -537,7 +621,8 @@ impl Dashboard {
                 }
             }
             (None, None) if was_open => {
-                let moved = self.guide.is_open() && self.guide.focus() != guide;
+                // B closing a Flyout or a list changes where focus is, and is silent all the same.
+                let moved = press.button != Button::B && self.guide.is_open() && self.guide_place() != guide;
                 [select.or(moved.then_some(Sound::GuideMove)), None]
             }
             (None, None) if self.guide.is_open() => [Some(Sound::GuideOpen), None],
@@ -552,6 +637,11 @@ impl Dashboard {
         for (at, sound) in sounds.into_iter().flatten().enumerate() {
             self.effects.insert(asked + at, Effect::Sound(sound));
         }
+    }
+
+    /// Where the Guide's focus is, and the volume: a press that changed any of it moved something.
+    fn guide_place(&self) -> ((Tab, guide::Focus), Option<(Flyout, FlyoutFocus)>, u8) {
+        (self.guide.focus(), self.guide.flyout(self.guide_around()), self.audio.volume)
     }
 
     /// Power, by a hold of the Guide button (docs/spec/guide.md, 7.1): over the dim alone, wherever the Dashboard
@@ -569,20 +659,33 @@ impl Dashboard {
             self.guide_overlaid = self.has_overlay;
             self.release_awaited = None;
         }
-        self.guide.open_power(Around { library: &self.library, playing: self.playing, discord: self.status.discord });
+        self.guide.open_power(Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: &self.notifications,
+        });
         self.effects.push(Effect::Sound(Sound::PromptOpen));
     }
 
     /// Gives the press to whatever takes input now. True when it was A and it chose something.
     fn steer(&mut self, press: Press) -> bool {
         if self.guide.is_open() {
-            let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+            let around = Around {
+                library: &self.library,
+                playing: self.playing,
+                discord: self.status.discord,
+                audio: &self.audio,
+                notifications: &self.notifications,
+            };
             let action = self.guide.press(press, around);
             if let Some(action) = action {
                 self.guide_action(action);
             }
             // Everything but closing with B or the Guide button is a choice, and sounds as one.
-            return action.is_some_and(|action| action != GuideAction::Close);
+            // The volume moving is a move, and sounds as one.
+            return action.is_some_and(|action| !matches!(action, GuideAction::Close | GuideAction::Volume(_)));
         }
         // While a game starts, the Dashboard takes no input.
         if self.launch.up() {
@@ -729,9 +832,17 @@ impl Dashboard {
         let (tab, focus) = self.guide.focus();
         let panel = if self.guide.panel_shown() { "" } else { ", no panel" };
         let title = self.guide.dialog_title().map(|title| format!(" {title:?}")).unwrap_or_default();
+        let flyout = match self.guide.flyout(self.guide_around()) {
+            Some((Flyout::Audio, at)) => {
+                let muted = if self.audio.muted { ", muted" } else { "" };
+                format!(", flyout Audio {at:?}, volume {}{muted}", self.audio.volume)
+            }
+            Some((which, at)) => format!(", flyout {which:?} {at:?}"),
+            None => String::new(),
+        };
         match self.guide.dialog() {
             Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}{title}{quitting}"),
-            None => format!("{tab:?} {focus:?}{panel}{quitting}"),
+            None => format!("{tab:?} {focus:?}{panel}{flyout}{quitting}"),
         }
     }
 
@@ -797,6 +908,22 @@ impl Dashboard {
             // With a game running the Guide stays, under the question.
             GuideAction::Launch(game) => self.play(game),
             GuideAction::Asked => {}
+            // The level shows at once; the shell's next reading says what the system made of it.
+            GuideAction::Volume(level) => {
+                self.audio.volume = level;
+                self.effects.push(Effect::Volume(level));
+            }
+            GuideAction::Mute(muted) => {
+                self.audio.muted = muted;
+                self.effects.push(Effect::Mute(muted));
+            }
+            GuideAction::Device(flow, device) => {
+                match flow {
+                    Flow::Output => self.audio.output = Some(device),
+                    Flow::Input => self.audio.input = Some(device),
+                }
+                self.effects.push(Effect::DefaultDevice(flow, device));
+            }
             // The Guide closes first; then what was chosen is the shell's to do.
             GuideAction::Power(choice) => {
                 self.close_guide();
@@ -829,7 +956,13 @@ impl Dashboard {
         }
         // A dialog page closes with no answer as the Guide comes (docs/spec/tile-menu.md, section 6).
         self.pages.close_dialog();
-        let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+        let around = Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: &self.notifications,
+        };
         self.guide.open_on(tab, around);
         self.guide_overlaid = self.has_overlay;
         // Opened again before the foreground went back: the Overlay still has it, and keeps it.
@@ -980,7 +1113,13 @@ impl Dashboard {
     /// The Guide alone, over whatever is drawn already: the same in Home's window and on the Overlay.
     pub fn draw_guide(&mut self, ui: &mut Ui) {
         let clock = self.clock();
-        let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+        let around = Around {
+            library: &self.library,
+            playing: self.playing,
+            discord: self.status.discord,
+            audio: &self.audio,
+            notifications: &self.notifications,
+        };
         // The pad's own word on its charge, unless the shell has said otherwise. One on a cable shows its glyph.
         let charge = match self.pad.battery {
             Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),

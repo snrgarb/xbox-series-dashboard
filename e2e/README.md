@@ -107,7 +107,8 @@ launcher that stays: the Launch screen steps aside for it), `guide-hold` (the Gu
 the game, on the monitor of the window in front; the game frozen while it is open, thawed as it closes, and thawed at
 the next start after the Dashboard is killed with the Guide open), `pages` (every way from Home into a page and B
 back from each), `my-games` (My games & apps on the full shelf: along its nav, the grid's edges and its scroll, Play
-history, Manage, and B and Y), and `overlay` and `video` for the spikes.
+history, Manage, and B and Y), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
+output device it moves the real volume and mute and puts them back), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets

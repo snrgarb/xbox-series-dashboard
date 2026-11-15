@@ -1988,3 +1988,110 @@ fn a_secret_is_drawn_as_dots_with_the_caret_among_them() {
     assert_eq!(caret_x(&image), Some(562));
     assert!(white(&image, 533) && white(&image, 551) && white(&image, 573));
 }
+
+/// The system's sound in the Bundle's picture of the Audio Flyout (54-guide-audio-flyout.jpg): one output and one
+/// input, their names too long for the box, volume 67. A second output for the list.
+fn bundle_audio() -> model::Audio {
+    use model::AudioDevice;
+    model::Audio {
+        outputs: vec![
+            AudioDevice::new("out-1", "Speakers (2- High Definition Audio Device)"),
+            AudioDevice::new("out-2", "TV (HD Audio Driver for Display Audio)"),
+        ],
+        output: Some(0),
+        inputs: vec![AudioDevice::new("in-1", "Microphone (2- High Definition Audio Device)")],
+        input: Some(0),
+        volume: 67,
+        muted: false,
+    }
+}
+
+/// The Guide at Home with focus on a Utility: `place` along the row.
+fn on_utility(place: usize) -> Stage {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_pad_connected(true);
+    stage.dashboard.set_audio(bundle_audio());
+    stage.press(&[Button::Guide]);
+    stage.press(&[Button::Down; 6]);
+    stage.press(&vec![Button::Right; place]);
+    stage
+}
+
+/// The Bundle's 53-guide-notifications-flyout.jpg: the Flyout over the dimmed panel, with nothing in it; the hints
+/// beside the panel hidden.
+#[test]
+fn guide_notifications_flyout_with_none() {
+    let mut stage = on_utility(0);
+    stage.press(&[Button::A]);
+    stage.check("guide-notifications-empty");
+}
+
+/// Notifications, newest first: a card as tall as its text, at least 87 and three lines at most.
+#[test]
+fn guide_notifications_flyout() {
+    let mut stage = on_utility(0);
+    stage.dashboard.notify("Saltwind Rally is ready to play");
+    stage.dashboard.notify(
+        "A long one, which says a good deal more than fits on two lines of the card and so is cut short at the end \
+         of its third line, where an ellipsis says that there was more of it to read",
+    );
+    stage.dashboard.notify("Controller connected");
+    stage.press(&[Button::A, Button::Down]);
+    stage.check("guide-notifications");
+}
+
+/// The Bundle's 54-guide-audio-flyout.jpg: Output with focus, Input, Volume at 67, Mute off, and under a divider
+/// the line about music.
+#[test]
+fn guide_audio_flyout() {
+    let mut stage = on_utility(1);
+    stage.press(&[Button::A]);
+    let image = stage.still();
+    // The Flyout's flat grey at its foot, to the screen's last row, and no further right than x 691.
+    assert_eq!(image.get_pixel(400, 1079).0[..3], [0x1F, 0x1F, 0x1F]);
+    assert_ne!(image.get_pixel(700, 1079).0[..3], [0x1F, 0x1F, 0x1F], "the Flyout ends at x 691");
+    stage.check_image("guide-audio", image);
+}
+
+/// Output's list open: the dropdown ringed in the accent, its chevron up, and the list over the entries below, the
+/// default device ticked and focused.
+#[test]
+fn guide_audio_output_list() {
+    let mut stage = on_utility(1);
+    stage.press(&[Button::A, Button::A]);
+    stage.check("guide-audio-output-list");
+}
+
+/// Mute on, with focus: the switch filled in the accent, its knob at the right.
+#[test]
+fn guide_audio_muted() {
+    let mut stage = on_utility(1);
+    stage.dashboard.set_audio(model::Audio { muted: true, volume: 0, ..bundle_audio() });
+    stage.press(&[Button::A, Button::Down, Button::Down, Button::Down]);
+    stage.check("guide-audio-muted");
+}
+
+/// With no devices at all: "None" in both dropdowns, the volume at 0.
+#[test]
+fn guide_audio_with_no_devices() {
+    let mut stage = on_utility(1);
+    stage.dashboard.set_audio(model::Audio::default());
+    stage.press(&[Button::A]);
+    stage.check("guide-audio-none");
+}
+
+/// A Flyout comes in from 48 to the left, fading in, over 120 ms; closing it is at once.
+#[test]
+fn a_flyout_slides_in_from_the_left() {
+    let mut stage = on_utility(1);
+    stage.run(1.0, 0.05);
+    let lit = |image: &image::RgbaImage, x: u32| image.get_pixel(x, 900).0[..3] == [0x1F, 0x1F, 0x1F];
+    stage.press(&[Button::A]);
+    let early = stage.frame_after(0.03);
+    assert!(!lit(&early, 680), "its right edge has not arrived, and it is not yet opaque");
+    let settled = stage.frame_after(0.3);
+    assert!(lit(&settled, 680) && lit(&settled, 160) && !lit(&settled, 695));
+    stage.press(&[Button::B]);
+    let closed = stage.frame_after(0.01);
+    assert!(!lit(&closed, 680) && !lit(&closed, 400));
+}
