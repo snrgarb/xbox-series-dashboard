@@ -79,6 +79,8 @@ struct App {
     /// When the library had been read, in ms since the process started.
     library_ready: f64,
     sounds: Sounds,
+    /// Whether Home's last frame left something moving.
+    moving: bool,
     /// With --log-focus: say where Home's focus went, for a test that must know before it presses on.
     log_focus: bool,
     /// The minute of the day Home's last frame showed on its clock.
@@ -131,6 +133,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
+        moving: false,
         log_focus: args.log_focus,
         minute: minute(),
         frames: args.log_frames.then(|| (0, 0, Instant::now())),
@@ -444,9 +447,11 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let began = since_start();
                 let now = Instant::now();
-                // Animations step by a tenth of a second at most; the clock takes all the time there was.
+                // From rest an animation starts with a tenth of a second at most, however long Home sat still. One
+                // that was moving has moved on by as long as this frame is after the last, as the Overlay's does: a
+                // fade takes its time by the clock however few frames a slow renderer gives it.
                 let passed = (now - self.last_frame).as_secs_f32();
-                let dt = passed.min(0.1);
+                let dt = passed.min(if self.moving { 1.0 } else { 0.1 });
                 state.host.store.slept(passed - dt);
                 self.last_frame = now;
                 self.stale = false;
@@ -472,6 +477,7 @@ impl ApplicationHandler for App {
                 let dashboard = &mut self.dashboard;
                 state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
                 state.gpu.queue.present(frame);
+                self.moving = state.host.animating();
                 if self.presented.is_none() {
                     self.presented = Some(Instant::now());
                     let [library, window, gpu, renderer] = state.ready;
