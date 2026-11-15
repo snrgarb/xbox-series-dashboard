@@ -1,7 +1,6 @@
 //! The pages over Home: every way into one, and where B on it leaves focus (docs/spec/home.md, 7.4;
-//! docs/spec/my-games.md, 3; docs/spec/search.md, 4; docs/spec/settings.md, 8). Search is a stand-in that opens and
-//! closes and no more; what My games & apps does once it is open is tests/my_games.rs, and Settings,
-//! tests/settings.rs. No picture, so no GPU; what the hint bar looks like is tests/shots.rs.
+//! docs/spec/my-games.md, 3; docs/spec/search.md, 4; docs/spec/settings.md, 8). What each page does once it is
+//! open is its own file's: tests/my_games.rs, tests/search.rs, tests/settings.rs. No picture, so no GPU; what the hint bar looks like is tests/shots.rs.
 use model::Library;
 use screens::home::{rest, Focus, TopButton};
 use screens::{hint_bar, Dashboard, Effect, Sound};
@@ -19,6 +18,9 @@ fn library() -> Library {
     }
     database.snapshot().unwrap()
 }
+
+/// Search as it opens on this library: empty, on Q, Recently added under the box.
+const SEARCH: &str = "Search: Key(Q); \"|\" upper letters, RecentlyAdded 12";
 
 /// Home with focus on the Recent row's first tile.
 fn home() -> Dashboard {
@@ -45,7 +47,7 @@ fn rests(dashboard: &Dashboard) -> screens::home::Rest {
 }
 
 /// Presses `open` on Home as it is, expects the page that says `line` of itself and nothing of Home changed under
-/// it; then B, and Home again with focus on `back`.
+/// it; then B, and Home again with focus on `back`. On Search B is two steps: the keyboard goes, then the page.
 #[track_caller]
 fn there_and_back(dashboard: &mut Dashboard, open: Button, line: &str, back: Focus) {
     let before = dashboard.home_focus();
@@ -57,6 +59,10 @@ fn there_and_back(dashboard: &mut Dashboard, open: Button, line: &str, back: Foc
     // its own, the game's hub.)
     press(dashboard, &[Down, Right, Up, Left]);
     assert_eq!((dashboard.pages_up(), dashboard.home_focus()), (1, before));
+    if line.starts_with("Search: ") {
+        press(dashboard, &[B]);
+        assert_eq!(dashboard.page(), Some("Search"), "B puts Search's keyboard away first");
+    }
     press(dashboard, &[B]);
     assert_eq!(dashboard.page(), None, "B closes the page");
     assert_eq!(dashboard.home_focus(), back);
@@ -96,7 +102,7 @@ fn the_top_bars_my_games_button_opens_games_and_b_comes_back_on_the_recent_row()
 fn the_top_bars_search_and_settings_buttons_open_their_pages_and_get_focus_back() {
     let mut home = home();
     press(&mut home, &[Right, Right, Up, Right]);
-    there_and_back(&mut home, A, "Search: Open", Focus::TopBar(TopButton::Search));
+    there_and_back(&mut home, A, SEARCH, Focus::TopBar(TopButton::Search));
     press(&mut home, &[Right]);
     settings_and_back(&mut home, "Settings: Rail: Theme settings", 1, Focus::TopBar(TopButton::Settings));
     // Notifications has no page.
@@ -108,31 +114,31 @@ fn the_top_bars_search_and_settings_buttons_open_their_pages_and_get_focus_back(
 fn y_opens_search_from_anywhere_on_home_and_b_gives_focus_back_to_homes_rows() {
     // From the top bar, where Home starts: back on the Recent row, not on the button.
     let mut home = Dashboard::new(library());
-    there_and_back(&mut home, Y, "Search: Open", Focus::Recent(0));
+    there_and_back(&mut home, Y, SEARCH, Focus::Recent(0));
     // Even from the Search button itself: only A on it gives it focus back.
     press(&mut home, &[Right, Right, Up, Right]);
     assert_eq!(home.home_focus(), Focus::TopBar(TopButton::Search));
-    there_and_back(&mut home, Y, "Search: Open", Focus::Recent(2));
+    there_and_back(&mut home, Y, SEARCH, Focus::Recent(2));
 
     // From a game's tile, and from the Play history tile, which gives focus to the game's tile before it.
     press(&mut home, &[Right]);
-    there_and_back(&mut home, Y, "Search: Open", Focus::Recent(3));
+    there_and_back(&mut home, Y, SEARCH, Focus::Recent(3));
     press(&mut home, &[Right, Right, Right, Right]);
     assert_eq!(home.home_focus(), Focus::Recent(7));
-    there_and_back(&mut home, Y, "Search: Open", Focus::Recent(6));
+    there_and_back(&mut home, Y, SEARCH, Focus::Recent(6));
 
     // From a wide tile, a Group's card and See all: back where it was, the page at the same rest.
     press(&mut home, &[Down, Left]);
     let wide = home.home_focus();
     assert!(matches!(wide, Focus::Wide(_)));
-    there_and_back(&mut home, Y, "Search: Open", wide);
+    there_and_back(&mut home, Y, SEARCH, wide);
     press(&mut home, &[Down, Down, Right, Right]);
     let card = Focus::Group { group: 1, card: 2 };
     let at_rest = rests(&home);
-    there_and_back(&mut home, Y, "Search: Open", card);
+    there_and_back(&mut home, Y, SEARCH, card);
     assert_eq!(rests(&home), at_rest);
     press(&mut home, &[Right, Right, Right, Right]);
-    there_and_back(&mut home, Y, "Search: Open", Focus::Group { group: 1, card: 6 });
+    there_and_back(&mut home, Y, SEARCH, Focus::Group { group: 1, card: 6 });
 }
 
 #[test]
@@ -230,8 +236,8 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     let mut home = guide_open();
     press(&mut home, &[Down, Down, Down, Down, Down, Down, Right, Right, A]);
     assert_eq!(asked(&mut home), [Effect::GuideClosed]);
-    assert_eq!(home.focus_line(), "Search: Open");
-    press(&mut home, &[B]);
+    assert_eq!(home.focus_line(), SEARCH);
+    press(&mut home, &[B, B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
 }
 
@@ -331,7 +337,7 @@ fn the_hint_bar_shows_on_a_groups_game_card_and_nowhere_else_on_home() {
     assert_eq!(home.hints(), none, "under the Guide");
     press(&mut home, &[B, Y]);
     assert_eq!(home.hints(), none, "on Search");
-    press(&mut home, &[B, Right, Right, Right, Right, Right, Right]);
+    press(&mut home, &[B, B, Right, Right, Right, Right, Right, Right]);
     assert_eq!(home.home_focus(), Focus::Group { group: 0, card: 6 });
     assert_eq!(home.hints(), none, "See all");
     press(&mut home, &[Left]);
@@ -351,7 +357,11 @@ fn a_that_opens_a_page_sounds_and_y_and_b_are_silent() {
     assert!(home.take_effects().is_empty());
     press(&mut home, &[Y]);
     assert_eq!(home.page(), Some("Search"));
+    // Its first B puts the keyboard away, focus landing on a result; the second closes it, in silence.
     press(&mut home, &[Down, B]);
+    home.take_effects();
+    press(&mut home, &[B]);
+    assert_eq!(home.page(), None);
     assert!(home.take_effects().is_empty());
     // From the Guide it is the Guide's own sound.
     press(&mut home, &[Guide, Down]);

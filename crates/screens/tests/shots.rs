@@ -683,20 +683,28 @@ fn the_hint_bar_stands_in_the_bottom_right_corner_on_a_groups_game_card() {
 /// page at the Group's rest and nothing sliding there (docs/spec/search.md, 6).
 #[test]
 fn a_page_takes_homes_place_at_once_and_b_shows_home_at_the_rest_it_was_left_at() {
+    // Search as it first draws over another Home, one not on the row and with the swirl still behind it.
+    let points = [(120, 100), (960, 114), (1700, 114), (300, 700), (960, 950), (1800, 1000)];
+    let elsewhere = {
+        let mut stage = Stage::new(library_with_art(), HD);
+        stage.press(&[Button::Y]);
+        let image = stage.frame();
+        points.map(|(x, y)| image.get_pixel(x, y).0)
+    };
     let mut stage = Stage::on_row(library_with_art(), HD);
     let pale = |image: &image::RgbaImage| image.get_pixel(120, 100).0[..3].iter().all(|&c| c > 200);
     stage.run(1.0, TICK);
     assert!(pale(&stage.frame()), "the profile's picture is at the top left of Home");
-    // The first frame after Y is the page alone: one flat colour where the top bar and the rows were.
+    // The first frame after Y is the page alone: the same where the top bar and the rows were, whatever Home was.
     stage.press(&[Button::Y]);
     let image = stage.frame();
-    let fill = image.get_pixel(120, 100).0;
     assert!(!pale(&image), "the top bar hides while a page is up");
-    for (x, y) in [(960, 114), (1700, 114), (300, 700), (960, 950), (1800, 1000)] {
-        assert_eq!(image.get_pixel(x, y).0, fill, "nothing of Home shows at {x}, {y}");
+    for ((x, y), page) in points.into_iter().zip(elsewhere) {
+        assert_eq!(image.get_pixel(x, y).0, page, "nothing of Home shows at {x}, {y}");
     }
-    // And the first frame after B is Home at rest, the top bar back.
-    stage.press(&[Button::B]);
+    // And the first frame after B (Search's second: the first puts its keyboard away) is Home at rest, the top bar
+    // back.
+    stage.press(&[Button::B, Button::B]);
     assert!(pale(&stage.frame()), "Home is back in the next frame");
 
     // From a Group: Home comes back risen to the Group's rest in the first frame, its header 64 down.
@@ -707,7 +715,7 @@ fn a_page_takes_homes_place_at_once_and_b_shows_home_at_the_rest_it_was_left_at(
     assert!((64..80).contains(&at_rest.0), "the header's ink starts at {}", at_rest.0);
     stage.press(&[Button::Y]);
     stage.run(0.2, TICK);
-    stage.press(&[Button::B]);
+    stage.press(&[Button::B, Button::B]);
     let back = stage.frame();
     assert_eq!(header(&back), at_rest, "Home is at the Group's rest in the first frame back");
     assert!(!pale(&back), "and its top bar is still up off the screen");

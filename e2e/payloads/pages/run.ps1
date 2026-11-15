@@ -1,7 +1,7 @@
 # The page stack, walked with the virtual pad on a fake Steam library: every way from Home into My games & apps,
 # Search and Settings, and B back from each, with focus where it should be; and the hint bar on a Group's game card.
-# Search and Settings are stand-ins until their own tickets, which say only which page they are; My games & apps
-# says which of its items is up and where focus is on it, and is walked in my-games/run.ps1.
+# Each page says where focus is on it, and is walked in a test of its own (my-games, search, settings); on Search B is
+# two steps, the keyboard put away and then the page left.
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: Recent(2)` on Home, and
 # `focus: Settings: Rail: Theme settings` with a page on top (the page's name, then where it says its focus is). Passes when every
@@ -86,7 +86,8 @@ try {
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
 
     # Y from the profile, where Home starts: Search, and B back on the Recent row, not on the top bar.
-    Press Y 'Search: Open' '01-search-from-y'
+    Press Y 'Search: Key\(Q\); "\|" upper letters, RecentlyAdded \d+' '01-search-from-y'
+    Press B 'Search: RecentlyAdded\(0\) .+; "" away, RecentlyAdded \d+'
     Press B 'Recent\(0\)' '02-back-on-the-recent-row'
 
     # The top bar's three buttons. My games & apps gives focus back to the Recent row; Search and Settings to
@@ -97,7 +98,8 @@ try {
     Press B 'Recent\(0\)'
     Press Up 'TopBar\(Profile\)'
     Walk Right 'TopBar\(Search\)' 3
-    Press A 'Search: Open'
+    Press A 'Search: Key\(Q\); "\|" upper letters, RecentlyAdded \d+'
+    Press B 'Search: RecentlyAdded\(0\) .+; "" away, RecentlyAdded \d+'
     Press B 'TopBar\(Search\)' '04-back-on-the-search-button'
     Walk Right 'TopBar\(Settings\)' 2
     Press A 'Settings: Rail: Theme settings' '05-settings'
@@ -123,7 +125,8 @@ try {
     # The first Group: the hint bar is up on a game's card, bottom right. Y there is Search, and B comes back to
     # the card with the page still risen to the Group.
     Press Down 'Group \{ group: 0, card: 0 \}' '07-hint-bar-on-a-group-card'
-    Press Y 'Search: Open'
+    Press Y 'Search: Key\(Q\); "\|" upper letters, RecentlyAdded \d+'
+    Press B 'Search: RecentlyAdded\(0\) .+; "" away, RecentlyAdded \d+'
     Press B 'Group \{ group: 0, card: 0 \}' '08-back-on-the-group-card'
     # See all, the Group's last card, wherever that is: no hint bar; Full library on the Group's filter; B back on
     # See all.
