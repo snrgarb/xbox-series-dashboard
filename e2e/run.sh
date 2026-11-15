@@ -46,6 +46,8 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 cp -r "$payload_src/." "$stage/"
 cp -r "$here/payloads/lib" "$stage/lib"
+# Whatever else was built goes too: the spikes' exes, for the payloads that run them.
+cp "$built"/*.exe "$stage/" 2>/dev/null || true
 cp "$exe" "$stage/dashboard.exe"
 cp "$standin" "$stage/standin.exe"
 
