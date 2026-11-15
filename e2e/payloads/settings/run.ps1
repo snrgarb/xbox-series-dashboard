@@ -129,7 +129,7 @@ try {
 
     # Into the category: its first box. Along the row to its end, the Guide box; its page, and B back on the box.
     Press Right 'Settings: Theme settings: Personalisation' '29-settings-theme-settings-box-focused'
-    Walk-ToEdge Right 'Theme settings: Guide'
+    Walk-ToEdge Right 'Settings: Theme settings: Guide'
     Press A 'Settings: Guide: Use the Guide' '35-settings-guide'
     Press B 'Settings: Theme settings: Guide'
     Walk Left 'Settings: Theme settings: Personalisation' 3
@@ -139,7 +139,7 @@ try {
     Turn-Over 'home.background_delay' 'false' '31-background-delay-off'
     Press Down 'Settings: Personalisation: Reduce motion'
     Turn-Over 'motion.reduce' 'true' '31-reduce-motion-on'
-    Walk-ToEdge Down 'Personalisation: Show battery percentages'
+    Walk-ToEdge Down 'Settings: Personalisation: Show battery percentages'
     Start-Sleep -Milliseconds 2000
     Save-Screen '31-personalisation-last-box'
 
