@@ -18,7 +18,8 @@
 #   own CA signs the certificate and isn't trusted here, so the key is pinned instead; compute it on the host with
 #     openssl x509 -in /etc/pve/local/pve-ssl.pem -pubkey -noout | openssl pkey -pubin -outform der |
 #       openssl dgst -sha256 -binary | base64
-# and optionally PVE_BRIDGE (default vmbr2, the DMZ) and PVE_VMID_FROM (default 9000, where test VM ids start).
+# and optionally PVE_BRIDGE (default vmbr2, the DMZ), PVE_VMID_FROM (default 9000, where test VM ids start), PVE_MAC (the
+# one MAC every test VM gets) and PVE_FALLBACK_IP (an unused address on the bridge's /24 for when DHCP gives none).
 set -euo pipefail
 
 ENV_FILE="${XBOX_E2E_ENV:-$HOME/.config/xbox-e2e/proxmox.env}"
@@ -26,6 +27,8 @@ ENV_FILE="${XBOX_E2E_ENV:-$HOME/.config/xbox-e2e/proxmox.env}"
 set -a; . "$ENV_FILE"; set +a
 : "${PVE_HOST:?}" "${PVE_NODE:?}" "${PVE_TOKEN:?}" "${PVE_TEMPLATE:?}" "${PVE_PINNEDPUBKEY:?}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr2}"
+PVE_MAC="${PVE_MAC:-BC:24:11:E2:E0:01}"
+PVE_FALLBACK_IP="${PVE_FALLBACK_IP:-}"
 PVE_VMID_FROM="${PVE_VMID_FROM:-9000}"
 TAG="xbox-e2e"
 
@@ -113,8 +116,10 @@ cmd_up() {
     wait_task "$(api POST "$(vm "$PVE_TEMPLATE")/clone" "newid=$id" "name=$name" "full=0" | py 'd')" "clone"
     # From here on a failure leaves a VM behind: destroy it rather than leak it.
     trap 'log "up failed, destroying $id"; cmd_down "$id" || true' ERR
-    log "moving its network to $PVE_BRIDGE (new MAC) and tagging it $TAG"
-    api PUT "$(vm "$id")/config" "net0=virtio,bridge=$PVE_BRIDGE,firewall=1" "tags=$TAG" "onboot=0" \
+    # One MAC for every test VM, not the template's and not a new one each time: there is only ever one of them, and
+    # a new MAC for each run takes a new DHCP lease, which in a day of runs empties the network's pool.
+    log "moving its network to $PVE_BRIDGE (MAC $PVE_MAC) and tagging it $TAG"
+    api PUT "$(vm "$id")/config" "net0=virtio=$PVE_MAC,bridge=$PVE_BRIDGE,firewall=1" "tags=$TAG" "onboot=0" \
         "description=Throwaway test VM made by e2e/proxmox/vm.sh; destroyed after its run." >/dev/null
     log "starting"
     wait_task "$(api POST "$(vm "$id")/status/start" | py 'd')" "start"
@@ -130,7 +135,15 @@ cmd_up() {
         sleep 5
     done
     log "signed in: $(users "$id") after $((SECONDS - started))s; waiting for an IP"
+    local signed_in=$SECONDS
     until [[ -n "$(ipv4 "$id")" ]]; do
+        # No DHCP answer (a pool with no lease left): the address the settings name for that, if they name one.
+        if [[ -n "$PVE_FALLBACK_IP" ]] && (( SECONDS - signed_in >= 60 )); then
+            log "no DHCP answer after a minute: giving it $PVE_FALLBACK_IP"
+            cmd_exec "$id" netsh interface ipv4 set address name=Ethernet static "$PVE_FALLBACK_IP" 255.255.255.0 \
+                >/dev/null || die "could not set $PVE_FALLBACK_IP"
+            PVE_FALLBACK_IP=""
+        fi
         (( SECONDS - started < 600 )) || die "no IPv4 after 10 minutes"
         sleep 5
     done

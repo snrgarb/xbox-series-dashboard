@@ -10,12 +10,12 @@
 //! | Games | `games` (the grid is `grid`, its tile `tile`: both are Full library's too) |
 //! | Apps | [`Note`], until M4 |
 //! | Play history | `history` |
-//! | Full library | [`full_library`], an empty pane until #53 |
+//! | Full library | `full_library`: the tabs, the Sort and Filter row, and the grid under them |
 //! | Manage | `manage` |
 //!
-//! **Hooks for other tickets**, each one function that does nothing yet: [`full_library`] and
-//! [`full_library_count`] (#53), `manage::open_manage_queue`
-//! and `nav::foot` (M4), [`progress`] (the library updating).
+//! **Hooks for other tickets**, each one function that does nothing yet: `manage::open_manage_queue` and
+//! `nav::foot` (M4), [`progress`] (the library updating).
+mod full_library;
 mod games;
 mod grid;
 mod history;
@@ -29,6 +29,7 @@ use std::time::Instant;
 use model::{Game, Library};
 use ui::{Button, Ease, Press, Ui};
 
+use self::full_library::FullLibrary;
 use self::games::Games;
 use self::history::History;
 use self::look::{HEADER, PAGE, TEXT_DIM};
@@ -36,6 +37,7 @@ use self::manage::Manage;
 use self::nav::{Item, Settle};
 use crate::game_hub;
 use crate::hint_bar::{self, Hint};
+use crate::keyboard;
 use crate::pages::{Around, Open, Page, PageAction, Tick};
 
 /// How the page is opened: which of its items shows, and so where focus lands (docs/spec/my-games.md, 3.1).
@@ -74,24 +76,6 @@ fn open_tile_menu(game: &Game) -> Option<PageAction> {
     Some(crate::tile_menu::open(game, crate::tile_menu::Opener::MyGames))
 }
 
-/// **#53's hook.** Full library's content, opened on the tab of this saved filter (`model::Filter::id`), or as the
-/// nav opens it: the tabs, the Sort and Filter row and the grid under them. A file of its own that implements
-/// [`Pane`] takes this function's one line; nothing else in this folder changes. Until then the pane is empty and
-/// takes no focus, and says in the focus log which filter it was handed.
-fn full_library(filter: Option<i64>) -> Box<dyn Pane> {
-    Box::new(Note {
-        text: "",
-        log_name: Some(format!("FullLibrary {{ filter: {filter:?} }}")),
-        count: full_library_count,
-    })
-}
-
-/// **#53's hook.** The count at Full library's nav item: the games its tab and name filter show. Until there are
-/// tabs, every game that is not hidden.
-fn full_library_count(library: &Library) -> Option<usize> {
-    Some(library.games.len())
-}
-
 /// **The library updating: a hook.** While the library is being read the Bundle repeats the top bar's status text
 /// and its Spinner here, right-aligned to x 1815 in a strip y 84..144, 12 between them (docs/spec/my-games.md,
 /// 11.3). The page is not told that the library is updating, so nothing is drawn.
@@ -123,11 +107,6 @@ enum Outcome {
 /// An item's content, beside the nav and under the header. A pane lives as long as the page, showing or not, and
 /// keeps its own focus and what it remembers; it is told the library each time and keeps none of it.
 trait Pane {
-    /// The pane's own name in the focus log, in place of its item's.
-    fn log_name(&self) -> Option<String> {
-        None
-    }
-
     /// The number at the item's right in the nav.
     fn nav_count(&self, _around: Around) -> Option<usize> {
         None
@@ -154,6 +133,20 @@ trait Pane {
     fn focus(&self) -> Option<String> {
         None
     }
+
+    /// What the focus log says of the pane after where focus is, while it is showing: what a press changes
+    /// without moving focus (Full library's tab, sort, name and count).
+    fn state(&self, _around: Around) -> String {
+        String::new()
+    }
+
+    /// The text that text entry starts from when the pane opens it.
+    fn entry_text(&self) -> String {
+        String::new()
+    }
+
+    /// What text entry over the page has to say to the pane that opened it.
+    fn entry(&mut self, _event: keyboard::Event, _around: Around) {}
 
     /// What time has brought the pane while it shows ([`Page::tick`]).
     fn tick(&mut self, _around: Around) -> Tick {
@@ -186,19 +179,13 @@ trait Pane {
     fn draw(&mut self, ui: &mut Ui, around: Around, look: Look);
 }
 
-/// A pane that is a line of dim text at the content row's top, and takes no focus: Apps until M4, and Full library
-/// until #53, with no line at all.
+/// A pane that is a line of dim text at the content row's top, and takes no focus: Apps until M4.
 struct Note {
     text: &'static str,
-    log_name: Option<String>,
     count: fn(&Library) -> Option<usize>,
 }
 
 impl Pane for Note {
-    fn log_name(&self) -> Option<String> {
-        self.log_name.clone()
-    }
-
     fn nav_count(&self, around: Around) -> Option<usize> {
         (self.count)(around.library)
     }
@@ -211,7 +198,7 @@ impl Pane for Note {
 /// Apps until M4: the item is in the nav, counts none, and its pane says where Apps will come from. The Bundle's
 /// line names Playnite's software tools, which are not this Dashboard's.
 fn apps() -> Note {
-    Note { text: "Apps you add show up here.", log_name: None, count: |_| Some(0) }
+    Note { text: "Apps you add show up here.", count: |_| Some(0) }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,11 +223,21 @@ pub struct MyGames {
     games: Games,
     apps: Note,
     history: History,
-    full_library: Box<dyn Pane>,
+    full_library: FullLibrary,
     manage: Manage,
+    /// What the pane showing had to say of itself (`Pane::state`) when the page was last pressed or drawn.
+    state: String,
 }
 
 impl MyGames {
+    /// The page opened on the library as it is: focus is where it lands at once, and the focus log can say so.
+    pub fn opened(entry: Entry, around: Around) -> Self {
+        let mut page = Self::open(entry);
+        page.keep(around);
+        page.note(around);
+        page
+    }
+
     pub fn open(entry: Entry) -> Self {
         let (showing, filter) = match entry {
             Entry::Games => (Item::Games, None),
@@ -258,8 +255,9 @@ impl MyGames {
             games: Games::new(),
             apps: apps(),
             history: History::default(),
-            full_library: full_library(filter),
+            full_library: FullLibrary::open(filter),
             manage: Manage,
+            state: String::new(),
         };
         // A pane that never takes focus leaves it on the nav from the start.
         if page.pane(showing).focus().is_none() {
@@ -273,7 +271,7 @@ impl MyGames {
             Item::Games => &self.games,
             Item::Apps => &self.apps,
             Item::PlayHistory => &self.history,
-            Item::FullLibrary => &*self.full_library,
+            Item::FullLibrary => &self.full_library,
             Item::Manage => &self.manage,
         }
     }
@@ -283,7 +281,7 @@ impl MyGames {
             Item::Games => &mut self.games,
             Item::Apps => &mut self.apps,
             Item::PlayHistory => &mut self.history,
-            Item::FullLibrary => &mut *self.full_library,
+            Item::FullLibrary => &mut self.full_library,
             Item::Manage => &mut self.manage,
         }
     }
@@ -345,6 +343,11 @@ impl MyGames {
         }
     }
 
+    /// Keeps what the pane showing says of itself, for the focus log, which is asked without the library.
+    fn note(&mut self, around: Around) {
+        self.state = self.pane(self.showing).state(around);
+    }
+
     fn user<'a>(around: Around<'a>) -> &'a str {
         around.library.user.as_deref().unwrap_or("Player")
     }
@@ -356,18 +359,60 @@ impl Page for MyGames {
     }
 
     /// The item showing, then where focus is: `Games: Tile(3)`, `Games: SeeFullLibrary`, `PlayHistory: Row(0)`,
-    /// `Manage: Queue`, or on the nav `Games: Nav(Apps)`, which is focus on Apps while Games is still up (the
-    /// settle wait; it is `Apps: Nav(Apps)` at once when Apps was reached in one step).
+    /// `Manage: Queue`, `FullLibrary: Sort`, or on the nav `Games: Nav(Apps)`, which is focus on Apps while Games is
+    /// still up (the settle wait; it is `Apps: Nav(Apps)` at once when Apps was reached in one step).
     fn focus(&self) -> String {
-        let pane = self.pane(self.showing);
-        let showing = pane.log_name().unwrap_or_else(|| format!("{:?}", self.showing));
+        let showing = self.showing;
         match self.focus {
-            Focus::Nav(item) => format!("{showing}: Nav({item:?})"),
-            Focus::Content => format!("{showing}: {}", pane.focus().unwrap_or_default()),
+            Focus::Nav(item) => format!("{showing:?}: Nav({item:?})"),
+            Focus::Content => format!("{showing:?}: {}", self.pane(showing).focus().unwrap_or_default()),
         }
     }
 
+    /// Full library's tab, sort, name and count while it is showing: `tab 2/4 "Most played", sort Playtime, name
+    /// "ha", 3 games`. Nothing for the other items.
+    fn state(&self) -> String {
+        self.state.clone()
+    }
+
     fn press(&mut self, press: Press, around: Around) -> Option<PageAction> {
+        let action = self.pressed(press, around);
+        self.note(around);
+        action
+    }
+
+    fn entry_text(&self) -> String {
+        self.pane(self.showing).entry_text()
+    }
+
+    /// Text entry is only ever over the pane that opened it, which is the one showing.
+    fn entry(&mut self, event: keyboard::Event, around: Around) {
+        let showing = self.showing;
+        self.pane_mut(showing).entry(event, around);
+        self.keep(around);
+        self.note(around);
+    }
+
+    fn tick(&mut self, around: Around) -> Tick {
+        let showing = self.showing;
+        self.pane_mut(showing).tick(around)
+    }
+
+    fn hints(&self, around: Around) -> &'static [Hint] {
+        match self.focus {
+            Focus::Nav(_) => hint_bar::NONE,
+            Focus::Content => self.pane(self.showing).hints(around),
+        }
+    }
+
+    fn draw(&mut self, ui: &mut Ui, around: Around) {
+        self.drawn(ui, around);
+        self.note(around);
+    }
+}
+
+impl MyGames {
+    fn pressed(&mut self, press: Press, around: Around) -> Option<PageAction> {
         let now = Instant::now();
         self.keep(around);
         // An item whose wait ended with no frame drawn since is showing by now.
@@ -409,19 +454,7 @@ impl Page for MyGames {
         None
     }
 
-    fn tick(&mut self, around: Around) -> Tick {
-        let showing = self.showing;
-        self.pane_mut(showing).tick(around)
-    }
-
-    fn hints(&self, around: Around) -> &'static [Hint] {
-        match self.focus {
-            Focus::Nav(_) => hint_bar::NONE,
-            Focus::Content => self.pane(self.showing).hints(around),
-        }
-    }
-
-    fn draw(&mut self, ui: &mut Ui, around: Around) {
+    fn drawn(&mut self, ui: &mut Ui, around: Around) {
         self.keep(around);
         // The item focus rests on shows once its wait is over: a frame is asked for then. A frame that is to show
         // the page at rest does not wait.

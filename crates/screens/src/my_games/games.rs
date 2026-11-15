@@ -18,10 +18,10 @@ const BUTTON_UNDER: f32 = 12.0;
 const BUTTON_HEIGHT: f32 = 52.0;
 const BUTTON_SIDE: f32 = 26.0;
 /// The grid with no games in it. Playnite's own line in the Bundle; its style is kept.
-const EMPTY: &str = "No games found";
+pub const EMPTY: &str = "No games found";
 
 /// What a name sorts by, as the library database sorts: lower case, without a leading article.
-fn sort_key(name: &str) -> String {
+pub fn sort_key(name: &str) -> String {
     let lower = name.trim().to_lowercase();
     let rest = ["the ", "a ", "an "].iter().find_map(|article| lower.strip_prefix(article));
     rest.map_or(lower.clone(), |rest| rest.trim_start().to_string())
