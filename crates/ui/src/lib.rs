@@ -422,11 +422,14 @@ impl<'a> Ui<'a> {
         Rect::new(-self.offset.0, -self.offset.1, self.width, self.height).grow(4096.0)
     }
 
-    /// A glyph from the icon font, centred on (`cx`, `cy`), `size` design units tall. Where there is no icon font
-    /// (anywhere but Windows) a small outlined square stands in, so a screenshot still shows something is there.
+    /// A glyph centred on (`cx`, `cy`), `size` design units tall: from the icon font if it is one of its own (they
+    /// are all in Unicode's private use area), else from the symbol font, which is where the Bundle's body font
+    /// finds a symbol such as the trophy. Where the font is missing (anywhere but Windows) a small outlined square
+    /// stands in, so a screenshot still shows something is there.
     pub fn icon(&mut self, cx: f32, cy: f32, glyph: char, size: f32, color: Color) {
-        if self.text.has(Font::Icons) {
-            let style = TextStyle { font: Font::Icons, size, weight: 400, color };
+        let font = if ('\u{E000}'..='\u{F8FF}').contains(&glyph) { Font::Icons } else { Font::Symbols };
+        if self.text.has(font) {
+            let style = TextStyle { font, size, weight: 400, color };
             let mut buffer = [0u8; 4];
             self.label_centered(cx, cy, glyph.encode_utf8(&mut buffer), &style);
         } else {

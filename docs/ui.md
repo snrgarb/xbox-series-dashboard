@@ -40,12 +40,12 @@ Within a layer, quads are drawn in order and the layer's text is drawn over all 
 
 - `fill`, `gradient` (vertical, horizontal, diagonal, radial), `ring`, `glow` (a soft band): rounded rectangles, antialiased by a signed-distance shader. `arc` is part of a circle's ring with round ends, which is what the Spinner is made of (`screens::spinner`).
 - `image` / `art`: a texture filling a box, cropped on the GPU to the box's shape (`Crop::Top` is the theme's rule for covers and backgrounds). `art_darkened` is the same under a black sheet that fades with it; `art_turned` stretches the whole picture over a box turned about its middle.
-- `label*` for one line, `paragraph` for text in a box (wrapped, a maximum number of lines, an ellipsis, never drawn outside the box), `icon` for a Segoe Fluent Icons glyph.
+- `label*` for one line, `paragraph` for text in a box (wrapped, a maximum number of lines, an ellipsis, never drawn outside the box), `icon` for a Segoe Fluent Icons glyph, or a symbol that font lacks (the trophy), which comes from Segoe UI Symbol as it does in the Bundle.
 - Text styles are consts in `screens::theme` (`BODY` is Segoe UI 26, the Xbox accessibility floor).
 
 ## Fonts
 
-Loaded from Windows at runtime, never bundled: Segoe UI, Bahnschrift and Segoe Fluent Icons (`render::Font::{Ui, Display, Icons}`). On Linux, where development and CI run, the folder `DASHBOARD_FONTS` names stands in with **Selawik**, Microsoft's open font with Segoe UI's metrics, fetched by `tools/test-fonts.sh` into `target/fonts/` (never committed); text there takes the room it will on Windows. There is no icon font on Linux: `ui.icon` draws a small outlined square in its place, so screenshots show where an icon is, and what it looks like is checked on Windows.
+Loaded from Windows at runtime, never bundled: Segoe UI, Bahnschrift, Segoe Fluent Icons and Segoe UI Symbol (`render::Font::{Ui, Display, Icons, Symbols}`). On Linux, where development and CI run, the folder `DASHBOARD_FONTS` names stands in with **Selawik**, Microsoft's open font with Segoe UI's metrics, fetched by `tools/test-fonts.sh` into `target/fonts/` (never committed); text there takes the room it will on Windows. There is no icon or symbol font on Linux: `ui.icon` draws a small outlined square in its place, so screenshots show where an icon is, and what it looks like is checked on Windows.
 
 ## Animation
 
