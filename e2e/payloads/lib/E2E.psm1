@@ -59,6 +59,41 @@ function Save-Screen([string] $Name) {
     } finally { $g.Dispose(); $bmp.Dispose() }
 }
 
+# The colour of one pixel of the primary screen, as R, G and B, 0 to 255: what the compositor shows there, the
+# Overlay included (docs/research/overlay-window.md, "Reading the screen back"). $X and $Y are real pixels.
+function Get-ScreenPixel([int] $X, [int] $Y) {
+    $origin = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Location
+    $bmp = New-Object System.Drawing.Bitmap 1, 1
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    try {
+        $g.CopyFromScreen($origin.X + $X, $origin.Y + $Y, 0, 0, (New-Object System.Drawing.Size 1, 1))
+        $c = $bmp.GetPixel(0, 0)
+    } finally { $g.Dispose(); $bmp.Dispose() }
+    [pscustomobject]@{ R = [int] $c.R; G = [int] $c.G; B = [int] $c.B }
+}
+
+# The same at a point of the Dashboard's 1920x1080 canvas, which is scaled to fit the screen whole, centred across and
+# at the top (docs/ui.md, Coordinates): on a 1920x1080 screen the same pixel.
+function Get-DesignPixel([double] $X, [double] $Y) {
+    $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $scale = [Math]::Min($b.Width / 1920, $b.Height / 1080)
+    $left = ($b.Width - 1920 * $scale) / 2
+    Get-ScreenPixel ([int] [Math]::Round($left + $X * $scale)) ([int] [Math]::Round($Y * $scale))
+}
+
+# A colour as "(r, g, b)", for a line in steps.txt. Takes a pixel or three numbers.
+function Format-Colour($Colour) {
+    if ($Colour -is [array]) { return "($($Colour[0]), $($Colour[1]), $($Colour[2]))" }
+    "($($Colour.R), $($Colour.G), $($Colour.B))"
+}
+
+# Whether a pixel is the colour $Rgb (three numbers, or another pixel), each channel within $Tolerance.
+function Test-Colour($Pixel, $Rgb, [int] $Tolerance = 8) {
+    if ($Rgb -isnot [array]) { $Rgb = @($Rgb.R, $Rgb.G, $Rgb.B) }
+    ([Math]::Abs($Pixel.R - $Rgb[0]) -le $Tolerance) -and ([Math]::Abs($Pixel.G - $Rgb[1]) -le $Tolerance) -and
+        ([Math]::Abs($Pixel.B - $Rgb[2]) -le $Tolerance)
+}
+
 # Runs $Condition every quarter second until it gives something true, which is returned, or $null after $Seconds.
 function Wait-Until([scriptblock] $Condition, [double] $Seconds = 10) {
     $watch = [Diagnostics.Stopwatch]::StartNew()  # not the clock, which the VM's time sync can move mid-test
