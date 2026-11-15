@@ -1465,6 +1465,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "overlay-spike"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "render",
+ "wgpu",
+ "windows",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
