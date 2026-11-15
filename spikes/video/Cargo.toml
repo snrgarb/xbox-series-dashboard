@@ -1,0 +1,31 @@
+[package]
+name = "video-spike"
+version = "0.0.0"
+edition = "2021"
+description = "Spike (#6): plays a video file through Media Foundation into the renderer, with its sound."
+publish = false
+
+[[bin]]
+name = "video-spike"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+render = { path = "../../crates/render" }
+wgpu = "30"
+winit = "0.30"
+# The version wgpu's DX12 backend already builds, so this adds no second copy. `windows` rather than the
+# `windows-sys` the other crates use because Media Foundation and WASAPI are COM, which `windows-sys` leaves out.
+windows = { version = "0.62", features = [
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Media_Audio",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Performance",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }

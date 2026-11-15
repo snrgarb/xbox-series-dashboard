@@ -165,11 +165,15 @@ struct Instance {
 struct Texture {
     texture: wgpu::Texture,
     bind: wgpu::BindGroup,
+    /// A video texture: its fourth byte is not alpha, and it is drawn opaque.
+    video: bool,
 }
 
 pub struct Renderer {
     pub text: TextSys,
     pipeline: wgpu::RenderPipeline,
+    /// The same, for video textures: the texture's alpha is taken as 1.
+    opaque_pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
     texture_layout: wgpu::BindGroupLayout,
@@ -228,7 +232,8 @@ impl Renderer {
             bind_group_layouts: &[Some(&globals_layout), Some(&texture_layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = |fragment: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("quads"),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
@@ -248,7 +253,7 @@ impl Renderer {
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs"),
+                entry_point: Some(fragment),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -258,7 +263,9 @@ impl Renderer {
             }),
             multiview_mask: None,
             cache: None,
-        });
+        })
+        };
+        let (pipeline, opaque_pipeline) = (pipeline("fs"), pipeline("fs_opaque"));
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: 16,
@@ -290,6 +297,7 @@ impl Renderer {
         let mut renderer = Self {
             text: TextSys::new(),
             pipeline,
+            opaque_pipeline,
             globals,
             globals_bind,
             texture_layout,
@@ -332,13 +340,54 @@ impl Renderer {
         for (level, mip) in mips.iter().enumerate() {
             Self::write(queue, &texture, level as u32, mip);
         }
+        self.keep_texture(device, texture, false)
+    }
+
+    /// A texture for video: `width` x `height`, black until its first frame, filled by
+    /// [`Self::update_video_texture`]. Its pixels are B, G, R, X bytes as Media Foundation's RGB32 has them; the
+    /// fourth byte is ignored and the picture drawn opaque. One mip level, so it is for drawing at about its own
+    /// size or larger.
+    pub fn add_video_texture(&mut self, device: &wgpu::Device, width: u32, height: u32) -> TexId {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("video"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // Not an sRGB format, as the other textures aren't.
+            format: wgpu::TextureFormat::Bgra8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.keep_texture(device, texture, true)
+    }
+
+    /// Replaces a video texture's pixels with one frame: rows of B, G, R, X bytes from the top, each `stride` bytes
+    /// apart (at least four times the width; a decoder may pad its rows). It shows from the next [`Self::render`].
+    ///
+    /// Panics if `id` did not come from [`Self::add_video_texture`] or `pixels` is too short for the texture.
+    pub fn update_video_texture(&mut self, queue: &wgpu::Queue, id: TexId, pixels: &[u8], stride: u32) {
+        let texture = self.textures.get(id.0).and_then(Option::as_ref).filter(|texture| texture.video);
+        let texture = &texture.expect("update_video_texture on a texture that isn't for video").texture;
+        let size = texture.size();
+        let needed = stride as usize * (size.height as usize - 1) + 4 * size.width as usize;
+        assert!(stride >= 4 * size.width && pixels.len() >= needed, "a video frame too small for its texture");
+        queue.write_texture(
+            texture.as_image_copy(),
+            pixels,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: None },
+            size,
+        );
+    }
+
+    fn keep_texture(&mut self, device: &wgpu::Device, texture: wgpu::Texture, video: bool) -> TexId {
         let view = texture.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.texture_layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
         });
-        let entry = Some(Texture { texture, bind });
+        let entry = Some(Texture { texture, bind, video });
         match self.free.pop() {
             Some(slot) => {
                 self.textures[slot] = entry;
@@ -458,7 +507,6 @@ impl Renderer {
             let mut text = 0;
             for layer in &frame.layers {
                 if !layer.quads.is_empty() {
-                    pass.set_pipeline(&self.pipeline);
                     pass.set_bind_group(0, &self.globals_bind, &[]);
                     pass.set_vertex_buffer(0, self.instances.slice(..));
                 }
@@ -469,7 +517,9 @@ impl Renderer {
                     let end = start + layer.quads[start..].iter().take_while(|q| q.tex == tex).count();
                     // A texture freed while something still draws with it shows as plain white, not a crash.
                     let bound = self.textures.get(tex.0).and_then(Option::as_ref).or(self.textures[0].as_ref());
-                    pass.set_bind_group(1, &bound.expect("the white texture").bind, &[]);
+                    let bound = bound.expect("the white texture");
+                    pass.set_pipeline(if bound.video { &self.opaque_pipeline } else { &self.pipeline });
+                    pass.set_bind_group(1, &bound.bind, &[]);
                     pass.draw(0..4, (first + start) as u32..(first + end) as u32);
                     start = end;
                 }
