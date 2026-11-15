@@ -1,0 +1,9 @@
+[package]
+name = "steam"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+model = { path = "../model" }
+anyhow = "1"
+serde_json = "1"
