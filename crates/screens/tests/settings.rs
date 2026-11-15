@@ -233,7 +233,7 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
     press(&mut dashboard, &[Down, Down, A, B, B, B]);
     assert_eq!((dashboard.home_focus(), dashboard.focused_game()), (Focus::Recent(6), Some(6)));
     press(&mut dashboard, &[Right, A]);
-    assert_eq!(dashboard.focus_line(), "MyGames: PlayHistory");
+    assert_eq!(dashboard.focus_line(), "MyGames: PlayHistory: Row(0)");
 }
 
 #[test]
