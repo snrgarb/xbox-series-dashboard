@@ -28,7 +28,8 @@ $record = Join-Path $env:LOCALAPPDATA 'XboxSeriesDashboard\frozen-game.txt'
 function Front { $f = Get-Foreground; "$($f.Process) '$($f.Title)'" }
 function Format-Colours($Colours) { (@($Colours) | ForEach-Object { Format-Colour $_ }) -join ', ' }
 
-# The lines the Dashboard logged after the first $After that match $Pattern.
+# The lines the Dashboard logged after the first $After that match $Pattern. Callers wrap the call in @( ) to count or
+# index what comes back: one line alone comes back as a string.
 function Find-DashboardLog([string] $Pattern, [int] $After = 0) {
     @(Get-DashboardLog | Select-Object -Skip $After | Where-Object { $_ -match $Pattern })
 }
@@ -83,12 +84,12 @@ try {
     if (-not $shown) { $failures += 'at Home the Guide did not open on the Overlay' }
     if (-not $panelUp) { $failures += "at Home the Guide's panel is not on screen at (270, 900): seen $(Format-Colour (Get-DesignPixel 270 900)), expected $(Format-Colour $panel)" }
     if ((Get-Foreground).Title -ne $overlayTitle) { $failures += "at Home the Guide did not take the foreground: $(Front)" }
-    $where = Find-DashboardLog '^overlay: over the monitor' $mark
+    $where = @(Find-DashboardLog '^overlay: over the monitor' $mark)
     Say "which monitor: $(if ($where.Count) { $where[-1] } else { 'no line' })"
     if (-not $where.Count -or $where[-1] -notmatch $monitor -or $where[-1] -notmatch [regex]::Escape("title `"$dashboardTitle`"")) {
         $failures += "at Home the Overlay did not go over the monitor Home's window is on ($($screen.Width)x$($screen.Height) at $($screen.X), $($screen.Y)): $($where -join ' | ')"
     }
-    if ((Find-DashboardLog '^freeze:').Count) { $failures += "something was frozen at Home, with no game running: $((Find-DashboardLog '^freeze:') -join ' | ')" }
+    if (@(Find-DashboardLog '^freeze:').Count) { $failures += "something was frozen at Home, with no game running: $((Find-DashboardLog '^freeze:') -join ' | ')" }
 
     $mark = Get-DashboardLogLength
     Push-Button B
@@ -137,7 +138,7 @@ try {
     }
     if (-not $atRest) { Say 'note: the Guide took more than 6 s to come to rest' }
     if ((Get-Foreground).Title -ne $overlayTitle) { $failures += "the Guide did not take the foreground from the game: $(Front)" }
-    $where = Find-DashboardLog '^overlay: over the monitor' $mark
+    $where = @(Find-DashboardLog '^overlay: over the monitor' $mark)
     Say "which monitor: $(if ($where.Count) { $where[-1] } else { 'no line' })"
     if (-not $where.Count -or $where[-1] -notmatch $monitor -or $where[-1] -notmatch [regex]::Escape("title `"$($game.name)`"")) {
         $failures += "the Overlay did not go over the monitor the game is on: $($where -join ' | ')"
