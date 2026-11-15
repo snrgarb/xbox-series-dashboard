@@ -83,7 +83,8 @@ function Send-Toast([string] $Text) {
 
 # Waits for the Toast with this line to show, and for the banner to be on screen. Returns its shown line.
 function Wait-Toast([string] $Text, [string] $Kind, [int] $After = 0, [double] $Seconds = 15) {
-    $shown = Wait-DashboardLog "^toasts: shown `"$([regex]::Escape($Text))`" \($Kind\)" $Seconds -After $After
+    # To the line's end, its time: a line read while it is being written is not yet the line.
+    $shown = Wait-DashboardLog "^toasts: shown `"$([regex]::Escape($Text))`" \($Kind\).* at \d+ ms`$" $Seconds -After $After
     if (-not $shown) {
         $script:failures += "no Toast '$Text' showed (log: $((Get-DashboardLog | Where-Object { $_ -match '^toasts:' } | Select-Object -Last 4) -join ' | '))"
         return $null
@@ -236,17 +237,26 @@ try {
     if ($shownOne -and $goingOne -and $shownTwo) { Test-Timing $shownOne $goingOne $shownTwo 'the first Toast over the game' }
     if ((Get-Foreground).Title -ne $game.name) { $failures += "the second Toast took the foreground from the game: $(Front)" }
 
-    # A tap of the Guide button while it shows: the Guide opens over the game, on Notifications, and the Toast goes.
+    # A tap of the Guide button while it shows: the Guide opens over the game, on the Notifications Flyout, and the Toast goes.
     $mark = Get-DashboardLogLength
     Push-Button Guide
     $opened = Wait-DashboardLog 'Guide over the game' 10 -After $mark
     $focus = Wait-DashboardLog '^guide: ' 5 -After $mark
     $dropped = Wait-DashboardLog '^toasts: gone' 5 -After $mark
-    $atRest = Wait-Until { -not @(Find-WrongColours $guidePoints).Count } 6
+    Start-Sleep -Milliseconds 1500
     Save-Screen 'guide-from-toast'
+    # It opens on the Notifications Flyout, which lists what the Toast told of. B closes the Flyout, focus on its
+    # Utility: the Guide's panel is looked at there, and a notification that comes then has a Toast again (one that
+    # comes while the Flyout is open is listed in it and has none).
+    $markB = Get-DashboardLogLength
+    Push-Button B
+    $onUtility = Wait-DashboardLog '^guide: Landing Utility\(0\)$' 8 -After $markB
+    if (-not $onUtility) { $failures += "B did not close the Notifications Flyout onto its Utility: $(Get-DashboardLog | Where-Object { $_ -match '^guide: ' } | Select-Object -Last 1)" }
+    $atRest = Wait-Until { -not @(Find-WrongColours $guidePoints).Count } 6
+    Save-Screen 'guide-flyout-closed'
     Say "after Guide: $(if ($opened) { $opened } else { 'no Guide over the game line' }); $focus; $dropped; foreground $(Front)"
     if (-not $opened) { $failures += 'a tap of the Guide button while a Toast showed did not open the Guide' }
-    if ($focus -ne 'guide: Landing Utility(0)') { $failures += "the Guide did not open on Notifications: $focus" }
+    if ($focus -notmatch '^guide: Landing Utility\(0\), flyout Notifications ') { $failures += "the Guide did not open on the Notifications Flyout: $focus" }
     if (-not $dropped) { $failures += 'the Toast did not go as the Guide opened' }
     foreach ($p in $guidePoints) { Say "  Guide at ($($p.X), $($p.Y)), $($p.What): seen $(Format-Colour $p.Seen), expected $(Format-Colour $p.Colour)" }
     foreach ($p in @(Find-WrongColours $guidePoints)) {

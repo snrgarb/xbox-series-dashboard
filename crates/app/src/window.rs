@@ -683,6 +683,9 @@ impl ApplicationHandler for App {
         if self.state.is_none() {
             return;
         }
+        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
+        let focus = self.dashboard.focus_line();
+        let guide = self.dashboard.guide_line();
         // Toasts are timed by the time the Dashboard is told has passed: told first, so that one posted this turn
         // starts from its start.
         let mut toasts_changed = self.dashboard.advance(told(&mut self.told_time));
@@ -696,9 +699,6 @@ impl ApplicationHandler for App {
                 self.make_overlay();
             }
         }
-        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
-        let focus = self.dashboard.focus_line();
-        let guide = self.dashboard.guide_line();
         if let Some(strip) = &mut self.toast_strip {
             for text in strip.take_posts() {
                 eprintln!("toasts: posted {text:?} at {:.0} ms", since_start());
