@@ -11,6 +11,7 @@ use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
 use screens::{Dashboard, Effect, OverlayShows, Setting};
 use shell::power::{DryPower, Power, SystemPower};
+use shell::store::{Addresses, Ask, SystemAddresses};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
@@ -98,6 +99,8 @@ struct App {
     log_focus: bool,
     /// What turns the machine off, restarts it and puts it to sleep: for real, or with --dry-power in the log only.
     power: Box<dyn Power>,
+    /// What opens a store's address for a game: Steam's, to install or uninstall it.
+    addresses: Box<dyn Addresses>,
     /// How long the sound of leaving has still to play: Exit waits for it.
     leaving: Duration,
     /// The minute of the day Home's last frame showed on its clock.
@@ -193,6 +196,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         log_focus: args.log_focus,
         // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
         power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
+        addresses: Box::new(SystemAddresses),
         leaving: Duration::ZERO,
         minute: minute(),
         frames: args.log_frames.then(|| (0, 0, Instant::now())),
@@ -395,7 +399,31 @@ impl App {
                 Effect::Power(command) => self.power.carry_out(command),
                 // In force already: saved, so that it is still so the next time.
                 Effect::Set(change) => self.store.set(change),
+                // The user's marks go to the library database, and what it says then is what the screens show.
+                Effect::Favourite { game, on } => {
+                    let marked = self.store.set_favourite(game, on);
+                    self.show(marked);
+                }
+                Effect::Hidden { game, on } => {
+                    let marked = self.store.set_hidden(game, on);
+                    self.show(marked);
+                }
+                Effect::Install(game) => {
+                    crate::games::ask_store(self.dashboard.library(), game, Ask::Install, &mut *self.addresses);
+                }
+                Effect::Uninstall(game) => {
+                    crate::games::ask_store(self.dashboard.library(), game, Ask::Uninstall, &mut *self.addresses);
+                }
             }
+        }
+    }
+
+    /// A newer snapshot of the library, if there is one, takes the place of the one on screen.
+    fn show(&mut self, library: Option<Library>) {
+        if let Some(library) = library {
+            self.dashboard.set_library(library);
+            self.stale = true;
+            self.overlay_stale = true;
         }
     }
 }

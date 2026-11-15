@@ -5,14 +5,18 @@
 //! pad. One under it keeps its state, so B on the top one finds it as it was. Opening and closing are instant: a
 //! page is there in the next frame and gone in the one after B, with no transition (docs/spec/my-games.md, 3.2).
 //!
+//! A page that does not fill the screen is drawn over the one under it. One that is a **dialog** (the Tile menu)
+//! has sounds of its own, holds what was pressed while it was up back from the page under it until it is let go,
+//! and may still be drawn for a moment after it has closed, on its way out.
+//!
 //! **Adding a page:** a module with a struct that implements [`Page`], a variant of [`Open`] that carries how it is
 //! opened, and that variant's line in [`Open::page`]. Nothing else here changes, and nothing in `Dashboard`.
-use model::Library;
+use model::{Library, Sound};
 use ui::{Button, Press, Repeat, Ui};
 
 use crate::hint_bar::{self, Hint};
 use crate::keyboard::{self, Typed};
-use crate::{my_games, search, settings, Effect};
+use crate::{my_games, search, settings, tile_menu, Effect};
 
 /// What a page is told of the world each time it is pressed or drawn. It keeps none of it.
 #[derive(Clone, Copy)]
@@ -35,13 +39,16 @@ pub enum Open {
     TextEntry(keyboard::Entry),
     /// The stand-in page that opens text entry until Full library and Settings do (`keyboard::stand_in`).
     KeyboardStandIn,
+    /// A game's Tile menu, over whatever asked for it (`tile_menu::open`).
+    TileMenu(tile_menu::Entry),
 }
 
 impl Open {
     /// The page, made anew: a page remembers nothing from the last time it was up. `under` is the page it opens
-    /// over, if it is opened over one.
-    fn page(self, under: Option<&dyn Page>) -> Box<dyn Page> {
-        match self {
+    /// over, if it is opened over one. It is made from the world as it is now, and one that has nothing to open on
+    /// (the Tile menu of a game that has gone) is not made.
+    fn page(self, under: Option<&dyn Page>, around: Around) -> Option<Box<dyn Page>> {
+        Some(match self {
             Open::MyGames(entry) => Box::new(my_games::MyGames::open(entry)),
             Open::Search => Box::new(search::Search::open()),
             Open::Settings(entry) => Box::new(settings::Settings::open(entry)),
@@ -50,7 +57,8 @@ impl Open {
                 Box::new(keyboard::TextEntry::open(entry, text))
             }
             Open::KeyboardStandIn => Box::new(keyboard::stand_in::StandIn::open()),
-        }
+            Open::TileMenu(entry) => Box::new(tile_menu::TileMenu::open(entry, around)?),
+        })
     }
 }
 
@@ -64,6 +72,30 @@ pub enum PageAction {
     Open(Open),
     /// Something for the shell: a launch, say.
     Effect(Effect),
+    /// The page goes, and then this is asked of the shell: a row of a menu that closes it and acts.
+    CloseWith(Effect),
+    /// The page goes and this one opens in its place, over what was under it: B there comes back to that.
+    Replace(Open),
+}
+
+/// What kind of dialog a page is while it is one, which is what its sounds are told by (docs/spec/tile-menu.md,
+/// section 8): opening is `PromptOpen`, a move `GuideMove`, B `PromptClose`, and A what [`Dialog::chosen`] says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dialog {
+    /// Rows of things to do.
+    Menu,
+    /// A question and its answers.
+    Prompt,
+}
+
+impl Dialog {
+    /// The sound of A on a row: a choice in a menu goes on with something, an answer to a prompt closes it.
+    pub fn chosen(self) -> Sound {
+        match self {
+            Dialog::Menu => Sound::GuideSelect,
+            Dialog::Prompt => Sound::PromptClose,
+        }
+    }
 }
 
 /// A page over Home. It owns its state and its focus, as every screen does (docs/ui.md): `press` moves them, `draw`
@@ -129,12 +161,27 @@ pub trait Page {
     fn says(&mut self) -> Option<keyboard::Event> {
         None
     }
+
+    /// Whether the page is a dialog over what is under it, and of which kind with focus where it is. A dialog's
+    /// sounds are a dialog's, its held direction repeats at a dialog's pace, a button pressed while it is up does
+    /// nothing under it until it is let go, and it closes when the Guide opens.
+    fn dialog(&self) -> Option<Dialog> {
+        None
+    }
+
+    /// Draws what still shows of the page once it has closed: a dialog on its way out. False when nothing does,
+    /// and it is then asked no more. The page under it has the pad already.
+    fn draw_leaving(&mut self, _ui: &mut Ui, _around: Around) -> bool {
+        false
+    }
 }
 
 /// The pages that are up, the last on top. Home is under them all and is not one of them.
 #[derive(Default)]
 pub struct Stack {
     pages: Vec<Box<dyn Page>>,
+    /// A dialog that has closed and is still on its way out. It takes no input.
+    leaving: Option<Box<dyn Page>>,
 }
 
 impl Stack {
@@ -153,21 +200,51 @@ impl Stack {
     }
 
     /// Opens a page from outside the stack (Home, the Guide): it takes the place of whatever pages are up, so My
-    /// games & apps, Search and Settings are never up together and B on it goes to Home.
-    pub fn open(&mut self, open: Open) {
+    /// games & apps, Search and Settings are never up together and B on it goes to Home. False, with nothing
+    /// changed, when the page has nothing to open on.
+    pub fn open(&mut self, open: Open, around: Around) -> bool {
+        let Some(page) = open.page(None, around) else { return false };
         self.pages.clear();
-        self.pages.push(open.page(None));
+        self.push(page);
+        true
     }
 
-    /// Opens a page the top page asked for, over it.
-    pub fn open_over(&mut self, open: Open) {
-        let page = open.page(self.top());
+    /// Opens a page the top page asked for, over it. False when the page has nothing to open on.
+    pub fn open_over(&mut self, open: Open, around: Around) -> bool {
+        let Some(page) = open.page(self.top(), around) else { return false };
+        self.push(page);
+        true
+    }
+
+    fn push(&mut self, page: Box<dyn Page>) {
+        // A dialog opened while another is on its way out takes over from it.
+        if page.dialog().is_some() {
+            self.leaving = None;
+        }
         self.pages.push(page);
     }
 
-    /// The top page goes.
+    /// The top page goes. A dialog is kept for as long as something of it still shows.
     pub fn close(&mut self) {
-        self.pages.pop();
+        if let Some(page) = self.pages.pop() {
+            if page.dialog().is_some() {
+                self.leaving = Some(page);
+            }
+        }
+    }
+
+    /// The kind of dialog that has the pad, if the top page is one.
+    pub fn dialog(&self) -> Option<Dialog> {
+        self.top().and_then(|page| page.dialog())
+    }
+
+    /// A dialog on top goes, with no answer: something else has taken the screen. True if there was one.
+    pub fn close_dialog(&mut self) -> bool {
+        let any = self.dialog().is_some();
+        while self.dialog().is_some() {
+            self.close();
+        }
+        any
     }
 
     /// Every page goes. True if there was one.
@@ -233,6 +310,12 @@ impl Stack {
             }
             page.draw(ui, around);
         }
+        if let Some(page) = &mut self.leaving {
+            ui.layer();
+            if !page.draw_leaving(ui, around) {
+                self.leaving = None;
+            }
+        }
     }
 }
 
@@ -275,8 +358,11 @@ mod tests {
 
     fn press(stack: &mut Stack, button: Button) -> Option<PageAction> {
         let library = Library::default();
-        let around = Around { library: &library, playing: None, options: settings::Options::default() };
-        stack.press(Press { button, repeat: false }, around)
+        stack.press(Press { button, repeat: false }, around(&library))
+    }
+
+    fn around(library: &Library) -> Around<'_> {
+        Around { library, playing: None, options: settings::Options::default() }
     }
 
     fn focus(stack: &Stack) -> Option<(&'static str, String)> {
@@ -292,7 +378,7 @@ mod tests {
         press(&mut stack, Button::Down);
         // It asks for Search over it, as the Dashboard would open it.
         assert_eq!(press(&mut stack, Button::A), Some(PageAction::Open(Open::Search)));
-        stack.open_over(Open::Search);
+        stack.open_over(Open::Search, around(&Library::default()));
         assert_eq!((stack.depth(), focus(&stack)), (2, Some(("Search", "Open".into()))));
         // Search has the pad: the page under it hears nothing, and is as it was when Search has gone.
         press(&mut stack, Button::Down);
@@ -304,9 +390,10 @@ mod tests {
     #[test]
     fn a_page_opened_from_outside_takes_the_place_of_every_page_that_is_up() {
         let mut stack = Stack::default();
-        stack.open(Open::MyGames(my_games::Entry::Games));
-        stack.open_over(Open::Search);
-        stack.open(Open::Settings(settings::Entry::Rail));
+        let library = Library::default();
+        stack.open(Open::MyGames(my_games::Entry::Games), around(&library));
+        stack.open_over(Open::Search, around(&Library::default()));
+        stack.open(Open::Settings(settings::Entry::Rail), around(&library));
         assert_eq!((stack.depth(), focus(&stack)), (1, Some(("Settings", "Rail: Theme settings".into()))));
         assert!(stack.clear() && stack.is_empty() && !stack.clear());
     }
@@ -317,7 +404,7 @@ mod tests {
         assert!(!stack.hides_home());
         stack.pages.push(Box::new(Counter { presses: 0, covers: false }));
         assert!(!stack.hides_home());
-        stack.open_over(Open::Search);
+        stack.open_over(Open::Search, around(&Library::default()));
         assert!(stack.hides_home());
     }
 }

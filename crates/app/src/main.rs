@@ -1,4 +1,5 @@
 //! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG.
+mod games;
 mod offscreen;
 mod sounds;
 mod store;

@@ -24,7 +24,7 @@ pub use self::top_bar::{profile_picture, Status, TopButton};
 use crate::hint_bar::{self, Hint};
 use crate::pages::Open;
 use crate::theme::ROW_SCALE as S;
-use crate::{my_games, settings};
+use crate::{my_games, settings, tile_menu};
 
 /// How many games the Recent row holds, before its Play history tile.
 pub const RECENT_GAMES: usize = recent::GAMES;
@@ -239,6 +239,15 @@ impl Home {
             (Focus::Recent(i), Button::A) if i < row.games.len() => return self.choose(i),
             // The Play history tile, at once: it has no double tap to wait for.
             (Focus::Recent(_), Button::A) => return open(Open::MyGames(my_games::Entry::PlayHistory)),
+
+            // Menu on a game's tile is its Tile menu: every game of the Recent row and of the Groups, a hidden
+            // one's card too. Nothing else on Home has one (docs/spec/tile-menu.md, section 1).
+            (Focus::Recent(i), Button::Menu) if i < row.games.len() => {
+                return open(tile_menu::entry(&row.games[i], tile_menu::Opener::Home));
+            }
+            (Focus::Group { group, card }, Button::Menu) if card < groups[group].games.len() => {
+                return open(tile_menu::entry(groups[group].games[card], tile_menu::Opener::Home));
+            }
 
             // The wide tiles: along them; up to the Recent tile Down left; down into the first Group, at its start.
             (Focus::Wide(i), Button::Left) if i > 0 => self.go_wide(i - 1),

@@ -17,6 +17,7 @@ pub mod search;
 pub mod settings;
 pub mod spinner;
 pub mod theme;
+pub mod tile_menu;
 pub mod wide_dialog;
 
 use model::Library;
@@ -55,6 +56,16 @@ pub enum Effect {
     /// Settings changed an option. The Dashboard has taken the change already: this is for whoever keeps the
     /// settings to save it.
     Set(settings::Change),
+    /// Mark the game with this id in the library database as a favourite, or as one no longer. The shell answers
+    /// with a new snapshot of the library (`set_library`).
+    Favourite { game: i64, on: bool },
+    /// Hide the game with this id from every list but the Hidden filter's, or show it again. A new snapshot
+    /// follows, as for a favourite.
+    Hidden { game: i64, on: bool },
+    /// Ask its store to install the game with this id in the library database: the store's own window does it.
+    Install(i64),
+    /// Ask its store to uninstall the game with this id. The player has said yes to "Uninstall X?".
+    Uninstall(i64),
 }
 
 /// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
@@ -135,6 +146,9 @@ pub struct Dashboard {
     quit: Option<Quit>,
     /// The seconds until the Guide closes by itself: the game quit from it has stopped.
     close_in: Option<f32>,
+    /// The buttons pressed while a dialog page (the Tile menu) was up and not let go since: held on after it has
+    /// closed, they do nothing to what was under it (docs/spec/tile-menu.md, section 6).
+    held: Vec<Button>,
     effects: Vec<Effect>,
 }
 
@@ -161,6 +175,7 @@ impl Dashboard {
             in_front: false,
             quit: None,
             close_in: None,
+            held: Vec::new(),
             effects: Vec::new(),
         }
     }
@@ -262,9 +277,10 @@ impl Dashboard {
         pages::Around { library: &self.library, playing: self.playing, options: self.options }
     }
 
-    /// How a held direction repeats now, for whoever times the pad.
+    /// How a held direction repeats now, for whoever times the pad: in the Guide and in a dialog at their pace
+    /// (docs/spec/tile-menu.md, section 6), anywhere else at Home's.
     pub fn repeat(&self) -> Repeat {
-        if self.guide.is_open() {
+        if self.guide.is_open() || self.pages.dialog().is_some() {
             GUIDE_REPEAT
         } else if self.page_has_pad() {
             self.pages.repeat().unwrap_or_default()
@@ -316,6 +332,7 @@ impl Dashboard {
             }
             PadEvent::Release(button) => {
                 self.pages.pad(button, false);
+                self.held.retain(|&held| held != button);
                 if self.release_awaited == Some(button) {
                     self.release_awaited = None;
                 }
@@ -487,16 +504,24 @@ impl Dashboard {
     /// A dialog over the Guide has sounds of its own: one for its coming up, after A's if A brought it; a move's;
     /// A's on an option, which in a prompt is the sound of its closing; and B's, the closing's. A tap of the Guide
     /// button closes whatever is up in silence.
+    ///
+    /// A page that is a dialog (the Tile menu) sounds as a dialog does (docs/spec/tile-menu.md, section 8): its
+    /// opening, after the sound of what opened it; a move along its rows; A on a row, which in a prompt is the
+    /// sound of its closing; B at every level. A move with nowhere to go is silent there too.
     pub fn press(&mut self, press: Press) {
         let (was_open, guide) = (self.guide.is_open(), self.guide.focus());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
         let (depth, focus) = (self.pages.depth(), self.focus_place());
         let dialog = self.guide.dialog();
+        let page_dialog = self.pages.dialog();
         let asked = self.effects.len();
         let activated = self.steer(press);
         self.settle_quit();
         let select = activated.then_some(Sound::GuideSelect);
+        let moved = self.pages.depth() == depth && self.focus_place() != focus;
+        // A dialog page that was not up before the press came up by it.
+        let opened = (page_dialog.is_none() && self.pages.dialog().is_some()).then_some(Sound::PromptOpen);
         let sounds = match (dialog, self.guide.dialog()) {
             (None, Some(_)) => [select, Some(Sound::PromptOpen)],
             (Some(was), Some(now)) => [(was != now).then_some(Sound::GuideMove), None],
@@ -516,11 +541,13 @@ impl Dashboard {
                 [select.or(moved.then_some(Sound::GuideMove)), None]
             }
             (None, None) if self.guide.is_open() => [Some(Sound::GuideOpen), None],
-            (None, None) if activated => [Some(Sound::Activate), None],
-            (None, None) => {
-                let moved = self.pages.depth() == depth && self.focus_place() != focus;
-                [moved.then_some(Sound::Move), None]
-            }
+            (None, None) => match (page_dialog, press.button) {
+                (Some(kind), Button::A) if !press.repeat => [Some(kind.chosen()), None],
+                (Some(_), Button::B) if !press.repeat => [Some(Sound::PromptClose), None],
+                (Some(_), _) => [moved.then_some(Sound::GuideMove), None],
+                (None, _) if activated => [Some(Sound::Activate), opened],
+                (None, _) => [moved.then_some(Sound::Move), opened],
+            },
         };
         for (at, sound) in sounds.into_iter().flatten().enumerate() {
             self.effects.insert(asked + at, Effect::Sound(sound));
@@ -536,6 +563,8 @@ impl Dashboard {
             return;
         }
         if !self.guide.is_open() {
+            // A dialog page closes with no answer as the Guide comes.
+            self.pages.close_dialog();
             // As the Guide opens: on the Overlay where there is one, which keeps the foreground if it still has it.
             self.guide_overlaid = self.has_overlay;
             self.release_awaited = None;
@@ -569,17 +598,43 @@ impl Dashboard {
         if self.playing.is_some() && !self.in_front {
             return false;
         }
+        if self.pages.dialog().is_some() {
+            // The dialog gets every press, and each button pressed while it is up is remembered until let go.
+            if !self.held.contains(&press.button) {
+                self.held.push(press.button);
+            }
+        } else if press.repeat && self.held.contains(&press.button) {
+            // Still down from before the dialog closed: nothing under it hears of it.
+            return false;
+        } else {
+            // Pressed afresh: it was let go, whether or not anyone said so (a key has no release).
+            self.held.retain(|&held| held != press.button);
+        }
         if !self.pages.is_empty() {
             let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
             match self.pages.press(press, around) {
                 Some(PageAction::Close) => self.close_page(),
-                Some(PageAction::Open(open)) => self.pages.open_over(open),
+                Some(PageAction::Open(open)) => {
+                    self.pages.open_over(open, around);
+                }
                 Some(PageAction::Effect(Effect::Set(change))) => self.set(change),
                 // A page's Play is Home's: with another game running it is asked about first.
                 Some(PageAction::Effect(Effect::Launch(game))) => self.play(game),
                 // And a page's Quit is the Guide's, with its ten seconds and "Force quit?".
                 Some(PageAction::Effect(Effect::QuitGame)) => self.quit_game(),
                 Some(PageAction::Effect(effect)) => self.effects.push(effect),
+                Some(PageAction::CloseWith(effect)) => {
+                    self.close_page();
+                    self.effects.push(effect);
+                }
+                // What was under the page is under the new one: B there comes back to it.
+                Some(PageAction::Replace(open)) => {
+                    self.pages.close();
+                    let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
+                    if !self.pages.open_over(open, around) {
+                        self.close_page();
+                    }
+                }
                 None => return false,
             }
             return press.button == Button::A;
@@ -592,7 +647,8 @@ impl Dashboard {
             }
             Some(HomeAction::Open(open)) if !press.repeat => {
                 let on_button = matches!(self.home.focus(), Focus::TopBar(TopButton::Search | TopButton::Settings));
-                self.pages.open(open);
+                self.pages
+                    .open(open, pages::Around { library: &self.library, playing: self.playing, options: self.options });
                 self.back_to_button = on_button && press.button == Button::A;
             }
             // The Guide on its Discord tab while Discord is connected (M6); with no such tab, or the Guide off,
@@ -612,7 +668,7 @@ impl Dashboard {
     /// Opens a page over Home, in place of any that is up: from the Guide, or by whoever drives the Dashboard.
     /// B on it goes to Home, its rows taking focus where they last had it.
     pub fn open_page(&mut self, open: Open) {
-        self.pages.open(open);
+        self.pages.open(open, pages::Around { library: &self.library, playing: self.playing, options: self.options });
         self.back_to_button = false;
     }
 
@@ -771,6 +827,8 @@ impl Dashboard {
         if self.playing.is_some() && !self.has_overlay && !self.in_front {
             return;
         }
+        // A dialog page closes with no answer as the Guide comes (docs/spec/tile-menu.md, section 6).
+        self.pages.close_dialog();
         let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
         self.guide.open_on(tab, around);
         self.guide_overlaid = self.has_overlay;
@@ -953,7 +1011,8 @@ impl Dashboard {
         };
         // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn.
         if !self.pages.hides_home() {
-            self.home.set_in_front(!self.guide.is_open() && self.pages.is_empty());
+            // Under a page that leaves it showing (the Tile menu) Home goes on as it was.
+            self.home.set_in_front(!self.guide.is_open());
             self.home.draw(ui, &self.library, &status);
         }
         self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing, options: self.options });
