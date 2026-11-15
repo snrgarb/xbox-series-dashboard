@@ -614,6 +614,11 @@ impl App {
                     let marked = self.store.set_hidden(game, on);
                     self.show(marked);
                 }
+                // Settings' Groups: the database changes, and Home and Full library follow its next snapshot.
+                Effect::Filter(change) => {
+                    let changed = self.store.change_filter(&change);
+                    self.show(changed);
+                }
                 Effect::Install(game) => {
                     crate::games::ask_store(self.dashboard.library(), game, Ask::Install, &mut *self.addresses);
                 }
@@ -627,10 +632,20 @@ impl App {
     /// A newer snapshot of the library, if there is one, takes the place of the one on screen.
     fn show(&mut self, library: Option<Library>) {
         if let Some(library) = library {
+            let groups = self.dashboard.home_groups();
             self.dashboard.set_library(library);
             self.stale = true;
             self.overlay_stale = true;
+            if self.log_focus && self.dashboard.home_groups() != groups {
+                self.log_groups();
+            }
         }
+    }
+
+    /// With --log-focus: Home's Groups in order, as Home shows them now (`groups: Favourites, Most played`). Said
+    /// with the first frame and again whenever they change.
+    fn log_groups(&self) {
+        eprintln!("groups: {}", self.dashboard.home_groups().join(", "));
     }
 }
 
@@ -722,9 +737,7 @@ impl ApplicationHandler for App {
             self.overlay_stale = true;
         }
         if let Some(library) = self.store.changed() {
-            self.dashboard.set_library(library);
-            self.stale = true;
-            self.overlay_stale = true;
+            self.show(Some(library));
         }
         // The keyboard is the Overlay's while it is the Guide over a game.
         if let Some(overlay) = &mut self.overlay {
@@ -807,7 +820,12 @@ impl ApplicationHandler for App {
         if toasts_changed || pressed {
             self.toasts_changed();
         }
+        let said = self.dashboard.focus_line();
         self.carry_out(event_loop);
+        // What was carried out may have changed what the page says (a Group shown or not, from the snapshot after).
+        if self.log_focus && self.dashboard.focus_line() != said {
+            eprintln!("focus: {}", self.dashboard.focus_line());
+        }
         let audio_wants = self.follow_audio();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
         // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
@@ -996,6 +1014,9 @@ impl ApplicationHandler for App {
                          at {renderer:.0} ms, first frame begun at {began:.0} ms"
                     );
                     eprintln!("first frame presented at {:.0} ms since process start", since_start());
+                    if self.log_focus {
+                        self.log_groups();
+                    }
                     // Steam is read once the first frame is out, and wakes the window if it has news.
                     let proxy = self.proxy.clone();
                     self.store.sync_in_background(self.dashboard.library(), move || {

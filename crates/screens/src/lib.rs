@@ -23,7 +23,7 @@ pub mod toasts;
 pub mod wide_dialog;
 
 use model::{Audio, Flow, Library};
-pub use model::{PowerCommand, Sound};
+pub use model::{FilterChange, PowerCommand, Sound};
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
 use crate::guide::{Around, DialogFocus, Face, Flyout, FlyoutFocus, Guide, GuideAction, PowerChoice, Status, Tab};
@@ -35,7 +35,7 @@ pub use crate::toasts::Notification;
 use crate::toasts::{Toast, ToastKind, Toasts};
 
 /// What the Dashboard asks of the shell.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     /// Start the game at this place in the library. The shell answers with `launch_started` or `game_ended`.
     Launch(usize),
@@ -78,6 +78,10 @@ pub enum Effect {
     Install(i64),
     /// Ask its store to uninstall the game with this id. The player has said yes to "Uninstall X?".
     Uninstall(i64),
+    /// Settings' Groups page changed a saved filter: shown or not, moved, made, changed, deleted
+    /// (docs/spec/filters.md, section 6). A new snapshot follows, as for a favourite, and the pages over Home are
+    /// told of it.
+    Filter(FilterChange),
 }
 
 /// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
@@ -236,6 +240,15 @@ impl Dashboard {
         }
         // The Guide's lists name games by their place: made again, focus staying where it is in them.
         self.refresh_guide();
+        // A page that keeps something of the library (Settings' Groups, the row focus is on) finds it again.
+        let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
+        self.pages.library_changed(around);
+    }
+
+    /// The names of Home's Groups, in order, as Home shows them now: what `--log-focus` says of them
+    /// (`groups: ...`), since a Group's place is all Home's focus says of it.
+    pub fn home_groups(&self) -> Vec<String> {
+        home::groups::of(&self.library).iter().map(|group| group.name.to_string()).collect()
     }
 
     fn refresh_guide(&mut self) {
@@ -372,10 +385,13 @@ impl Dashboard {
     /// pad, if that takes text now (text entry; Search). False if nothing took it: Backspace is then B, as it is
     /// everywhere else, and anything else nothing.
     pub fn typed(&mut self, typed: keyboard::Typed) -> bool {
-        self.page_has_pad()
-            && self
-                .pages
-                .typed(typed, pages::Around { library: &self.library, playing: self.playing, options: self.options })
+        if !self.page_has_pad() {
+            return false;
+        }
+        let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
+        let taken = self.pages.typed(typed, around);
+        self.effects.extend(self.pages.asked());
+        taken
     }
 
     /// What a pad says happened. A button going down is a `press`. The Guide button is a tap or a hold
@@ -611,7 +627,9 @@ impl Dashboard {
         let activated = self.steer(press);
         self.settle_quit();
         let select = activated.then_some(Sound::GuideSelect);
-        let moved = self.pages.depth() == depth && self.focus_place() != focus;
+        // A dialog a page shows over itself (Settings' menu of a Group) coming up or going is no move either.
+        let same_level = self.pages.depth() == depth && self.pages.dialog().is_some() == page_dialog.is_some();
+        let moved = same_level && self.focus_place() != focus;
         // A dialog page that was not up before the press came up by it.
         let opened = (page_dialog.is_none() && self.pages.dialog().is_some()).then_some(Sound::PromptOpen);
         let sounds = match (dialog, self.guide.dialog()) {
@@ -728,7 +746,10 @@ impl Dashboard {
         }
         if !self.pages.is_empty() {
             let around = pages::Around { library: &self.library, playing: self.playing, options: self.options };
-            match self.pages.press(press, around) {
+            let action = self.pages.press(press, around);
+            // What the page under text entry asks for as its text is kept: a Group's new name, to save.
+            self.effects.extend(self.pages.asked());
+            match action {
                 Some(PageAction::Close) => self.close_page(),
                 Some(PageAction::Open(open)) => {
                     self.pages.open_over(open, around);

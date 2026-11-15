@@ -63,7 +63,7 @@ impl Open {
 }
 
 /// What a press on a page asks the Dashboard to do.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PageAction {
     /// B with nothing of the page's own left to step back from: the page goes, and what opened it has the pad
     /// again with focus where it was.
@@ -174,6 +174,24 @@ pub trait Page {
     fn draw_leaving(&mut self, _ui: &mut Ui, _around: Around) -> bool {
         false
     }
+
+    /// Puts away a dialog the page shows over itself (Settings' menu of a Group), with no answer: something else
+    /// has taken the screen. True for a page that stays up without it; a page that is the dialog answers false,
+    /// and closes.
+    fn dismiss_dialog(&mut self) -> bool {
+        false
+    }
+
+    /// A newer snapshot of the library has taken the old one's place (`Dashboard::set_library`). What the page
+    /// keeps of the old one, such as the row focus is on, it finds again in `around.library`. Every page that is
+    /// up is told, the top one or not.
+    fn library_changed(&mut self, _around: Around) {}
+
+    /// What the page asks of the shell that no press of its own answered: text entry over it kept a name
+    /// ([`Page::entry`]), which is a change to save. Asked after every press and everything typed.
+    fn asks(&mut self) -> Vec<Effect> {
+        Vec::new()
+    }
 }
 
 /// The pages that are up, the last on top. Home is under them all and is not one of them.
@@ -238,13 +256,29 @@ impl Stack {
         self.top().and_then(|page| page.dialog())
     }
 
-    /// A dialog on top goes, with no answer: something else has taken the screen. True if there was one.
+    /// A dialog on top goes, with no answer: something else has taken the screen. True if there was one. A page
+    /// that only shows a dialog over itself puts it away and stays.
     pub fn close_dialog(&mut self) -> bool {
         let any = self.dialog().is_some();
         while self.dialog().is_some() {
-            self.close();
+            let stays = self.pages.last_mut().is_some_and(|page| page.dismiss_dialog());
+            if !stays || self.dialog().is_some() {
+                self.close();
+            }
         }
         any
+    }
+
+    /// Tells every page that is up of a newer snapshot of the library.
+    pub fn library_changed(&mut self, around: Around) {
+        for page in &mut self.pages {
+            page.library_changed(around);
+        }
+    }
+
+    /// What the pages ask of the shell beyond what the last press answered ([`Page::asks`]).
+    pub fn asked(&mut self) -> Vec<Effect> {
+        self.pages.iter_mut().flat_map(|page| page.asks()).collect()
     }
 
     /// Every page goes. True if there was one.

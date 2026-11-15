@@ -256,7 +256,7 @@ fn customise_home_opens_settings_on_personalisation_and_b_comes_back_to_the_tile
     down_to(&mut menu, "Customise Home");
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER]);
-    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("Settings: Personalisation: Background delay", 1));
+    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("Settings: Personalisation: Groups", 1));
     // Settings' own way back: Theme settings' boxes, its rail, then what the menu was over.
     press(&mut menu, &[B, B, B]);
     assert_eq!((menu.page(), menu.home_focus()), (None, Focus::Recent(3)));

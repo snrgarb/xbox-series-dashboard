@@ -6,8 +6,10 @@
 //! A panel knows its rows and where focus is among them, takes the pad, and draws itself where it is told. What a
 //! row stands for is the caller's own type; what is behind the panel (a dim, a blurred Guide), how it comes and
 //! goes, and what its sounds are, are the caller's too: [`MenuPanel::choose_sound`] says which the Bundle plays.
+use std::hash::Hash;
+
 use model::Sound;
-use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
+use ui::{Button, Color, Ease, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
 use crate::theme::{self, BODY, TEXT_DIM};
 
@@ -36,6 +38,29 @@ const FOCUSED: Color = Color::rgb(0x404040);
 /// The room over a row that starts a group of its own (the Tile menu's Customise).
 const GAP: f32 = 21.0;
 
+/// The dim under a panel that stands in the middle of the screen: black at 60%, there at once and gone at once.
+pub const DIM: Color = Color::argb(0x99000000);
+/// Such a panel flies up from this far under its place as it opens, and back down to it as it closes.
+pub const FLY: f32 = 80.0;
+const OPEN_SECONDS: f32 = 0.25;
+const CLOSE_SECONDS: f32 = 0.15;
+
+/// Where a panel that flies up into the middle of the screen is and how much of it shows, on its way in or,
+/// `leaving`, out: how far under its place, and its opacity. `id` tells one flight from another: each panel that
+/// takes the middle flies up afresh. Under Reduce motion it is in its place, or gone, at once. Out, it has gone
+/// when it shows nothing or has reached [`FLY`].
+pub fn flight(ui: &mut Ui, id: impl Hash + Copy, leaving: bool) -> (f32, f32) {
+    let ids = (("menu panel fly", id), ("menu panel fade", id));
+    let still = ui.store.reduce_motion;
+    if leaving {
+        let fly = ui.slide(ids.0, FLY, CLOSE_SECONDS, Ease::CubicIn);
+        (fly, ui.tween(ids.1, 0.0, if still { 0.0 } else { CLOSE_SECONDS }, Ease::Linear))
+    } else {
+        let fly = ui.slide_from(ids.0, FLY, 0.0, OPEN_SECONDS, Ease::CubicOut);
+        (fly, ui.tween_from(ids.1, 0.0, 1.0, if still { 0.0 } else { OPEN_SECONDS }, Ease::Linear))
+    }
+}
+
 /// The icons the Bundle's menus and prompts use, in Segoe Fluent Icons.
 pub mod icon {
     pub const PLAY: char = '\u{E768}';
@@ -54,6 +79,10 @@ pub mod icon {
     pub const HDR: char = '\u{E793}';
     pub const EXTENSIONS: char = '\u{EA86}';
     pub const REMOVE_GAME: char = '\u{E738}';
+    pub const MOVE_UP: char = '\u{E74A}';
+    pub const MOVE_DOWN: char = '\u{E74B}';
+    pub const EDIT: char = '\u{E70F}';
+    pub const DELETE: char = '\u{E74D}';
 }
 
 /// One row: what it shows, and what choosing it means to whoever made the panel.
@@ -249,6 +278,18 @@ impl<T: Copy> MenuPanel<T> {
             // WPF's corner of 7 is the stroke's centre line: 9 at its outer edge.
             theme::focus_ring_cornered(ui, fill, 9.0);
         }
+    }
+
+    /// Draws the panel centred on the screen by its own height, `fly` under its place, at `opacity`: a panel on
+    /// its [`flight`]. Gives its place at rest.
+    pub fn draw_flown(&self, ui: &mut Ui, fly: f32, opacity: f32) -> (f32, f32) {
+        let at = self.centred(ui);
+        if opacity >= 1.0 {
+            self.draw(ui, (at.0, at.1 + fly));
+        } else if opacity > 0.0 {
+            self.draw_faded(ui, (at.0, at.1 + fly), opacity);
+        }
+        at
     }
 
     /// Draws the panel as one picture in a layer of its own, faded as a whole to `opacity`: a panel flying in, or

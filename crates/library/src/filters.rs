@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use anyhow::{bail, Context, Result};
-use model::{Collection, Filter, FilterKind, Played, Rule, Sort};
+use model::{Collection, Filter, FilterChange, FilterKind, Played, Rule, Sort};
 use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 
@@ -369,6 +369,20 @@ impl Database {
             bail!("filter {filter} is not a custom filter");
         }
         Ok(())
+    }
+
+    /// Carries out a change Settings asked for, by the setter that is its own. An `Add` gives the new filter's id.
+    pub fn change_filter(&mut self, change: &FilterChange) -> Result<Option<i64>> {
+        match change {
+            FilterChange::Shown { filter, shown } => self.set_filter_shown(*filter, *shown)?,
+            FilterChange::Move { filter, by } => self.move_filter(*filter, *by)?,
+            FilterChange::Add { name } => return self.add_filter(name).map(Some),
+            FilterChange::Set { filter, name, rule, sort, descending } => {
+                self.set_filter(*filter, name, rule, *sort, *descending)?
+            }
+            FilterChange::Delete { filter } => self.delete_filter(*filter)?,
+        }
+        Ok(None)
     }
 }
 
@@ -819,6 +833,27 @@ mod tests {
         db.delete_filter(id).unwrap();
         db.delete_filter(second).unwrap();
         assert!(db.filters_at(NOW).unwrap().iter().all(|f| f.kind != FilterKind::Custom));
+    }
+
+    /// What Settings' Groups page asks for, each change by the setter that is its own.
+    #[test]
+    fn a_change_settings_asks_for_is_carried_out() {
+        let mut db = woods();
+        let id = db.change_filter(&FilterChange::Add { name: "New Group".into() }).unwrap().expect("its id");
+        assert_eq!(order_of(&db).last().unwrap(), "New Group");
+        let rule = Rule { installed: Some(true), ..Rule::default() };
+        let set = FilterChange::Set { filter: id, name: "Ready".into(), rule, sort: Sort::Playtime, descending: true };
+        assert_eq!(db.change_filter(&set).unwrap(), None);
+        assert_eq!(names(&db, &filter(&db, id)), ["The Dogwood", "Alder", "Cedar"]);
+        db.change_filter(&FilterChange::Move { filter: id, by: -9 }).unwrap();
+        assert_eq!(order_of(&db)[0], "Ready");
+        db.change_filter(&FilterChange::Shown { filter: id, shown: false }).unwrap();
+        assert!(!filter(&db, id).shown);
+        db.change_filter(&FilterChange::Delete { filter: id }).unwrap();
+        assert!(order_of(&db).iter().all(|name| name != "Ready"));
+        // What a setter refuses is refused here.
+        assert!(db.change_filter(&FilterChange::Delete { filter: keyed(&db, FAVOURITES).id }).is_err());
+        assert!(db.change_filter(&FilterChange::Add { name: " ".into() }).is_err());
     }
 
     #[test]
