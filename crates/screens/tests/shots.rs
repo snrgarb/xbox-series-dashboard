@@ -1159,8 +1159,8 @@ fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
     stage.dashboard.game_booted();
     stage.press(&[Button::Left, Button::A]);
     assert!(stage.dashboard.take_effects().is_empty(), "not so much as a sound");
-    // The Guide over the game: Menu on the running game quits it, and the Guide goes when the game has.
-    stage.press(&[Button::Guide, Button::Down, Button::Down, Button::Menu]);
+    // The Guide over the game: Quit in the running game's menu quits it, and the Guide goes when the game has.
+    stage.press(&[Button::Guide, Button::Down, Button::Down, Button::Menu, Button::A]);
     assert_eq!(asked(&mut stage.dashboard), [Effect::QuitGame]);
     assert!(stage.dashboard.guide_open());
     stage.dashboard.game_ended();
@@ -1438,4 +1438,285 @@ fn a_new_tabs_content_flies_in_from_the_side() {
         "{short:?} on the way, {:?} at rest",
         colour(&image, 601, 235)
     );
+}
+
+// The Guide's dialogs (docs/spec/guide.md, section 6), and the menu panel by itself as the Tile menu will use it
+// (docs/spec/tile-menu.md).
+
+use screens::menu_panel::{icon, MenuPanel, Row};
+
+/// Profile & system with focus on Power, and Power opened from it.
+fn power_from_its_entry(mut stage: Stage) -> Stage {
+    stage.press(&[Button::RightBumper, Button::Down, Button::Down, Button::Down, Button::A]);
+    stage
+}
+
+fn guide_at_home() -> Stage {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.press(&[Button::Guide]);
+    stage
+}
+
+/// Power from its entry: the band over the Guide's panel, which is out of focus under the dialog's dim, with
+/// focus on Close.
+#[test]
+fn guide_power() {
+    let mut stage = power_from_its_entry(guide_at_home());
+    let image = stage.still();
+    // The band is opaque and as wide as the screen; over and under it the dim is over everything.
+    assert_eq!(colour(&image, 4, 500), [45, 45, 45]);
+    assert_eq!(colour(&image, 1916, 500), [45, 45, 45]);
+    assert_ne!(colour(&image, 1916, 133), [45, 45, 45]);
+    assert_eq!(colour(&image, 1916, 134), [45, 45, 45]);
+    assert_eq!(colour(&image, 1000, 941), [45, 45, 45]);
+    assert_ne!(colour(&image, 1000, 942), [45, 45, 45]);
+    stage.check_image("guide-power", image);
+}
+
+/// Focus on a tile: Restart PC, the middle of the first row.
+#[test]
+fn guide_power_tile_focused() {
+    let mut stage = power_from_its_entry(guide_at_home());
+    stage.press(&[Button::Up, Button::Up, Button::Right]);
+    stage.check("guide-power-restart");
+}
+
+/// Power by a hold of the Guide button at Home: no panel, no hints, no Status area; Home under the two dims.
+#[test]
+fn guide_power_held() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.pad_event(ui::PadEvent::GuideHeld);
+    stage.check("guide-power-held");
+}
+
+/// Power by a hold over a game, as the Overlay shows it.
+#[test]
+fn guide_power_held_over_a_game() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.dashboard.launch_started(1);
+    stage.dashboard.game_booted();
+    stage.still();
+    stage.dashboard.pad_event(ui::PadEvent::GuideHeld);
+    let image = stage.still_over(GAME);
+    stage.check_image("guide-power-over-game", image);
+}
+
+#[test]
+fn guide_power_720p() {
+    let mut stage = Stage::on_row(library_with_art(), (1280, 720));
+    stage.press(&[Button::Guide]);
+    let mut stage = power_from_its_entry(stage);
+    stage.press(&[Button::Up]);
+    stage.check("guide-power-720p");
+}
+
+/// Wider than 16:9: the band to both edges, its contents where they are on the canvas.
+#[test]
+fn guide_power_ultrawide() {
+    let mut stage = Stage::on_row(library_with_art(), (2560, 1080));
+    stage.press(&[Button::Guide]);
+    power_from_its_entry(stage).check("guide-power-ultrawide");
+}
+
+/// The running game's menu over the Guide: the menu panel in the middle of the screen, the panel out of focus
+/// behind the dim, the hints still beside it.
+#[test]
+fn guide_running_game_menu() {
+    let mut stage = guide_over_game(library_with_art(), 1);
+    stage.press(&[Button::Down, Button::Down, Button::Menu]);
+    let image = stage.still_over(GAME);
+    // The menu panel: x 735..1185, its fill, and its one row's ring 8 outside it.
+    assert_eq!(colour(&image, 737, 500), [43, 43, 43]);
+    assert_eq!(colour(&image, 1183, 500), [43, 43, 43]);
+    assert!(within(colour(&image, 728, 590), GREEN, 8), "{:?}", colour(&image, 728, 590));
+    stage.check_image("guide-game-menu", image);
+}
+
+/// The panel behind a dialog is out of focus: an edge of it that is sharp with no dialog is soft with one, and
+/// nothing beside the panel is touched.
+#[test]
+fn behind_a_dialog_the_panel_is_out_of_focus_and_what_is_beside_it_is_not() {
+    let mut stage = guide_at_home();
+    stage.press(&[Button::RightBumper, Button::Down, Button::Down, Button::Down]);
+    let sharp = stage.still();
+    stage.press(&[Button::A]);
+    let soft = stage.still();
+    let luma = |image: &image::RgbaImage, x: u32, y: u32| colour(image, x, y).iter().map(|&c| c as i32).sum::<i32>();
+    // Down the panel's top edge, above the band (y 33), and across its right edge under the band (x 614): the
+    // light changes in one step when sharp, and over the blur's reach either side when not.
+    let rise = |image: &image::RgbaImage, down: bool, from: u32| {
+        let at = |i: u32| if down { (300, i) } else { (i, 1000) };
+        let lumas: Vec<i32> = (from..from + 28).map(|i| luma(image, at(i).0, at(i).1)).collect();
+        let whole = (lumas[27] - lumas[0]).abs();
+        let steepest = lumas.windows(2).map(|pair| (pair[1] - pair[0]).abs()).max().unwrap();
+        (whole, steepest)
+    };
+    for (edge, down, from) in [("top", true, 19), ("right", false, 600)] {
+        let ((whole, steepest), (soft_whole, soft_steepest)) = (rise(&sharp, down, from), rise(&soft, down, from));
+        assert!(whole > 20 && steepest * 2 > whole, "the {edge} edge, sharp: {steepest} of {whole}");
+        assert!(
+            soft_whole > 6 && soft_steepest * 4 < soft_whole,
+            "the {edge} edge, soft: {soft_steepest} of {soft_whole}"
+        );
+    }
+    // What is beside the panel is under the dialog's dim and otherwise as it was: the words on Home's Achievements
+    // tile, under the band, are as sharp as they were, their ink where it was.
+    let ink = |image: &image::RgbaImage| {
+        let lit = |x: u32, y: u32| luma(image, x, y) > luma(image, 1350, 950) + 30;
+        (985..1170u32).flat_map(|x| (960..996u32).map(move |y| (x, y))).filter(|&(x, y)| lit(x, y)).count()
+    };
+    assert!(ink(&sharp) > 200, "the tile's title is drawn: {}", ink(&sharp));
+    assert!(ink(&soft) * 3 > ink(&sharp) * 2, "and still sharp under the dim: {} of {}", ink(&soft), ink(&sharp));
+}
+
+/// Power's contents come in from the left after 40 ms, over 120 ms, fading in; the band and the dim are there at
+/// once.
+#[test]
+fn powers_contents_come_in_from_the_left_behind_the_band() {
+    const TILE: [u8; 3] = [59, 59, 59];
+    const BAND: [u8; 3] = [45, 45, 45];
+    let mut stage = guide_at_home();
+    stage.still();
+    let mut stage = power_from_its_entry(stage);
+    let image = stage.frame_after(0.0);
+    assert_eq!(colour(&image, 1900, 500), BAND, "the band is there in the first frame");
+    // A point of the first tile, which is x 132..636, y 356..485 at rest.
+    assert_eq!(colour(&image, 600, 380), BAND, "its contents are not");
+    let image = stage.frame_after(0.03);
+    assert_eq!(colour(&image, 600, 380), BAND, "nor 30 ms in");
+    // 100 ms in, halfway through settling: 25 short of its place and half there.
+    let image = stage.frame_after(0.07);
+    let tile = colour(&image, 500, 380);
+    assert!(tile[0] > BAND[0] + 3 && tile[0] < TILE[0] - 3, "half faded in: {tile:?}");
+    assert_eq!(colour(&image, 625, 380), BAND, "and not yet as far right as it will be");
+    let image = stage.frame_after(0.07);
+    assert_eq!(colour(&image, 500, 380), TILE);
+    assert_eq!(colour(&image, 625, 380), TILE);
+    // Moving focus brings nothing in again.
+    stage.press(&[Button::Up]);
+    assert_eq!(colour(&stage.frame_after(0.0), 625, 380), TILE);
+}
+
+/// Under Reduce motion Power is whole at once.
+#[test]
+fn under_reduce_motion_power_is_there_at_once() {
+    let mut stage = guide_at_home();
+    stage.host.store.reduce_motion = true;
+    stage.frame_after(0.0);
+    let mut stage = power_from_its_entry(stage);
+    assert_eq!(colour(&stage.frame_after(0.0), 625, 380), [59, 59, 59]);
+}
+
+/// A hold with the Guide open: the panel slides away under Power, and the dim stays.
+#[test]
+fn a_hold_slides_the_panel_away_under_power() {
+    let mut stage = guide_at_home();
+    stage.still();
+    stage.dashboard.pad_event(ui::PadEvent::GuideHeld);
+    stage.frame_after(0.0);
+    stage.frame_after(0.2);
+    let image = stage.frame_after(0.2);
+    assert!(stage.dashboard.guide_open());
+    // Under the band, where the panel was: no panel, and Home's wide tile under the two dims.
+    assert!(!is_panel(&image, 300));
+    let tile = colour(&image, 300, 1010);
+    assert!(tile[2] > tile[1] + 8, "the Discord tile's blue, dimmed: {tile:?}");
+    // Closing Power closes it all, and Home is as it was.
+    stage.press(&[Button::B]);
+    stage.frame_after(0.0);
+    stage.frame_after(0.2);
+    assert!(!stage.dashboard.guide().showing());
+}
+
+impl Stage {
+    /// Home at rest with `over` drawn over it.
+    fn still_with(&mut self, mut over: impl FnMut(&mut ui::Ui)) -> image::RgbaImage {
+        self.host.store.set_time(10.0);
+        let Self { gpu, host, target, dashboard, .. } = self;
+        let pixels = target.still(gpu, host, |ui| {
+            dashboard.draw_all(ui);
+            over(ui);
+        });
+        image::RgbaImage::from_raw(target.size.0, target.size.1, pixels).unwrap()
+    }
+}
+
+/// The Tile menu's dim, which the Tile menu will draw under its panel.
+const TILE_MENU_DIM: ui::Color = ui::Color::argb(0x99000000);
+
+fn tile_menu() -> MenuPanel<u8> {
+    let rows = vec![
+        Row::new(icon::PLAY, "Play game", 0),
+        Row::new(icon::UNFAVOURITE, "Remove from Favourites", 1),
+        Row::new(icon::MANAGE, "Manage game", 2),
+        Row::new(icon::CUSTOMISE, "Customise Home", 3).after_a_gap(),
+        Row::new(icon::MORE_OPTIONS, "More options", 4),
+    ];
+    MenuPanel::menu("Halo Infinite", rows)
+}
+
+/// A menu of five rows as the Bundle's picture of the Tile menu has it (23-tile-menu-installed.jpg): the panel at
+/// x 735..1185, y 300..780, the first row's ring from y 399, the gap before Customise Home.
+#[test]
+fn menu_panel_as_the_tile_menu() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    let menu = tile_menu();
+    let image = stage.still_with(|ui| {
+        ui.layer();
+        ui.fill(ui.screen(), TILE_MENU_DIM, 0.0);
+        let at = menu.centred(ui);
+        assert!((menu.height(ui) - 480.6).abs() < 0.01, "{}", menu.height(ui));
+        menu.draw(ui, at);
+    });
+    const PANEL: [u8; 3] = [43, 43, 43];
+    for (x, y) in [(735, 310), (1184, 310), (960, 300), (960, 779), (960, 640)] {
+        assert_eq!(colour(&image, x, y), PANEL, "the panel at {x}, {y}");
+    }
+    for (x, y) in [(734, 500), (1185, 500), (960, 299), (960, 781)] {
+        assert_ne!(colour(&image, x, y), PANEL, "outside the panel at {x}, {y}");
+    }
+    // The focused row: its ring's strokes at x 727..730 and 1189..1192, y 399..402 and 467..470; its fill between.
+    for (x, y) in [(728, 435), (1190, 435), (960, 400), (960, 468)] {
+        assert!(within(colour(&image, x, y), GREEN, 6), "the ring at {x}, {y}: {:?}", colour(&image, x, y));
+    }
+    assert_eq!(colour(&image, 1100, 435), FILL);
+    stage.check_image("menu-panel", image);
+}
+
+/// A prompt in the flyout's place over its menu, which is behind it at 0.45 as one picture
+/// (26-tile-menu-remove-prompt.jpg).
+#[test]
+fn menu_panel_prompt_over_its_menu() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    let mut menu = tile_menu();
+    menu.set_focus(4);
+    let rows = vec![Row::new(icon::REMOVE_GAME, "Remove", true), Row::new(icon::CANCEL, "Cancel", false)];
+    let prompt = MenuPanel::prompt("Remove Halo Infinite?", None, rows);
+    let image = stage.still_with(|ui| {
+        ui.layer();
+        ui.fill(ui.screen(), TILE_MENU_DIM, 0.0);
+        let at = menu.centred(ui);
+        menu.draw_faded(ui, at, 0.45);
+        prompt.draw(ui, (at.0 + 77.0, at.1));
+    });
+    assert_eq!(colour(&image, 820, 310), [43, 43, 43], "the prompt, opaque, from x 812");
+    assert_ne!(colour(&image, 800, 310), [43, 43, 43], "the menu behind it, faded");
+    stage.check_image("menu-panel-prompt", image);
+}
+
+/// A prompt whose question wraps, with a message under it: the Guide's "Force quit X?" (#40).
+#[test]
+fn menu_panel_prompt_with_a_message() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    let rows = vec![Row::new(icon::QUIT, "Force quit", true), Row::new(icon::CANCEL, "Cancel", false)];
+    let message = Some("It hasn't closed. Anything unsaved will be lost.");
+    let mut prompt = MenuPanel::prompt("Force quit Microsoft Flight Simulator?", message, rows);
+    prompt.set_focus(1);
+    let image = stage.still_with(|ui| {
+        ui.layer();
+        ui.fill(ui.screen(), ui::Color::argb(0xB3000000), 0.0);
+        let at = prompt.centred(ui);
+        prompt.draw(ui, at);
+    });
+    stage.check_image("menu-panel-prompt-message", image);
 }

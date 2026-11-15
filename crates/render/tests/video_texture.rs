@@ -41,7 +41,7 @@ fn a_video_texture_shows_its_latest_frame_opaque() {
     let video = renderer.add_video_texture(&gpu.device, 4, 2);
     // The left half of the target; the right half stays the clear colour.
     let quad = Quad::image(Rect::new(0.0, 0.0, 32.0, 32.0), video, [0.0, 0.0, 1.0, 1.0], 1.0, 0.0);
-    let frame = Frame { layers: vec![Layer { quads: vec![quad], texts: Vec::new() }] };
+    let frame = Frame { layers: vec![Layer { quads: vec![quad], ..Layer::default() }] };
 
     // Blue 255, green 128, red 0, and a fourth byte of 0 that would hide the picture were it taken as alpha.
     renderer.update_video_texture(&gpu.queue, video, &frame_of([255, 128, 0, 0], 16), 16);

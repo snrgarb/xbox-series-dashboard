@@ -3,8 +3,9 @@
 //! run time, and a sound with no file is silent.
 
 /// A sound the Dashboard asks for, named by what happened. They are the Bundle's, played where it plays them
-/// (`docs/spec/home.md`, section 9). What the Bundle does in silence is silent here too: B, the Guide closing, a
-/// game starting (beyond its tile's or entry's own activation) and a move that has nowhere to go.
+/// (`docs/spec/home.md`, section 9; `docs/spec/guide.md`, section 8). What the Bundle does in silence is silent
+/// here too: B, the Guide closing, a game starting (beyond its tile's or entry's own activation) and a move that
+/// has nowhere to go.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sound {
     /// Focus landed on another of a page's buttons or tiles.
@@ -13,14 +14,30 @@ pub enum Sound {
     Activate,
     /// The Guide opened.
     GuideOpen,
-    /// Focus landed on another of the Guide's entries. Its four files take turns, as on the console.
+    /// Focus landed on another of the Guide's entries, or of a dialog's options. Its four files take turns, as on
+    /// the console.
     GuideMove,
-    /// A on one of the Guide's entries.
+    /// A on one of the Guide's entries, or on an option of a menu or of Power.
     GuideSelect,
+    /// A dialog opened: a menu, a prompt or Power.
+    PromptOpen,
+    /// A prompt was answered, or a dialog closed with B.
+    PromptClose,
+    /// The Dashboard is leaving to the desktop. Played to its end before it goes.
+    PowerOff,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 5] = [Sound::Move, Sound::Activate, Sound::GuideOpen, Sound::GuideMove, Sound::GuideSelect];
+    pub const ALL: [Sound; 8] = [
+        Sound::Move,
+        Sound::Activate,
+        Sound::GuideOpen,
+        Sound::GuideMove,
+        Sound::GuideSelect,
+        Sound::PromptOpen,
+        Sound::PromptClose,
+        Sound::PowerOff,
+    ];
 
     /// The sound's files, by the Bundle's names: one, or several that take turns in this order. The first two are
     /// the theme's (`audio\`), which Playnite plays itself; the rest the extension's (`Sounds\`).
@@ -31,6 +48,9 @@ impl Sound {
             Sound::GuideOpen => &["OpenMenu.wav"],
             Sound::GuideMove => &["Navigate1.wav", "Navigate2.wav", "Navigate3.wav", "Navigate4.wav"],
             Sound::GuideSelect => &["Enter.wav"],
+            Sound::PromptOpen => &["PromptOpen.wav"],
+            Sound::PromptClose => &["PromptClose.wav"],
+            Sound::PowerOff => &["PowerOff.wav"],
         }
     }
 

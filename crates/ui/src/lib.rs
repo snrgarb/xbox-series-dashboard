@@ -183,6 +183,35 @@ impl<'a> Ui<'a> {
         }
     }
 
+    /// Draws `body` as a layer of its own that is one picture, over everything before it: blurred by `blur` as
+    /// WPF's `BlurEffect` blurs (a Gaussian that reaches `blur`; 0 for none), and faded as a whole to `opacity`
+    /// times the alpha in force, as WPF fades an element: its parts do not show through each other. `bounds` is
+    /// everything `body` draws and `blur` more round it, and moves with the offset in force; nothing of the layer
+    /// shows outside it. What is drawn after covers it. `body` starts no layer of its own.
+    pub fn group<R>(&mut self, bounds: Rect, blur: f32, opacity: f32, body: impl FnOnce(&mut Self) -> R) -> R {
+        self.layer();
+        let group = render::Group { bounds: self.place(bounds), blur: blur * self.px, opacity: opacity * self.alpha };
+        self.top().group = Some(group);
+        let layers = self.frame.layers.len();
+        // The picture is drawn whole and faded after.
+        let alpha = std::mem::replace(&mut self.alpha, 1.0);
+        let result = body(self);
+        self.alpha = alpha;
+        debug_assert_eq!(self.frame.layers.len(), layers, "a group is one layer");
+        // Even if it drew nothing, what follows is not part of it.
+        self.frame.layers.push(Layer::default());
+        result
+    }
+
+    /// A soft shadow round the rounded rectangle `rect`, as WPF's `DropShadowEffect` with no offset casts it:
+    /// `blur` is its `BlurRadius`. It is darkest under the rectangle, so draw what casts it over it.
+    pub fn shadow(&mut self, rect: Rect, color: Color, radius: f32, blur: f32) {
+        // Measured on the Bundle's picture of the Tile menu (radius 24, half black): a quarter black at the panel's
+        // edge, a sixth 5 out, a twelfth 10 out and gone by 18, which is the shader's soft edge one and a half
+        // times the radius wide.
+        self.push(Quad { feather: blur * 1.5, ..Quad::fill(rect, color.quad(self.alpha), radius) });
+    }
+
     /// Draws `body` with every alpha multiplied by `alpha`.
     pub fn with_alpha<R>(&mut self, alpha: f32, body: impl FnOnce(&mut Self) -> R) -> R {
         let was = self.alpha;

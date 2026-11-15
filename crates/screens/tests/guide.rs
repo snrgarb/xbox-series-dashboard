@@ -186,12 +186,13 @@ fn entries_whose_flyouts_and_dialogs_are_yet_to_come_are_there_and_do_nothing() 
     assert!(guide.take_effects().iter().all(|effect| *effect == Effect::Sound(screens::Sound::GuideMove)));
 }
 
-/// Until Power has its dialog, the Power entry at Home is the way out to the desktop.
+/// Power, whose own tests are tests/power.rs.
 #[test]
-fn a_on_power_at_home_leaves_to_the_desktop() {
+fn a_on_power_opens_its_dialog_and_asks_nothing_of_the_shell() {
     let mut guide = at_home();
     press(&mut guide, &[RightBumper, Down, Down, Down, A]);
-    assert_eq!(asked(&mut guide), [Effect::Exit]);
+    assert!(guide.guide().dialog().is_some());
+    assert!(guide.guide_open() && asked(&mut guide).is_empty());
 }
 
 #[test]
@@ -217,17 +218,19 @@ fn a_on_the_running_game_goes_back_to_it() {
     assert_eq!(guide.playing(), Some(2));
 }
 
-/// Until the running game has its menu, Menu on it is the menu's one option.
 #[test]
-fn menu_on_the_running_game_quits_it_and_the_guide_stays_until_the_game_has_gone() {
+fn only_the_running_game_has_a_menu_and_quitting_from_it_leaves_the_guide_until_the_game_has_gone() {
     let mut guide = over_game(screens::fake_library(), 2);
     press(&mut guide, &[Down, Menu]);
-    assert!(asked(&mut guide).is_empty(), "My games & apps has no menu");
+    assert!(guide.guide().dialog().is_none(), "My games & apps has no menu");
     press(&mut guide, &[Down, Menu]);
+    assert!(guide.guide().dialog().is_some());
+    assert!(asked(&mut guide).is_empty(), "the menu is asked first");
+    press(&mut guide, &[A]);
     assert_eq!(asked(&mut guide), [Effect::QuitGame]);
     assert!(guide.guide_open());
     press(&mut guide, &[Down, Menu]);
-    assert!(asked(&mut guide).is_empty(), "nor has a recent game");
+    assert!(guide.guide().dialog().is_none(), "nor has a recent game");
     guide.game_ended();
     assert!(!guide.guide_open());
 }
@@ -235,13 +238,13 @@ fn menu_on_the_running_game_quits_it_and_the_guide_stays_until_the_game_has_gone
 #[test]
 fn over_a_game_what_needs_the_game_gone_first_does_nothing() {
     let mut guide = over_game(screens::fake_library(), 2);
-    // Home, a recent game, Switch profile (greyed out, and still taking focus), Power.
+    // Home, a recent game, Switch profile (greyed out, and still taking focus).
     press(&mut guide, &[A, Down, Down, Down, A]);
     assert_eq!(guide.guide().focus(), (LANDING, entry(3)));
     press(&mut guide, &[RightBumper, Down]);
     assert!(!guide.guide().entries()[1].enabled);
-    assert_eq!(after(&mut guide, &[A, Down, Down, A]), (PROFILE, entry(3)));
-    assert!(guide.guide_open() && asked(&mut guide).is_empty());
+    assert_eq!(after(&mut guide, &[A, Down, Down]), (PROFILE, entry(3)));
+    assert!(guide.guide_open() && guide.guide().dialog().is_none() && asked(&mut guide).is_empty());
 
     // At Home Switch profile is not greyed out.
     let mut guide = at_home();

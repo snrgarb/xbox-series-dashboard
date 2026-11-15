@@ -27,6 +27,8 @@ They were taken with builds of 4 and 10 November, **before** the type was set at
 
 **There is no picture of the Bundle showing** a Flyout, a Toast, Power, a prompt over the Guide, or the landing tab with games in it. Those sections are from the XAML alone. The console captures the XAML's comments cite (`docs/reference/console/G-guide`) are not in the repository; only `docs/reference/notifications/IMG_2336.jpg`, `IMG_2337.jpg` (photos of a console's Toast) are.
 
+The later set `port-reference-20261115-200355/` (Bundle 0.4.2) has the Guide at 50 to 58. Two of its names say more than its pictures show: `56-guide-profile-power-focused.jpg` has focus on **Settings**, and `57-guide-power.jpg` is the **Settings page** that A opened from there (the run was one Down short). The set after it, `port-reference-20261115-215324/`, has them right: `56-guide-profile-power-focused.jpg` (focus on Power), `57-guide-power.jpg` (Power from its entry, focus on Close, the panel out of focus behind), `59-guide-power-option-focused.jpg` (focus on Turn off PC) and `62-guide-power-held.jpg` (by the hold: no panel). **Power is measured against those** (section 13). There is no picture of a menu or prompt over the Guide; the menu panel itself is in `port-reference-20261115-192720/23-tile-menu-installed.jpg` and `26-tile-menu-remove-prompt.jpg`.
+
 Things marked **NOT FOUND** were looked for and are absent; things marked **UNVERIFIED** depend on Playnite, WPF or font internals that are not in the repository.
 
 ---
@@ -92,7 +94,7 @@ LB and RB change tab (section 4). The old tab's content (heading, entries and Ut
 
 ### 1.5 Behind a dialog
 
-While a menu, prompt or Power is up, the panel and its contents are replaced by a picture of themselves blurred (Gaussian, radius 12) under the `#B3000000` dialog dim (E/OverlayWindow.xaml:1215-1216; E/OverlayWindow.xaml.cs:157-192; E/PanelBlur.cs:20). The picture is a WPF economy; a port blurs the panel's layer live, or, if blur of a layer is not yet in `render`, draws the panel unblurred under the dim until it is (see Open questions).
+While a menu, prompt or Power is up, the panel and its contents are replaced by a picture of themselves blurred (Gaussian, radius 12) under the `#B3000000` dialog dim (E/OverlayWindow.xaml:1215-1216; E/OverlayWindow.xaml.cs:157-192; E/PanelBlur.cs:20). The picture is of the panel and its contents alone, on clear, its bounds grown by the blur's radius (E/PanelBlur.cs:20-70): it is the panel that is out of focus, not what is behind it, and what is beside it (the hints, the Status area, the page) stays sharp under the dim. The picture is a WPF economy; the port draws the panel's layer live into a texture of its own and blurs that (`render::Group`, `Ui::group`; section 13).
 
 ---
 
@@ -317,7 +319,8 @@ Beside the panel, a column from (675, 168), each row 45 high (E/OverlayWindow.xa
 |---|---|---|
 | Always, while the panel shows and no Flyout is open | Guide glyph (the Xbox mark, white, filling the box) "Hold for power options" | C/GuideState.cs:72-81 |
 | Focus on an item with a menu (Running game; Discord shortcut in M6) | adds: Menu glyph (a circle stroked white 2 around icon U+E700 at 12) "More options" | C/GuideState.cs:704 |
-| Flyout open, dialog up, Power alone | none | E/OverlayWindow.xaml:936-952 |
+| Flyout open; Power alone, with no panel | none | E/OverlayWindow.xaml:936-952 |
+| A dialog over the panel | as without it, under the dialog's dim: only a Flyout and the panel's going hide them | E/OverlayWindow.xaml:936-952 |
 
 There are no A/B hints in the Guide (**NOT FOUND**). Measured: glyph x 675..701, y 177..203; text from x 716.
 
@@ -421,11 +424,11 @@ E/MenuPanel.xaml. Centred on the screen, 450 wide, as tall as its content.
 | Title | Bahnschrift 33 white, `Margin="28,36,28,24"`; one line with ellipsis in a menu, wraps in a prompt | 41-54 |
 | Message (prompts) | Segoe UI 26 `#B3FFFFFF`, wraps, sides 28, pulled 14 up toward the title, 20 below | 56-57 |
 | Option row | 72 high, the panel's width | 71-74 |
-| Row, focused | fill `#FF404040`, radius 2, the row's width, 56 high (8 clear above and below); ring 4 thick `#FF2CA243` radius 7 standing 8 outside the fill left and right and flush with it above and below, with glow | 75-90 |
+| Row, focused | fill `#FF404040`, radius 2, the row's width, 56 high (8 clear above and below); ring 4 thick `#FF2CA243` radius 7, the row's whole 72 high and standing 8 outside the panel left and right, so 8 outside the fill all round, with glow | 75-90 |
 | Row content | from 32 in: icon in a box 24 wide (icon font 22, white), label Segoe UI 26 white 32 after it | 76-84 |
 | Icons | Quit U+E711, Cancel U+E72B, Play U+E768 (others belong to the Tile menu, M3) | 97-156 |
 
-Measured (Tile menu picture): panel x 735..1185, fill `#2b2b2b`, focused row `#404040`, ring x 727..1193.
+Measured (Tile menu picture): panel x 735..1185, fill `#2b2b2b`, focused row `#404040`, ring x 727..1193. `tile-menu.md` sections 2 and 5 have the panel and its rows to the pixel; the port draws both from the one `screens::menu_panel`.
 
 Navigation: Up/Down along the options, stopping at the ends; A chooses; B closes (declines). No animation in or out (**NOT FOUND**). Sounds: opening = Prompt open; choosing in a menu = Enter; answering or closing a prompt = Prompt close; B on a menu = Prompt close (C/Dialog.cs:72; C/ExtensionCore.cs:2406-2416).
 
@@ -445,7 +448,7 @@ E/WideDialogPanel.xaml. A band across the whole screen, y 134..942 (808 high), `
 
 Opening (E/WideDialogPanel.xaml.cs:21-74): the band is there at once; its contents start 200 to the left at opacity 0 and, 40 ms after the first frame, settle: offset to 0 over 120 ms cubic ease-out, opacity to 1 over 120 ms linear. Reduce motion: at once. Closing: at once.
 
-Navigation (C/Dialog.cs:17, 39, 104-137): focus starts on **Close**. Left/Right within a row of tiles, stopping at the ends. Up to the tile above. Down to the tile below; if the next row has none below, to its last tile; from the last row, to Close. Up from Close goes to the last row's first tile. A carries the option out; B or A on Close closes Power (and the Overlay, if the Guide was not open).
+Navigation (C/Dialog.cs:17, 39, 104-137): focus starts on **Close**. Left/Right within a row of tiles, stopping at the ends. Up to the tile above; from the first row, nothing. Down to the tile below; if the next row has none below, to its last tile; from the last row, to Close. Up from Close goes to the last row's first tile; Left, Right and Down on Close do nothing. A carries the option out; B or A on Close closes Power (and the Overlay, if the panel was not showing). Closed from its entry, focus is on the Power entry still. LB, RB and Menu do nothing while it is up; a tap of the Guide button closes the Guide and Power with it, in silence. A hold while Power is up puts it up anew, focus on Close, without its contents coming in again, and takes the panel away if it was showing.
 
 Carried out after the Guide has closed (E/PlayniteHost.cs:384-428): Turn off = `shutdown.exe /s /hybrid /t 0`; Restart = `shutdown.exe -r -t 0`; Sleep = `SetSuspendState(false, true, false)`; Exit = quit the program.
 
@@ -550,7 +553,9 @@ By the Bundle's file names (E/PlayniteSounds.cs:23-34); in the port they are ask
 | B closing a Flyout or a device list | none | 755-866 |
 | A menu, a prompt or Power opens | `PromptOpen.wav` | 2406-2416 |
 | A menu option chosen; a Power option chosen | `Enter.wav` | C/Dialog.cs:72 |
-| A prompt answered; any dialog closed with B; Close in Power | `PromptClose.wav` | C/Dialog.cs:72 |
+| A prompt answered; any dialog closed with B | `PromptClose.wav` | C/Dialog.cs:72 |
+| Close in Power, with A | `Enter.wav`: Power is not a prompt, and A on any of its options, Close among them, is `ChooseSound` | C/Dialog.cs:72 |
+| A on the Power entry | `Enter.wav`, then `PromptOpen.wav` | C/ExtensionCore.cs:2040-2106, 2406-2416 |
 | A Toast shows | `Notification.wav` | C/ExtensionCore.cs:313-423 |
 | A Toast goes | none | |
 | The program exits from Power | `PowerOff.wav`, played to its end before exit | E/XboxSeriesPlugin.cs:406-410 |
@@ -635,7 +640,7 @@ A tap opens the Guide on what the Toast was about (C/ExtensionCore.cs:953-983). 
 |---|---|
 | Playnite's notification list feeds the Notifications Flyout and Toasts | A notification list of our own in `services`: an id, a text, a time. What posts to it in M2 is an open question (1) |
 | Playnite's controller events for the Guide button | Our own `XInputGetStateEx` polling in `input` (exists); add the tap/hold timing |
-| "Exit Playnite" in Power | "Exit" (the Dashboard itself); the name is an open question (6) |
+| "Exit Playnite" in Power | "Exit to desktop": the Dashboard itself exits (section 13) |
 | Playnite's interface volume for sounds | Our own setting (#28) |
 | `BringToFront(page)` to show Home, My games & apps, Settings, Search | The main window to the front and the page asked of the core; pages that do not exist yet: open question (2) |
 | A game known by Playnite's id and install folder; its window found by install folder | The library's id and what launch tracking already knows (process, window) |
@@ -657,13 +662,13 @@ A tap opens the Guide on what the Toast was about (C/ExtensionCore.cs:953-983). 
 3. **Freezing the game.** **Decided (#38): kept, as the Bundle has it**, with no setting of its own, since the Bundle has none (7.2). A game an anti-cheat guards refuses to be opened and is left running, which is said in the log.
 4. **Exclusive fullscreen and elevated games.** **Decided (#38): the Bundle's limits are accepted** and said in the log when they are met: `overlay: Windows says a Direct3D program has the screen to itself (exclusive fullscreen)` as the Guide opens over such a game, `overlay: Windows did not give the Overlay the foreground` over a game that runs elevated, and `freeze: Windows won't let <name> (<id>) be frozen` for a process it can't suspend. Nothing is done to work around either.
 5. **The Xbox mark** on the landing tab, the Guide hint and the Toast prompt, and the store badges: what is drawn in a repository that may go public?
-6. **Power.** The fourth option's name ("Exit", "Exit to desktop"); whether "Turn off PC" keeps the hybrid shutdown; whether Exit plays `PowerOff.wav` when the media folder has it.
+6. ~~**Power.** The fourth option's name ("Exit", "Exit to desktop"); whether "Turn off PC" keeps the hybrid shutdown; whether Exit plays `PowerOff.wav` when the media folder has it.~~ Decided in #39: section 13.
 7. **One window or two.** The Bundle has an Overlay window (activatable) and a Toast window (passive, a strip). The port's Overlay window has both modes (#27) but a Toast must stay passive while the Guide is active and must show while the Guide is closed. Two windows as the Bundle is the recommendation. **One Guide (#38):** the Guide is on the Overlay over Home as it is over a game, as in the Bundle; only where no Overlay can be made is it drawn in Home's window.
 8. **Layered window not updating on the VM** (#23) blocks checking Toasts there if the passive window is the layered kind.
 9. **Which monitor.** The Bundle covers the monitor of the foreground window. **Decided (#38): the same.** Each time the Overlay is shown it goes over the monitor of the window that has the foreground then (`overlay: over the monitor at (x, y), WxH`), the Launch screen's showing included, as the Bundle's Launch screen does. Home's own window stays on the primary monitor.
 10. **Game Bar and Steam** also react to the Guide button. Document turning them off, or detect and warn?
 11. **The 300 ms wait before a tap opens the Guide.** Kept as is? It is the price of the hold not flashing the Guide.
-12. **Blur behind dialogs.** `render` has no blur of a layer yet; is unblurred-under-dim acceptable for M2?
+12. ~~**Blur behind dialogs.** `render` has no blur of a layer yet; is unblurred-under-dim acceptable for M2?~~ `render` has it (#39): section 13.
 13. **Font metrics.** Line heights are assumed (2.1). The first screenshot test on Windows should be compared with the Bundle's pictures at the entries' text baselines.
 14. **The badge's 26-px figure in a 24-high pill** (2.8): confirm on the TV PC how the Bundle draws it today.
 15. **A Toast over the open Guide** (9.4): confirm on the Bundle.
@@ -722,3 +727,24 @@ In order. Each can be tested on its own; 1 to 3 need nothing of each other.
    - An end-to-end run on the VM: Guide over a game, Flyouts, Power (cancelled), a Toast over a game.
    - Side-by-side pictures with the Bundle for the views it has pictures of; new Bundle pictures of a Flyout, a Toast and Power to close the gaps named at the top.
    - The M2 report, the port's `CONTEXT.md` entries for Guide, Overlay, Status area, Utility, Flyout, Toast, Guide button.
+
+---
+
+## 13. Where the Dashboard's dialogs differ, and what was decided (#39)
+
+What `crates/screens/src/guide/`, `menu_panel.rs` and `wide_dialog.rs` do that the sections above leave open, or do differently.
+
+- **Measured against the Bundle's pictures of Power** (`port-reference-20261115-215324/57`, `59`, `62`), pixel for pixel: the band y 134..941 at `#2d2d2d`; tiles at x 132..635, 652..1155, 1171..1675 and y 356..484, 503..631 at `#3b3b3b`; Close x 126..437, y 730..833 at `#4a4a4a` with focus, its ring `#2ca243` and the glow's tint inside its edge; the panel behind, whose top edge goes from black at y 24 to its dimmed grey at y 39 in both (the blur's 12 either side of y 33); the dimmed page under the band. Nothing was changed for them. What they cannot settle here is type: the tests draw with stand-in fonts, so the title's and labels' own shapes and baselines wait for a picture taken on Windows.
+- **The blur is of a layer, not of the backdrop.** As the Bundle: the panel and what is on it are drawn to a texture of their own, 12 larger than the panel all round, blurred there (a Gaussian of deviation 4, which is WPF's radius 12) and laid over the dim; the dialog's `#B3000000` goes over that. Nothing beside the panel is blurred. `render::Group` is that texture: a layer drawn as one picture, blurred, faded as a whole, or both. The Tile menu's menu behind its flyout (opacity 0.45 as one group) and its fly-in are the same thing with no blur.
+- **The menu panel's shadow** is drawn by the quad shader's soft edge, 36 wide (one and a half times WPF's `BlurRadius` of 24), which is what the picture of the Tile menu measures: about a quarter black at the panel's edge, a sixth 5 out, a twelfth 10 out, gone by 18.
+- **Power's fourth option is "Exit to desktop"**, with the Bundle's glyph (U+F3B1). It exits the Dashboard; whatever game is running is left running.
+- **"Turn off PC" keeps the hybrid shutdown** (`shutdown.exe /s /hybrid /t 0`), Restart is `shutdown.exe -r -t 0`, Sleep is `SetSuspendState(false, true, false)`: the Bundle's, unchanged. Nothing is asked first: the Bundle has no "are you sure".
+- **Exit plays `PowerOff.wav` to its end** when the media folder has it, then exits; the wait is the clip's own length, 4 s at most, and none at all with no file, no device or no volume. The window stands still meanwhile, as the Bundle's does.
+- **The machine's power is behind a trait** (`shell::power::Power`). The core only ever asks: `Effect::Power(TurnOff | Restart | Sleep)` and `Effect::Exit`. The one implementation that does anything (`SystemPower`, Windows only) is made in one place, the window's start, and not there with `--dry-power`, which logs `power: would run ...` instead. A test, a `--screenshot` or `--press` run never carries effects out at all.
+- **Power's contents fade as one picture** while they come in (a group), and a second hold does not bring them in again.
+- **A on Close in Power is `Enter.wav`**, as the Bundle's code has it; section 8 said `PromptClose.wav` before.
+- **The hints stay beside the panel under a dialog**; section 3.6 said none before. With no panel (Power by a hold) there are none, and no top shade or Status area, at once.
+- **A hold does nothing** with the Guide setting off, while a game is starting (the Dashboard takes no input then), or over a game with no Overlay to show Power on.
+- **The running game's menu** (6.3) is here as the menu panel's first user: Menu on the Running game opens it, its one row Quit asks the shell to quit the game and leaves the Guide open. The prompts of 6.4, the 10 s timeout and the Guide closing after a quit are #40's.
+- **A game stopping closes the Guide, and any dialog with it**, where the Bundle leaves Power up: that is how the core has treated a game's end since the Guide was first drawn, and #40 owns it.
+- **Not here:** bringing the Dashboard to the front before a prompt; a click on the dim.

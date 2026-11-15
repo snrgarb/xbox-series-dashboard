@@ -3,6 +3,10 @@
 //!
 //! Colours are sRGB with straight alpha and blended in gamma space on a non-sRGB target, as WPF blends, so the
 //! theme's colours and alphas mean here what they mean there.
+//!
+//! A layer can be drawn as one picture ([`Group`]): to a texture of its own, which is then laid over the layers
+//! under it, out of focus or faded as a whole. That is how the Bundle shows the Guide's panel behind a dialog, and
+//! a menu behind its flyout.
 pub mod gpu;
 pub mod offscreen;
 mod text;
@@ -154,11 +158,28 @@ pub struct Text {
     pub color: [u8; 4],
 }
 
+/// A layer drawn as one picture, quads and text together, and that picture blurred, faded, or both, as WPF blurs
+/// and fades an element: what overlaps within the layer does not show through itself as it fades. What is under the
+/// layer is untouched, and shows through wherever the layer's picture is not opaque.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Group {
+    /// The part of the target the layer is drawn in, in pixels: everything it draws and as far round that as the
+    /// blur reaches. Nothing of the layer shows outside it.
+    pub bounds: Rect,
+    /// The blur's radius in pixels, as WPF's `BlurEffect` counts it: how far the blur reaches, which is three times
+    /// the Gaussian's deviation. 0 leaves the picture sharp.
+    pub blur: f32,
+    /// What the picture's alpha is multiplied by, 0 to 1.
+    pub opacity: f32,
+}
+
 #[derive(Default)]
 pub struct Layer {
     pub quads: Vec<Quad>,
     /// Drawn over the layer's quads.
     pub texts: Vec<Text>,
+    /// Draws the layer as one picture, blurred or faded.
+    pub group: Option<Group>,
 }
 
 /// What to draw, bottom layer first.
@@ -180,6 +201,30 @@ struct Instance {
     turn: [f32; 4],
 }
 
+/// What one grouped layer of a frame is drawn through: the texture it is drawn to, the one it is blurred across
+/// into, and what the passes between them read. Kept from frame to frame while the layer's size stays the same.
+struct BlurSlot {
+    size: (u32, u32),
+    drawn: wgpu::TextureView,
+    across: wgpu::TextureView,
+    /// The quad shader's globals for drawing to `drawn`: its size, and where in the frame it is.
+    globals: wgpu::Buffer,
+    globals_bind: wgpu::BindGroup,
+    /// The same for the text.
+    viewport: Viewport,
+    /// The pass across, which reads `drawn`, and the pass down, which reads `across`.
+    params: [wgpu::Buffer; 2],
+    binds: [wgpu::BindGroup; 2],
+}
+
+/// A grouped layer of the frame being drawn: which slot it is drawn through, and where in the frame it is, in whole
+/// pixels.
+#[derive(Clone, Copy)]
+struct Blurred {
+    slot: usize,
+    origin: (f32, f32),
+}
+
 struct Texture {
     texture: wgpu::Texture,
     bind: wgpu::BindGroup,
@@ -194,12 +239,22 @@ pub struct Renderer {
     opaque_pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
+    globals_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    format: wgpu::TextureFormat,
+    /// The blur's pass across, which replaces what is in its target, and its pass down, which is blended onto the
+    /// frame.
+    blur_across: wgpu::RenderPipeline,
+    blur_down: wgpu::RenderPipeline,
+    blur_layout: wgpu::BindGroupLayout,
+    blur_slots: Vec<BlurSlot>,
     texture_layout: wgpu::BindGroupLayout,
     textures: Vec<Option<Texture>>,
     free: Vec<usize>,
     instances: wgpu::Buffer,
     capacity: usize,
     swash: SwashCache,
+    cache: Cache,
     viewport: Viewport,
     atlas: TextAtlas,
     /// One per layer that has text.
@@ -216,7 +271,7 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -285,6 +340,72 @@ impl Renderer {
         })
         };
         let (pipeline, opaque_pipeline) = (pipeline("fs"), pipeline("fs_opaque"));
+
+        let blur_shader = device.create_shader_module(wgpu::include_wgsl!("blur.wgsl"));
+        let blur_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let blur_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(&blur_layout)],
+            immediate_size: 0,
+        });
+        let blur_pipeline = |blend: Option<wgpu::BlendState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("blur"),
+                layout: Some(&blur_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &blur_shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &blur_shader,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let blur_across = blur_pipeline(None);
+        let blur_down = blur_pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING));
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: 16,
@@ -319,12 +440,20 @@ impl Renderer {
             opaque_pipeline,
             globals,
             globals_bind,
+            globals_layout,
+            sampler,
+            format,
+            blur_across,
+            blur_down,
+            blur_layout,
+            blur_slots: Vec::new(),
             texture_layout,
             textures: Vec::new(),
             free: Vec::new(),
             instances,
             capacity,
             swash: SwashCache::new(),
+            cache,
             viewport,
             atlas,
             text_renderers: Vec::new(),
@@ -448,6 +577,120 @@ impl Renderer {
         }
     }
 
+    /// One layer's quads, then its text over them, into `pass`: `place` is where its quads start among the
+    /// instances and which text renderer is its own.
+    fn draw_layer(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        layer: &Layer,
+        (first, text): (usize, Option<usize>),
+        globals: &wgpu::BindGroup,
+        viewport: &Viewport,
+    ) {
+        if !layer.quads.is_empty() {
+            pass.set_bind_group(0, globals, &[]);
+            pass.set_vertex_buffer(0, self.instances.slice(..));
+        }
+        // One draw per run of quads sharing a texture.
+        let mut start = 0;
+        while start < layer.quads.len() {
+            let tex = layer.quads[start].tex;
+            let end = start + layer.quads[start..].iter().take_while(|q| q.tex == tex).count();
+            // A texture freed while something still draws with it shows as plain white, not a crash.
+            let bound = self.textures.get(tex.0).and_then(Option::as_ref).or(self.textures[0].as_ref());
+            let bound = bound.expect("the white texture");
+            pass.set_pipeline(if bound.video { &self.opaque_pipeline } else { &self.pipeline });
+            pass.set_bind_group(1, &bound.bind, &[]);
+            pass.draw(0..4, (first + start) as u32..(first + end) as u32);
+            start = end;
+        }
+        if let Some(text) = text {
+            self.text_renderers[text].render(&self.atlas, viewport, pass).expect("render text");
+        }
+    }
+
+    /// Makes slot `slot` ready for a layer `size` pixels at `origin` in a frame of `target` pixels, blurred and
+    /// faded as `group` says: its textures, made again only when the size has changed, and what its passes read.
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_group(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        slot: usize,
+        origin: (f32, f32),
+        size: (u32, u32),
+        group: Group,
+        target: (u32, u32),
+    ) {
+        if self.blur_slots.get(slot).is_none_or(|made| made.size != size) {
+            let texture = || {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("grouped layer"),
+                    size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                texture.create_view(&Default::default())
+            };
+            let (drawn, across) = (texture(), texture());
+            let buffer = |size| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            };
+            let globals = buffer(16);
+            let globals_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.globals_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                ],
+            });
+            let params = [buffer(48), buffer(48)];
+            let bind = |params: &wgpu::Buffer, view: &wgpu::TextureView| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &self.blur_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(view) },
+                    ],
+                })
+            };
+            let binds = [bind(&params[0], &drawn), bind(&params[1], &across)];
+            let viewport = Viewport::new(device, &self.cache);
+            let made = BlurSlot { size, drawn, across, globals, globals_bind, viewport, params, binds };
+            if slot < self.blur_slots.len() {
+                self.blur_slots[slot] = made;
+            } else {
+                self.blur_slots.push(made);
+            }
+        }
+        let made = &mut self.blur_slots[slot];
+        let (w, h) = (size.0 as f32, size.1 as f32);
+        queue.write_buffer(&made.globals, 0, bytemuck::cast_slice(&[w, h, origin.0, origin.1]));
+        made.viewport.update(queue, Resolution { width: size.0, height: size.1 });
+        // WPF's Gaussian reaches its radius at three deviations. With no radius each pass reads its one texel, and
+        // the picture stays sharp.
+        let radius = group.blur.max(0.0);
+        let (sigma, taps) = ((radius / 3.0).max(0.01), radius.ceil());
+        let opacity = group.opacity.clamp(0.0, 1.0);
+        let across = [0.0, 0.0, w, h, w, h, 1.0 / w, 0.0, sigma, taps, 1.0, 0.0];
+        let (width, height) = (target.0 as f32, target.1 as f32);
+        let down = [origin.0, origin.1, w, h, width, height, 0.0, 1.0 / h, sigma, taps, opacity, 0.0];
+        queue.write_buffer(&made.params[0], 0, bytemuck::cast_slice(&across));
+        queue.write_buffer(&made.params[1], 0, bytemuck::cast_slice(&down));
+    }
+
     /// Draws `frame` to `target`, which is `size` pixels and is first cleared to `clear`, and submits it.
     pub fn render(
         &mut self,
@@ -481,73 +724,118 @@ impl Renderer {
         queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&instances));
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&[size.0 as f32, size.1 as f32, 0.0, 0.0]));
 
+        // The layers drawn as one picture, each through a slot of its own. One whose bounds are off the target, or
+        // that draws nothing or is faded to nothing, is not drawn at all.
+        let limit = device.limits().max_texture_dimension_2d as f32;
+        let mut slots = 0;
+        let mut blurred: Vec<Option<Blurred>> = Vec::with_capacity(frame.layers.len());
+        for layer in &frame.layers {
+            let placed = layer.group.and_then(|group| {
+                let (x, y) = (group.bounds.x.floor(), group.bounds.y.floor());
+                let w = (group.bounds.right().ceil() - x).min(limit);
+                let h = (group.bounds.bottom().ceil() - y).min(limit);
+                let on_target = x < size.0 as f32 && y < size.1 as f32 && x + w > 0.0 && y + h > 0.0;
+                let empty = (layer.quads.is_empty() && layer.texts.is_empty()) || group.opacity <= 0.0;
+                (on_target && w >= 1.0 && h >= 1.0 && !empty).then_some(((x, y), (w as u32, h as u32), group))
+            });
+            blurred.push(placed.map(|(origin, extent, group)| {
+                self.prepare_group(device, queue, slots, origin, extent, group, size);
+                slots += 1;
+                Blurred { slot: slots - 1, origin }
+            }));
+        }
+        self.blur_slots.truncate(slots);
+        // A layer that was to be drawn as one picture and has nowhere to be drawn.
+        let hidden = |at: usize| frame.layers[at].group.is_some() && blurred[at].is_none();
+
         self.viewport.update(queue, Resolution { width: size.0, height: size.1 });
-        let with_text = frame.layers.iter().filter(|l| !l.texts.is_empty()).count();
+        let has_text = |at: usize| !frame.layers[at].texts.is_empty() && !hidden(at);
+        let with_text = (0..frame.layers.len()).filter(|&at| has_text(at)).count();
         while self.text_renderers.len() < with_text {
             self.text_renderers.push(TextRenderer::new(&mut self.atlas, device, Default::default(), None));
         }
-        for (next, layer) in frame.layers.iter().filter(|l| !l.texts.is_empty()).enumerate() {
+        for (next, at) in (0..frame.layers.len()).filter(|&at| has_text(at)).enumerate() {
+            let layer = &frame.layers[at];
             for text in &layer.texts {
                 self.text.buffer(&text.key);
             }
+            // A grouped layer's text is drawn to the layer's own texture, which holds a part of the frame.
+            let (dx, dy) = blurred[at].map_or((0.0, 0.0), |blurred| blurred.origin);
             let areas = layer.texts.iter().map(|t| TextArea {
                 buffer: &self.text.buffers[&t.key],
-                left: t.x,
-                top: t.y,
+                left: t.x - dx,
+                top: t.y - dy,
                 scale: 1.0,
                 bounds: TextBounds {
-                    left: t.clip.x.floor() as i32,
-                    top: t.clip.y.floor() as i32,
-                    right: t.clip.right().ceil() as i32,
-                    bottom: t.clip.bottom().ceil() as i32,
+                    left: (t.clip.x - dx).floor() as i32,
+                    top: (t.clip.y - dy).floor() as i32,
+                    right: (t.clip.right() - dx).ceil() as i32,
+                    bottom: (t.clip.bottom() - dy).ceil() as i32,
                 },
                 default_color: glyphon::Color::rgba(t.color[0], t.color[1], t.color[2], t.color[3]),
                 custom_glyphs: &[],
             });
+            let viewport = blurred[at].map_or(&self.viewport, |blurred| &self.blur_slots[blurred.slot].viewport);
             self.text_renderers[next]
-                .prepare(device, queue, &mut self.text.fonts, &mut self.atlas, &self.viewport, areas, &mut self.swash)
+                .prepare(device, queue, &mut self.text.fonts, &mut self.atlas, viewport, areas, &mut self.swash)
                 .expect("prepare text");
         }
 
+        // Where each layer's quads start among the instances, and which text renderer is the layer's.
+        let (mut first, mut text) = (0, 0);
+        let mut places: Vec<(usize, Option<usize>)> = Vec::with_capacity(frame.layers.len());
+        for (at, layer) in frame.layers.iter().enumerate() {
+            places.push((first, has_text(at).then_some(text)));
+            first += layer.quads.len();
+            text += has_text(at) as usize;
+        }
+
         let mut encoder = device.create_command_encoder(&Default::default());
+        fn attachment(view: &wgpu::TextureView, clear: wgpu::Color) -> Option<wgpu::RenderPassColorAttachment<'_>> {
+            Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
+            })
+        }
+        // Each grouped layer to its own texture, then blurred across into its second.
+        for (at, layer) in frame.layers.iter().enumerate() {
+            let Some(blurred) = blurred[at] else { continue };
+            let slot = &self.blur_slots[blurred.slot];
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("grouped layer"),
+                    color_attachments: &[attachment(&slot.drawn, wgpu::Color::TRANSPARENT)],
+                    ..Default::default()
+                });
+                self.draw_layer(&mut pass, layer, places[at], &slot.globals_bind, &slot.viewport);
+            }
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("blur across"),
+                color_attachments: &[attachment(&slot.across, wgpu::Color::TRANSPARENT)],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.blur_across);
+            pass.set_bind_group(0, &slot.binds[0], &[]);
+            pass.draw(0..4, 0..1);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
+                color_attachments: &[attachment(target, clear)],
+                ..Default::default()
             });
-            let mut first = 0usize;
-            let mut text = 0;
-            for layer in &frame.layers {
-                if !layer.quads.is_empty() {
-                    pass.set_bind_group(0, &self.globals_bind, &[]);
-                    pass.set_vertex_buffer(0, self.instances.slice(..));
-                }
-                // One draw per run of quads sharing a texture.
-                let mut start = 0;
-                while start < layer.quads.len() {
-                    let tex = layer.quads[start].tex;
-                    let end = start + layer.quads[start..].iter().take_while(|q| q.tex == tex).count();
-                    // A texture freed while something still draws with it shows as plain white, not a crash.
-                    let bound = self.textures.get(tex.0).and_then(Option::as_ref).or(self.textures[0].as_ref());
-                    let bound = bound.expect("the white texture");
-                    pass.set_pipeline(if bound.video { &self.opaque_pipeline } else { &self.pipeline });
-                    pass.set_bind_group(1, &bound.bind, &[]);
-                    pass.draw(0..4, (first + start) as u32..(first + end) as u32);
-                    start = end;
-                }
-                first += layer.quads.len();
-                if !layer.texts.is_empty() {
-                    self.text_renderers[text].render(&self.atlas, &self.viewport, &mut pass).expect("render text");
-                    text += 1;
+            for (at, layer) in frame.layers.iter().enumerate() {
+                match blurred[at] {
+                    // Blurred down and faded as it is laid over what is under it.
+                    Some(blurred) => {
+                        pass.set_pipeline(&self.blur_down);
+                        pass.set_bind_group(0, &self.blur_slots[blurred.slot].binds[1], &[]);
+                        pass.draw(0..4, 0..1);
+                    }
+                    None if hidden(at) => {}
+                    None => self.draw_layer(&mut pass, layer, places[at], &self.globals_bind, &self.viewport),
                 }
             }
         }

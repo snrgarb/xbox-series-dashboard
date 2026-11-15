@@ -54,6 +54,13 @@ pub fn focus_ring(ui: &mut Ui, rect: Rect, scale: f32) {
     ui.ring(rect.grow(8.0 * scale), ACCENT_LIGHT, 16.0 * scale, 4.0 * scale);
 }
 
+/// The focus ring of a dialog's option, with its glow: the same 4-wide stroke 4 clear of the box, its outer corners
+/// `outer` (WPF's `CornerRadius` is the stroke's centre line: 2 less).
+pub fn focus_ring_cornered(ui: &mut Ui, rect: Rect, outer: f32) {
+    ui.glow(rect.grow(11.5), ACCENT_LIGHT.fade(0.5), outer + 1.5, 11.0, 17.0);
+    ui.ring(rect.grow(8.0), ACCENT_LIGHT, outer, 4.0);
+}
+
 /// The hero scrim, over a game's art on the whole screen: dark at the top for the top bar, clear through the
 /// middle, darker at the foot for the rows (docs/spec/home.md section 8.4).
 pub fn hero_scrim(ui: &mut Ui) {
