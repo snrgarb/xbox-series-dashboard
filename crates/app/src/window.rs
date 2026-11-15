@@ -18,10 +18,12 @@ use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::{since_start, Args};
 
-/// How often the pad is looked at while nothing is being drawn.
-const PAD_EVERY: Duration = Duration::from_millis(8);
-/// How often it is looked at behind a running game, for the Guide button.
-const PAD_EVERY_HIDDEN: Duration = Duration::from_millis(30);
+/// How long the loop sleeps with nothing to draw: the pad's thread, the art cache and the window wake it sooner.
+const IDLE: Duration = Duration::from_millis(250);
+/// How often a launch is looked at: the game's window appearing, booting, ending.
+const LAUNCH_EVERY: Duration = Duration::from_millis(8);
+/// The same behind a running game.
+const LAUNCH_EVERY_HIDDEN: Duration = Duration::from_millis(30);
 
 struct State {
     host: Host,
@@ -57,7 +59,12 @@ pub fn run(args: &Args, library: Library) {
     let mut app = App {
         windowed: args.windowed,
         dashboard,
-        pad: Pad::new(),
+        pad: Pad::start({
+            let proxy = event_loop.create_proxy();
+            move || {
+                let _ = proxy.send_event(());
+            }
+        }),
         keys: Vec::new(),
         state: None,
         proxy: event_loop.create_proxy(),
@@ -152,20 +159,20 @@ impl ApplicationHandler for App {
         let Some(state) = &mut self.state else { return };
         let mut presses = self.pad.poll();
         presses.append(&mut self.keys);
-        let mut wait = PAD_EVERY;
+        let mut wait = if self.launch.is_some() { LAUNCH_EVERY } else { IDLE };
         let mut hidden = false;
 
         if let Some(launch) = &mut self.launch {
             match launch.tick() {
                 // The Launch screen, or its fade: keep drawing.
                 Showing::LaunchScreen => self.stale = true,
-                // Nothing to draw behind a running game: sleep between looks at the pad, for the Guide button.
+                // Nothing to draw behind a running game: only the Guide button does anything.
                 Showing::Nothing => {
                     self.dashboard.game_booted();
                     presses.retain(|p| p.button == Button::Guide && !p.repeat);
                     if presses.is_empty() {
                         hidden = true;
-                        wait = PAD_EVERY_HIDDEN;
+                        wait = LAUNCH_EVERY_HIDDEN;
                     } else {
                         launch.open_guide();
                         self.last_frame = Instant::now();

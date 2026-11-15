@@ -74,10 +74,20 @@ impl Presses {
     }
 }
 
+/// The pads, read on a thread of their own every few milliseconds, so a short press is caught however long a frame
+/// takes to draw.
 pub struct Pad {
+    presses: std::sync::mpsc::Receiver<Press>,
+}
+
+/// How often the pads are read.
+#[cfg_attr(not(windows), allow(dead_code))]
+const READ_EVERY: Duration = Duration::from_millis(4);
+
+#[cfg_attr(not(windows), allow(dead_code))]
+struct Reader {
     #[cfg(windows)]
     get_state: Option<unsafe extern "system" fn(u32, *mut State) -> u32>,
-    presses: Presses,
 }
 
 #[repr(C)]
@@ -96,14 +106,45 @@ struct State {
     reserved: [u32; 2],
 }
 
-impl Default for Pad {
-    fn default() -> Self {
-        Self::new()
+impl Pad {
+    /// Starts reading. `wake` is called, on the reading thread, after presses have been queued.
+    pub fn start(wake: impl Fn() + Send + 'static) -> Self {
+        let (sender, presses) = std::sync::mpsc::channel();
+        #[cfg(windows)]
+        std::thread::Builder::new()
+            .name("pad".into())
+            .spawn(move || {
+                let reader = Reader::new();
+                let mut held = Presses::default();
+                loop {
+                    let pressed = held.update(reader.buttons(), Instant::now());
+                    let any = !pressed.is_empty();
+                    for press in pressed {
+                        if sender.send(press).is_err() {
+                            return;
+                        }
+                    }
+                    if any {
+                        wake();
+                    }
+                    std::thread::sleep(READ_EVERY);
+                }
+            })
+            .expect("the pad thread starts");
+        #[cfg(not(windows))]
+        let _ = (sender, wake);
+        Self { presses }
+    }
+
+    /// What has been pressed since the last call.
+    pub fn poll(&mut self) -> Vec<Press> {
+        self.presses.try_iter().collect()
     }
 }
 
-impl Pad {
-    pub fn new() -> Self {
+#[cfg_attr(not(windows), allow(dead_code))]
+impl Reader {
+    fn new() -> Self {
         Self {
             #[cfg(windows)]
             get_state: unsafe {
@@ -116,7 +157,6 @@ impl Pad {
                 }
                 found.map(|f| std::mem::transmute(f))
             },
-            presses: Presses::default(),
         }
     }
 
@@ -158,12 +198,6 @@ impl Pad {
             }
         }
         buttons
-    }
-
-    /// What has been pressed since the last call.
-    pub fn poll(&mut self) -> Vec<Press> {
-        let buttons = self.buttons();
-        self.presses.update(buttons, Instant::now())
     }
 }
 
