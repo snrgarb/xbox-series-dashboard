@@ -122,6 +122,11 @@ impl Dashboard {
         self.pad = connected;
     }
 
+    /// Settings' Background delay. See [`Home::set_background_delay`].
+    pub fn set_background_delay(&mut self, on: bool) {
+        self.home.set_background_delay(on);
+    }
+
     /// What the shell is asked to do since the last call.
     pub fn take_effects(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.effects)
@@ -308,6 +313,7 @@ impl Dashboard {
     pub fn draw(&mut self, ui: &mut Ui) {
         let clock = self.clock.clone().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string());
         let status = home::Status { user: &self.user, clock: &clock, pad: self.pad };
+        self.home.set_in_front(!self.guide.is_open());
         self.home.draw(ui, &self.library, &status);
         if !self.guide_overlaid {
             self.guide.draw(ui, &self.library, &self.user);

@@ -39,7 +39,7 @@ Within a layer, quads are drawn in order and the layer's text is drawn over all 
 ## Drawing
 
 - `fill`, `gradient` (vertical, horizontal, diagonal, radial), `ring`, `glow` (a soft band): rounded rectangles, antialiased by a signed-distance shader. `arc` is part of a circle's ring with round ends, which is what the Spinner is made of (`screens::spinner`).
-- `image` / `art`: a texture filling a box, cropped on the GPU to the box's shape (`Crop::Top` is the theme's rule for covers and backgrounds).
+- `image` / `art`: a texture filling a box, cropped on the GPU to the box's shape (`Crop::Top` is the theme's rule for covers and backgrounds). `art_darkened` is the same under a black sheet that fades with it; `art_turned` stretches the whole picture over a box turned about its middle.
 - `label*` for one line, `paragraph` for text in a box (wrapped, a maximum number of lines, an ellipsis, never drawn outside the box), `icon` for a Segoe Fluent Icons glyph.
 - Text styles are consts in `screens::theme` (`BODY` is Segoe UI 26, the Xbox accessibility floor).
 
@@ -56,13 +56,14 @@ let shown = ui.tween("guide", if self.open { 1.0 } else { 0.0 }, 0.2, Ease::Cubi
 let share = ui.approach(("recent tile", i), if focused { 1.0 } else { 0.0 }, 0.05);
 ```
 
-- `tween(id, target, seconds, ease)`: when the target changes, the value goes there from wherever it is, as WPF's to-only animations do. The first time an id is seen it is at its target; `tween_from` starts it somewhere else (a fade-in).
+- `tween(id, target, seconds, ease)`: when the target changes, the value goes there from wherever it is, as WPF's to-only animations do. It sets off in the frame the target changes and has moved by the next, so a frame drawn after the window slept does not start an animation part way through. The first time an id is seen it is at its target; `tween_from` starts it somewhere else (a fade-in).
 - `slide` / `slide_from`: the same for movement, which is instant under Settings' **Reduce motion**; fades stay.
 - `approach(id, target, tau)`: exponential, for the Recent row's tile growth (63% of the way every 50 ms).
-- `time()`: for what turns endlessly (the Spinner, the swirl). Reduce motion leaves these turning.
+- `time()`: for what turns endlessly (the Spinner). Asking keeps frames coming, and Reduce motion leaves it turning.
+- `store.time()` is the same clock without asking for frames, and `store.wake_in(seconds)` asks for one frame that long from now: a delay is timed on the two (Home's background waits 1.5 s for focus to rest, drawing nothing meanwhile), and so is what moves too slowly to need every frame (the swirl, 30 times a second). Home's window gives animations a tenth of a second at most per frame and the clock the rest too (`Store::slept`), so a wait ends when it should however long the window slept.
 - A value nothing asked for this frame is forgotten, so something that leaves and comes back starts afresh.
-- `Store::animating()` says whether another frame is wanted; the window draws only when something changed, is moving, or the clock's second is up.
-- `set_settle(true)` ends every animation at once: a screenshot is of the screen at rest.
+- `Store::animating()` says whether another frame is wanted and `Store::wake()` when one is; the window draws only when something changed, is moving, asked to be woken, or the clock's second is up. A screen that is not drawn asks for nothing.
+- `set_settle(true)` ends every animation at once, and every wait on the clock: a screenshot is of the screen at rest.
 
 ## Focus
 
@@ -119,8 +120,8 @@ Anywhere but Windows there is no Overlay (`Overlay::new` makes none).
 
 ## Art
 
-`ui.art(rect, &ArtKey { path, kind }, crop, alpha, radius)` draws a piece of art if it is decoded and asks for it if not. Decoding runs on a few threads, newest request first, since that is what is on screen. `Kind::Thumb(width)` is a tile's cover with mips, `Kind::Full(width)` a background, `Kind::Blurred` the theme's blurred cover behind a game with no background art. Art nothing has asked for in a while is freed once the cache is over its budget. Images are decoded by content, not extension: Steam stores some PNGs as `.jpg`.
+`ui.art(rect, &ArtKey { path, kind }, crop, alpha, radius)` draws a piece of art if it is decoded and asks for it if not. Decoding runs on a few threads, newest request first, since that is what is on screen. `Kind::Thumb(width)` is a tile's cover with mips, `Kind::Full(width)` a background, `Kind::Blurred` the theme's blurred cover behind a game with no background art. `Kind::Painted(painter)` is a picture a function draws rather than a file: the swirl's bands, drawn once with tiny-skia on a decoding thread and then only moved. Art nothing has asked for in a while is freed once the cache is over its budget. Images are decoded by content, not extension: Steam stores some PNGs as `.jpg`.
 
 ## Tests
 
-Every screen has screenshot tests in `crates/screens/tests/shots.rs`: build a `Dashboard` on a fake library (some games given generated, banded art so a crop or stretch shows), press buttons, and compare the frame at rest with a committed reference (`crates/shots`), at 1080p and at other shapes. The frame is `draw_all`: the Overlay's picture over Home's window's, so the Guide over a game is seen over Home there, where on screen it is over the game. They run on lavapipe in CI. Behaviour (where focus goes, what effects a press asks for) is asserted in the same file with no picture. `SHOTS=bless cargo test -p screens` accepts what is drawn now; **look at the image before blessing it**.
+Every screen has screenshot tests in `crates/screens/tests/shots.rs`: build a `Dashboard` on a fake library (some games given generated, banded art so a crop or stretch shows), press buttons, and compare the frame at rest with a committed reference (`crates/shots`), at 1080p and at other shapes. The frame is `draw_all`: the Overlay's picture over Home's window's, so the Guide over a game is seen over Home there, where on screen it is over the game. They run on lavapipe in CI. Behaviour (where focus goes, what effects a press asks for) is asserted in the same file with no picture. What happens over time is tested on the ui's clock: `Stage::run` draws frames a fixed step apart, `check_frame` compares the screen as it is mid-flight, and a pixel of the background says which art is up. `SHOTS=bless cargo test -p screens` accepts what is drawn now; **look at the image before blessing it**.

@@ -9,7 +9,7 @@ pub mod input;
 use std::hash::Hash;
 
 pub use anim::{Ease, Store};
-pub use art::{Art, ArtCache, ArtKey, Kind};
+pub use art::{Art, ArtCache, ArtKey, Kind, Painter};
 pub use host::Host;
 pub use input::{Button, Press};
 pub use render::{Font, Gradient, HAlign, Rect, TexId};
@@ -279,6 +279,32 @@ impl<'a> Ui<'a> {
         let u0 = (1.0 - u) / 2.0;
         let v0 = if crop == Crop::Top { 0.0 } else { (1.0 - v) / 2.0 };
         self.push(Quad::image(rect, tex, [u0, v0, u0 + u, v0 + v], alpha * self.alpha, radius));
+    }
+
+    /// As `art`, under a black sheet: `light` of the picture's own colour is left, 1 for all of it. The darkening
+    /// is part of the picture, so the two fade as one.
+    pub fn art_darkened(&mut self, rect: Rect, key: &ArtKey, crop: Crop, alpha: f32, light: f32) -> bool {
+        let before = self.top().quads.len();
+        let drawn = self.art(rect, key, crop, alpha, 0.0);
+        if let Some(quad) = self.top().quads.get_mut(before) {
+            for colour in [&mut quad.c0, &mut quad.c1] {
+                colour[..3].iter_mut().for_each(|channel| *channel *= light);
+            }
+        }
+        drawn
+    }
+
+    /// A piece of art, all of it, stretched over `rect`, which is turned `turn` radians clockwise about its
+    /// middle. False until it is decoded.
+    pub fn art_turned(&mut self, rect: Rect, key: &ArtKey, alpha: f32, turn: f32) -> bool {
+        match self.art.get(key) {
+            Art::Ready { tex, .. } => {
+                let quad = Quad::image(rect, tex, [0.0, 0.0, 1.0, 1.0], alpha * self.alpha, 0.0);
+                self.push(Quad { turn, ..quad });
+                true
+            }
+            _ => false,
+        }
     }
 
     /// A piece of art filling `rect`, once it is decoded; false until then, or if it can't be.

@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use model::{Game, Library};
 use render::gpu::{self, Gpu};
-use render::offscreen::FORMAT;
+use render::offscreen::{read_back, wait, FORMAT};
 use screens::Dashboard;
 use ui::host::Offscreen;
 use ui::{Button, Host, Press};
@@ -125,13 +125,70 @@ impl Stage {
 
     fn check(&mut self, name: &str) {
         let image = self.still();
-        let got = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.png"));
-        image.save(&got).unwrap();
-        shots::check(name, &got, &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/reference"));
+        compare(name, &image);
+    }
+
+    /// One frame, `dt` seconds after the last on the ui's clock: what is mid-flight stays mid-flight. Art the frame
+    /// asks for is decoded and the frame drawn again at the same moment, however long that takes, so a frame shows
+    /// the same on any machine.
+    fn step(&mut self, mut dt: f32) {
+        let Self { gpu, host, target, dashboard, .. } = self;
+        loop {
+            let index = host.draw(gpu, &target.view, target.size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
+            wait(gpu, Some(index));
+            if !host.art.wait(gpu, &mut host.renderer) {
+                break;
+            }
+            while host.art.wait(gpu, &mut host.renderer) {}
+            dt = 0.0;
+        }
+    }
+
+    /// Frames `step` seconds apart until `seconds` have gone by.
+    fn run(&mut self, seconds: f32, step: f32) {
+        for _ in 0..(seconds / step).round() as u32 {
+            self.step(step);
+        }
+    }
+
+    /// This many frames a `TICK` apart.
+    fn ticks(&mut self, frames: u32) {
+        for _ in 0..frames {
+            self.step(TICK);
+        }
+    }
+
+    /// The screen as it is at this moment, as an image.
+    fn frame(&mut self) -> image::RgbaImage {
+        self.step(0.0);
+        let pixels = read_back(&self.gpu, &self.target.texture, self.target.size);
+        image::RgbaImage::from_raw(self.target.size.0, self.target.size.1, pixels).unwrap()
+    }
+
+    /// The background's colour in the clear between the top bar and the rows, where the scrim leaves it as it is.
+    fn background(&mut self) -> [u8; 3] {
+        let pixel = self.frame().get_pixel(960, 300).0;
+        [pixel[0], pixel[1], pixel[2]]
+    }
+
+    fn check_frame(&mut self, name: &str) {
+        let image = self.frame();
+        compare(name, &image);
     }
 }
 
+fn compare(name: &str, image: &image::RgbaImage) {
+    let got = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.png"));
+    image.save(&got).unwrap();
+    shots::check(name, &got, &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/reference"));
+}
+
 const HD: (u32, u32) = (1920, 1080);
+
+/// The step of the tests that follow the background over time: 25 frames a second. None of the background's waits
+/// (1.5 s, 150 ms, 100 ms) is a whole number of them, so no frame falls on the moment a wait ends. The first frame
+/// after a press is the one a wait is timed from: the wait of 1.5 s is over in the 39th, 1.52 s later.
+const TICK: f32 = 0.04;
 
 #[test]
 fn home() {
@@ -183,6 +240,68 @@ fn home_as_it_starts() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.dashboard.set_pad_connected(true);
     stage.check("home-start");
+}
+
+/// The swirl some twelve seconds into its movement: turned most of the way back to level, its bands drifted across.
+#[test]
+fn home_swirl_later() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.run(12.0, 0.1);
+    stage.check_frame("home-swirl-later");
+}
+
+/// Under Reduce motion the swirl stands as it is authored, however long it shows.
+#[test]
+fn home_swirl_under_reduce_motion() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.host.store.reduce_motion = true;
+    stage.run(12.0, 0.1);
+    stage.check_frame("home-swirl-reduce-motion");
+}
+
+/// The swirl fills a screen of another shape: scaled until it covers it, centred.
+#[test]
+fn home_swirl_16_10() {
+    Stage::new(library_with_art(), (1280, 800)).check("home-swirl-16-10");
+}
+
+#[test]
+fn home_swirl_ultrawide() {
+    Stage::new(library_with_art(), (2560, 1080)).check("home-swirl-ultrawide");
+}
+
+/// Focus has rested on the row's second game: its art has taken the first's place.
+#[test]
+fn home_background_follows_focus_after_the_delay() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.ticks(15);
+    stage.press(&[Button::Right]);
+    stage.ticks(55);
+    stage.check_frame("home-background-followed");
+}
+
+/// Half way through the crossfade from the first game's art to the second's.
+#[test]
+fn home_background_mid_crossfade() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.ticks(15);
+    stage.press(&[Button::Right]);
+    // The wait, in whose last frame the art sets off; then half the fade's 0.4 s.
+    stage.ticks(39);
+    stage.ticks(5);
+    stage.check_frame("home-background-crossfade");
+}
+
+/// Half way through a blurred cover's fade in over the swirl: it comes darkened, as one with its black sheet.
+#[test]
+fn home_blurred_cover_fading_in_over_the_swirl() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.ticks(10);
+    stage.press(&[Button::Down, Button::Right, Button::Right, Button::Right]);
+    // Over the swirl there is no wait: the cover sets off in the first frame.
+    stage.ticks(1);
+    stage.ticks(5);
+    stage.check_frame("home-blurred-cover-fading");
 }
 
 /// A round button with focus: its ring, its label under it, its icon larger.
@@ -385,6 +504,115 @@ fn the_title_band_is_nearly_opaque() {
     assert!(in_band[0] < 40 && in_band[1] < 40 && in_band[2] < 40, "the band lets the cover through: {in_band:?}");
     let above_band = image.get_pixel(108, 600).0;
     assert!(above_band[0] > 200, "the cover's white edge should show above the band: {above_band:?}");
+}
+
+// --- The background's timing, on the ui's clock. docs/spec/home.md, section 8, has the rules. ---
+
+/// The colours of the fake library's background art where `Stage::background` looks: the first game's, the
+/// second's.
+const FIRST_ART: [u8; 3] = [40, 125, 210];
+const SECOND_ART: [u8; 3] = [93, 178, 63];
+
+fn near(a: [u8; 3], b: [u8; 3]) -> bool {
+    a.iter().zip(b).all(|(&a, b)| a.abs_diff(b) <= 6)
+}
+
+#[test]
+fn the_background_follows_focus_only_once_it_has_rested_on_a_tile() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    // Coming onto the row over the swirl there is no wait: only the fade.
+    stage.ticks(15);
+    assert!(near(stage.background(), FIRST_ART), "{:?}", stage.background());
+
+    stage.press(&[Button::Right]);
+    stage.ticks(25);
+    assert!(near(stage.background(), FIRST_ART), "the art changed before the delay: {:?}", stage.background());
+    // Nothing is moving meanwhile: the window sleeps until the delay's end, 0.54 s on.
+    assert!(!stage.host.animating(), "frames are drawn all through the delay");
+    let wake = stage.host.wake().expect("the delay's end asks for a frame");
+    assert!((0.5..=0.58).contains(&wake), "{wake}");
+
+    // Another move starts the wait again, even one that comes straight back.
+    stage.ticks(10);
+    stage.press(&[Button::Left, Button::Right]);
+    stage.ticks(35);
+    assert!(near(stage.background(), FIRST_ART), "a move did not restart the delay: {:?}", stage.background());
+
+    // The delay over, the art decoded, the crossfade done.
+    stage.ticks(20);
+    assert!(near(stage.background(), SECOND_ART), "{:?}", stage.background());
+    assert!(!stage.host.animating() && stage.host.wake().is_none(), "at rest under art, Home asks for no frame");
+}
+
+#[test]
+fn with_background_delay_off_the_wait_is_short() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_background_delay(false);
+    stage.ticks(15);
+    stage.press(&[Button::Right]);
+    stage.ticks(4);
+    assert!(near(stage.background(), FIRST_ART), "the art changed at once: {:?}", stage.background());
+    // 150 ms from the first frame is over in the fifth; then the fade.
+    stage.ticks(18);
+    assert!(near(stage.background(), SECOND_ART), "{:?}", stage.background());
+}
+
+#[test]
+fn the_swirl_comes_back_a_moment_after_focus_leaves_the_rows_games() {
+    let green = |colour: [u8; 3]| colour[1] > colour[0] && colour[1] > colour[2];
+    let mut stage = Stage::new(library_with_art(), HD);
+    let swirl = stage.background();
+    assert!(green(swirl), "{swirl:?}");
+    stage.press(&[Button::Down]);
+    stage.ticks(15);
+    assert!(near(stage.background(), FIRST_ART));
+
+    // Up to the top bar: the art stays for a tenth of a second, then fades out over the swirl.
+    stage.press(&[Button::Up]);
+    stage.ticks(2);
+    assert!(near(stage.background(), FIRST_ART), "{:?}", stage.background());
+    stage.ticks(15);
+    let back = stage.background();
+    assert!(green(back) && !near(back, FIRST_ART), "{back:?}");
+
+    // A game with no art at all leaves up what is up: the sixth has none, after the fifth's blurred header.
+    stage.press(&[Button::Down, Button::Right, Button::Right, Button::Right, Button::Right]);
+    stage.ticks(15);
+    let fifth = stage.background();
+    assert!(!near(fifth, back), "the fifth game's header is not up: {fifth:?}");
+    stage.press(&[Button::Right]);
+    stage.ticks(60);
+    assert!(near(stage.background(), fifth), "{:?} became {:?}", fifth, stage.background());
+}
+
+#[test]
+fn the_swirl_moves_at_thirty_frames_a_second_and_not_at_all_under_reduce_motion() {
+    let mut stage = Stage::new(library_with_art(), HD);
+    let start = stage.frame();
+    assert!(!stage.host.animating(), "the swirl alone does not ask for every frame");
+    assert_eq!(stage.host.wake(), Some(1.0 / 30.0));
+    stage.run(3.0, 0.1);
+    assert!(shots::difference(&stage.frame(), &start).share > 0.01, "the swirl has not moved");
+
+    // Under art the swirl is not drawn, and nothing asks for a frame.
+    stage.press(&[Button::Down]);
+    stage.ticks(15);
+    assert!(!stage.host.animating() && stage.host.wake().is_none());
+
+    // Under the Guide the swirl holds still, as the Bundle's does behind another window.
+    stage.press(&[Button::Up]);
+    stage.dashboard.open_guide();
+    stage.ticks(25);
+    assert!(!stage.host.animating() && stage.host.wake().is_none(), "the swirl moves under the Guide");
+
+    // One stage at a time draws.
+    drop(stage);
+    let mut stage = Stage::new(library_with_art(), HD);
+    stage.host.store.reduce_motion = true;
+    let start = stage.frame();
+    assert!(!stage.host.animating() && stage.host.wake().is_none(), "a swirl standing still asks for no frame");
+    stage.run(3.0, 0.1);
+    assert_eq!(shots::difference(&stage.frame(), &start).share, 0.0);
 }
 
 // --- Where focus goes and what a press asks for: no picture, so no GPU. docs/spec/home.md has the rules. ---

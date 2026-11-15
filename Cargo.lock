@@ -1930,6 +1930,7 @@ dependencies = [
  "model",
  "render",
  "shots",
+ "tiny-skia",
  "ui",
  "wgpu",
 ]

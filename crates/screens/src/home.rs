@@ -5,6 +5,7 @@
 mod background;
 mod groups;
 mod recent;
+mod swirl;
 mod tile;
 mod top_bar;
 mod wide;
@@ -14,8 +15,8 @@ use std::time::{Duration, Instant};
 use model::Library;
 use ui::{Button, Ease, Ui};
 
-pub use self::background::hero_art;
 use self::background::Background;
+pub use self::background::{hero_art, DELAY_SECONDS, FADE_SECONDS, LEAVE_SECONDS, SETTLE_SECONDS};
 use self::groups::Group;
 use self::recent::Row;
 pub use self::tile::cover_art;
@@ -113,6 +114,17 @@ impl Home {
         self.focus
     }
 
+    /// Settings' Background delay: on, as it starts, the background follows focus along the Recent row once it has
+    /// rested on a tile for a second and a half; off, almost at once.
+    pub fn set_background_delay(&mut self, on: bool) {
+        self.background.delay = on;
+    }
+
+    /// Whether Home is what the player is looking at, or lies under the Guide: the swirl moves only in front.
+    pub fn set_in_front(&mut self, in_front: bool) {
+        self.background.in_front = in_front;
+    }
+
     /// Puts focus on the Recent row's tile for the game at this place in the library, if it has one.
     pub fn focus_recent(&mut self, game: usize, library: &Library) {
         if game < Row::of(library).games.len() {
@@ -130,6 +142,15 @@ impl Home {
     }
 
     pub fn press(&mut self, button: Button, library: &Library) -> Option<HomeAction> {
+        let before = self.focus;
+        let action = self.pressed(button, library);
+        if self.focus != before {
+            self.background.focus_moved();
+        }
+        action
+    }
+
+    fn pressed(&mut self, button: Button, library: &Library) -> Option<HomeAction> {
         let row = Row::of(library);
         let groups = groups::of(library);
         self.keep_focus_in(&row, &groups);
@@ -239,7 +260,7 @@ impl Home {
             Focus::Group { group, card } => on_group = Some((group, card)),
         }
 
-        // Only a Recent game's art shows; with focus anywhere else, the background's base.
+        // Only a Recent game's art shows; with focus anywhere else, the swirl.
         self.background.draw(ui, on_recent.and_then(|i| row.games.get(i)));
 
         // The page and the top bar slide to where they rest with focus here. The Recent row and the wide tiles

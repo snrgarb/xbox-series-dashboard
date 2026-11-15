@@ -8,6 +8,7 @@ description = "The Dashboard's screens, and the core that holds them: no window,
 model = { path = "../model" }
 ui = { path = "../ui" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 
 [dev-dependencies]
 render = { path = "../render" }

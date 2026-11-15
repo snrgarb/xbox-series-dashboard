@@ -398,9 +398,11 @@ Art choice rule (`HeroArtOf`, C/ExtensionCore.cs:1958-1971):
 ### 8.2 Delay before it changes
 
 - Entering the row from the swirl (no art up): the focused game's art starts **at once**, no delay (C/ExtensionCore.cs:1261-1267).
-- Moving along the row with art already up: the art changes after focus has rested on a tile for **1.5 s** (Background delay on, the default) or **150 ms** (off); every focus move restarts the timer; the old art stays up meanwhile (C/ExtensionCore.cs:42, 48, 1269-1273). The setting is read at the moment of each focus change.
+- Moving along the row with art already up: the art changes after focus has rested on a tile for **1.5 s** (Background delay on, the default) or **150 ms** (off); every focus move restarts the timer; the old art stays up meanwhile (C/ExtensionCore.cs:42, 48, 1269-1273). The setting is read at the moment of each focus change. Which of the two it is depends on the setting alone, never on how fast focus is moving: the 150 ms is there so that a held direction, repeating every 80 ms, passes over tiles without their art being read (C/ExtensionCore.cs:44-48).
+- "Art already up" means a game's art has been asked for (`heroGame`), whether or not it has faded in yet. A game with no art at all asks for nothing and does not count: moving from it onto a game with art, over the swirl, still shows that art at once.
 - Leaving a Recent tile for something that is not a Recent game tile: the swirl request is made **100 ms** after the tile loses focus, cancelled if another Recent tile gets focus in that time (C/ExtensionCore.cs:54, 1280-1296). Focusing a Group card requests the swirl immediately (C/ExtensionCore.cs:1255-1259).
-- Art from a file is decoded off the UI thread; if focus has moved on by the time it is decoded it is dropped (E/HeroControl.cs:82-109).
+- Art is read only when its wait is over, not while focus rests: the crossfade starts when the wait and the decoding are both done. Art from a file is decoded off the UI thread; if focus has moved on by the time it is decoded it is dropped (E/HeroControl.cs:82-109).
+- The first background Home shows is put up with no fade (`ShowAtOnce`, E/HeroControl.cs:54, 67-74). In practice that is the swirl: Home starts with focus on the profile.
 
 ### 8.3 Art layers and crossfade
 
@@ -408,8 +410,9 @@ E/HeroControl.cs, E/HeroLayer.cs.
 
 - Two full-screen art layers over the swirl; each clips to bounds.
 - Background art: decoded at 1920 wide, `UniformToFill`, **horizontally centred, top-aligned**, high-quality scaling, no extra darkening of its own.
-- Cover: decoded at **120 px wide**, Gaussian-blurred once with radius **15** px (120 / 8) at that size, then scaled `UniformToFill`, centred/top-aligned, into a box that overhangs the screen by **120 on every side** (2160 x 1320, so the blur's soft edges are off screen); over it a flat **`#99000000`** rectangle (E/HeroLayer.cs:25-31, 94-95, 124-134).
-- Crossfade: the new art's layer goes on top and fades to opacity 1 while the old layer fades to 0, both **linear, 400 ms**; **150 ms** with Reduce motion (still a fade). To the swirl: the top layer fades to 0 the same way. Animations are to-only, so an interrupted fade continues from its current opacity (E/HeroControl.cs:24-27, 111-141).
+- Cover: decoded at **120 px wide**, Gaussian-blurred once with radius **15** px (120 / 8) at that size, then scaled `UniformToFill`, centred/top-aligned, into a box that overhangs the screen by **120 on every side** (2160 x 1320, so the blur's soft edges are off screen); over it a flat **`#99000000`** rectangle (E/HeroLayer.cs:25-31, 94-95, 124-134). The rectangle is in the layer with the cover, so the two fade as one picture: mid-fade the layer is the cover at 40% of its light, at the layer's opacity, not a cover and a sheet each faded on its own.
+- Crossfade: the new art's layer goes on top and fades to opacity 1 while the old layer fades to 0, both **linear, 400 ms**; **150 ms** with Reduce motion (still a fade). To the swirl: both layers fade to 0 the same way. Animations are to-only, so an interrupted fade continues from its current opacity (E/HeroControl.cs:24-27, 111-141).
+- There are only the two layers, and they swap places at each crossfade: the one that was at the back (usually faded out) takes the new art and goes to the front. A crossfade that starts before the last has ended therefore gives the new art to a layer that may still be part way out: the picture it was showing is replaced at that opacity, and the layer fades up from there over the full 400 ms.
 - The swirl is made visible under the layers for the whole fade and hidden again (so it stops animating) once art fully covers it.
 
 ### 8.4 Scrim (always on, over art and swirl)
@@ -430,7 +433,9 @@ It does not scroll and does not change with focus location (no extra dim or blur
 **Drawn as vector XAML: no image, video or shader asset exists for it.** E/SwirlBackground.xaml, E/SwirlBackground.xaml.cs. Authored on a 1920 x 1080 canvas, `UniformToFill`, clipped.
 
 1. Base fill: radial gradient, centre (0.5, 0.5), RadiusX = RadiusY = 0.75 (relative to the canvas, so an ellipse 1440 x 810 semi-axes): `#FF1E2C1C` @0 -> `#FF0C140B` @1 (lines 59-64).
-2. A group scaled 1.2 about the canvas centre, then rotated by `SwirlTurn` about the centre (lines 65-71), holding two band sets, each translated by its own drift. All paths are open cubic Bezier strokes with no fill; each stroke's brush is a linear gradient from the top-left to the bottom-right of that path's bounding box.
+2. A group scaled 1.2 about the canvas centre, then rotated by `SwirlTurn` about the centre (lines 65-71), holding two band sets, each translated by its own drift. The drift is inside the group: on screen it is 1.2 times as far and turned with the whole. A positive angle turns clockwise. All paths are open cubic Bezier strokes with no fill; each stroke's brush is a linear gradient from the top-left to the bottom-right of that path's bounding box.
+
+   The bounding box is that of the curve itself, not of its stroke (WPF maps a pen's brush to the geometry's bounds), and it is the curve's tight box, not its control points': for these six paths, the box from the first point to the last. The brush is stretched with the box, so a stop's colour lies along a line parallel to the box's **other** diagonal, not square to the gradient's own line: at a point (x, y) the gradient is at `((x - left) / width + (y - top) / height) / 2`. Colours are mixed as sRGB values (WPF's default), and a path's `Opacity` multiplies its alpha before it is laid over the paths under it in the set's bitmap.
 
 Top-right set (`TopDrift`), lines 74-109:
 
@@ -448,11 +453,11 @@ Bottom-left set (`BottomDrift`), lines 112-147:
 | `M -300,600 C 40,720 140,960 540,1020 C 860,1070 1000,1140 1120,1460` | 160 | 1 | `#FF5CB02A` @0, `#FFA6E040` @0.4, `#FF3E9A24` @1 |
 | `M -300,660 C 20,780 120,1020 520,1080 C 830,1130 960,1200 1060,1500` | 50 | 0.85 | `#FFC6F25A` @0 -> `#FF9BE03A` @1 |
 
-Stroke caps and joins are WPF defaults (flat caps, miter joins). Each set is rendered once to a bitmap at 1x and then only transformed.
+Stroke caps and joins are WPF defaults (flat caps, miter joins). Each set is rendered once to a bitmap (`BitmapCache RenderAtScale="1"`: one pixel to a canvas unit, whatever the screen) and then only transformed: at 1080p the bitmap is drawn 1.2 times its size, at 4K 2.4 times, smoothed. The top set is drawn first, the bottom set over it.
 
 3. On top, not rotated: a centre darkening, radial gradient centre (0.5, 0.5), RadiusX 0.45, RadiusY 0.55: `#88101810` @0 -> `#00101810` @1 (lines 150-158).
 
-Motion (lines 18-49): five endless back-and-forth animations, each `SineEase EaseInOut`, auto-reversing, at 30 fps. Durations are one way; a full cycle is double.
+Motion (lines 18-49): five endless back-and-forth animations, each `SineEase EaseInOut`, auto-reversing, at 30 fps. Durations are one way; a full cycle is double. Eased both ways, each is a cosine: t seconds into the movement a value is at `from + (to - from) * (1 - cos(pi * t / duration)) / 2`. All five start at their From together.
 
 | Target | From -> To | One-way duration |
 |---|---|---|
@@ -462,13 +467,17 @@ Motion (lines 18-49): five endless back-and-forth animations, each `SineEase Eas
 | Bottom set X | 50 -> -50 | 15 s |
 | Bottom set Y | -40 -> 40 | 19 s |
 
-It moves only while visible, loaded, and its window is the active window; otherwise it is paused where it is (E/SwirlBackground.xaml.cs:85-121).
+It moves only while visible, loaded, and its window is the active window; otherwise it is paused where it is (E/SwirlBackground.xaml.cs:85-121). Its clock is its own: time spent hidden under a game's art does not count, and it comes back where it left off. Until it first moves it stands as authored, at angle 0 with no drift, which is not where the movement starts (-5 degrees, the sets at their From).
+
+The 30 fps is on purpose (lines 13-17): nothing in it moves faster than some tens of pixels a second, and each of its frames draws all of Home again. The fastest point is a screen corner as the turn and a drift pass their middles together: about 14 px/s from the turn and 17 px/s from the top set's drift at 1080p, a pixel a frame.
+
+Checked against the Bundle's picture: `see-all-20261110-113608/0-home.jpg` is this drawing 7.1 s into its movement. The Dashboard's swirl (`crates/screens/src/home/swirl.rs`) at that moment, compared with the picture over the million pixels away from the top bar and the tiles, differs by 0.7 of a level in 255 on average; 0.4% of pixels differ by more than 8 levels, along the bands' edges, and none by more than 32.
 
 ### 8.6 Reduce motion on Home (Settings; off by default, C/StartupState.cs:191)
 
 | Thing | Normal | Reduce motion |
 |---|---|---|
-| Swirl | Turns and drifts | Stands still (paused where it is; at angle 0 / no drift if it never ran) |
+| Swirl | Turns and drifts, redrawn 30 times a second | Stands still (paused where it is; at angle 0 / no drift if it never ran) and asks for no frames |
 | Hero crossfade | 400 ms | 150 ms |
 | Recent tile growth | Exponential, 50 ms time constant | Full size in one frame |
 | Page slide | 300 ms cubic ease-out | Instant |
@@ -598,4 +607,5 @@ What `crates/screens/src/home*` does that the sections above do not say, or does
 - **Recent row.** Always seven games and the Play history tile (there is no Show Play history setting yet). Never-played games pad it in the library's order, by name: there is no date added.
 - **Focused top bar glyphs.** Settings swaps to U+F8B0. My games & apps and Notifications keep their outline glyph (the Bundle's filled ones are vector paths) and Search is not emboldened.
 - **Not drawn yet:** the Running badge, the install status band, the Score line and the name swap, the PC's battery and the Discord mark in the status area.
+- **The background.** As section 8, with these differences. Background delay is a switch on the core (`Dashboard::set_background_delay`) with no Settings page to turn it yet. Focus moves in one step here, so the 100 ms before the swirl comes back is kept only for the look of it. The swirl holds still under the Guide, as the Bundle's does whenever its window is not the active one; behind a game Home is not drawn at all. Its pictures are drawn on a decoding thread: the first frame or two of a Home that starts on the swirl show the dark green alone. The blurred cover is blurred by a Gaussian of deviation 7.5 with its edges held, where WPF's blur of radius 15 fades them to clear; what of that reaches the screen has not been compared with a picture of the Bundle.
 - **Another screen shape.** The rests use the screen's own height in design units (1200 at 16:10), so the wide tiles' rest rises less on a taller screen.
