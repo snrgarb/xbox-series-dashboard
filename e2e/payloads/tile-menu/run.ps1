@@ -2,7 +2,8 @@
 # and on a Group's card, its rows by a game's state, More options and its flyout, "Uninstall X?" and its answers, B a
 # level at a time, and what each row then does: Add to and Remove from Favourites and Hide this game (the library
 # database), Install and Uninstall (the address the stand-in Steam is started with), Customise Home (Settings on
-# Personalisation, B back to the tile), Manage game (nothing until the Game hub is a page) and Play game (a launch).
+# Personalisation, B back to the tile), Manage game (the game's Game hub in the menu's place, whose own Tile menu has
+# no Manage game row, and B back to the tile) and Play game (a launch).
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: TileMenu: Menu(Play game) of <game>`,
 # `focus: TileMenu: MoreOptions(Hide this game) of <game>`, `focus: TileMenu: Prompt(Uninstall) of <game>`, and
@@ -171,8 +172,9 @@ try {
     Press A 'Recent\(\d+\)' | Out-Null
     Expect-Logged "^library: $game is (a|no longer a) favourite" $mark 'Favourites, back' | Out-Null
 
-    # --- Customise Home: Settings on Personalisation, and B back on the tile. Manage game: the menu closes and,
-    # until the Game hub is a page, no more.
+    # --- Customise Home: Settings on Personalisation, and B back on the tile. Manage game: the game's Game hub in
+    # the menu's place; Menu there is the same game's Tile menu without its Manage game row; B a level at a time
+    # back to the tile.
     Press Start "TileMenu: Menu\(Play game\) of $game" | Out-Null
     Walk Down "TileMenu: Menu\(Customise Home\) of $game"
     Press A 'Settings: Personalisation: .+' '09-settings-on-personalisation' | Out-Null
@@ -183,7 +185,13 @@ try {
     if ($back) { Press B ([regex]::Escape($back)) | Out-Null }
     Press Start "TileMenu: Menu\(Play game\) of $game" | Out-Null
     Walk Down "TileMenu: Menu\(Manage game\) of $game"
-    Press A 'Recent\(\d+\)' | Out-Null
+    Press A 'GameHub: \d+ Hub (Play|Install)' '09b-manage-game-opens-the-hub' | Out-Null
+    Press Start "TileMenu: Menu\((Play game|Install)\) of $game" | Out-Null
+    Press Down "TileMenu: Menu\((Add to|Remove from) Favourites\) of $game" | Out-Null
+    $next = Press Down "TileMenu: Menu\(.+\) of $game"
+    if ((Menu-Row $next) -eq 'Manage game') { $script:failures += "the hub's Tile menu has a Manage game row" }
+    Press B 'GameHub: \d+ Hub (Play|Install)' | Out-Null
+    if ($back) { Press B ([regex]::Escape($back)) | Out-Null }
 
     # --- A game that is not installed: Install first and no Uninstall, five rows. Install closes the menu and
     # starts Steam with the game's install address.

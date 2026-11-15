@@ -50,10 +50,23 @@ impl Host {
     ) -> wgpu::SubmissionIndex {
         let (whole, top) = part;
         self.art.pump(gpu, &mut self.renderer);
+        // A place for a picture the frame may ask to have taken (`Ui::snapshot`), ready before it is declared.
+        if self.store.snaps.wants_spare() {
+            self.store.snaps.set_spare(self.renderer.reserve_texture(&gpu.device, &gpu.queue));
+        }
         self.store.begin(dt);
         let mut frame = Frame::default();
         declare(&mut Ui::part(&mut frame, &mut self.renderer.text, &mut self.store, &mut self.art, whole, top));
         self.store.end();
+        // The pictures it asked for are taken before it is drawn, so it shows them in this very frame; those it no
+        // longer asks for are let go.
+        for job in self.store.snaps.take_jobs() {
+            let (device, queue) = (&gpu.device, &gpu.queue);
+            self.renderer.snapshot(device, queue, job.tex, &job.frame, job.output, job.shrink, job.blur);
+        }
+        for tex in self.store.snaps.take_dropped() {
+            self.renderer.remove_texture(tex);
+        }
         self.renderer.render(&gpu.device, &gpu.queue, target, output, &frame, clear)
     }
 

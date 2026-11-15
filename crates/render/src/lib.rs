@@ -7,6 +7,9 @@
 //! A layer can be drawn as one picture ([`Group`]): to a texture of its own, which is then laid over the layers
 //! under it, out of focus or faded as a whole. That is how the Bundle shows the Guide's panel behind a dialog, and
 //! a menu behind its flyout.
+//!
+//! A whole frame can be kept as a small picture ([`Renderer::snapshot`]): drawn once to a texture, shrunk and
+//! blurred, and from then on a texture like any other. That is how the Game hub shows the page it was opened over.
 pub mod gpu;
 pub mod offscreen;
 mod text;
@@ -528,14 +531,88 @@ impl Renderer {
         );
     }
 
-    fn keep_texture(&mut self, device: &wgpu::Device, texture: wgpu::Texture, video: bool) -> TexId {
+    /// A texture as a quad reads it.
+    fn bound(&self, device: &wgpu::Device, texture: wgpu::Texture, video: bool) -> Texture {
         let view = texture.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.texture_layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
         });
-        let entry = Some(Texture { texture, bind, video });
+        Texture { texture, bind, video }
+    }
+
+    /// A texture a frame can be drawn to and a quad can then read, in the target's format.
+    fn drawn_texture(&self, device: &wgpu::Device, size: (u32, u32)) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("snapshot"),
+            size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+    }
+
+    /// A place for a picture that is drawn later, by [`Self::snapshot`]: black until then. Whoever declares frames
+    /// can hold one ready, so a quad can name the picture in the very frame it is taken.
+    pub fn reserve_texture(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> TexId {
+        self.add_texture(device, queue, &[RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255]))])
+    }
+
+    /// Takes a picture of `frame`, which is declared for a target of `size` pixels, and keeps it as the texture
+    /// `into` (one from [`Self::reserve_texture`]): `shrink` times smaller each way, and blurred there by `blur` of
+    /// its own pixels, as WPF's `BlurEffect` blurs (0 for none). The frame is drawn over black. Returns the
+    /// picture's size.
+    ///
+    /// It is drawn at its own size and halved down to the small one, so every pixel of the frame is in the picture
+    /// and none is skipped; the blur is the last step, at the small size, which is what makes it cheap. The edges
+    /// are held, not faded. Nothing of the frame being declared is touched: this submits passes of its own, before
+    /// the frame's.
+    #[allow(clippy::too_many_arguments)]
+    pub fn snapshot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        into: TexId,
+        frame: &Frame,
+        size: (u32, u32),
+        shrink: u32,
+        blur: f32,
+    ) -> (u32, u32) {
+        let small = ((size.0 / shrink.max(1)).max(1), (size.1 / shrink.max(1)).max(1));
+        let texture = self.drawn_texture(device, size);
+        self.render(device, queue, &texture.create_view(&Default::default()), size, frame, wgpu::Color::BLACK);
+        let mut held = self.keep_texture(device, texture, false);
+        let mut at = size;
+        loop {
+            let next = if at.0 / 2 > small.0 && at.1 / 2 > small.1 { (at.0 / 2, at.1 / 2) } else { small };
+            let last = next == small;
+            let whole = Rect::new(0.0, 0.0, next.0 as f32, next.1 as f32);
+            let layer = Layer {
+                quads: vec![Quad::image(whole, held, [0.0, 0.0, 1.0, 1.0], 1.0, 0.0)],
+                texts: Vec::new(),
+                group: (last && blur > 0.0).then_some(Group { bounds: whole, blur, opacity: 1.0 }),
+            };
+            let texture = self.drawn_texture(device, next);
+            let view = texture.create_view(&Default::default());
+            self.render(device, queue, &view, next, &Frame { layers: vec![layer] }, wgpu::Color::BLACK);
+            self.remove_texture(held);
+            if last {
+                if into != WHITE && into.0 < self.textures.len() {
+                    self.textures[into.0] = Some(self.bound(device, texture, false));
+                }
+                return next;
+            }
+            held = self.keep_texture(device, texture, false);
+            at = next;
+        }
+    }
+
+    fn keep_texture(&mut self, device: &wgpu::Device, texture: wgpu::Texture, video: bool) -> TexId {
+        let entry = Some(self.bound(device, texture, video));
         match self.free.pop() {
             Some(slot) => {
                 self.textures[slot] = entry;

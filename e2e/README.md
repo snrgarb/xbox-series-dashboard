@@ -113,7 +113,9 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Watch-Pulse <seconds>`, `Test-PulseColour`, `Test-Suspended <pid>` | the colours the stand-in game's pulse showed (two when it runs, one when it is frozen); whether a pixel is the pulse, dimmed or not; whether every thread of a process is suspended |
 
 The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again), `home` (Home
-walked with the pad), `needs-user` (a launcher that stays: the Launch screen steps aside for it), `guide-hold` (the
+walked with the pad), `needs-user` (a launcher that stays: the Launch screen steps aside for it), `game-hub` (A on a tile opens the game's
+hub, its actions, cards and two pages by `--log-focus`, its Tile menu, Install, B back on the tile, and a double tap
+playing the game), `guide-hold` (the
 Guide on the Overlay at Home and over the game, on the monitor of the window in front; the game frozen while it is
 open, thawed as it closes, and thawed at the next start after the Dashboard is killed with the Guide open), `pages`
 (every way from Home into a page and B back from each), `my-games` (My games & apps on the full shelf: along its nav,

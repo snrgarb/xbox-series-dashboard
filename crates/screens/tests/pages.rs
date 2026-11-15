@@ -53,8 +53,9 @@ fn there_and_back(dashboard: &mut Dashboard, open: Button, line: &str, back: Foc
     assert_eq!(dashboard.focus_line(), line);
     assert_eq!(dashboard.pages_up(), 1);
     assert_eq!(dashboard.home_focus(), before, "Home keeps its focus while it is covered");
-    // The page has the pad: nothing reaches Home under it.
-    press(dashboard, &[Down, Right, Up, Left, A]);
+    // The page has the pad: nothing reaches Home under it. (No A: on a game of My games & apps it is a page of
+    // its own, the game's hub.)
+    press(dashboard, &[Down, Right, Up, Left]);
     assert_eq!((dashboard.pages_up(), dashboard.home_focus()), (1, before));
     press(dashboard, &[B]);
     assert_eq!(dashboard.page(), None, "B closes the page");

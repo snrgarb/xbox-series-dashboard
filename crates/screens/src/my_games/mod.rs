@@ -13,8 +13,8 @@
 //! | Full library | `full_library`: the tabs, the Sort and Filter row, and the grid under them |
 //! | Manage | `manage` |
 //!
-//! **Hooks for other tickets**, each one function that does nothing yet: [`open_game_hub`] (#51),
-//! `manage::open_manage_queue` and `nav::foot` (M4), [`progress`] (the library updating).
+//! **Hooks for other tickets**, each one function that does nothing yet: `manage::open_manage_queue` and
+//! `nav::foot` (M4), [`progress`] (the library updating).
 mod full_library;
 mod games;
 mod grid;
@@ -35,9 +35,10 @@ use self::history::History;
 use self::look::{HEADER, PAGE, TEXT_DIM};
 use self::manage::Manage;
 use self::nav::{Item, Settle};
+use crate::game_hub;
 use crate::hint_bar::{self, Hint};
 use crate::keyboard;
-use crate::pages::{Around, Page, PageAction};
+use crate::pages::{Around, Open, Page, PageAction, Tick};
 
 /// How the page is opened: which of its items shows, and so where focus lands (docs/spec/my-games.md, 3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,11 +65,9 @@ const COUNT_TOP: f32 = 88.0;
 const FLY: f32 = 50.0;
 const FLY_SECONDS: f32 = 0.12;
 
-/// **#51's hook.** A on a game opens its Game hub: `Some(PageAction::Open(..))` with the hub's own variant of
-/// `pages::Open`, over this page, so that B there comes back with focus on the game. Nothing until the hub is a
-/// page.
-fn open_game_hub(_game: &Game) -> Option<PageAction> {
-    None
+/// A on a game opens its Game hub over this page, so that B there comes back with focus on the game.
+fn open_game_hub(game: &Game) -> Option<PageAction> {
+    Some(PageAction::Open(Open::GameHub(game_hub::Entry::of(game))))
 }
 
 /// Menu on a game (and X on a grid tile) opens its Tile menu, with "Customise games & apps" in place of Home's
@@ -148,6 +147,11 @@ trait Pane {
 
     /// What text entry over the page has to say to the pane that opened it.
     fn entry(&mut self, _event: keyboard::Event, _around: Around) {}
+
+    /// What time has brought the pane while it shows ([`Page::tick`]).
+    fn tick(&mut self, _around: Around) -> Tick {
+        Tick::Nothing
+    }
 
     /// A press with focus in the content, but for B and the bumpers.
     fn press(&mut self, _press: Press, _around: Around) -> Outcome {
@@ -387,6 +391,11 @@ impl Page for MyGames {
         self.pane_mut(showing).entry(event, around);
         self.keep(around);
         self.note(around);
+    }
+
+    fn tick(&mut self, around: Around) -> Tick {
+        let showing = self.showing;
+        self.pane_mut(showing).tick(around)
     }
 
     fn hints(&self, around: Around) -> &'static [Hint] {

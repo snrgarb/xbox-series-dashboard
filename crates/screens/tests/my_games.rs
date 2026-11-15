@@ -320,12 +320,9 @@ fn y_on_a_game_opens_search_over_the_page_and_b_comes_back_to_the_game() {
 }
 
 #[test]
-fn a_on_a_game_asks_nothing_until_the_game_hub_is_there_and_menu_and_x_open_its_tile_menu() {
+fn a_on_a_game_opens_its_game_hub_at_once_and_menu_and_x_open_its_tile_menu() {
     let mut page = page(Entry::Games);
     page.take_effects();
-    assert_eq!(after(&mut page, &[A]), "Games: Tile(0)");
-    assert!(page.take_effects().is_empty());
-    assert_eq!(page.pages_up(), 1);
     // The Tile menu over the page, which says "Customise games & apps" where Home's says "Customise Home"; B
     // comes back to the tile.
     for button in [Menu, X] {
@@ -338,6 +335,15 @@ fn a_on_a_game_asks_nothing_until_the_game_hub_is_there_and_menu_and_x_open_its_
         assert_eq!(after(&mut page, &[B]), "Games: Tile(0)");
         assert_eq!(page.pages_up(), 1);
     }
+    page.take_effects();
+    // A: the hub of the game on the tile, over the page; B is the page again, focus on the tile.
+    press(&mut page, &[Right, A]);
+    let line = page.focus_line();
+    assert!(line.starts_with("GameHub: ") && line.ends_with(" Hub Play"), "{line}");
+    assert_eq!(page.pages_up(), 2);
+    assert!(asked(&mut page).is_empty(), "the grid has no double tap: A opens, and plays nothing");
+    assert_eq!(after(&mut page, &[B]), "Games: Tile(1)");
+    assert_eq!(page.pages_up(), 1);
 }
 
 #[test]
@@ -361,23 +367,49 @@ fn a_second_a_on_a_play_history_row_within_the_double_tap_plays_its_game() {
     let mut page = page(Entry::PlayHistory);
     press(&mut page, &[Down, Down]);
     page.take_effects();
-    // One A waits for the Game hub, which is not there yet: nothing.
+    // One A waits out the double tap's time before the game's hub opens: nothing yet.
     press(&mut page, &[A]);
     assert!(asked(&mut page).is_empty());
+    assert_eq!(page.pages_up(), 1);
     press(&mut page, &[A]);
+    assert_eq!(page.pages_up(), 1, "a double tap opens no hub");
     let row = page.library().history[2];
     let place = page.library().games.iter().position(|game| game.id == row.game).unwrap();
     assert_eq!(page.library().games[place].name, "Copperhead Station");
     assert_eq!(asked(&mut page), [Effect::Launch(place)]);
 
-    // Not once the 300 ms are over, and not across two rows.
+    // Not across two rows.
     let mut page = self::page(Entry::PlayHistory);
-    press(&mut page, &[A]);
-    std::thread::sleep(Duration::from_millis(350));
     press(&mut page, &[A, Down, A]);
     assert!(asked(&mut page).is_empty());
     press(&mut page, &[A]);
     assert_eq!(asked(&mut page).len(), 1);
+}
+
+#[test]
+fn one_a_on_a_play_history_row_opens_its_game_hub_when_the_double_taps_time_is_over() {
+    let mut page = page(Entry::PlayHistory);
+    press(&mut page, &[Down, Down]);
+    let row = page.library().history[2];
+    let appid = page.library().games.iter().find(|game| game.id == row.game).unwrap().appid;
+    page.take_effects();
+    // On the Dashboard's clock, which the test moves on: nothing waits.
+    press(&mut page, &[A]);
+    page.advance(0.1);
+    let wait = page.timer().expect("the hub is 200 ms off");
+    assert!((wait - 0.2).abs() < 0.001, "{wait}");
+    assert_eq!(page.pages_up(), 1);
+    page.advance(0.2);
+    assert_eq!(page.timer(), None);
+    assert_eq!((page.pages_up(), page.focus_line()), (2, format!("GameHub: {appid} Hub Play")));
+    assert!(asked(&mut page).is_empty());
+    // A there is the hub's Play; B is Play history again, focus on the row.
+    page.advance(1.6);
+    press(&mut page, &[B]);
+    assert_eq!((page.pages_up(), page.focus_line().as_str()), (1, "MyGames: PlayHistory: Row(2)"));
+    // And nothing opens a second time.
+    page.advance(1.0);
+    assert_eq!((page.timer(), page.pages_up()), (None, 1));
 }
 
 #[test]
@@ -686,11 +718,11 @@ fn full_librarys_focus_follows_its_game_when_the_library_changes_and_a_tab_that_
     let mut found = source();
     found.games.iter_mut().for_each(|game| game.favourite = game.name == "Quiet Orbit");
     page.set_library(through(&[found]));
-    // (A on a game asks nothing yet: it is a press that leaves focus where it is.)
-    assert_eq!(on(&mut page, &[A]), "Tile(0); tab 1/3 \"Favourites\", sort Name, name \"\", 1 games");
+    // (A opens the game's hub and B closes it: focus is back where it was.)
+    assert_eq!(on(&mut page, &[A, B]), "Tile(0); tab 1/3 \"Favourites\", sort Name, name \"\", 1 games");
     // No favourite at all: the tab is gone, no tab is lit, and the grid is every game, focus on the same game.
     page.set_library(library());
-    assert_eq!(on(&mut page, &[A]), "Tile(15); tab 0/2 \"\", sort Name, name \"\", 22 games");
+    assert_eq!(on(&mut page, &[A, B]), "Tile(15); tab 0/2 \"\", sort Name, name \"\", 22 games");
 }
 
 // --- What it looks like ---

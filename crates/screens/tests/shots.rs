@@ -865,6 +865,17 @@ fn press(dashboard: &mut Dashboard, buttons: &[Button]) {
     }
 }
 
+/// A twice at one moment: a double tap, which plays the game focus is on.
+fn double_tap(dashboard: &mut Dashboard) {
+    press(dashboard, &[A, A]);
+}
+
+/// A on a game's tile, and the double tap's time gone by with no second A: the game's hub opens.
+fn a_alone(dashboard: &mut Dashboard) {
+    press(dashboard, &[A]);
+    dashboard.advance(screens::home::DOUBLE_TAP.as_secs_f32());
+}
+
 /// Presses, then says where focus is.
 fn after(dashboard: &mut Dashboard, buttons: &[Button]) -> Focus {
     press(dashboard, buttons);
@@ -1107,12 +1118,12 @@ fn b_on_a_group_goes_back_to_the_recent_rows_game_last_focused() {
 }
 
 #[test]
-fn a_on_a_groups_card_launches_its_game_and_on_see_all_or_play_history_none() {
+fn a_double_tap_on_a_groups_card_launches_its_game_and_a_on_see_all_or_play_history_none() {
     let mut home = core();
     // Most played's first card is the game played longest, Stardew Valley, tenth in the library.
     press(&mut home, &[Down, Down, Down]);
     assert_eq!(home.focused_game(), Some(9));
-    press(&mut home, &[A]);
+    double_tap(&mut home);
     assert_eq!(asked(&mut home), [Effect::Launch(9)]);
     // See all and the Play history tile open pages (tests/pages.rs) and launch nothing.
     press(&mut home, &[Right, Right, Right, Right, Right, Right, A]);
@@ -1124,24 +1135,146 @@ fn a_on_a_groups_card_launches_its_game_and_on_see_all_or_play_history_none() {
 }
 
 #[test]
-fn a_second_a_within_the_double_tap_does_not_launch_twice() {
+fn a_on_a_game_opens_its_hub_once_the_double_taps_time_is_up_and_a_second_a_within_it_plays() {
     let mut home = core();
-    press(&mut home, &[Right, A, A, A]);
+    press(&mut home, &[Right]);
+    // The Dashboard's clock, in ms from here: the test moves it on, and nothing waits.
+    let mut clock = 0;
+    let mut to = |home: &mut Dashboard, ms: u64| {
+        home.advance((ms - clock) as f32 / 1000.0);
+        clock = ms;
+    };
+    let left = |home: &Dashboard| home.timer().map(|left| (left * 1000.0).round() as u64);
+    let a = Press { button: A, repeat: false };
+    let button = |button: Button| Press { button, repeat: false };
+
+    // One A: nothing yet, for as long as a second may still come.
+    home.press(a);
+    assert_eq!(left(&home), Some(300));
+    to(&mut home, 299);
+    assert_eq!(left(&home), Some(1));
+    assert!(asked(&mut home).is_empty() && home.page().is_none());
+    // None came: the game's hub, focus on Play. Nothing was launched.
+    to(&mut home, 300);
+    assert_eq!(left(&home), None);
+    assert_eq!(home.focus_line(), "GameHub: 1001 Hub Play");
+    assert!(asked(&mut home).is_empty());
+    // B: Home again, focus on the tile, and nothing more waiting.
+    to(&mut home, 400);
+    home.press(button(B));
+    assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(1)));
+    to(&mut home, 1000);
+    assert_eq!(left(&home), None);
+
+    // A second A within the time plays the game, once, and no hub opens.
+    to(&mut home, 2000);
+    home.press(a);
+    to(&mut home, 2299);
+    home.press(a);
     assert_eq!(asked(&mut home), [Effect::Launch(1)]);
-    // Another tile is another choice, however soon.
-    press(&mut home, &[Right, A]);
-    assert_eq!(asked(&mut home), [Effect::Launch(2)]);
-    // And so is the same tile once the double tap's 300 ms are over.
-    std::thread::sleep(std::time::Duration::from_millis(350));
+    assert_eq!(left(&home), None);
+    to(&mut home, 5000);
+    assert_eq!(home.page(), None);
+
+    // One that comes after it finds the hub, which is up by then: it is A on Play.
+    to(&mut home, 6000);
+    home.press(a);
+    to(&mut home, 6300);
+    home.press(a);
+    assert_eq!(home.focus_line(), "GameHub: 1001 Hub Play");
+    assert_eq!(asked(&mut home), [Effect::Launch(1)]);
+    to(&mut home, 6400);
+    home.press(button(B));
+
+    // A on another tile is another choice, however soon: the first tile's is forgotten.
+    to(&mut home, 7000);
+    home.press(a);
+    to(&mut home, 7100);
+    home.press(button(Right));
+    to(&mut home, 7200);
+    home.press(a);
+    to(&mut home, 7300);
+    assert_eq!(left(&home), Some(200));
+    to(&mut home, 7500);
+    assert_eq!(left(&home), None);
+    assert_eq!(home.focus_line(), "GameHub: 1002 Hub Play");
+    assert!(asked(&mut home).is_empty());
+    to(&mut home, 7600);
+    home.press(button(B));
+    assert_eq!(home.home_focus(), Focus::Recent(2));
+
+    // Focus moving on does not undo the choice: the hub of the tile that was chosen opens, and B is on the tile
+    // focus went to.
+    to(&mut home, 8000);
+    home.press(a);
+    to(&mut home, 8100);
+    home.press(button(Left));
+    to(&mut home, 8300);
+    assert_eq!(home.focus_line(), "GameHub: 1002 Hub Play");
+    to(&mut home, 8400);
+    home.press(button(B));
+    assert_eq!(home.home_focus(), Focus::Recent(1));
+
+    // Menu does, and so does anything that takes the pad from Home: the Guide, a page.
+    for (at, taken) in [Button::Menu, Button::Guide, Button::Y].into_iter().enumerate() {
+        let ms = 9000 + 1000 * at as u64;
+        to(&mut home, ms);
+        home.press(a);
+        to(&mut home, ms + 100);
+        home.press(button(taken));
+        to(&mut home, ms + 300);
+        assert_eq!(left(&home), None, "{taken:?}");
+        assert_ne!(home.page(), Some("GameHub"), "{taken:?}");
+        home.close_guide();
+        to(&mut home, ms + 400);
+        home.press(button(B));
+    }
+    assert!(asked(&mut home).iter().all(|effect| *effect == Effect::GuideClosed));
+}
+
+#[test]
+fn a_game_played_from_its_hub_brings_home_back_on_its_tile_when_it_ends() {
+    let mut home = core();
+    press(&mut home, &[Right, Right]);
+    a_alone(&mut home);
+    // The hub is over Home; A on Play asks the shell for the game, and the hub stays under its Launch screen.
     press(&mut home, &[A]);
     assert_eq!(asked(&mut home), [Effect::Launch(2)]);
+    home.launch_started(2);
+    assert_eq!(home.focus_line(), "GameHub: 1002 Hub Play");
+    home.game_ended();
+    assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
+}
+
+#[test]
+fn a_hidden_games_card_opens_its_hub_and_a_double_tap_on_it_plays_nothing() {
+    // The Hidden Group shown, with one game in it.
+    let library = from_database(screens::fake_library(), |database| {
+        let games = database.snapshot().unwrap().games;
+        database.set_hidden(games[4].id, true).unwrap();
+        for filter in database.filters().unwrap() {
+            database.set_filter_shown(filter.id, filter.key.as_deref() == Some("hidden")).unwrap();
+        }
+    });
+    let hidden = library.hidden[0].appid;
+    let mut home = on_row(library);
+    press(&mut home, &[Down, Down]);
+    assert_eq!((home.home_focus(), home.focused_game()), (card(0, 0), None));
+    double_tap(&mut home);
+    assert!(asked(&mut home).is_empty());
+    a_alone(&mut home);
+    assert_eq!(home.focus_line(), format!("GameHub: {hidden} Hub Play"));
+    press(&mut home, &[A, B]);
+    assert!(asked(&mut home).is_empty());
+    assert_eq!(home.home_focus(), card(0, 0));
 }
 
 #[test]
 fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
     let mut home = core();
     // Installed's second card is Forza Horizon 5, second in the Recent row.
-    press(&mut home, &[Down, Down, Right, A]);
+    press(&mut home, &[Down, Down, Right]);
+    double_tap(&mut home);
     assert_eq!(asked(&mut home), [Effect::Launch(1)]);
     home.launch_started(1);
     home.game_ended();
@@ -1151,7 +1284,8 @@ fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
 #[test]
 fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
     let mut stage = Stage::on_row(screens::fake_library(), HD);
-    stage.press(&[Button::Right, Button::Right, Button::A]);
+    stage.press(&[Button::Right, Button::Right]);
+    double_tap(&mut stage.dashboard);
     assert_eq!(asked(&mut stage.dashboard), [Effect::Launch(2)]);
     stage.dashboard.launch_started(2);
     // While it starts, and behind it once it runs, Home takes no input.
@@ -2094,4 +2228,119 @@ fn a_flyout_slides_in_from_the_left() {
     stage.press(&[Button::B]);
     let closed = stage.frame_after(0.01);
     assert!(!lit(&closed, 680) && !lit(&closed, 400));
+}
+
+// --- The Game hub (docs/spec/game-hub.md). Where its focus goes is the page's own tests', in src/game_hub. ---
+
+/// The library with art, and with what Steam's files tell of three of its games: the first, which has all its art,
+/// everything; the fourth, which has a cover alone, nothing; the sixth, which has no art and is not installed, who
+/// made it and published it.
+fn library_for_the_hub() -> Library {
+    let mut library = library_with_art();
+    for game in &mut library.games {
+        // Noon in Greenwich: the same day wherever the test runs.
+        game.last_played = game.last_played / 86_400 * 86_400 + if game.last_played > 0 { 43_200 } else { 0 };
+    }
+    let told = &mut library.games[0];
+    told.publishers = vec!["Harbour & Hull".into()];
+    told.developers = vec!["Tin Lantern".into(), "Second Kettle".into()];
+    told.released = 1_698_364_800;
+    told.size_on_disk = 50_067 * (1 << 20);
+    (told.critic_score, told.community_score) = (Some(87), Some(91));
+    let uninstalled = &mut library.games[5];
+    uninstalled.publishers = vec!["Ninth Bell Games".into(), "Oddfellow Interactive".into()];
+    uninstalled.developers = vec!["Mossback Works".into()];
+    uninstalled.released = 1_552_348_800;
+    // Not installed, it takes no room, whatever the number says.
+    uninstalled.size_on_disk = 1 << 30;
+    library
+}
+
+impl Stage {
+    /// Home with focus on the Recent row's tile `tile`, at rest as the player sees it by then; A on the tile; and
+    /// the double tap's time gone by with no second A. The game's hub is up, over Home as it was.
+    fn hub(tile: usize) -> Self {
+        let mut stage = Stage::on_row(library_for_the_hub(), HD);
+        stage.press(&vec![Button::Right; tile]);
+        stage.still();
+        a_alone(&mut stage.dashboard);
+        assert_eq!(stage.dashboard.page(), Some("GameHub"));
+        stage
+    }
+}
+
+/// The Bundle's `19-game-hub-play-focused.jpg`: a game with background art, which is behind the band, blurred;
+/// Home in the strips above and below it; focus on Play.
+#[test]
+fn game_hub() {
+    let mut stage = Stage::hub(0);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1000 Hub Play");
+    assert_eq!(stage.dashboard.hints(), screens::hint_bar::MORE_OPTIONS);
+    stage.check("game-hub");
+}
+
+/// The Bundle's `20-game-hub-manage-focused.jpg`: Manage says its name over itself.
+#[test]
+fn game_hub_manage() {
+    let mut stage = Stage::hub(0);
+    stage.press(&[Button::Right]);
+    stage.check("game-hub-manage");
+}
+
+/// The Bundle's `22-game-hub-details.jpg`: the other page, its wide card showing the game's art.
+#[test]
+fn game_hub_details() {
+    let mut stage = Stage::hub(0);
+    stage.press(&[Button::Right, Button::Right, Button::A]);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1000 Details Toggle");
+    stage.check("game-hub-details");
+}
+
+/// A game with a cover and no background art: the cover behind the band, blurred more and overhanging; no Info
+/// card, as the library knows nothing to put in it. Focus on a card: the ring, and nothing else changes.
+#[test]
+fn game_hub_cover_only() {
+    let mut stage = Stage::hub(3);
+    stage.press(&[Button::Right, Button::Up]);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1003 Hub Stats");
+    stage.check("game-hub-cover-only");
+}
+
+/// A game with no art at all, not installed: the theme's green behind the band, the game's name where its cover
+/// would be, and Install with the store's name under it.
+#[test]
+fn game_hub_no_art() {
+    let mut stage = Stage::hub(5);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1005 Hub Install");
+    stage.check("game-hub-no-art");
+}
+
+/// The strips show the screen the hub was opened over as it was then, and keep showing it: Home is not drawn
+/// again under the hub, whatever becomes of it. B, and the next hub has a picture of its own.
+#[test]
+fn the_hubs_strips_show_home_as_it_was_when_the_hub_opened() {
+    let mut stage = Stage::hub(0);
+    let first = stage.still();
+    // Points in the strip above the band and in the one below it, clear of the hint bar.
+    let strips = [(200, 60), (960, 60), (1700, 60), (300, 1030), (1100, 1030)];
+    let in_strips = |image: &image::RgbaImage| strips.map(|(x, y)| colour(image, x, y));
+    // Home's background was the game's art, which is in the strip above. In the band it is blurred.
+    assert_ne!(colour(&first, 960, 60), colour(&first, 960, 110));
+
+    // The game loses its background art under the hub: the band has its cover now, and the strips what they had.
+    let mut library = stage.dashboard.library().clone();
+    library.games[0].hero = None;
+    stage.dashboard.set_library(library);
+    let later = stage.still();
+    assert!(later != first, "the band's art is the game's as it is now");
+    assert_eq!(in_strips(&later), in_strips(&first), "the picture of the screen behind is kept as it was taken");
+
+    // B, the next game's tile, and its hub: Home's background is that game's by now, and so is the strip.
+    stage.press(&[Button::B, Button::Right]);
+    assert_eq!(stage.dashboard.home_focus(), Focus::Recent(1));
+    // Long enough on the tile for the background to follow focus there.
+    stage.run(2.5, 0.1);
+    a_alone(&mut stage.dashboard);
+    let next = stage.still();
+    assert_ne!(colour(&next, 960, 60), colour(&first, 960, 60), "the next hub has a picture of its own");
 }

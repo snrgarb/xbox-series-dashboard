@@ -150,6 +150,9 @@ try {
     Push-Button Down
     if (-not (Wait-DashboardLog '^focus: Recent\(0\)' 10)) { throw "Down did not put focus on the Recent row's first tile" }
     $mark = Get-DashboardLogLength
+    # A is the game's Game hub, after the double tap's 300 ms; A on its Play is the launch.
+    Push-Button A
+    if (-not (Wait-DashboardLog '^focus: GameHub: \d+ Hub Play$' 10 $mark)) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     Push-Button A
     Wait-Game $x $mark
 
@@ -247,6 +250,9 @@ try {
     Add-Content (Join-Path $y.install_dir 'game-args.txt') '--ignore-close' -Encoding ASCII
     # Home's focus is on the tile of the game just played.
     $mark = Get-DashboardLogLength
+    # A is the game's Game hub, after the double tap's 300 ms; A on its Play is the launch.
+    Push-Button A
+    if (-not (Wait-DashboardLog '^focus: GameHub: \d+ Hub Play$' 10 $mark)) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     Push-Button A
     Wait-Game $y $mark
     Open-Guide
