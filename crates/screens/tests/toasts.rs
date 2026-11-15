@@ -31,9 +31,9 @@ fn showing(dashboard: &Dashboard) -> Option<String> {
 /// A turn of a loop that puts each frame on the screen at once: what there is now, the time passing, what there is
 /// then. True when what is drawn may have changed.
 fn pass(dashboard: &mut Dashboard, seconds: f32) -> bool {
-    dashboard.toasts_presented();
+    dashboard.toasts_presented(0.0);
     let changed = dashboard.advance(seconds);
-    dashboard.toasts_presented();
+    dashboard.toasts_presented(0.0);
     changed
 }
 
@@ -224,7 +224,7 @@ impl Stage {
 
     /// The same as it is now, `seconds` after the last frame: the Toast where its age puts it.
     fn frame_after(&mut self, seconds: f32) -> image::RgbaImage {
-        self.dashboard.toasts_presented();
+        self.dashboard.toasts_presented(0.0);
         self.dashboard.advance(seconds);
         let Self { gpu, host, target, dashboard, .. } = self;
         loop {
@@ -325,7 +325,7 @@ fn the_banner() {
 fn a_frame_for_the_strip_is_the_foot_of_the_whole_screens() {
     let mut stage = Stage::new(HD);
     stage.dashboard.notify("Screenshot saved");
-    stage.dashboard.toasts_presented();
+    stage.dashboard.toasts_presented(0.0);
     stage.dashboard.advance(1.0);
     let Stage { gpu, host, target, dashboard, .. } = &mut stage;
     let draw = |host: &mut Host, target: &Offscreen, part, dashboard: &mut Dashboard| {

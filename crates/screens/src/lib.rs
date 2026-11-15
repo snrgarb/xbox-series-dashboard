@@ -18,8 +18,8 @@ pub mod search;
 pub mod settings;
 pub mod spinner;
 pub mod theme;
-pub mod wide_dialog;
 pub mod toasts;
+pub mod wide_dialog;
 
 use model::Library;
 pub use model::{PowerCommand, Sound};
@@ -110,6 +110,8 @@ pub struct Dashboard {
     toasts: Toasts,
     /// Whether Toasts have a window of their own: if not they are drawn in Home's.
     toast_strip: bool,
+    /// Whether frames come slowly: Home then gives way to a Toast.
+    slow_renderer: bool,
     effects: Vec<Effect>,
 }
 
@@ -135,6 +137,7 @@ impl Dashboard {
             playing: None,
             toasts: Toasts::default(),
             toast_strip: false,
+            slow_renderer: false,
             effects: Vec::new(),
         }
     }
@@ -399,7 +402,7 @@ impl Dashboard {
                 let toast = self.toasts.on_screen().map(|toast| toast.kind);
                 self.open_guide();
                 if let Some(toast) = toast.filter(|_| self.guide.is_open()) {
-                    self.open_guide_on(toast);
+                    self.show_what_toast_told(toast);
                 }
             }
             return false;
@@ -581,7 +584,7 @@ impl Dashboard {
 
     /// The Guide, just opened by a tap while a Toast of this kind was on screen, shows what the Toast was about
     /// (docs/spec/guide.md, 9.5).
-    fn open_guide_on(&mut self, toast: ToastKind) {
+    fn show_what_toast_told(&mut self, toast: ToastKind) {
         match toast {
             ToastKind::Notification => self.open_notifications(),
             ToastKind::Greeting => {
@@ -644,8 +647,23 @@ impl Dashboard {
 
     /// The Toasts' picture as it is now has been put on the screen, or taken off it: said by whoever shows it,
     /// after each frame and after hiding it. The queue goes by it (`toasts::Toasts::presented`).
-    pub fn toasts_presented(&mut self) {
+    /// `seconds` is the time since the Dashboard was last told the time, by this or by `advance`: a frame is out
+    /// well into a turn of the loop.
+    pub fn toasts_presented(&mut self, seconds: f32) {
+        self.toasts.tick(seconds);
         self.toasts.presented();
+    }
+
+    /// Says whether the renderer is a slow one: the processor, where there is no GPU, which takes long over a
+    /// frame of Home with the swirl moving. On one, the swirl holds still while a Toast is on screen or coming, as
+    /// it does under the Guide, so the Toast's own frames are not kept waiting (docs/spec/guide.md, 9.4).
+    pub fn set_slow_renderer(&mut self, slow: bool) {
+        self.slow_renderer = slow;
+    }
+
+    /// Whether Home's window gives way to the Toasts: on a slow renderer, while one is on screen or coming.
+    pub fn home_gives_way(&self) -> bool {
+        self.slow_renderer && self.toasts.busy()
     }
 
     /// The Toasts: which is on screen, how many wait, how many have shown.
@@ -829,7 +847,7 @@ impl Dashboard {
         };
         // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn.
         if !self.pages.hides_home() {
-            self.home.set_in_front(!self.guide.is_open() && self.pages.is_empty());
+            self.home.set_in_front(!self.guide.is_open() && self.pages.is_empty() && !self.home_gives_way());
             self.home.draw(ui, &self.library, &status);
         }
         self.pages.draw(ui, pages::Around { library: &self.library, playing: self.playing, options: self.options });

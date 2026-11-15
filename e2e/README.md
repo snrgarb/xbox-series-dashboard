@@ -65,7 +65,7 @@ the TV PC, not for here.
 - **`standin make-tones <dir>`** writes a 0.15 s tone under each of the names the Dashboard's sounds have in the
   Bundle (`model::Sound`), a semitone apart. The console's own sounds are in no repository and on no test machine;
   a test points the Dashboard at the tones with `--media <dir>` and has it log what it plays with `--log-sounds`
-  (`audio: 9 sounds from <dir>`, `audio: device "<name>" started, ...` at the first sound, `audio: played <file>`
+  (`audio: 12 sounds from <dir>`, `audio: device "<name>" started, ...` at the first sound, `audio: played <file>`
   for each).
 - **The stand-in game.** Every installed game's folder holds a copy of `standin.exe` named `game.exe`, which shows a
   borderless, full-screen, dark-blue window titled with the game's name (from `game-args.txt` beside it) until it is

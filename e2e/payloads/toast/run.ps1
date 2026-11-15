@@ -95,13 +95,15 @@ function Wait-Toast([string] $Text, [string] $Kind, [int] $After = 0, [double] $
 }
 
 # A Toast's time on screen and the wait for the next, from the log's own times: five seconds, then half a second.
-# Each line is said after the frame it tells of was presented, so two of them are apart by what the Dashboard timed
-# give or take a frame at each end, and a slow VM's frames are long: 4.7 to 6 s for the five seconds. The next Toast
-# can't be before the last has gone (0.41 s) and is half a second after it began to go, give or take the same.
+# Each line is said when the frame it tells of has been presented (shown: the Toast's first; going: the first of its
+# going), so two of them are apart by what the screen had, give or take the log's own lateness. The VM draws with the
+# processor, and one frame of Home there can take most of a second, which is how late the Dashboard can be to see a
+# Toast's time is up: 4.5 to 6.5 s for the five seconds. The next Toast can't be before the last has gone (0.41 s) and
+# is half a second after it began to go, give or take the same.
 function Test-Timing([string] $Shown, [string] $Going, [string] $Next, [string] $What) {
     $showed = (At $Going) - (At $Shown)
     Say "$What`: shown for $showed ms"
-    if ($showed -lt 4700 -or $showed -gt 6000) { $script:failures += "$What showed for $showed ms, not five seconds" }
+    if ($showed -lt 4500 -or $showed -gt 6500) { $script:failures += "$What showed for $showed ms, not five seconds" }
     if ($Next) {
         $gap = (At $Next) - (At $Going)
         Say "$What`: the next showed $gap ms after it went"
@@ -110,8 +112,9 @@ function Test-Timing([string] $Shown, [string] $Going, [string] $Next, [string] 
 }
 
 # The strip's own count of the frames it presented while it was last shown, from the first `strip hidden` line after
-# $After: a Toast's coming in, its turns and its going are some dozens of frames, and a strip kept waiting by Home's
-# window draws a handful.
+# $After. A Toast moves for about a second of its five (in 0.3 s, the greeting's slide or a notification's two turns
+# of text, out 0.41 s) and is drawn only while it moves: sixty-odd frames where the strip has the renderer, as it has
+# over the game. Fifteen is a quarter of that: fewer is a strip kept waiting by Home's window, which drew 5 and 7.
 function Test-Frames([int] $After, [string] $What, [int] $AtLeast = 15) {
     $hidden = Wait-DashboardLog '^toasts: strip hidden after' 10 -After $After
     if ($hidden -notmatch ' and (\d+) frames ') { $script:failures += "the strip did not hide after $What`: $hidden"; return }
@@ -170,6 +173,7 @@ try {
     $gone = Wait-DashboardLog '^toasts: gone' 10 -After $after
     $hidden = Wait-DashboardLog '^toasts: strip hidden' 5 -After $after
     if ($next -and $goingNext) { Test-Timing $next $goingNext $null "--toast's notification" }
+    Test-Frames $after "--toast's notification"
     Start-Sleep -Milliseconds 300
     if (-not $gone -or -not $hidden) { $failures += "the last Toast did not go and the strip hide: gone '$gone', hidden '$hidden'" }
     if (Test-Banner) { $failures += 'the banner is still on screen after its Toast has gone' }
@@ -236,13 +240,13 @@ try {
     $mark = Get-DashboardLogLength
     Push-Button Guide
     $opened = Wait-DashboardLog 'Guide over the game' 10 -After $mark
-    $focus = Wait-DashboardLog '^guide focus: ' 5 -After $mark
+    $focus = Wait-DashboardLog '^guide: ' 5 -After $mark
     $dropped = Wait-DashboardLog '^toasts: gone' 5 -After $mark
     $atRest = Wait-Until { -not @(Find-WrongColours $guidePoints).Count } 6
     Save-Screen 'guide-from-toast'
     Say "after Guide: $(if ($opened) { $opened } else { 'no Guide over the game line' }); $focus; $dropped; foreground $(Front)"
     if (-not $opened) { $failures += 'a tap of the Guide button while a Toast showed did not open the Guide' }
-    if ($focus -ne 'guide focus: Landing, Utility(0)') { $failures += "the Guide did not open on Notifications: $focus" }
+    if ($focus -ne 'guide: Landing Utility(0)') { $failures += "the Guide did not open on Notifications: $focus" }
     if (-not $dropped) { $failures += 'the Toast did not go as the Guide opened' }
     foreach ($p in $guidePoints) { Say "  Guide at ($($p.X), $($p.Y)), $($p.What): seen $(Format-Colour $p.Seen), expected $(Format-Colour $p.Colour)" }
     foreach ($p in @(Find-WrongColours $guidePoints)) {

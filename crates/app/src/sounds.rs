@@ -170,7 +170,8 @@ mod tests {
         let theme = playnite.join("Themes").join("Fullscreen").join(BUNDLE_THEME).join("audio");
         let navigate = ["Navigate1.wav", "Navigate2.wav", "Navigate3.wav", "Navigate4.wav"];
         tones(&extension, &navigate);
-        let rest = ["Enter.wav", "OpenMenu.wav", "PromptOpen.wav", "PromptClose.wav", "PowerOff.wav", "Notification.wav"];
+        let rest =
+            ["Enter.wav", "OpenMenu.wav", "PromptOpen.wav", "PromptClose.wav", "PowerOff.wav", "Notification.wav"];
         tones(&extension, &rest);
         tones(&theme, &["navigation.wav", "activation.wav"]);
 
