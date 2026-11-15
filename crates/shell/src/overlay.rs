@@ -255,12 +255,15 @@ mod win {
         /// Makes the Overlay, hidden, on `gpu`'s device, to be drawn in `format` (Home's window's, so one renderer
         /// draws both). None, having said why, where it can't be made: the Dashboard then runs without one.
         pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Option<Self> {
+            let began = Instant::now();
             unsafe {
                 let (hwnd, size) = create_window()?;
                 let made = Self::on_window(gpu, format, hwnd, size);
                 if made.is_none() {
                     // Not a window to leave about: an Overlay that was made destroys its own when dropped.
                     DestroyWindow(hwnd);
+                } else {
+                    log(&format!("made in {:.0} ms", began.elapsed().as_secs_f64() * 1000.0));
                 }
                 made
             }

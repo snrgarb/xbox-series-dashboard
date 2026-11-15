@@ -66,7 +66,12 @@ mod win {
     /// How long the game's window must have been up before the Launch screen leaves: time to draw its first frames.
     const SETTLE: Duration = Duration::from_millis(1500);
     /// A window that isn't the game's and holds the foreground this long needs the user: a EULA, a sign-in, an error.
+    /// The Bundle's rule and its time (ExtensionCore.LaunchScreen.cs), which makes nothing of whose window it is: a
+    /// launcher's or a splash that stays this long steps the Launch screen aside too.
+    /// `DASHBOARD_NEEDS_USER_MS` is another time, for a test.
     const NEEDS_USER: Duration = Duration::from_secs(5);
+    /// A look this long after the one before came late: the machine is not keeping up.
+    const LATE: Duration = Duration::from_millis(500);
     const GIVE_UP: Duration = Duration::from_secs(120);
     /// The game is over once Steam and the desktop have shown nothing of it for this long.
     const GONE: Duration = Duration::from_secs(2);
@@ -96,8 +101,14 @@ mod win {
         next_look: Instant,
         /// Since when the game has had a window that covers the screen.
         game_since: Option<Instant>,
-        /// A window that isn't the game's and has the foreground, and since when.
-        other: Option<(HWND, Instant)>,
+        /// A window that isn't the game's and has the foreground, and how long it has been seen to hold it.
+        other: Option<(HWND, Duration)>,
+        /// How long such a window holds the foreground before it counts as needing the user.
+        needs_user: Duration,
+        /// When the desktop was last looked at.
+        looked: Instant,
+        /// Whether the game's window has been said to be up.
+        said_up: bool,
         /// Since when nothing of the game has shown.
         gone_since: Option<Instant>,
         /// Whether Steam or the desktop has shown anything of the game yet.
@@ -154,6 +165,9 @@ mod win {
                 next_look: now,
                 game_since: None,
                 other: None,
+                needs_user: needs_user(),
+                looked: now,
+                said_up: false,
                 gone_since: None,
                 seen: false,
                 game: None,
@@ -174,14 +188,20 @@ mod win {
                 return Step::Same;
             }
             self.next_look = now + LOOK_EVERY;
+            let since_last = now - std::mem::replace(&mut self.looked, now);
             let look = look(&self.dir, self.home);
             let running = steam_says_running(self.appid);
             self.seen |= running || look.any;
             self.game = look.largest;
 
             match self.state {
-                State::Starting => self.starting(now, &look, overlay),
+                State::Starting => self.starting(now, since_last, &look, overlay),
                 State::Revealing | State::Running => {
+                    // After a window that wanted the user, or after giving up: the game's window, when it comes.
+                    if look.game.is_some() && !self.said_up {
+                        self.said_up = true;
+                        log("the game's window is up");
+                    }
                     if running || look.any {
                         self.gone_since = None;
                     } else if now - *self.gone_since.get_or_insert(now) >= GONE {
@@ -195,7 +215,7 @@ mod win {
         }
 
         /// One look while the game starts: its window up and settled, a window that wants the user, or time up.
-        fn starting(&mut self, now: Instant, look: &Look, overlay: Option<&Overlay>) -> Step {
+        fn starting(&mut self, now: Instant, since_last: Duration, look: &Look, overlay: Option<&Overlay>) -> Step {
             // Above a launcher or a splash that made itself topmost since the last look.
             if let Some(overlay) = overlay {
                 overlay.raise();
@@ -203,6 +223,7 @@ mod win {
             let foreground = unsafe { GetForegroundWindow() };
             if let Some(game) = look.game {
                 if self.game_since.is_none() {
+                    self.said_up = true;
                     log("the game's window is up");
                 }
                 let since = *self.game_since.get_or_insert(now);
@@ -217,14 +238,22 @@ mod win {
             }
             self.game_since = None;
             unsafe { AllowSetForegroundWindow(ASFW_ANY) };
-            // A window that keeps the foreground without being the game wants the user.
+            // A window that keeps the foreground without being the game wants the user. How long it has kept it is
+            // counted in looks that came on time, a fifth of a second each, and not by the clock: on a machine that
+            // is not keeping up a launcher that would be gone in a moment stays for many, and that is no question
+            // put to the user. A look that came late, or a window that is not answering Windows, counts for nothing.
             if foreground.is_null() || foreground == self.home || unsafe { IsWindowVisible(foreground) } == 0 {
                 self.other = None;
             } else if self.other.map(|o| o.0) != Some(foreground) {
-                self.other = Some((foreground, now));
-            } else if self.other.is_some_and(|o| now - o.1 >= NEEDS_USER) {
-                log("a window wants the user, Launch screen stepping aside");
-                return self.reveal();
+                self.other = Some((foreground, Duration::ZERO));
+            } else if let Some((_, held)) = &mut self.other {
+                if since_last < LATE && unsafe { IsHungAppWindow(foreground) } == 0 {
+                    *held += since_last.min(LOOK_EVERY);
+                }
+                if *held >= self.needs_user {
+                    log("a window wants the user, Launch screen stepping aside");
+                    return self.reveal();
+                }
             }
             if now - self.started >= GIVE_UP {
                 if self.seen {
@@ -268,6 +297,21 @@ mod win {
             if let Some(game) = self.game {
                 unsafe { PostMessageW(game, WM_CLOSE, 0, 0) };
                 log("asked the game to quit");
+            }
+        }
+    }
+
+    /// How long a window holds the foreground before it needs the user: `DASHBOARD_NEEDS_USER_MS`, or 5 s.
+    fn needs_user() -> Duration {
+        let Some(given) = std::env::var_os("DASHBOARD_NEEDS_USER_MS") else { return NEEDS_USER };
+        match given.to_string_lossy().trim().parse() {
+            Ok(ms) => {
+                log(&format!("a window needs the user after {ms} ms (DASHBOARD_NEEDS_USER_MS)"));
+                Duration::from_millis(ms)
+            }
+            Err(_) => {
+                log(&format!("DASHBOARD_NEEDS_USER_MS is not a number of milliseconds: {given:?}"));
+                NEEDS_USER
             }
         }
     }

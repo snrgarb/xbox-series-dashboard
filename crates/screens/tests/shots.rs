@@ -295,13 +295,16 @@ fn the_overlay_shows_the_launch_screen_then_the_guide_over_the_game() {
     stage.dashboard.launch_started(2);
     assert_eq!(stage.dashboard.overlay(), OverlayShows::Passive);
     assert!(!stage.dashboard.home_covered(), "Home shows until the Launch screen has faded in over it");
+    assert!(!stage.dashboard.overlay_at_rest(), "fading in");
     stage.still();
     assert!(stage.dashboard.home_covered());
     assert!(stage.dashboard.launch_screen_showing());
+    assert!(stage.dashboard.overlay_at_rest(), "only the Spinner turns");
 
     // Booted: it fades away, and then the Overlay has nothing to show.
     stage.dashboard.game_booted();
     assert_eq!(stage.dashboard.overlay(), OverlayShows::Passive, "still fading");
+    assert!(!stage.dashboard.overlay_at_rest(), "fading away");
     stage.still();
     assert!(!stage.dashboard.launch_screen_showing());
     assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);

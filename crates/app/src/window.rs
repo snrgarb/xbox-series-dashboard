@@ -25,12 +25,22 @@ use crate::{since_start, Args};
 const IDLE: Duration = Duration::from_millis(250);
 /// How soon the Overlay is tried again when it had no frame to draw on.
 const OVERLAY_RETRY: Duration = Duration::from_millis(16);
+/// The Overlay is made once Home has come to rest after its first frame, or this long after it, whichever is first.
+const OVERLAY_AFTER: Duration = Duration::from_secs(2);
+/// A frame of the Overlay that took longer than this was drawn by a slow renderer: the processor, where there is no
+/// GPU. With vsync a GPU's takes a refresh at most.
+const SLOW_FRAME: Duration = Duration::from_millis(50);
+/// What a slow renderer is held to while only the Spinner turns: a frame, then this many frames' time left to the
+/// game that is starting.
+const SLOW_FRAME_REST: u32 = 3;
 
 struct State {
     host: Host,
     config: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
     gpu: Gpu,
+    /// When the library, the window, the GPU and the renderer were each ready, in ms since the process started.
+    ready: [f64; 4],
     // Last, so it outlives the surface made from it.
     window: Arc<Window>,
 }
@@ -50,15 +60,23 @@ struct App {
     overlay_last_frame: Instant,
     /// The Overlay wants a frame whatever else: it was just shown, a button was pressed, art came in.
     overlay_stale: bool,
+    /// Whether the Overlay's last frame left something moving: the next one is then that much later in its
+    /// animations, however long it took.
+    overlay_moving: bool,
+    /// The soonest the Overlay is drawn again for the Spinner alone: at once, but on a slow renderer.
+    overlay_next: Instant,
     state: Option<State>,
     proxy: EventLoopProxy<()>,
     last_frame: Instant,
     /// A frame is wanted whatever else: the first, or after a resize.
     stale: bool,
-    presented: bool,
+    /// When Home's first frame was presented.
+    presented: Option<Instant>,
     launch: Option<Launch>,
     /// The library database: where a newer snapshot comes from, and where Play sessions go.
     store: Store,
+    /// When the library had been read, in ms since the process started.
+    library_ready: f64,
 }
 
 pub fn run(args: &Args, library: Library, store: Store) {
@@ -84,13 +102,16 @@ pub fn run(args: &Args, library: Library, store: Store) {
         overlay_store: ui::Store::default(),
         overlay_last_frame: Instant::now(),
         overlay_stale: false,
+        overlay_moving: false,
+        overlay_next: Instant::now(),
         state: None,
         proxy: event_loop.create_proxy(),
         last_frame: Instant::now(),
         stale: true,
-        presented: false,
+        presented: None,
         launch: None,
         store,
+        library_ready: since_start(),
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
@@ -147,14 +168,22 @@ impl App {
                 // Shown afresh: whatever was moving when it was last hidden starts again from its start.
                 self.overlay_store.clear();
                 self.overlay_last_frame = Instant::now();
+                self.overlay_moving = false;
             }
             overlay.set(mode);
             self.overlay_stale = true;
         }
         mode?;
         let moving = self.overlay_store.animating() || state.host.art.pending() > 0;
-        if !self.overlay_stale && !moving {
-            return None;
+        if !self.overlay_stale {
+            if !moving {
+                return None;
+            }
+            // Only the Spinner turning: a slow renderer waits its turn, and the loop goes on meanwhile.
+            let wait = self.overlay_next.saturating_duration_since(Instant::now());
+            if self.dashboard.overlay_at_rest() && !wait.is_zero() {
+                return Some(wait);
+            }
         }
         let Some(frame) = overlay.frame(&state.gpu) else {
             if overlay.lost() {
@@ -166,7 +195,9 @@ impl App {
             return Some(OVERLAY_RETRY);
         };
         let now = Instant::now();
-        let dt = (now - self.overlay_last_frame).as_secs_f32().min(0.1);
+        // Something that was moving has moved on by as long as this frame is after the last, so a fade takes its
+        // time by the clock however few frames a slow renderer gives it; from rest, a frame starts what it starts.
+        let dt = (now - self.overlay_last_frame).as_secs_f32().min(if self.overlay_moving { 1.0 } else { 0.1 });
         self.overlay_last_frame = now;
         self.overlay_stale = false;
         let view = frame.texture.create_view(&Default::default());
@@ -176,10 +207,17 @@ impl App {
             host.draw(gpu, &view, size, dt, wgpu::Color::TRANSPARENT, |ui| dashboard.draw_overlay(ui))
         });
         overlay.present(gpu, frame);
+        let took = now.elapsed();
+        self.overlay_next = now + if took > SLOW_FRAME { took * (1 + SLOW_FRAME_REST) } else { Duration::ZERO };
         // At once if something is moving, or if that frame was the last of something: the Overlay is then hidden
         // without waiting out the loop's sleep.
-        let moving = self.overlay_store.animating() || state.host.art.pending() > 0;
-        (moving || wanted(&self.dashboard) != mode).then_some(Duration::ZERO)
+        self.overlay_moving = self.overlay_store.animating() || state.host.art.pending() > 0;
+        if wanted(&self.dashboard) != mode {
+            return Some(Duration::ZERO);
+        }
+        let at_rest = self.dashboard.overlay_at_rest();
+        let rest = if at_rest { self.overlay_next.saturating_duration_since(Instant::now()) } else { Duration::ZERO };
+        self.overlay_moving.then_some(rest)
     }
 
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
@@ -214,6 +252,7 @@ impl ApplicationHandler for App {
         let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
         window.set_cursor_visible(self.windowed);
 
+        let window_ready = since_start();
         let instance = gpu::instance(Some(Box::new(event_loop.owned_display_handle())));
         let surface = instance.create_surface(window.clone()).expect("create surface");
         let gpu = gpu::init(instance, Some(&surface));
@@ -227,12 +266,15 @@ impl ApplicationHandler for App {
         config.present_mode = wgpu::PresentMode::AutoVsync;
         surface.configure(&gpu.device, &config);
 
+        let gpu_ready = since_start();
+
         // A piece of art decoded on another thread asks for a frame.
         let proxy = self.proxy.clone();
         let host = Host::new(&gpu, config.format, move || {
             let _ = proxy.send_event(());
         });
-        self.state = Some(State { host, config, surface, gpu, window });
+        let ready = [self.library_ready, window_ready, gpu_ready, since_start()];
+        self.state = Some(State { host, config, surface, gpu, ready, window });
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
@@ -244,9 +286,13 @@ impl ApplicationHandler for App {
         if self.state.is_none() {
             return;
         }
-        // After Home's first frame, so the Overlay costs the start-up nothing.
-        if self.presented {
-            self.make_overlay();
+        // After Home's first frame, and once Home has come to rest or a while has passed, so the Overlay costs
+        // neither the start-up nor the first art its time. A launch that comes sooner makes it then.
+        if let (Some(presented), Some(state)) = (self.presented, &self.state) {
+            let at_rest = !self.stale && !state.host.animating() && state.host.art.pending() == 0;
+            if at_rest || presented.elapsed() >= OVERLAY_AFTER {
+                self.make_overlay();
+            }
         }
         let mut presses = self.pad.poll();
         presses.append(&mut self.keys);
@@ -275,6 +321,7 @@ impl ApplicationHandler for App {
                 Step::Same => {}
                 Step::LaunchScreenGoes => {
                     self.dashboard.game_booted();
+                    self.overlay_stale = true;
                     let playing = self.dashboard.playing();
                     self.store.game_booted(playing.and_then(|game| self.dashboard.library().games.get(game)));
                 }
@@ -348,7 +395,10 @@ impl ApplicationHandler for App {
                 state.surface.configure(&state.gpu.device, &state.config);
                 self.stale = true;
             }
+            // Behind a game or under its Launch screen nothing of Home's shows: nothing is drawn, whoever asked.
+            WindowEvent::RedrawRequested if self.dashboard.home_covered() => {}
             WindowEvent::RedrawRequested => {
+                let began = since_start();
                 let now = Instant::now();
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
@@ -371,8 +421,13 @@ impl ApplicationHandler for App {
                 let dashboard = &mut self.dashboard;
                 state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
                 state.gpu.queue.present(frame);
-                if !self.presented {
-                    self.presented = true;
+                if self.presented.is_none() {
+                    self.presented = Some(Instant::now());
+                    let [library, window, gpu, renderer] = state.ready;
+                    eprintln!(
+                        "start-up: library at {library:.0} ms, window at {window:.0} ms, GPU at {gpu:.0} ms, renderer \
+                         at {renderer:.0} ms, first frame begun at {began:.0} ms"
+                    );
                     eprintln!("first frame presented at {:.0} ms since process start", since_start());
                     // Steam is read once the first frame is out, and wakes the window if it has news.
                     let proxy = self.proxy.clone();

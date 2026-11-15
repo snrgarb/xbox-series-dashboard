@@ -220,6 +220,11 @@ impl Dashboard {
         }
     }
 
+    /// Whether the Overlay's picture is the Launch screen all the way in and nothing else: only its Spinner moves.
+    pub fn overlay_at_rest(&self) -> bool {
+        self.launch.covers() && !(self.guide_overlaid && self.guide.showing())
+    }
+
     /// Whether the Launch screen is up, or still fading away.
     pub fn launch_screen_showing(&self) -> bool {
         self.launch.showing()
