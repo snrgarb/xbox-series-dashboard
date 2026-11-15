@@ -1927,6 +1927,7 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "image",
+ "input",
  "model",
  "render",
  "shots",

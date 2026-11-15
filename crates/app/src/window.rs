@@ -35,6 +35,9 @@ const SLOW_FRAME: Duration = Duration::from_millis(50);
 /// game that is starting.
 const SLOW_FRAME_REST: u32 = 3;
 
+/// The Guide setting, on unless it says otherwise, in the library database's settings.
+const GUIDE_ENABLED: &str = "guide.enabled";
+
 struct State {
     host: Host,
     config: wgpu::SurfaceConfiguration,
@@ -102,6 +105,11 @@ pub fn run(args: &Args, library: Library, store: Store) {
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(args.clock.clone());
+    let guide = store.flag(GUIDE_ENABLED, true);
+    if !guide {
+        eprintln!("guide: off ({GUIDE_ENABLED}): the Guide button does nothing");
+    }
+    dashboard.set_guide_enabled(guide);
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
     }
@@ -262,6 +270,8 @@ impl App {
                 Effect::GuideClosed => {}
                 Effect::Exit => event_loop.exit(),
                 Effect::Sound(sound) => self.sounds.play(sound),
+                // Power is not here yet (#39).
+                Effect::PowerHold => eprintln!("guide button: held, which is Power: nothing yet"),
             }
         }
     }
@@ -323,8 +333,12 @@ impl ApplicationHandler for App {
                 self.make_overlay();
             }
         }
-        let mut presses = self.pad.poll();
-        presses.append(&mut self.keys);
+        let events = self.pad.poll();
+        let mut presses = std::mem::take(&mut self.keys);
+        if self.dashboard.set_pad(self.pad.status()) {
+            self.stale = true;
+            self.overlay_stale = true;
+        }
         if let Some(library) = self.store.changed() {
             self.dashboard.set_library(library);
             self.stale = true;
@@ -366,14 +380,19 @@ impl ApplicationHandler for App {
             }
         }
 
-        let pressed = !presses.is_empty();
+        let pressed = !presses.is_empty() || !events.is_empty();
         let focus = self.dashboard.home_focus();
+        for event in events {
+            self.dashboard.pad_event(event);
+        }
         for press in presses {
             self.dashboard.press(press);
         }
         if self.log_focus && self.dashboard.home_focus() != focus {
             eprintln!("focus: {:?}", self.dashboard.home_focus());
         }
+        // A held direction repeats at the pace of whatever has the pad now.
+        self.pad.set_repeat(self.dashboard.repeat());
         self.overlay_stale |= pressed;
         self.carry_out(event_loop);
         let overlay_wants = self.follow_overlay();

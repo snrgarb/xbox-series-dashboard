@@ -159,7 +159,36 @@ impl Store {
         self.database.as_ref()?.setting(key).map_err(|e| eprintln!("library: {e:#}")).ok()?
     }
 
+    /// A setting that is on or off: `default` when it has never been set, or says neither.
+    pub fn flag(&self, key: &str, default: bool) -> bool {
+        flag(self.setting(key).as_deref(), default)
+    }
+
     fn snapshot(&self) -> Option<Library> {
         self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()
+    }
+}
+
+/// On or off, as the settings table holds it.
+fn flag(setting: Option<&str>, default: bool) -> bool {
+    match setting.map(|text| text.trim().to_ascii_lowercase()).as_deref() {
+        Some("true" | "1" | "on" | "yes") => true,
+        Some("false" | "0" | "off" | "no") => false,
+        _ => default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::flag;
+
+    #[test]
+    fn a_flag_is_its_default_until_it_says_on_or_off() {
+        assert!(flag(None, true));
+        assert!(!flag(None, false));
+        assert!(!flag(Some("false"), true));
+        assert!(!flag(Some(" Off "), true));
+        assert!(flag(Some("1"), false));
+        assert!(flag(Some("perhaps"), true));
     }
 }

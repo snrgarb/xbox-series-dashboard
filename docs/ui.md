@@ -17,7 +17,7 @@ The Dashboard is a fixed set of 10-foot screens steered by a pad. Its navigation
 | `render` | The GPU: a `Frame` of `Layer`s, each quads then text. Textures. Fonts and shaping. Offscreen read-back. |
 | `ui` | `Ui` (drawing in design units), `Store` (animated values), `ArtCache`, `Button`/`Press`, `Host` (renderer + cache + store) and `Offscreen`. |
 | `screens` | The screens and the `Dashboard` core that owns them. The theme's colours, type and measures (`theme`). |
-| `input` | The pad through XInput, turned into `Press`es (with direction repeat). |
+| `input` | The pad through XInput, turned into `PadEvent`s: presses (with direction repeat), releases, the Guide button's tap and hold. Whether a pad is connected and what powers it. |
 | `shell` | Windows itself: the Overlay window, and launching a game and following it. |
 | `audio` | Short sounds: WAV files decoded once, mixed on a thread of its own, played through WASAPI. Silent anywhere but Windows. |
 | `app` | The two windows and the wiring. |
@@ -72,6 +72,15 @@ Focus is **state the screen owns**: an enum such as `Focus::Recent(usize) | Focu
 The focus visual is the theme's: a ring that appears at once on the focused element (`theme::focus_ring`), with its glow; it does not travel between elements. A Recent tile's ring grows with the tile.
 
 A held direction repeats (`Press::repeat`); a screen ignores a repeat for anything but movement.
+
+## The pad's timing
+
+Everything timed about the pad is timed in `input`, by `Presses`, which is told the time (`update(buttons, now)`) and so is tested with a clock of the test's own. The Dashboard has no clock. The pad's thread reads the pad every 4 ms whatever is being drawn and wakes the loop when it has something to tell, which is what a timer would have to do anyway: a tap of the Guide button opens the Guide 300 ms after the press, with nothing pressed and nothing drawn at that moment.
+
+- **Repeat.** A held direction repeats at the pace of whatever has the pad: 700 ms then every 80 ms in the Guide (`screens::GUIDE_REPEAT`), 400 ms then every 120 ms elsewhere (`Repeat::default()`). The Dashboard says which (`Dashboard::repeat`), since only it knows what is open; `app` passes it on (`Pad::set_repeat`) each turn of the loop. A pace that changes while a direction is held applies from the next repeat.
+- **The Guide button** (docs/spec/guide.md, 7.1) sends no `Press` as it goes down. `input` says what the press turned out to be, whatever is open: `Release(Guide)` as it is let go, then `GuideTap` 300 ms after the press or at the release if that is later; or `GuideHeld` at 700 ms, then its `Release` and no tap. `Dashboard::pad_event` gives them their meaning: a release closes an open Guide (and the tap that follows does nothing), a tap opens a closed one, a hold asks for `Effect::PowerHold`. With the Guide setting off (`guide.enabled` in the settings table) none of them does anything.
+- `Dashboard::press` with `Button::Guide` is a whole tap at once: the keyboard's, `--press guide`, a test's. Ctrl+Alt+G is read with the pad and is a tap however long it is held.
+- The keyboard's arrows repeat as Windows repeats keys, in the Guide too.
 
 ## Screens and what is over what
 
