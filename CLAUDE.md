@@ -1,6 +1,6 @@
 ## Project
 
-The Rust port of the Xbox Series Theme (`~/projects/xbox-series-theme`, the Playnite Bundle: its `CONTEXT.md` is the glossary and the behaviour to match, its `docs/research/` the prior findings). The plan is `docs/plan.md`; work is tracked in GitHub Issues on `snrgarb/xbox-series-dashboard`.
+Start with `docs/HANDOVER.md`. The Rust port of the Xbox Series Theme (`~/projects/xbox-series-theme`, the Playnite Bundle: its `CONTEXT.md` is the glossary and the behaviour to match, its `docs/research/` the prior findings). The plan is `docs/plan.md`; work is tracked in GitHub Issues on `snrgarb/xbox-series-dashboard`.
 
 ## Working here
 
