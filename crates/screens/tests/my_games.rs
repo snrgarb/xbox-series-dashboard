@@ -657,7 +657,7 @@ fn a_pane_opened_from_the_nav_flies_in_and_the_page_itself_does_not() {
 #[test]
 fn under_reduce_motion_a_pane_is_simply_there() {
     let mut stage = Stage::new(library(), Entry::Games, HD);
-    stage.host.store.reduce_motion = true;
+    stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
     let header = |image: &image::RgbaImage| ink_rows(image, (520, 900), (20, 190));
     let games = header(&stage.frame_after(0.0));
     stage.press(&[Left]);
@@ -694,7 +694,7 @@ fn the_grid_slides_to_its_row() {
     assert!(top == 126 && (178..=181).contains(&a_row_up), "{top} to {a_row_up}");
 
     // Under Reduce motion it is there in the next frame.
-    stage.host.store.reduce_motion = true;
+    stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
     stage.press(&[Up, Up, Up]);
     assert!((425..=428).contains(&foot(&stage.frame_after(0.0)).1));
 }
