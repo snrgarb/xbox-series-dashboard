@@ -362,13 +362,20 @@ impl ApplicationHandler for App {
         // Home's window is drawn when something changed or is moving, and once a second for the clock; not at all
         // behind a game or under its Launch screen, where it keeps the last frame it showed.
         let due = self.last_frame.elapsed() >= Duration::from_secs(1);
-        if !self.dashboard.home_covered() && (self.stale || pressed || due || state.host.animating()) {
+        // And when what was drawn last asked to be drawn again: a delay's end, the swirl's next step.
+        let covered = self.dashboard.home_covered();
+        let wake = state.host.wake().filter(|_| !covered).map(Duration::from_secs_f32);
+        let woken = wake.is_some_and(|wake| self.last_frame.elapsed() >= wake);
+        let mut home_wants = None;
+        if !covered && (self.stale || pressed || due || woken || state.host.animating()) {
             state.window.request_redraw();
+        } else if let Some(wake) = wake {
+            home_wants = Some(wake.saturating_sub(self.last_frame.elapsed()));
         }
         // Woken sooner by the pad's thread, the art cache and the windows' messages. During a launch, in time for
         // its next look at the desktop.
         let launch = self.launch.as_ref().map(|launch| launch.wait());
-        let wait = [Some(IDLE), launch, overlay_wants].into_iter().flatten().min().unwrap_or(IDLE);
+        let wait = [Some(IDLE), launch, overlay_wants, home_wants].into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
 
@@ -406,7 +413,10 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let began = since_start();
                 let now = Instant::now();
-                let dt = (now - self.last_frame).as_secs_f32().min(0.1);
+                // Animations step by a tenth of a second at most; the clock takes all the time there was.
+                let passed = (now - self.last_frame).as_secs_f32();
+                let dt = passed.min(0.1);
+                state.host.store.slept(passed - dt);
                 self.last_frame = now;
                 self.stale = false;
 

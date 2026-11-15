@@ -50,6 +50,12 @@ impl Host {
         result
     }
 
+    /// How long after the last frame the next is wanted when nothing is moving and no input comes: a delay ends
+    /// then, or something slow takes its next step.
+    pub fn wake(&self) -> Option<f32> {
+        self.store.wake()
+    }
+
     /// Whether another frame is wanted without any input: something is moving, or art is on its way.
     pub fn animating(&self) -> bool {
         self.store.animating() || self.art.pending() > 0

@@ -1,5 +1,5 @@
 // One rounded rectangle per instance: filled, a ring or an arc of one, a two-stop gradient, times a texture, cut to a
-// clip rectangle.
+// clip rectangle, and turned about its middle.
 // Colours are sRGB values with straight alpha and are blended as they are, in gamma space, as WPF blends: the theme's
 // colours and alphas carry over unchanged.
 struct Globals { size: vec2<f32>, pad: vec2<f32> }
@@ -14,6 +14,7 @@ struct Inst {
     @location(3) params: vec4<f32>, // corner radius, ring thickness (0 = filled), gradient kind (4 = an arc), feather
     @location(4) uv: vec4<f32>,     // the texture's u0, v0, u1, v1 across the rectangle; an arc's middle and half length
     @location(5) clip: vec4<f32>,   // x0, y0, x1, y1 in pixels
+    @location(6) turn: vec4<f32>,   // the cosine and sine of the turn about the rectangle's middle, clockwise
 }
 
 struct VOut {
@@ -33,7 +34,8 @@ fn vs(@builtin(vertex_index) vi: u32, i: Inst) -> VOut {
     let half = i.rect.zw * 0.5;
     // Wider than the shape by its soft edge.
     let local = (corner * 2.0 - 1.0) * (half + max(i.params.w, 1.0));
-    let p = i.rect.xy + half + local;
+    let turned = vec2<f32>(local.x * i.turn.x - local.y * i.turn.y, local.x * i.turn.y + local.y * i.turn.x);
+    let p = i.rect.xy + half + turned;
     var o: VOut;
     o.pos = vec4<f32>(p.x / g.size.x * 2.0 - 1.0, 1.0 - p.y / g.size.y * 2.0, 0.0, 1.0);
     o.local = local;

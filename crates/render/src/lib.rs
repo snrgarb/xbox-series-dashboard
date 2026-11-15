@@ -106,6 +106,8 @@ pub struct Quad {
     /// The part of a ring that is drawn, its ends round: the angle of its middle and half its length, in radians
     /// clockwise from the top. None draws the whole shape.
     pub arc: Option<(f32, f32)>,
+    /// How far the rectangle is turned about its middle, in radians clockwise.
+    pub turn: f32,
 }
 
 impl Quad {
@@ -122,6 +124,7 @@ impl Quad {
             uv: [0.0, 0.0, 1.0, 1.0],
             clip: None,
             arc: None,
+            turn: 0.0,
         }
     }
     pub fn gradient(rect: Rect, c0: Rgba, c1: Rgba, gradient: Gradient, radius: f32) -> Self {
@@ -173,6 +176,8 @@ struct Instance {
     params: [f32; 4],
     uv: [f32; 4],
     clip: [f32; 4],
+    /// The turn's cosine and sine; two to spare.
+    turn: [f32; 4],
 }
 
 struct Texture {
@@ -257,7 +262,8 @@ impl Renderer {
                     array_stride: std::mem::size_of::<Instance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4
+                        0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4,
+                        6 => Float32x4
                     ],
                 })],
             },
@@ -465,6 +471,7 @@ impl Renderer {
                 params: [q.radius, q.ring, if q.arc.is_some() { ARC } else { q.gradient as u32 as f32 }, q.feather],
                 uv: q.arc.map_or(q.uv, |(middle, half)| [middle, half, 0.0, 0.0]),
                 clip: q.clip.map_or(everything, |c| [c.x, c.y, c.right(), c.bottom()]),
+                turn: [q.turn.cos(), q.turn.sin(), 0.0, 0.0],
             })
             .collect();
         if instances.len() > self.capacity {

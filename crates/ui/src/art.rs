@@ -6,7 +6,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 
 use image::imageops::FilterType;
-use image::RgbaImage;
+pub use image::RgbaImage;
 use render::gpu::Gpu;
 use render::{Renderer, TexId};
 
@@ -19,6 +19,30 @@ pub enum Kind {
     Full(u32),
     /// A background made of a cover: 120 wide, blurred. Drawn stretched far past the screen.
     Blurred,
+    /// A picture this function draws, not one read from a file. The key's path is its name: it is what tells one
+    /// painted picture from another. It is drawn on a decoding thread, so it may take its time.
+    Painted(Painter),
+}
+
+/// Draws a picture: straight alpha, no mips.
+#[derive(Clone, Copy)]
+pub struct Painter(pub fn() -> RgbaImage);
+
+// The name beside it in the key is what a painted picture is known by, never the function: a function's address
+// is not one thing across a build.
+impl PartialEq for Painter {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for Painter {}
+impl std::hash::Hash for Painter {
+    fn hash<H: std::hash::Hasher>(&self, _: &mut H) {}
+}
+impl std::fmt::Debug for Painter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Painter")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -191,6 +215,9 @@ fn work(queue: &Queue, tx: &Sender<Loaded>, wake: &(dyn Fn() + Send + Sync)) {
 }
 
 fn decode(key: &ArtKey) -> image::ImageResult<Vec<RgbaImage>> {
+    if let Kind::Painted(Painter(paint)) = key.kind {
+        return Ok(vec![paint()]);
+    }
     // Steam stores some PNGs under a .jpg name, so go by content, not extension.
     let image = image::ImageReader::open(&key.path)?.with_guessed_format()?.decode()?.into_rgba8();
     let fit = |image: RgbaImage, max: u32, filter| {
@@ -215,5 +242,6 @@ fn decode(key: &ArtKey) -> image::ImageResult<Vec<RgbaImage>> {
             let small = fit(image, 120, FilterType::Triangle);
             vec![image::imageops::blur(&small, 7.5)]
         }
+        Kind::Painted(_) => unreachable!("painted above"),
     })
 }
