@@ -3,8 +3,8 @@
 //! carries out the effects it asks for. Tests do the same with no window at all.
 //!
 //! It declares two pictures: Home's window's (`draw`) and the Overlay's (`draw_overlay`), the window above every
-//! other that shows the Launch screen and, over a running game, the Guide. `overlay` says what the Overlay is wanted
-//! for, which the executable follows by showing and hiding it.
+//! other that shows the Launch screen and the Guide, over a running game and over Home alike. `overlay` says what
+//! the Overlay is wanted for, which the executable follows by showing and hiding it.
 pub mod guide;
 pub mod home;
 pub mod launch;
@@ -39,6 +39,10 @@ pub enum Effect {
 /// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
 pub const GUIDE_REPEAT: Repeat = Repeat::millis(700, 80);
 
+/// How long the Guide waits for the button that closed it to be let go before it hands the foreground back all the
+/// same (docs/spec/guide.md, 3.5). Timed by whoever has a clock, who then says `release_wait_over`.
+pub const RELEASE_FALLBACK: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// What the Overlay is wanted for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OverlayShows {
@@ -47,7 +51,8 @@ pub enum OverlayShows {
     /// Something to look at that takes no input, so whatever is in front keeps the foreground: the Launch screen,
     /// or the Guide sliding away.
     Passive,
-    /// The Guide over a running game: it takes the foreground from the game.
+    /// The Guide, over a running game or over Home: it takes the foreground from whatever has it, and keeps it
+    /// until the Guide has closed and the button that closed it is let go.
     Guide,
 }
 
@@ -67,8 +72,12 @@ pub struct Dashboard {
     guide_button_spent: bool,
     home: Home,
     guide: Guide,
-    /// Whether the Guide, as it was last opened, is over a game: drawn on the Overlay, not in Home's window.
+    /// Whether the Guide, as it was last opened, is on the Overlay, as it is wherever there is one: over a game and
+    /// over Home alike, so there is one Guide. Without an Overlay it is drawn in Home's window, at Home only.
     guide_overlaid: bool,
+    /// The pad's button whose press closed the Guide, until it is let go: the foreground goes back only then, so
+    /// the window that gets it never sees the press (docs/spec/guide.md, 3.5).
+    release_awaited: Option<Button>,
     launch: LaunchScreen,
     /// Whether there is an Overlay to draw on.
     has_overlay: bool,
@@ -91,6 +100,7 @@ impl Dashboard {
             home: Home::default(),
             guide: Guide::default(),
             guide_overlaid: false,
+            release_awaited: None,
             launch: LaunchScreen::default(),
             has_overlay: true,
             playing: None,
@@ -183,7 +193,14 @@ impl Dashboard {
     pub fn pad_event(&mut self, event: PadEvent) {
         let guide = Press { button: Button::Guide, repeat: false };
         match event {
-            PadEvent::Press(press) => self.press(press),
+            PadEvent::Press(press) => {
+                let was_open = self.guide.is_open();
+                self.press(press);
+                // Closed by this press: the Overlay keeps the foreground until the button is up again.
+                if was_open && !self.guide.is_open() && self.guide_overlaid {
+                    self.release_awaited = Some(press.button);
+                }
+            }
             PadEvent::Release(Button::Guide) => {
                 // Let go after a hold: Power has been asked for, and that is all the press does.
                 if !std::mem::take(&mut self.guide_button_spent) && self.guide.is_open() {
@@ -191,7 +208,11 @@ impl Dashboard {
                     self.guide_button_spent = true;
                 }
             }
-            PadEvent::Release(_) => {}
+            PadEvent::Release(button) => {
+                if self.release_awaited == Some(button) {
+                    self.release_awaited = None;
+                }
+            }
             PadEvent::GuideTap => {
                 if !std::mem::take(&mut self.guide_button_spent) && !self.guide.is_open() {
                     self.press(guide);
@@ -296,7 +317,9 @@ impl Dashboard {
             return;
         }
         self.guide.open(Around { library: &self.library, playing: self.playing, discord: self.status.discord });
-        self.guide_overlaid = self.playing.is_some();
+        self.guide_overlaid = self.has_overlay;
+        // Opened again before the foreground went back: the Overlay still has it, and keeps it.
+        self.release_awaited = None;
     }
 
     pub fn close_guide(&mut self) {
@@ -315,30 +338,41 @@ impl Dashboard {
         &self.guide
     }
 
-    /// Whether the Guide is open over a game.
+    /// Whether the Guide is open over a game: the game is then held still under it (docs/spec/guide.md, 7.2).
     pub fn guide_over_game(&self) -> bool {
-        self.guide_overlaid && self.guide.is_open()
+        self.guide_overlaid && self.guide.is_open() && self.playing.is_some()
+    }
+
+    /// Whether the Guide has closed and is keeping the foreground until the button that closed it is let go.
+    pub fn awaiting_release(&self) -> bool {
+        self.release_awaited.is_some()
+    }
+
+    /// The button that closed the Guide has been down `RELEASE_FALLBACK` since: the foreground goes back now.
+    pub fn release_wait_over(&mut self) {
+        self.release_awaited = None;
     }
 
     /// Says whether there is an Overlay to draw on, as there is unless told otherwise. Without one no Launch screen
     /// shows and the Guide does not open over a game: neither can be drawn in Home's window, which is behind the
-    /// game.
+    /// game. At Home the Guide is then drawn in Home's window.
     pub fn set_overlay(&mut self, there: bool) {
         self.has_overlay = there;
         if !there {
-            // Whatever it was showing is gone with it.
+            // Whatever it was showing is gone with it, but for the Guide at Home, which Home's window can show.
             self.launch = LaunchScreen::default();
-            if self.guide_overlaid {
+            if self.guide_overlaid && self.playing.is_some() {
                 self.guide = Guide::default();
-                self.guide_overlaid = false;
             }
+            self.guide_overlaid = false;
+            self.release_awaited = None;
         }
     }
 
     /// What the Overlay is wanted for now.
     pub fn overlay(&self) -> OverlayShows {
         let guide = self.guide_overlaid && self.guide.showing();
-        if guide && self.guide.is_open() {
+        if self.guide_overlaid && (self.guide.is_open() || self.release_awaited.is_some()) {
             OverlayShows::Guide
         } else if guide || self.launch.showing() {
             OverlayShows::Passive
@@ -420,7 +454,7 @@ impl Dashboard {
         self.guide.draw(ui, around, &face);
     }
 
-    /// Home's window: the page, and the Guide over it.
+    /// Home's window: the page, and the Guide over it where there is no Overlay to draw it on.
     pub fn draw(&mut self, ui: &mut Ui) {
         let clock = self.clock();
         let status = home::Status { user: &self.user, clock: &clock, pad: self.pad.connected };
@@ -431,8 +465,8 @@ impl Dashboard {
         }
     }
 
-    /// The Overlay: the Launch screen, and the Guide over a game. Drawn over nothing, so where it draws nothing
-    /// the game shows.
+    /// The Overlay: the Launch screen, and the Guide. Drawn over nothing, so where it draws nothing the game shows,
+    /// or Home.
     pub fn draw_overlay(&mut self, ui: &mut Ui) {
         self.launch.draw(ui);
         if self.guide_overlaid {

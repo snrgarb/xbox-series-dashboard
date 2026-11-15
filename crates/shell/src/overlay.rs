@@ -4,9 +4,15 @@
 //! DirectComposition visual. docs/research/overlay-window.md has what was measured and why each style is there.
 //!
 //! It is shown in one of two ways. Passive, it is clicked through and never activated, so whatever is in front
-//! keeps the foreground and the pad: the Launch screen, later Toasts. As the Guide it takes the foreground, and
-//! gives it back when it stops being the Guide. Hidden, nothing is drawn or presented and it is out of the
-//! compositor's scene.
+//! keeps the foreground and the pad: the Launch screen, later Toasts. As the Guide it takes the foreground, from a
+//! game or from Home's window, and gives it back when it stops being the Guide. Hidden, nothing is drawn or
+//! presented and it is out of the compositor's scene.
+//!
+//! Each time it is shown it covers the monitor of the window that has the foreground then, as the Bundle's does
+//! (OverlayWindow.xaml.cs, ShowOverForeground): the Guide opens on the screen the game is on.
+//!
+//! What it cannot do is what the Bundle cannot, and is said in the log when it shows (docs/spec/guide.md, 7.2): a
+//! game in true exclusive fullscreen is not covered, and one that runs elevated keeps the foreground.
 //!
 //! It is made on the thread that runs the window's message loop, which dispatches its messages with Home's.
 use render::gpu::Gpu;
@@ -84,10 +90,14 @@ mod win {
         DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
     };
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY,
+    };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         VK_BACK, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_UP,
     };
+    use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     use super::{Gpu, Key, Mode};
@@ -139,7 +149,8 @@ mod win {
         }
     }
 
-    /// The window, hidden and passive, covering the primary monitor. Returns it and its size in pixels.
+    /// The window, hidden and passive, covering the primary monitor until it is first shown. Returns it and its size
+    /// in pixels.
     unsafe fn create_window() -> Option<(HWND, (u32, u32))> {
         let instance = GetModuleHandleW(null());
         let class = wide("XboxSeriesDashboardOverlay");
@@ -239,7 +250,9 @@ mod win {
         surface: Option<wgpu::Surface<'static>>,
         composition: Option<Composition>,
         hwnd: HWND,
+        /// The window's size in pixels: that of the monitor it was last shown over.
         size: (u32, u32),
+        /// The swap chain's own size, which follows the window's when the next frame is asked for.
         config: wgpu::SurfaceConfiguration,
         mode: Option<Mode>,
         /// The foreground window when the Overlay became the Guide, to give the foreground back to.
@@ -329,7 +342,7 @@ mod win {
             })
         }
 
-        /// The window's size in pixels: the primary monitor's.
+        /// The window's size in pixels: that of the monitor it was last shown over.
         pub fn size(&self) -> (u32, u32) {
             self.size
         }
@@ -344,8 +357,9 @@ mod win {
             self.lost
         }
 
-        /// Shows it as `mode`, or hides it. Becoming the Guide takes the foreground from whatever has it; ceasing
-        /// to be gives it back to that window.
+        /// Shows it as `mode`, or hides it. Shown from hidden, it goes over the monitor of the window that has the
+        /// foreground. Becoming the Guide takes the foreground from whatever has it; ceasing to be gives it back to
+        /// that window.
         pub fn set(&mut self, mode: Option<Mode>) {
             let mode = mode.filter(|_| !self.lost);
             if mode == self.mode {
@@ -368,6 +382,7 @@ mod win {
                             self.foreground_before = GetForegroundWindow();
                         }
                         if before.is_none() {
+                            self.cover_foreground_monitor();
                             ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
                             self.shown_at = Instant::now();
                             self.presented = 0;
@@ -375,6 +390,7 @@ mod win {
                         self.raise();
                         log(&format!("shown ({mode:?})"));
                         if mode == Mode::Guide {
+                            self.say_if_exclusive();
                             let allowed = take_foreground(self.hwnd);
                             let now = GetForegroundWindow();
                             log(&format!(
@@ -383,6 +399,13 @@ mod win {
                                 describe(now),
                                 now == self.hwnd
                             ));
+                            if now != self.hwnd {
+                                // The Bundle's limit, accepted: the Alt tap does not reach a program that runs
+                                // elevated, so Windows keeps the foreground where it is.
+                                log("Windows did not give the Overlay the foreground, as it won't from a game that \
+                                     runs elevated: the Guide shows above it and follows the pad, and the game still \
+                                     hears the pad too (docs/spec/guide.md, 7.2)");
+                            }
                         }
                     }
                 }
@@ -398,15 +421,65 @@ mod win {
             SetWindowLongPtrW(self.hwnd, GWL_EXSTYLE, if passive { ex | styles } else { ex & !styles });
         }
 
-        /// Gives the foreground back while it is still the Overlay's to give: hiding first lets Windows pick.
+        /// Moves the window over the monitor of the window in front, the primary one when nothing is in front. In
+        /// real pixels: the process is aware of each monitor's scaling.
+        unsafe fn cover_foreground_monitor(&mut self) {
+            let front = GetForegroundWindow();
+            let nearest = if front.is_null() { MONITOR_DEFAULTTOPRIMARY } else { MONITOR_DEFAULTTONEAREST };
+            let mut info: MONITORINFO = std::mem::zeroed();
+            info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(MonitorFromWindow(front, nearest), &mut info) == 0 {
+                log("Windows did not say which monitor the window in front is on: the Overlay stays where it was");
+                return;
+            }
+            let area = info.rcMonitor;
+            let (width, height) = (area.right - area.left, area.bottom - area.top);
+            if width <= 0 || height <= 0 {
+                return;
+            }
+            SetWindowPos(self.hwnd, HWND_TOPMOST, area.left, area.top, width, height, SWP_NOACTIVATE);
+            self.size = (width as u32, height as u32);
+            log(&format!(
+                "over the monitor at ({}, {}), {width}x{height}, which {} is on",
+                area.left,
+                area.top,
+                describe(front)
+            ));
+        }
+
+        /// Says so when Windows reports a Direct3D program with the screen to itself: a game in true exclusive
+        /// fullscreen, which no other window is drawn over. The Bundle's limit, accepted (docs/spec/guide.md, 7.2).
+        unsafe fn say_if_exclusive(&self) {
+            let mut state = 0;
+            if SHQueryUserNotificationState(&mut state) == 0 && state == QUNS_RUNNING_D3D_FULL_SCREEN {
+                log("Windows says a Direct3D program has the screen to itself (exclusive fullscreen): the Guide may \
+                     not show over it, and the game may leave fullscreen or minimise as it loses the foreground \
+                     (docs/spec/guide.md, 7.2)");
+            }
+        }
+
+        /// Gives the foreground back while it is still the Overlay's to give: hiding first lets Windows pick. If
+        /// another window has taken it meanwhile (a game that was started from the Guide), it is left there.
         unsafe fn give_foreground_back(&mut self) {
             let to = std::mem::replace(&mut self.foreground_before, null_mut());
+            let front = GetForegroundWindow();
+            if front != self.hwnd && front != to {
+                log(&format!("the foreground has gone to {} meanwhile, and stays there", describe(front)));
+                return;
+            }
             if to.is_null() || IsWindow(to) == 0 {
                 log("the window that had the foreground is gone: Windows picks the next");
                 return;
             }
+            if IsIconic(to) != 0 {
+                ShowWindow(to, SW_RESTORE);
+            }
             let gave = SetForegroundWindow(to) != 0;
             log(&format!("foreground given back to {}: {gave}", describe(to)));
+            if !gave {
+                log("Windows refused to hand the foreground back, as it does to a game that runs elevated \
+                     (docs/spec/guide.md, 7.2)");
+            }
         }
 
         /// Puts it above every other topmost window, as a game that is itself topmost may be: the last window
@@ -424,6 +497,19 @@ mod win {
         pub fn frame(&mut self, gpu: &Gpu) -> Option<wgpu::SurfaceTexture> {
             self.mode?;
             let (surface, composition) = (self.surface.as_ref()?, self.composition.as_ref()?);
+            // Shown over a monitor of another size since the last frame: the swap chain is made that size.
+            if (self.config.width, self.config.height) != self.size {
+                let mut config = self.config.clone();
+                (config.width, config.height) = self.size;
+                if let Some(error) = configure(gpu, surface, &config) {
+                    let size = format!("{}x{}", config.width, config.height);
+                    self.give_up(&format!("the swap chain could not be made {size}: {error}"));
+                    return None;
+                }
+                unsafe { composition.commit() };
+                log(&format!("configured: {}x{}, for the monitor it is over now", config.width, config.height));
+                self.config = config;
+            }
             match surface.get_current_texture() {
                 wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                     Some(frame)

@@ -9,7 +9,7 @@ use input::Pad;
 use model::Library;
 use render::gpu::{self, Gpu};
 use screens::{Dashboard, Effect, OverlayShows};
-use shell::{Key as OverlayKey, Launch, Mode, Overlay, Step};
+use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -77,6 +77,11 @@ struct App {
     /// When Home's first frame was presented.
     presented: Option<Instant>,
     launch: Option<Launch>,
+    /// Holds the running game still while the Guide is open over it, and lets it go as the Guide hands the
+    /// foreground back (docs/spec/guide.md, 7.2). After `launch` here, so it outlives it.
+    freezer: Freezer,
+    /// Since when the Guide has been closed with the button that closed it still down.
+    release_wait: Option<Instant>,
     /// The library database: where a newer snapshot comes from, and where Play sessions go.
     store: Store,
     /// When the library had been read, in ms since the process started.
@@ -110,6 +115,10 @@ pub fn run(args: &Args, library: Library, store: Store) {
         eprintln!("guide: off ({GUIDE_ENABLED}): the Guide button does nothing");
     }
     dashboard.set_guide_enabled(guide);
+    // A Dashboard that was killed with the Guide open over a game left the game frozen: it is let go first of all.
+    let data_dir = args.data_dir.clone().or_else(library::data_dir);
+    let mut freezer = Freezer::new(data_dir.as_deref());
+    freezer.thaw_leftovers();
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
     }
@@ -138,6 +147,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
         stale: true,
         presented: None,
         launch: None,
+        freezer,
+        release_wait: None,
         sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
@@ -161,8 +172,13 @@ impl App {
         self.overlay = Overlay::new(&state.gpu, state.config.format);
         if self.overlay.is_none() {
             self.dashboard.set_overlay(false);
+            // The Guide, if it is open at Home, is in Home's window from here on.
+            self.stale = true;
             if cfg!(windows) {
-                eprintln!("overlay: none: games start with no Launch screen and the Guide opens only at Home");
+                eprintln!(
+                    "overlay: none: games start with no Launch screen, and the Guide opens only at Home, in Home's \
+                     window"
+                );
             }
         }
     }
@@ -189,6 +205,10 @@ impl App {
     /// Shows, hides and draws the Overlay as the Dashboard wants it. Returns how soon it wants another turn, None
     /// when it has nothing more to draw.
     fn follow_overlay(&mut self) -> Option<Duration> {
+        // Wanted before Home came to rest: the Guide opened in the Dashboard's first moments.
+        if !self.overlay_tried && self.dashboard.overlay() != OverlayShows::Nothing {
+            self.make_overlay();
+        }
         let (Some(overlay), Some(state)) = (&mut self.overlay, &mut self.state) else { return None };
         let wanted = |dashboard: &Dashboard| match dashboard.overlay() {
             OverlayShows::Nothing => None,
@@ -220,9 +240,12 @@ impl App {
         }
         let Some(frame) = overlay.frame(&state.gpu) else {
             if overlay.lost() {
-                // It said why. From here on the Dashboard shows nothing that needs it.
+                // It said why. From here on the Dashboard shows nothing that needs it: the game is let go, and
+                // the Guide at Home is in Home's window.
                 self.overlay = None;
                 self.dashboard.set_overlay(false);
+                self.freezer.thaw();
+                self.stale = true;
                 return None;
             }
             return Some(OVERLAY_RETRY);
@@ -261,12 +284,12 @@ impl App {
             match effect {
                 Effect::Launch(game) => self.launch(game),
                 Effect::QuitGame => {
-                    if let Some(launch) = &self.launch {
-                        launch.quit_game();
+                    if let Some(launch) = &mut self.launch {
+                        launch.quit_game(&mut self.freezer);
                     }
                 }
-                // Over a game the Overlay follows what the Dashboard shows: it gives the foreground back as the
-                // Guide closes, and hides once the panel has slid away.
+                // The Overlay follows what the Dashboard shows: it gives the foreground back as the Guide closes,
+                // once the button that closed it is up, and hides once the panel has slid away.
                 Effect::GuideClosed => {}
                 Effect::Exit => event_loop.exit(),
                 Effect::Sound(sound) => self.sounds.play(sound),
@@ -369,6 +392,8 @@ impl ApplicationHandler for App {
                     self.store.game_booted(playing.and_then(|game| self.dashboard.library().games.get(game)));
                 }
                 Step::Ended => {
+                    // Whatever of it was frozen under the Guide has gone with it.
+                    self.freezer.thaw();
                     self.launch = None;
                     self.dashboard.game_ended();
                     if let Some(library) = self.store.game_ended() {
@@ -395,13 +420,37 @@ impl ApplicationHandler for App {
         self.pad.set_repeat(self.dashboard.repeat());
         self.overlay_stale |= pressed;
         self.carry_out(event_loop);
+        // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
+        // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
+        let mut release_wants = None;
+        if self.dashboard.awaiting_release() {
+            let waited = self.release_wait.get_or_insert_with(Instant::now).elapsed();
+            if waited >= screens::RELEASE_FALLBACK {
+                eprintln!("guide: the button that closed it is still down after a second: handing back all the same");
+                self.dashboard.release_wait_over();
+            } else {
+                release_wants = Some(screens::RELEASE_FALLBACK - waited);
+            }
+        }
+        if !self.dashboard.awaiting_release() {
+            self.release_wait = None;
+        }
+        // The game is let go before it is handed the foreground, so it can take it; and held only once the Overlay
+        // has taken the foreground from it, as the Bundle orders the two.
+        if self.freezer.is_frozen() && self.dashboard.overlay() != OverlayShows::Guide {
+            self.freezer.thaw();
+        }
         let overlay_wants = self.follow_overlay();
         if let Some(launch) = &mut self.launch {
             // Said once the Overlay has done what was asked of it, so the log's order is what happened.
             if !self.dashboard.launch_screen_showing() {
                 launch.launch_screen_gone();
             }
-            launch.guide(self.dashboard.guide_over_game());
+            let over_game = self.dashboard.guide_over_game();
+            launch.guide(over_game);
+            if over_game && self.overlay.as_ref().is_some_and(|overlay| overlay.mode() == Some(Mode::Guide)) {
+                launch.freeze(&mut self.freezer);
+            }
         }
 
         let Some(state) = &self.state else { return };
@@ -428,7 +477,8 @@ impl ApplicationHandler for App {
         // Woken sooner by the pad's thread, the art cache and the windows' messages. During a launch, in time for
         // its next look at the desktop.
         let launch = self.launch.as_ref().map(|launch| launch.wait());
-        let wait = [Some(IDLE), launch, overlay_wants, home_wants].into_iter().flatten().min().unwrap_or(IDLE);
+        let wants = [Some(IDLE), launch, overlay_wants, home_wants, release_wants];
+        let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }
 

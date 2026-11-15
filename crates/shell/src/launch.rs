@@ -6,7 +6,7 @@ use std::ffi::c_void;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::Overlay;
+use crate::{Freezer, Overlay};
 
 /// What a look at the launch found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +41,9 @@ impl Launch {
 
     pub fn guide(&mut self, _: bool) {}
 
-    pub fn quit_game(&self) {}
+    pub fn freeze(&self, _: &mut Freezer) {}
+
+    pub fn quit_game(&mut self, _: &mut Freezer) {}
 }
 
 #[cfg(windows)]
@@ -49,7 +51,7 @@ pub use win::Launch;
 
 #[cfg(windows)]
 mod win {
-    use super::{c_void, Duration, Overlay, Path, Step};
+    use super::{c_void, Duration, Freezer, Overlay, Path, Step};
     use crate::{take_foreground, wide};
     use std::time::Instant;
     use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
@@ -117,6 +119,8 @@ mod win {
         game: Option<HWND>,
         /// Whether the Guide is open over the game.
         guide: bool,
+        /// Whether the game has been asked to quit: from then on it is not frozen, so it is free to close.
+        quitting: bool,
     }
 
     fn log(message: &str) {
@@ -172,6 +176,7 @@ mod win {
                 seen: false,
                 game: None,
                 guide: false,
+                quitting: false,
             })
         }
 
@@ -292,8 +297,25 @@ mod win {
             }
         }
 
-        /// Asks the game to close, as its window's close button would.
-        pub fn quit_game(&self) {
+        /// Holds the game still under the Guide: every process of a program in its folder, and the one that owns
+        /// its window, until `freezer` thaws them. Not a game that is quitting. Does nothing while it is frozen
+        /// already.
+        pub fn freeze(&self, freezer: &mut Freezer) {
+            if self.quitting || freezer.is_frozen() {
+                return;
+            }
+            let mut owner = 0u32;
+            if let Some(game) = self.game {
+                unsafe { GetWindowThreadProcessId(game, &mut owner) };
+            }
+            freezer.freeze(&self.dir, Some(owner).filter(|&owner| owner != 0));
+        }
+
+        /// Asks the game to close, as its window's close button would. A frozen game can't answer: it is thawed
+        /// first, and stays so until it has gone.
+        pub fn quit_game(&mut self, freezer: &mut Freezer) {
+            freezer.thaw();
+            self.quitting = true;
             if let Some(game) = self.game {
                 unsafe { PostMessageW(game, WM_CLOSE, 0, 0) };
                 log("asked the game to quit");

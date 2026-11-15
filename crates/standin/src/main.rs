@@ -10,6 +10,9 @@
 //!       The stand-in game: a borderless, full-screen, dark-blue window titled <t> ("Stand-in game"). It closes when
 //!       asked to, on Esc, and after <seconds> (600) in case a test leaves it behind. With --splash-ms, a small window
 //!       titled "<t> launcher" shows for that long first, as a game's launcher or splash screen does.
+//!       Its pulse, a square towards the window's bottom right, changes colour four times a second while the game
+//!       runs, and so stands still while the game is frozen; a beat that comes late says in the log how long the
+//!       game stood still.
 //!       This is also what the program does when it is named `game.exe` and given no arguments, its arguments then
 //!       coming from `game-args.txt` beside it, one a line, if that exists.
 //!   standin steam-url steam://rungameid/<appid>

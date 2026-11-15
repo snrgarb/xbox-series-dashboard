@@ -2,17 +2,18 @@
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, SelectObject, SetBkMode,
-    SetTextColor, DT_CENTER, DT_SINGLELINE, DT_VCENTER, PAINTSTRUCT, TRANSPARENT,
+    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, InvalidateRect,
+    SelectObject, SetBkMode, SetTextColor, DT_CENTER, DT_SINGLELINE, DT_VCENTER, PAINTSTRUCT, TRANSPARENT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{
     RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_SZ,
 };
+use windows_sys::Win32::System::SystemInformation::GetTickCount64;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{install_dir, note, GameArgs};
@@ -21,6 +22,15 @@ const VK_ESCAPE: WPARAM = 0x1B;
 /// The timer that ends the launcher's window, and the one that ends the game.
 const SPLASH_OVER: usize = 1;
 const TIME_UP: usize = 2;
+/// The timer the game's pulse beats to.
+const PULSE: usize = 3;
+/// How often the pulse beats: the square in the game's window changes colour each time.
+const PULSE_MS: u32 = 250;
+/// A beat this long after the one before means the game stood still meanwhile: it was frozen.
+const STOOD_STILL_MS: u64 = 1500;
+/// The pulse's two colours, 0x00BBGGRR: (200, 200, 40) and (40, 200, 200). Far enough apart to tell under the
+/// Guide's dim.
+const PULSE_COLOURS: [u32; 2] = [0x0028_C8C8, 0x00C8_C828];
 /// 0x00BBGGRR: the dark blue of the theme's stand-in game, (16, 32, 80).
 const BLUE: u32 = 0x0050_2010;
 const WHITE: u32 = 0x00FF_FFFF;
@@ -28,6 +38,18 @@ const WHITE: u32 = 0x00FF_FFFF;
 /// Set once the game was asked to end, by its window closing, Esc or its time running out, rather than its
 /// launcher's window going away on its own.
 static ENDED: AtomicBool = AtomicBool::new(false);
+/// The game's own window, once it is up: the one that has the pulse.
+static GAME: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+/// How many times the pulse has beaten, and when it last did, in ms since Windows started.
+static BEATS: AtomicU64 = AtomicU64::new(0);
+static LAST_BEAT: AtomicU64 = AtomicU64::new(0);
+
+/// Where the pulse is in a window this size: on a 1920x1080 screen the square x 1700..1820, y 900..1020, clear of
+/// everything the Guide draws over the game but its dim.
+fn pulse_rect(client: &RECT) -> RECT {
+    let (w, h) = (client.right - client.left, client.bottom - client.top);
+    RECT { left: w * 1700 / 1920, top: h * 900 / 1080, right: w * 1820 / 1920, bottom: h * 1020 / 1080 }
+}
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -91,6 +113,10 @@ pub fn game(args: &GameArgs) -> i32 {
             return 1;
         }
         SetTimer(window, TIME_UP, args.seconds.saturating_mul(1000).min(USER_TIMER_MAXIMUM), None);
+        // Something that moves, so a test can see the game running, and see it stand still while it is frozen.
+        GAME.store(window, Ordering::Relaxed);
+        LAST_BEAT.store(GetTickCount64(), Ordering::Relaxed);
+        SetTimer(window, PULSE, PULSE_MS, None);
         SetForegroundWindow(window);
         note(&format!("game: \"{}\" up, {width}x{height}", args.title));
         pump();
@@ -112,6 +138,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
     match message {
         WM_TIMER if wparam == SPLASH_OVER => {
             DestroyWindow(hwnd);
+        }
+        WM_TIMER if wparam == PULSE => {
+            let now = GetTickCount64();
+            let since = now.saturating_sub(LAST_BEAT.swap(now, Ordering::Relaxed));
+            let beats = BEATS.fetch_add(1, Ordering::Relaxed) + 1;
+            if since >= STOOD_STILL_MS {
+                note(&format!("game: stood still for {since} ms, until beat {beats}"));
+            }
+            let mut client: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut client);
+            InvalidateRect(hwnd, &pulse_rect(&client), 0);
         }
         WM_TIMER | WM_CLOSE => {
             ENDED.store(true, Ordering::Relaxed);
@@ -137,6 +174,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
             DrawTextW(dc, title.as_ptr(), length, &mut rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SelectObject(dc, before);
             DeleteObject(font);
+            if hwnd == GAME.load(Ordering::Relaxed) {
+                // The pulse: a square that is one colour on even beats and another on odd ones.
+                let brush = CreateSolidBrush(PULSE_COLOURS[(BEATS.load(Ordering::Relaxed) % 2) as usize]);
+                FillRect(dc, &pulse_rect(&rect), brush);
+                DeleteObject(brush);
+            }
             EndPaint(hwnd, &paint);
         }
         _ => return DefWindowProcW(hwnd, message, wparam, lparam),

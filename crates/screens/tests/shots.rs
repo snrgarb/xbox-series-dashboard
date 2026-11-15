@@ -183,11 +183,13 @@ impl Stage {
 
     /// One frame, `dt` seconds after the last on the ui's clock: what is mid-flight stays mid-flight. Art the frame
     /// asks for is decoded and the frame drawn again at the same moment, however long that takes, so a frame shows
-    /// the same on any machine.
+    /// the same on any machine. Home's window and the Overlay over it, as `still` draws them: the Guide is on the
+    /// Overlay at Home too.
     fn step(&mut self, mut dt: f32) {
         let Self { gpu, host, target, dashboard, .. } = self;
         loop {
-            let index = host.draw(gpu, &target.view, target.size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
+            let draw = |ui: &mut ui::Ui| dashboard.draw_all(ui);
+            let index = host.draw(gpu, &target.view, target.size, dt, wgpu::Color::BLACK, draw);
             wait(gpu, Some(index));
             if !host.art.wait(gpu, &mut host.renderer) {
                 break;
@@ -467,13 +469,18 @@ fn the_overlay_shows_the_launch_screen_then_the_guide_over_the_game() {
     use screens::OverlayShows;
     let mut stage = Stage::new(screens::fake_library(), HD);
     assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
-    // The Guide over Home is in Home's window, not on the Overlay.
+    // The Guide over Home is on the Overlay too, so there is one Guide: it takes the foreground from Home's window,
+    // slides away passive, and Home is never covered. No game is held under it.
     stage.press(&[Button::Guide]);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Guide);
+    stage.still();
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Guide);
+    assert!(!stage.dashboard.guide_over_game());
+    assert!(!stage.dashboard.home_covered());
+    stage.press(&[Button::B]);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Passive);
     stage.still();
     assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
-    assert!(!stage.dashboard.guide_over_game());
-    stage.press(&[Button::B]);
-    stage.still();
 
     // The Launch screen: passive, and Home is covered once it has faded in.
     stage.dashboard.launch_started(2);
@@ -539,6 +546,21 @@ fn an_overlay_lost_takes_what_it_showed_with_it() {
     stage.dashboard.set_overlay(false);
     assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
     assert!(!stage.dashboard.guide_open() && !stage.dashboard.launch_screen_showing());
+}
+
+/// The Guide at Home outlives the Overlay it was on: Home's window can show it, and does.
+#[test]
+fn an_overlay_lost_at_home_leaves_the_guide_in_homes_window() {
+    use screens::OverlayShows;
+    let mut stage = Stage::new(screens::fake_library(), HD);
+    stage.press(&[Button::Guide, Button::Down]);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Guide);
+    let on_the_overlay = stage.still();
+    stage.dashboard.set_overlay(false);
+    assert_eq!(stage.dashboard.overlay(), OverlayShows::Nothing);
+    assert!(stage.dashboard.guide_open());
+    // The same picture, now all of it Home's window's: the Overlay has nothing to show.
+    assert_eq!(shots::difference(&stage.still(), &on_the_overlay).share, 0.0);
 }
 
 /// The Launch screen is the whole screen's: nothing of Home shows through it, corner to corner.
