@@ -1,6 +1,10 @@
 //! The domain: what a game is, the library of them, a Play session. No I/O.
+pub mod sound;
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+pub use sound::Sound;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Game {

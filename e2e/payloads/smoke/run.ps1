@@ -1,6 +1,8 @@
 # Smoke: the Dashboard starts on a fake Steam library and draws Home, the virtual pad moves focus, A launches a game
 # through the Launch screen, the Guide button opens the Guide over the game and closes it, and Home comes back when the
 # game ends. The game is the stand-in, started by the stand-in Steam (lib\E2E.psm1, Initialize-FakeSteam).
+# The sounds are tones `standin make-tones` writes under the console's sounds' names: the Dashboard is pointed at them
+# with --media and says what it plays with --log-sounds. Whether anything is heard is not something this can tell.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
@@ -22,8 +24,14 @@ try {
     $game = $recent[$moves]
     if (-not $game -or -not $game.installed) { throw "The Recent row's game $moves to the right isn't an installed one" }
 
+    # Tones for the sounds.
+    $media = Join-Path $Out 'media'
+    $toned = Start-Process (Join-Path $Payload 'standin.exe') -ArgumentList 'make-tones', "`"$media`"" -Wait -PassThru
+    if ($toned.ExitCode -ne 0) { throw "standin make-tones exited with $($toned.ExitCode)" }
+    $tones = @(Get-ChildItem $media -Filter *.wav).Count
+
     # Home, first frame.
-    $dashboard = Start-Dashboard
+    $dashboard = Start-Dashboard @('--media', "`"$media`"", '--log-sounds')
     $first = Wait-DashboardLog 'first frame presented' 60
     $adapter = Wait-DashboardLog '^adapter:' 1
     Say "adapter line: $(if ($adapter) { $adapter } else { 'none' })"
@@ -33,6 +41,9 @@ try {
     if ($first -match 'first frame presented at (\d+) ms') { Say "first frame presented at $($Matches[1]) ms since process start" }
     else { $failures += "the first frame line has no time: $first" }
     if (-not $adapter) { $failures += 'no adapter line in the log' }
+    $sounds = Wait-DashboardLog '^audio: \d+ sounds from ' 1
+    Say "sounds line: $(if ($sounds) { $sounds } else { 'none' })"
+    if ($tones -lt 1 -or $sounds -notmatch "^audio: $tones sounds from ") { $failures += "the Dashboard did not load the $tones tones: $sounds" }
     if ($steam -notmatch "^steam: $(@($library.games).Count) games ") { $failures += "the Dashboard did not read the fake Steam's $(@($library.games).Count) games: $steam" }
     # Art decodes after the first frame.
     Start-Sleep -Seconds 3
@@ -52,11 +63,22 @@ try {
     Start-Sleep -Milliseconds 600
     Save-Screen 'home-moved'
     Say "moved Right $moves times, to $($game.name)"
+    # The first sound starts the device; every move that landed on another tile is the move sound, once.
+    $device = Wait-DashboardLog '^audio: (device ".*" started|no sound)' 5
+    Say "sound device: $(if ($device) { $device } else { 'no line' })"
+    if ($device -notmatch '^audio: device ".*" started') { $failures += "no sound device was started: $device" }
+    $moved = @(Get-DashboardLog | Where-Object { $_ -eq 'audio: played navigation.wav' }).Count
+    Say "move sounds played: $moved"
+    # Down from the profile, then along the row.
+    if ($moved -ne $moves + 1) { $failures += "$moved move sounds for $($moves + 1) moves" }
 
     # A: the Launch screen, then the game.
     Push-Button A
     $up = Wait-DashboardLog 'Launch screen up' 10
     Say "after A: $(if ($up) { $up } else { 'no Launch screen up line' })"
+    $selected = Wait-DashboardLog '^audio: played activation\.wav$' 5
+    Say "select sound: $(if ($selected) { $selected } else { 'none' })"
+    if (-not $selected) { $failures += 'A played no select sound' }
     if (-not $up) { throw "A did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     if ($up -notmatch [regex]::Escape("launch: $($game.name) ($($game.appid))")) { $failures += "launched something other than $($game.name): $up" }
     Start-Sleep -Milliseconds 500

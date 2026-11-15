@@ -1,5 +1,6 @@
 //! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG.
 mod offscreen;
+mod sounds;
 mod store;
 mod window;
 
@@ -25,6 +26,10 @@ pub struct Args {
     windowed: bool,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
     clock: Option<String>,
+    /// The folder the sounds are in, in place of the data folder's and the Bundle's.
+    media: Option<PathBuf>,
+    /// Every sound played is a line in the log.
+    log_sounds: bool,
 }
 
 impl Args {
@@ -41,6 +46,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 }
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
+                 [--media <dir>] [--log-sounds]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>]";
@@ -86,6 +92,8 @@ fn parse_args() -> Result<Args, String> {
             "--bench" => args.bench = true,
             "--windowed" => args.windowed = true,
             "--clock" => args.clock = Some(value()?),
+            "--media" => args.media = Some(value()?.into()),
+            "--log-sounds" => args.log_sounds = true,
             _ => return Err(format!("unknown argument {arg}")),
         }
     }

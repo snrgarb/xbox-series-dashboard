@@ -154,6 +154,11 @@ impl Store {
         self.snapshot()
     }
 
+    /// A setting as the database has it; none with no database, or when it has never been set.
+    pub fn setting(&self, key: &str) -> Option<String> {
+        self.database.as_ref()?.setting(key).map_err(|e| eprintln!("library: {e:#}")).ok()?
+    }
+
     fn snapshot(&self) -> Option<Library> {
         self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()
     }

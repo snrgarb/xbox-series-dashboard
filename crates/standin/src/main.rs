@@ -3,6 +3,9 @@
 //!   standin make-steam <dir> [--json <file>]
 //!       Writes a fake Steam install at <dir> (`source_steam::fixture`), with a copy of this program as `game.exe` in
 //!       every installed game's folder, reads it back, and with --json writes the Library it read there.
+//!   standin make-tones <dir>
+//!       Writes a short tone into <dir> under each of the names the Dashboard's sounds have in the Bundle, for
+//!       `dashboard --media <dir>`: the console's own sounds are in no repository and on no test machine.
 //!   standin game [--title <t>] [--splash-ms <n>] [--seconds <n>]
 //!       The stand-in game: a borderless, full-screen, dark-blue window titled <t> ("Stand-in game"). It closes when
 //!       asked to, on Esc, and after <seconds> (600) in case a test leaves it behind. With --splash-ms, a small window
@@ -27,6 +30,7 @@ use std::path::{Path, PathBuf};
 use source_steam::fixture::{self, Fixture};
 
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>]
+       standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>]
        standin steam-url steam://rungameid/<appid>";
 
@@ -155,6 +159,23 @@ fn run(args: &[String]) -> i32 {
                 }
             }
         }
+        Some("make-tones") => {
+            let [dir] = &args[1..] else {
+                note(USAGE);
+                return 2;
+            };
+            let names = model::Sound::all_files();
+            match audio::tones::write(Path::new(dir), &names) {
+                Ok(()) => {
+                    note(&format!("make-tones: {} tones in {dir}", names.len()));
+                    0
+                }
+                Err(e) => {
+                    note(&format!("make-tones: {dir}: {e}"));
+                    1
+                }
+            }
+        }
         Some("game") => parsed_game(&args[1..]),
         Some("steam-url") => match args.get(1).and_then(|url| appid_of(url)) {
             Some(appid) => steam_url(appid),
@@ -209,6 +230,18 @@ mod tests {
         assert!(GameArgs::parse(&strings(&["--title"])).is_err());
         assert!(GameArgs::parse(&strings(&["--seconds", "soon"])).is_err());
         assert!(GameArgs::parse(&strings(&["--fullscreen"])).is_err());
+    }
+
+    #[test]
+    fn make_tones_writes_a_sound_for_every_file_the_dashboard_plays() {
+        let dir = tempfile::tempdir().unwrap();
+        let tones = dir.path().join("tones");
+        assert_eq!(run(&strings(&["make-tones", tones.to_str().unwrap()])), 0);
+        for name in model::Sound::all_files() {
+            let clip = audio::wav::decode(&std::fs::read(tones.join(name)).unwrap()).unwrap();
+            assert!(clip.seconds() > 0.1 && clip.seconds() < 0.5, "{name} is {} s", clip.seconds());
+        }
+        assert_eq!(run(&strings(&["make-tones"])), 2);
     }
 
     #[test]

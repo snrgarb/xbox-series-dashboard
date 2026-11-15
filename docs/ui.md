@@ -19,6 +19,7 @@ The Dashboard is a fixed set of 10-foot screens steered by a pad. Its navigation
 | `screens` | The screens and the `Dashboard` core that owns them. The theme's colours, type and measures (`theme`). |
 | `input` | The pad through XInput, turned into `Press`es (with direction repeat). |
 | `shell` | Windows itself. |
+| `audio` | Short sounds: WAV files decoded once, mixed on a thread of its own, played through WASAPI. Silent anywhere but Windows. |
 | `app` | The window and the wiring. |
 
 ## Coordinates
@@ -75,9 +76,15 @@ A held direction repeats (`Press::repeat`); a screen ignores a repeat for anythi
 
 `Dashboard` holds the screens and decides who gets a press, top down: the Guide if open, nothing while a Launch screen is up, else the page. It draws bottom up: the page, the Launch screen, the Guide, each on its own layer. As pages arrive in M3 the page becomes a stack (`Vec` of page screens, the top one taking input, each keeping its state while covered); the rule is the same.
 
-A press can ask the shell for something, returned as an `Effect` (`Launch(game)`, `QuitGame`, `GuideClosed`, `Exit`) that the window carries out; the shell reports back through methods (`launch_started`, `game_booted`, `game_ended`). The core never calls Windows, so the same core runs under a test.
+A press can ask the shell for something, returned as an `Effect` (`Launch(game)`, `QuitGame`, `GuideClosed`, `Exit`, `Sound(sound)`) that the window carries out; the shell reports back through methods (`launch_started`, `game_booted`, `game_ended`). The core never calls Windows, so the same core runs under a test.
 
 The games the screens show are a **snapshot** of the library database (`model::Library`, read by the `library` crate): the core never sees the database. When the database changes (Steam read in the background after the first frame, a Play session ending) the window hands the core a new snapshot with `set_library`, which keeps focus on the game it was on. A game is known across snapshots by its `id`; its place in the list is good for one snapshot only.
+
+## Sounds
+
+A sound is an effect like any other: `Effect::Sound(Sound::Move)`. No screen asks for one. `Dashboard::press` decides it for all of them, by what the press changed: focus somewhere new is the move sound, A that chose something the activation sound, the Guide opening its own. A move that went nowhere, B and the Guide closing are silent, as in the Bundle (`docs/spec/home.md`, section 9). A screen gets its sounds right by getting its focus right. The sound comes first among a press's effects.
+
+`model::Sound` is the one table of which sound is which of the Bundle's files. The files are Microsoft's and never in this repository (#10): the window looks for them at start (`crates/app/src/sounds.rs` says where, in what order), and a sound with no file is silent. Offscreen modes and tests never take the effects to a device, so they play nothing. Volume and mute are the settings `sound.volume` (0 to 1) and `sound.muted` (`true`) in the library database.
 
 The Guide, Toasts and the Launch screen will be drawn into their own windows (the Overlay, M2) by the same `Ui` and the same core; offscreen, everything is composed into one frame.
 

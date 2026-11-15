@@ -54,7 +54,7 @@ Say so in the milestone report rather than faking it:
 - **Discord (M6)** needs the user's Discord application's Client ID, and a signed-in Discord to test against.
 - **Xbox achievements and Game Pass sign-in** need the user's account.
 - **Code signing, the Xbox mode home-app package's trusted certificate, and a public release (M7)** need the user. Build and test everything up to the point of publishing; do not publish, and do not make this repository public.
-- **Microsoft's sounds and boot videos** (#10): until that is decided, build the features against placeholder files.
+- **Microsoft's sounds and boot videos** (#10, decided): they never come into this repository. They are read at run time from a media folder, and tests use generated tones (`cargo run -p audio --example make-tones <dir>`).
 
 ## Things the proof of concept taught
 
