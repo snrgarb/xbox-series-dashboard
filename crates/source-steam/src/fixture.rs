@@ -163,6 +163,38 @@ impl Fixture {
             collections: Some(collections),
         }
     }
+
+    /// `standard` and twelve more games after it, by appid 9100150, 9100160, ...: installed, never played, every
+    /// third with no art. Twenty installed games in all, which is four rows of My games & apps' grid: enough for it
+    /// to scroll. Nothing `standard` says of its own games changes.
+    pub fn full_shelf() -> Fixture {
+        const MORE: [&str; 12] = [
+            "Oakum & Tar",
+            "Pale Meridian Club",
+            "Quarry Lights",
+            "Rookwood Signal",
+            "Sable Ferry",
+            "Tin Lantern Derby",
+            "Umber Coast",
+            "Vesper Line",
+            "Wren and the Long Winter",
+            "Yarrow Field",
+            "Zenith Yard",
+            "Zinc Harbour",
+        ];
+        let mut spec = Fixture::standard();
+        let after = spec.games.len();
+        spec.games.extend(MORE.iter().enumerate().map(|(i, name)| FixtureGame {
+            appid: 9_100_010 + (after + i) as u32 * 10,
+            name: name.to_string(),
+            install_dir: name.replace(" & ", " and "),
+            installed: true,
+            last_played: 0,
+            playtime_minutes: 0,
+            art: if i % 3 == 2 { Art::None } else { Art::Flat },
+        }));
+        spec
+    }
 }
 
 /// Writes `spec` as a Steam install at `root`, making the folder. Files already there are written over.
@@ -588,6 +620,23 @@ mod tests {
         }
         let played = spec.games.iter().filter(|g| g.last_played > 0);
         assert!(played.clone().count() == 6 && played.map(|g| g.last_played).is_sorted_by(|a, b| a > b));
+    }
+
+    #[test]
+    fn the_full_shelf_is_the_standard_fixture_and_twelve_installed_games_more() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let (standard, mut spec) = (Fixture::standard(), Fixture::full_shelf());
+        spec.games.iter_mut().for_each(|g| g.art = Art::None);
+        write(&root, &spec).unwrap();
+        let library = load(&root).unwrap();
+
+        let names: Vec<&str> = library.games.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, spec.games.iter().map(|g| g.name.as_str()).collect::<Vec<_>>());
+        assert_eq!(names[..standard.games.len()], standard.games.iter().map(|g| g.name.as_str()).collect::<Vec<_>>());
+        assert_eq!(library.games.len(), 26);
+        assert_eq!(library.games.iter().filter(|g| g.installed).count(), 20);
+        assert_eq!(library.recent(8).len(), 6, "the games added were never played");
     }
 
     #[test]

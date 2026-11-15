@@ -736,6 +736,8 @@ A Playnite filter preset is a named, saved filter (any of Playnite's filter crit
 
 ## 15. Open questions
 
+Questions 1 to 7, 9, 10 and 12 are answered in section 16; 8, 11 and 13 are still open.
+
 1. **Intended or measured x?** The grid's tiles measure 526..1744 (2 in from the Sort row's 524..1746) and Play history's rows 529..1746, where the source's comments intend both flush at 524..1746. Build the artefacts as the pictures show them ("exactly as the theme"), or the alignment the author intended? (Tile width follows: 231.6 measured, 232.4 intended.)
 2. **Grid scrolling.** Playnite's panel decides how far the grid moves when focus goes to a row out of view, and animates only if the user's Playnite setting says so; none of it is in the repo. Proposal to confirm: scroll by whole rows (247.14) so the focused row rests in one of the three row slots, with the page's own slide (home.md 7.3: 300 ms cubic ease-out, instant under Reduce motion). On Games, does the quarter row at the foot stay as the hint that more follows?
 3. **Play history scrolling.** WPF moves the least needed and does not animate. Same question: animate it as the grid, and where does a row rest (is the 80 end padding kept clear at the foot while scrolling, or only after the last row)?
@@ -749,3 +751,26 @@ A Playnite filter preset is a named, saved filter (any of Playnite's filter crit
 11. **Tabs with nothing to show.** If the replacement for presets yields no tabs, is the strip's row kept empty (Sort row stays at y 262) or does the content move up? And what does focus on the tabs look like, given that the Bundle shows nothing for it?
 12. **The Games count's wording** ("1 games") and whether the port's own progress text may overlap it (section 11.3).
 13. **Sound on the pad's A** for the page's buttons, and on tab switches: unverified in the Bundle; one rule is needed for the port (shared with home.md's open point on A).
+
+---
+
+## 16. Decided in #52 (the shell, Games, Play history and Manage)
+
+What the port does where section 15 asked, each settled as this document recommends or, failing that, as the Bundle does it. Questions 8 and 11 are Full library's (#53) and 13 is shared with Home's; they stay open.
+
+1. **Measured x (question 1).** The artefacts are built as the pictures show them: the grid's tiles at x 526 + 246.6 a column, 231.6 wide; Play history's row backs 529..1746 with the row's item 525..1750. Not the flush 524..1746 the source's comments intend.
+2. **Grid scrolling (question 2, and the issue).** The grid moves by whole rows of 247.14, the least that brings the focused row into one of its three whole slots, so the focused row is whole on screen and the next row shows its top: the quarter row at the foot stays. It slides with the page's own slide (300 ms, cubic ease-out) and is simply there under Reduce motion. With focus on SEE FULL LIBRARY the grid is at its end, "Looking for more?" and the button under its last row.
+3. **Play history scrolling (question 3).** As the Bundle: the least that brings the focused row in, not animated. A section's first row brings its header in with it, and the last row brings the 80 of end padding under it; a row in the middle rests against the viewport's edge with nothing kept clear. The viewport runs to the foot of the screen.
+4. **A (question 4, and the issue).** A on a grid tile opens the Game hub at once: no double tap there. Play history's rows keep the Bundle's rule: A opens the Game hub and a second A within 300 ms plays the game instead. Until the Game hub is there (#51) the first A does nothing and the second still plays.
+5. **Edges (question 5, and the issue).** Every edge stops and nothing wraps. Right at a row's last tile and Up from the first row do nothing; Left from the first column is the nav; Down onto a shorter last row goes to its last tile; Down from the last row is SEE FULL LIBRARY, and Up from there is the last row's first tile. In Play history Up from the first row and Down from the last do nothing, Right nothing, Left the nav.
+6. **Manage (question 6).** Manage is in the nav in M3 with its one box, Queue, which takes focus and does nothing on A until M4 brings Manage Queue. Home's Downloads tile opens the page on Manage with focus on the box.
+7. **Play history's second line (question 7).** The date, two spaces, a bullet, two spaces, the platform, as pictured. The platform is "PC (Windows)" for any game a source found, since every source the port has is a Windows store; a game with no source keeps the bullet alone, as the Bundle's games with no platform do.
+8. **The date and the week.** The date is written M/D/YYYY and the week starts on Sunday, as in the Bundle's pictures (US English). The user's own regional settings are not read yet: `my_games::history::short_date` and `library::history::WEEK_STARTS` are where they go.
+9. **What Play history lists.** Every game that is not hidden and has been played: the later of the time its source says it was last played and the newest of its Play sessions, newest first. Sections are worked out when the library is read, so a page left open over midnight keeps yesterday's sections until the library is next read, as the filters' day counts do.
+10. **Storage ring (question 9).** M4, with the current download's block above it: nothing is drawn at the nav's foot in M3 (`my_games::nav::foot`).
+11. **Empty grid (question 10).** Playnite's line as the Bundle shows it: "No games found", 32 px, white, centred in the grid's box at (1135, 558.5). Play history's and Apps' empty texts are section 6.5's and section 8's.
+12. **Apps.** The item is always in the nav with a count of 0 until M4, and its pane says "Apps you add show up here." The Bundle's text names Playnite's Software tools, which the port does not have.
+13. **A tile with no cover.** Its game's name, centred on the tile's dark fill as Home's tile writes it, and gone under the title band while the tile has focus. (In the Bundle Playnite draws its own default cover there.)
+14. **The count (question 12).** "N games" for any N, one included, as the Bundle writes it. The progress text of section 11.3 is not drawn yet (`my_games::progress`).
+15. **Left out on purpose.** The fly-in's two held frames, which work around WPF's layout pass, and the playing mark's path: the mark is the glyph U+F5B0.
+16. **What the focus log says.** `MyGames: <item up>: <where>`: `Games: Tile(3)`, `Games: SeeFullLibrary`, `PlayHistory: Row(2)`, `Manage: Queue`, and `Games: Nav(Apps)` while focus is on the nav, where the item up is the one showing, which trails focus by the settle wait of section 4.2. Full library until #53: `FullLibrary { filter: Some(7) }: Nav(FullLibrary)`.

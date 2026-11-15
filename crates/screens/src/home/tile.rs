@@ -31,12 +31,17 @@ pub fn source(_game: &Game) -> Option<Source> {
 /// own logos, which are not this project's to ship: until they are loaded from somewhere they may be, a plain
 /// white disc stands in for the mark. This is the one place to draw the real thing.
 pub fn source_badge(ui: &mut Ui, tile: Rect, source: Source) {
+    source_badge_at(ui, tile, source, S);
+}
+
+/// The source's badge at another scale than the rows': 1 on My games & apps, where nothing is scaled.
+pub fn source_badge_at(ui: &mut Ui, tile: Rect, source: Source, scale: f32) {
     let Source::Steam = source;
-    let side = 20.0 * S;
-    let mark = Rect::new(tile.x + 10.0 * S, tile.bottom() - 10.0 * S - side, side, side);
+    let side = 20.0 * scale;
+    let mark = Rect::new(tile.x + 10.0 * scale, tile.bottom() - 10.0 * scale - side, side, side);
     // The theme's shadow: 0.8 black, blurred by 6, straight under the mark.
-    let shadow = mark.grow(3.0 * S);
-    ui.glow(shadow, Color::BLACK.fade(0.8), 999.0, shadow.w / 2.0, 6.0 * S);
+    let shadow = mark.grow(3.0 * scale);
+    ui.glow(shadow, Color::BLACK.fade(0.8), 999.0, shadow.w / 2.0, 6.0 * scale);
     ui.fill(mark, Color::WHITE, 999.0);
 }
 

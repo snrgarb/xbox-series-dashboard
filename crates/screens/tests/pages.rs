@@ -1,8 +1,7 @@
 //! The pages over Home: every way into one, and where B on it leaves focus (docs/spec/home.md, 7.4;
-//! docs/spec/my-games.md, 3; docs/spec/search.md, 4; docs/spec/settings.md, 8). My games & apps and Search are
-//! stand-ins that open and close and no more, which is all these tests press; what Settings does once it is open is
-//! tests/settings.rs. No picture, so no GPU; what the hint bar looks like is
-//! tests/shots.rs.
+//! docs/spec/my-games.md, 3; docs/spec/search.md, 4; docs/spec/settings.md, 8). Search is a stand-in that opens and
+//! closes and no more; what My games & apps does once it is open is tests/my_games.rs, and Settings,
+//! tests/settings.rs. No picture, so no GPU; what the hint bar looks like is tests/shots.rs.
 use model::Library;
 use screens::home::{rest, Focus, TopButton};
 use screens::{hint_bar, Dashboard, Effect, Sound};
@@ -55,8 +54,8 @@ fn there_and_back(dashboard: &mut Dashboard, open: Button, line: &str, back: Foc
     assert_eq!(dashboard.pages_up(), 1);
     assert_eq!(dashboard.home_focus(), before, "Home keeps its focus while it is covered");
     // The page has the pad: nothing reaches Home under it.
-    press(dashboard, &[Down, Right, Up, Left, A, Y]);
-    assert_eq!((dashboard.focus_line().as_str(), dashboard.home_focus()), (line, before));
+    press(dashboard, &[Down, Right, Up, Left, A]);
+    assert_eq!((dashboard.pages_up(), dashboard.home_focus()), (1, before));
     press(dashboard, &[B]);
     assert_eq!(dashboard.page(), None, "B closes the page");
     assert_eq!(dashboard.home_focus(), back);
@@ -89,7 +88,7 @@ fn the_top_bars_my_games_button_opens_games_and_b_comes_back_on_the_recent_row()
     press(&mut home, &[Right, Right, Up]);
     assert_eq!(home.home_focus(), Focus::TopBar(TopButton::MyGames));
     // Nothing gives the top bar focus back: the Recent row takes it, on the game last focused.
-    there_and_back(&mut home, A, "MyGames: Games", Focus::Recent(2));
+    there_and_back(&mut home, A, "MyGames: Games: Tile(0)", Focus::Recent(2));
 }
 
 #[test]
@@ -140,7 +139,7 @@ fn the_play_history_tile_opens_play_history_and_b_comes_back_on_the_game_before_
     let mut home = home();
     press(&mut home, &[Right, Right, Right, Right, Right, Right, Right]);
     assert_eq!(home.home_focus(), Focus::Recent(7));
-    there_and_back(&mut home, A, "MyGames: PlayHistory", Focus::Recent(6));
+    there_and_back(&mut home, A, "MyGames: PlayHistory: Row(0)", Focus::Recent(6));
 }
 
 #[test]
@@ -156,7 +155,7 @@ fn see_all_opens_full_library_on_its_groups_filter_and_b_comes_back_on_see_all_a
         let see_all = Focus::Group { group, card: 6 };
         assert_eq!(home.home_focus(), see_all);
         let at_rest = rests(&home);
-        let line = format!("MyGames: FullLibrary {{ filter: Some({}) }}", filter.id);
+        let line = format!("MyGames: FullLibrary {{ filter: Some({}) }}: Nav(FullLibrary)", filter.id);
         there_and_back(&mut home, A, &line, see_all);
         assert_eq!(rests(&home), at_rest, "Home is still at the Group's rest");
         // B again is the Group's own: back to the Recent row.
@@ -177,7 +176,7 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[Right]);
     settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(1));
     press(&mut home, &[Right, Right]);
-    there_and_back(&mut home, A, "MyGames: Queue", Focus::Wide(3));
+    there_and_back(&mut home, A, "MyGames: Manage: Queue", Focus::Wide(3));
     assert_eq!(rests(&home), at_rest);
 
     // Achievements is the Guide's, as the profile is: no page.
@@ -214,7 +213,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     press(&mut home, &[Down, A]);
     assert!(!home.guide_open());
     assert_eq!(asked(&mut home), [Effect::GuideClosed]);
-    assert_eq!(home.focus_line(), "MyGames: Games");
+    assert_eq!(home.focus_line(), "MyGames: Games: Tile(0)");
     press(&mut home, &[B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
 
@@ -242,7 +241,7 @@ fn a_page_opened_from_the_guide_takes_the_place_of_the_one_that_was_up() {
     assert_eq!(home.focus_line(), "Settings: Rail: Theme settings");
     // The Guide opens over the page, and its My games & apps closes Settings for it.
     press(&mut home, &[Guide, Down, A]);
-    assert_eq!((home.focus_line().as_str(), home.pages_up()), ("MyGames: Games", 1));
+    assert_eq!((home.focus_line().as_str(), home.pages_up()), ("MyGames: Games: Tile(0)", 1));
     // B is Home, on its rows: the Settings button that opened the page before is not remembered.
     press(&mut home, &[B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(0)));

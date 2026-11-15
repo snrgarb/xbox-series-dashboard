@@ -1,8 +1,9 @@
 //! Stand-ins for what a test machine doesn't have: Steam, and a game.
 //!
-//!   standin make-steam <dir> [--json <file>]
+//!   standin make-steam <dir> [--json <file>] [--full-shelf]
 //!       Writes a fake Steam install at <dir> (`source_steam::fixture`), with a copy of this program as `game.exe` in
-//!       every installed game's folder, reads it back, and with --json writes the Library it read there.
+//!       every installed game's folder, reads it back, and with --json writes the Library it read there. With
+//!       --full-shelf it is `Fixture::full_shelf`, twenty installed games, where it is otherwise `Fixture::standard`.
 //!   standin make-tones <dir>
 //!       Writes a short tone into <dir> under each of the names the Dashboard's sounds have in the Bundle, for
 //!       `dashboard --media <dir>`: the console's own sounds are in no repository and on no test machine.
@@ -32,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use source_steam::fixture::{self, Fixture};
 
-const USAGE: &str = "usage: standin make-steam <dir> [--json <file>]
+const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>]
        standin steam-url steam://rungameid/<appid>";
@@ -141,7 +142,9 @@ fn run(args: &[String]) -> i32 {
     };
     match args.first().map(String::as_str) {
         Some("make-steam") => {
-            let (dir, json) = match &args[1..] {
+            let full_shelf = args.last().is_some_and(|last| last == "--full-shelf");
+            let spec = if full_shelf { Fixture::full_shelf() } else { Fixture::standard() };
+            let (dir, json) = match &args[1..args.len() - usize::from(full_shelf)] {
                 [dir] => (Path::new(dir), None),
                 [dir, flag, json] if flag == "--json" => (Path::new(dir), Some(Path::new(json))),
                 _ => {
@@ -149,7 +152,7 @@ fn run(args: &[String]) -> i32 {
                     return 2;
                 }
             };
-            match make_steam(dir, json, Fixture::standard()) {
+            match make_steam(dir, json, spec) {
                 Ok(()) => 0,
                 Err(e) => {
                     note(&format!("make-steam: {e}"));

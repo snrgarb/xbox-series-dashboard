@@ -65,6 +65,62 @@ pub struct PlaySession {
     pub ended: Option<u64>,
 }
 
+/// How long ago a game was last played, by the calendar where the user is: the sections of Play history, in their
+/// order (docs/spec/my-games.md, 6.1). The first that holds is the game's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ago {
+    Today,
+    Yesterday,
+    /// Since the week's first day.
+    ThisWeek,
+    LastWeek,
+    /// Since the 1st.
+    ThisMonth,
+    LastMonth,
+    ThisYear,
+    Older,
+}
+
+impl Ago {
+    /// The section's title.
+    pub fn title(self) -> &'static str {
+        match self {
+            Ago::Today => "Today",
+            Ago::Yesterday => "Yesterday",
+            Ago::ThisWeek => "This week",
+            Ago::LastWeek => "Last week",
+            Ago::ThisMonth => "This month",
+            Ago::LastMonth => "Last month",
+            Ago::ThisYear => "This year",
+            Ago::Older => "Older",
+        }
+    }
+}
+
+/// A day of the calendar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Day {
+    pub year: i32,
+    /// 1 to 12.
+    pub month: u8,
+    /// 1 to 31.
+    pub day: u8,
+}
+
+/// A row of Play history: a game that has been played, and when it last was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryRow {
+    /// The game's id in the library database, found with `Library::game`.
+    pub game: i64,
+    /// Unix seconds: the latest of what its source says and the Play sessions seen here.
+    pub at: u64,
+    /// The day that was, where the user is.
+    pub day: Day,
+    /// The section it is in, as of when the snapshot was taken.
+    pub ago: Ago,
+}
+
 /// Who made a filter, which says what of it can change (docs/spec/filters.md, section 3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -184,6 +240,10 @@ pub struct Library {
     /// database has any: a source reads none.
     #[serde(default)]
     pub filters: Vec<Filter>,
+    /// Play history: every game that has been played and is not hidden, installed or not, the last played first.
+    /// Only a snapshot of the library database has it.
+    #[serde(default)]
+    pub history: Vec<HistoryRow>,
     /// The store's collections as a source has just read them, for the database to take in. `None` when they
     /// could not be read, which leaves the database's as they are; and always in a snapshot.
     #[serde(default)]
