@@ -1,12 +1,12 @@
-# Research: the Overlay window (draft)
+# Research: the Overlay window
 
-Ticket: [#2](https://github.com/snrgarb/xbox-series-dashboard/issues/2). Status: **draft**. The spike is written and cross-compiles; it has not yet run on Windows. Everything below is from documentation and from reading wgpu 30.0.2, except where a table says "to be measured". Nothing here is a finding until the tables at the end are filled in.
+Ticket: [#2](https://github.com/snrgarb/xbox-series-dashboard/issues/2). Status: **answered on the VM** (win11-e2e, WARP, 2026-11-15, `e2e/run.sh overlay`); the measures only a real GPU and a real game can give are still to be taken on the TV PC, and are listed at the end.
 
 **Question.** Can a wgpu DX12 surface present through DirectComposition with premultiplied alpha on a topmost window that (a) dims a running game and draws translucent panels over it, (b) takes the keyboard when it is the Guide, (c) is click-through and never activates when it is a Toast, the Launch screen or the Idle dim, and (d) costs nothing while hidden?
 
-## Expected answer
+## Answer
 
-Yes, with stock wgpu and no patches, for games that run in a window, borderless, or under Fullscreen Optimizations. Not for true exclusive fullscreen, which no separate window can draw over. One thing needs a decision before the real Overlay is built: which space the renderer blends in (see "Premultiplied alpha and the sRGB target").
+Yes, with stock wgpu and no patches: on the VM the composition swap chain is created (on WARP too), the Overlay comes out translucent over the window behind exactly as predicted, the `guide` mode takes the keyboard and gives it back, and the `passive` mode is never activated. This holds for games that run in a window, borderless, or under Fullscreen Optimizations. Not for true exclusive fullscreen, which no separate window can draw over (to be seen on the TV PC). The blending question is settled: the renderer now always blends encoded values on a non-sRGB target, as WPF does, and the DWM composes the stored bytes as they are, so the two agree exactly.
 
 ## The spike
 
@@ -23,7 +23,7 @@ It makes one raw Win32 window over the primary monitor, puts a wgpu surface on i
 | `--selfcheck` | Reads three screen pixels through GDI before the first show and 500 ms after the first frame, and logs them beside what composing the back buffer over the "before" colour predicts. |
 | `--visual` | Fallback: the spike makes the DirectComposition device, target and visual and passes wgpu `SurfaceTargetUnsafe::CompositionVisual`. |
 | `--hwnd-swapchain` | Control: an ordinary swap chain on the window. Expected to be opaque. |
-| `--gamma` | A `Bgra8Unorm` target with colours blended as encoded values, in place of the sRGB target. |
+| `--gamma` | Does nothing now: the renderer always draws to a plain 8-bit target with colours blended as encoded values. |
 | `--no-layered` | Fallback: `passive` without `WS_EX_LAYERED`. |
 | `--no-alt` | Control: `guide` without the Alt tap. Expected to fail to take the foreground from another program. |
 
@@ -70,7 +70,7 @@ Worked out in `spikes/overlay/src/scene.rs` and checked by a test that draws the
 - **`--gamma`** draws to `Bgra8Unorm` with colours as encoded values. The stored colour is then exactly `encoded × a`. This is also how WPF blends, so the Bundle's alpha values would mean what they mean there (the handover's "black overlays darken far less" note).
 - If the DWM composes in linear light instead (plausible with HDR or Advanced Colour on, not documented for SDR), the sRGB target is the exact one. `--selfcheck` logs both predictions beside the screen's colour, so a run over a mid-grey or coloured background says which the DWM did. Over black or white the panel point cannot tell them apart; the dim point can over anything but black.
 
-**Open decision for M2:** blend the Overlay in encoded space (a non-sRGB target), or keep linear and accept the error on light translucent colours.
+**Decided:** the whole renderer blends in encoded space on a non-sRGB target (`docs/ui.md`), so this spike has only that path left. On the VM the DWM composed the stored bytes as they are: every translucent point matched "as stored" and not "linear".
 
 ### Over games
 
@@ -121,25 +121,29 @@ The real Overlay still has to wake for the Guide button (the proof of concept po
 
 | Check | Command | Result |
 |---|---|---|
-| Adapter and capabilities logged; `PreMultiplied` offered | any | |
-| Swap chain for composition is created on WARP | any | |
-| `guide`: 3 of 3 `selfcheck` points; which composition (as stored / linear) | `--mode guide --selfcheck --seconds 6` | |
-| `guide`: took the foreground; gave it back on hide | `--mode guide --cycle 2` | |
-| `guide --no-alt`: foreground refused | `--mode guide --no-alt --seconds 4` | |
-| `passive`: 3 of 3 `selfcheck` points | `--mode passive --selfcheck --seconds 6` | |
-| `passive`: foreground unchanged, 0 activations, a click reaches the window behind | `--mode passive --seconds 10` | |
-| `passive --no-layered`: same checks | `--mode passive --no-layered --selfcheck --seconds 6` | |
-| `--visual`: same as default | `--mode guide --visual --selfcheck --seconds 6` | |
-| `--hwnd-swapchain`: opaque, only `Opaque` offered | `--mode guide --hwnd-swapchain --selfcheck --seconds 6` | |
-| `--gamma`: panel point matches "as stored" | `--mode guide --gamma --selfcheck --seconds 6` | |
-| Hidden: 0 frames, wake-ups, processor time per hidden stretch | `--mode passive --cycle 3` | |
-| Screenshot from the harness shows the dim, the panel and the banner over the desktop | | |
+| Adapter and capabilities logged; `PreMultiplied` offered | any | Microsoft Basic Render Driver (DX12, CPU). Formats `Bgra8UnormSrgb, Rgba8UnormSrgb, Bgra8Unorm, Rgba8Unorm, Rgb10a2Unorm, Rgba16Float`; alpha modes `Auto, Inherit, Opaque, PostMultiplied, PreMultiplied`; present modes `Mailbox, Fifo, Immediate`. |
+| Swap chain for composition is created on WARP | any | Yes: configured 1920x1080 `Bgra8Unorm`, `PreMultiplied`, `Fifo`; first frame at 525 ms. |
+| `guide`: 3 of 3 `selfcheck` points; which composition (as stored / linear) | `--mode guide --selfcheck --seconds 6` | 3 of 3. Over Notepad's `[249,249,249]`: panel `[39,39,39]`, dim `[100,100,100]`, banner `[16,124,16]`: **as stored** (linear light would be 73 and 166). |
+| `guide`: took the foreground; gave it back on hide | `--mode guide --cycle 2` | Yes both times: `SetForegroundWindow returned true`, and Notepad had the foreground again after each hide. |
+| `guide --no-alt`: foreground refused | `--mode guide --no-alt --seconds 4` | Refused as expected: `SetForegroundWindow returned false`, Notepad kept the foreground. The Alt tap is what makes it work. |
+| `passive`: 3 of 3 `selfcheck` points | `--mode passive --selfcheck --seconds 6` | 3 of 3, the same colours as `guide`. |
+| `passive`: foreground unchanged, 0 activations, a click reaches the window behind | `--mode passive --seconds 10` | Foreground unchanged and 0 activations in every passive run. The click was not tried (the harness sends no mouse input): TV PC. |
+| `passive --no-layered`: same checks | `--mode passive --no-layered --selfcheck --seconds 6` | The same: 3 of 3, foreground unchanged, 0 activations. `WS_EX_LAYERED` is kept because click-through is documented with it. |
+| `--visual`: same as default | `--mode guide --visual --selfcheck --seconds 6` | The same, 3 of 3. Not needed: wgpu's own visual works. |
+| `--hwnd-swapchain`: opaque, only `Opaque` offered | `--mode guide --hwnd-swapchain --selfcheck --seconds 6` | Opaque as expected: 1 of 3, the dim reads `[0,0,0]` and the panel `[24,24,24]`. The composition swap chain is what gives transparency. |
+| `--gamma`: panel point matches "as stored" | `--mode guide --gamma --selfcheck --seconds 6` | Now the only path, and it matches "as stored" (rows above). |
+| Hidden: 0 frames, wake-ups, processor time per hidden stretch | `--mode passive --cycle 3` | 0 frames and 1 wake-up per 2 s hidden stretch. Processor time was **not** nothing: 0.8 to 1.2 s per 2 s stretch, with the spike's own thread asleep. WARP renders on the processor on its own threads, so this is most likely WARP finishing or idling; it has to be read again on a real GPU before "costs nothing while hidden" is claimed. |
+| Screenshot from the harness shows the dim, the panel and the banner over the desktop | | Yes: `CopyFromScreen` shows Notepad dimmed, the panel translucent and the banner opaque, in both modes. |
+
+Shown, the Overlay drew a frame about every 210 ms on the VM: the wait for a back buffer is the DWM composing 1080p on the processor. That is the VM, not the design.
 
 ### TV PC (real GPU)
 
 | Measure | Result |
 |---|---|
 | Adapter, capabilities, first frame at | |
+| Processor time per hidden stretch (`--mode passive --cycle 3`): near 0? | |
+| `passive`: a mouse click reaches the window behind | |
 | Overlay frame interval and draw/present times while shown (`--cycle 3`) | |
 | Game frame time, Overlay not running (baseline) | |
 | Game frame time, Overlay hidden | |
