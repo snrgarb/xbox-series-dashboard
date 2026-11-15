@@ -57,7 +57,7 @@ impl Open {
         Some(match self {
             Open::MyGames(entry) => Box::new(my_games::MyGames::opened(entry, around)),
             Open::GameHub(entry) => Box::new(game_hub::GameHub::open(entry)),
-            Open::Search => Box::new(search::Search::open()),
+            Open::Search => Box::new(search::Search::open(around.library)),
             Open::Settings(entry) => Box::new(settings::Settings::open(entry)),
             Open::TextEntry(entry) => {
                 let text = under.map(|page| page.entry_text()).unwrap_or_default();
@@ -446,9 +446,11 @@ mod tests {
         // It asks for Search over it, as the Dashboard would open it.
         assert_eq!(press(&mut stack, Button::A), Some(PageAction::Open(Open::Search)));
         stack.open_over(Open::Search, around(&Library::default()));
-        assert_eq!((stack.depth(), focus(&stack)), (2, Some(("Search", "Open".into()))));
-        // Search has the pad: the page under it hears nothing, and is as it was when Search has gone.
+        assert_eq!((stack.depth(), focus(&stack)), (2, Some(("Search", "Key(Q)".into()))));
+        // Search has the pad: the page under it hears nothing, and is as it was when Search has gone. Its first B
+        // puts its keyboard away.
         press(&mut stack, Button::Down);
+        assert_eq!(press(&mut stack, Button::B), None);
         assert_eq!(press(&mut stack, Button::B), Some(PageAction::Close));
         stack.close();
         assert_eq!((stack.depth(), focus(&stack)), (1, Some(("Counter", "3".into()))));
