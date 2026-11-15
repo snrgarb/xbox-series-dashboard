@@ -2,17 +2,22 @@
 //! without reading any store.
 //!
 //! A source (Steam, later the other stores) is read into a `model::Library` and `Database::sync` merges that in:
-//! what the source knows (name, installed, art, its own play history) follows the source, and what is the user's own
-//! (Play sessions, hidden, favourite) is never touched by a sync. A game a source no longer lists is kept, marked
-//! gone, and comes back with everything it had if the source lists it again. The screens are given a snapshot
-//! (`Database::snapshot`, a `model::Library`) and never see the database.
+//! what the source knows (name, installed, art, its own play history, its collections) follows the source, and what
+//! is the user's own (Play sessions, hidden, favourite, which filters show and in what order) is never touched by
+//! a sync. A game a source no longer lists is kept, marked gone, and comes back with everything it had if the
+//! source lists it again. The screens are given a snapshot (`Database::snapshot`, a `model::Library`) and never
+//! see the database.
+//!
+//! The snapshot carries the saved filters, each with the games it picks: Home's Groups and Full library's tabs
+//! (`filters`, and docs/spec/filters.md).
 //!
 //! The schema has a version (`PRAGMA user_version`) and grows by migrations: `MIGRATIONS[n]` takes a database from
 //! version `n` to `n + 1`, and one is never edited once released. What is still to come has its place:
 //! - More sources: a game is keyed by `(source, source_id)`, both text, so each store keeps its own ids.
 //! - Games added by hand (#12): a source of their own, `manual`, with a table beside `games` for the program, its
 //!   arguments and working folder.
-//! - Groups (#8): a table of saved filters, and one of each Steam collection's games, keyed by game id.
+pub mod filters;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -30,6 +35,10 @@ pub const STEAM: &str = "steam";
 
 /// The setting that holds a source's signed-in user is `<source>.user`.
 const USER: &str = "user";
+
+/// `<source>.marks`, set once the source's favourites and hidden games have been taken for the games that were in
+/// the database before it could say which they are.
+const MARKS: &str = "marks";
 
 const MIGRATIONS: &[&str] = &[
     // 1: games, their art, Play sessions and settings.
@@ -73,6 +82,8 @@ const MIGRATIONS: &[&str] = &[
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     ) WITHOUT ROWID;",
+    // 2: a store's collections, and the saved filters.
+    filters::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -149,8 +160,10 @@ impl Database {
     ///   ever go up, so a Play session recorded here is not undone by a source that has not caught up;
     /// - a game the source no longer lists is marked uninstalled and gone.
     ///
-    /// Play sessions, hidden and favourite are the user's and are left as they are. Syncing the same thing twice
-    /// changes nothing the second time.
+    /// Play sessions, hidden and favourite are the user's and are left as they are: what the source says of the two
+    /// marks (Steam's Favourites, its hidden games) is taken only as a game is first seen. The source's
+    /// collections, when it read any (`found.collections`), become the collection filters (`filters`). Syncing the
+    /// same thing twice changes nothing the second time.
     pub fn sync(&mut self, source: &str, found: &Library, now: u64) -> Result<Synced> {
         struct Known {
             id: i64,
@@ -235,8 +248,8 @@ impl Database {
                     tx.execute(
                         "INSERT INTO games
                             (source, source_id, name, sort_name, installed, install_dir, last_played,
-                             playtime_minutes, added)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                             playtime_minutes, added, favourite, hidden)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                         params![
                             source,
                             source_id,
@@ -246,7 +259,9 @@ impl Database {
                             state.install_dir,
                             state.last_played,
                             state.playtime,
-                            now as i64
+                            now as i64,
+                            game.favourite,
+                            game.hidden
                         ],
                     )?;
                     set_art(tx.last_insert_rowid(), &state.art)?;
@@ -293,15 +308,43 @@ impl Database {
             )?,
             None => tx.execute("DELETE FROM settings WHERE key = ?1", [&key])?,
         };
+        if let Some(collections) = &found.collections {
+            filters::sync_collections(&tx, source, collections)?;
+            // The games that were here before the source could say which are favourites or hidden (a database
+            // from before it was asked, or a first sync with no collections file) take its word now, once.
+            let key = format!("{source}.{MARKS}");
+            let taken: Option<String> =
+                tx.query_row("SELECT value FROM settings WHERE key = ?1", [&key], |row| row.get(0)).optional()?;
+            if taken.is_none() {
+                for game in found.games.iter().filter(|g| g.favourite || g.hidden) {
+                    tx.execute(
+                        "UPDATE games SET favourite = MAX(favourite, ?3), hidden = MAX(hidden, ?4)
+                         WHERE source = ?1 AND source_id = ?2",
+                        params![source, game.appid.to_string(), game.favourite, game.hidden],
+                    )?;
+                }
+                tx.execute("INSERT INTO settings (key, value) VALUES (?1, 'taken')", [&key])?;
+            }
+        }
         tx.commit()?;
         Ok(synced)
     }
 
     /// What the screens are given: every game that is neither hidden nor gone, most recently played first and then
-    /// by name, and the user's name.
+    /// by name; the hidden ones apart, in the same order; every filter with its games; and the user's name.
     pub fn snapshot(&self) -> Result<Library> {
-        let user = self.setting(&format!("{STEAM}.{USER}"))?;
-        Ok(Library { user, games: self.games("hidden = 0 AND gone = 0", &[], None)? })
+        self.snapshot_at(now())
+    }
+
+    /// `snapshot`, with the filters that count days counting them back from `now`.
+    pub fn snapshot_at(&self, now: u64) -> Result<Library> {
+        Ok(Library {
+            user: self.setting(&format!("{STEAM}.{USER}"))?,
+            games: self.games("hidden = 0 AND gone = 0", &[], None)?,
+            hidden: self.games("hidden = 1 AND gone = 0", &[], None)?,
+            filters: self.filters_at(now)?,
+            collections: None,
+        })
     }
 
     /// The Recent row: the `n` most recently played games.
@@ -321,7 +364,8 @@ impl Database {
         let mut games = Vec::new();
         let mut place: HashMap<i64, usize> = HashMap::new();
         let mut rows = self.conn.prepare(&format!(
-            "SELECT id, source, source_id, name, installed, install_dir, last_played, playtime_minutes, favourite
+            "SELECT id, source, source_id, name, installed, install_dir, last_played, playtime_minutes, favourite,
+                    added, hidden
              FROM games WHERE {filter} ORDER BY last_played DESC, sort_name, name, id {limit}"
         ))?;
         let mut rows = rows.query(values)?;
@@ -332,12 +376,15 @@ impl Database {
                 id,
                 // Only Steam's games have an appid; another source's are launched by its own id.
                 appid: if source == STEAM { source_id.parse().unwrap_or(0) } else { 0 },
+                source,
                 name: row.get(3)?,
                 installed: row.get(4)?,
                 install_dir: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
                 last_played: row.get::<_, i64>(6)?.max(0) as u64,
                 playtime_minutes: row.get::<_, i64>(7)?.clamp(0, u32::MAX as i64) as u32,
                 favourite: row.get(8)?,
+                added: row.get::<_, i64>(9)?.max(0) as u64,
+                hidden: row.get(10)?,
                 cover: None,
                 hero: None,
                 header: None,
@@ -460,6 +507,7 @@ mod tests {
         Game {
             id: 0,
             appid,
+            source: STEAM.into(),
             name: name.into(),
             last_played,
             playtime_minutes: if last_played > 0 { 30 } else { 0 },
@@ -468,7 +516,7 @@ mod tests {
             cover: Some(PathBuf::from("art").join(format!("{appid}-cover.jpg"))),
             hero: None,
             header: None,
-            favourite: false,
+            ..Game::default()
         }
     }
 
@@ -476,12 +524,20 @@ mod tests {
         Library {
             user: Some("Tester".into()),
             games: vec![game(30, "Cinder", 300), game(10, "The Anchor", 100), game(20, "Bramble", 0)],
+            ..Library::default()
         }
     }
 
-    /// A snapshot as a source would have read it: no ids.
+    /// A snapshot's games as a source would have read them: no ids, no time they were added, and no filters.
     fn without_ids(mut library: Library) -> Library {
-        library.games.iter_mut().for_each(|g| g.id = 0);
+        library.games.iter_mut().for_each(|g| (g.id, g.added) = (0, 0));
+        library.filters.clear();
+        library
+    }
+
+    /// What a source read, less its collections: what `without_ids` makes of the snapshot it becomes.
+    fn games_of(mut library: Library) -> Library {
+        library.collections = None;
         library
     }
 
@@ -493,7 +549,9 @@ mod tests {
     fn a_new_database_is_at_the_latest_version_and_empty() {
         let db = Database::in_memory().unwrap();
         assert_eq!(db.version().unwrap(), MIGRATIONS.len());
-        assert_eq!(db.snapshot().unwrap(), Library::default());
+        let snapshot = db.snapshot().unwrap();
+        assert!(snapshot.filters.iter().all(|f| f.games.is_empty()) && !snapshot.filters.is_empty());
+        assert_eq!(without_ids(snapshot), Library::default());
     }
 
     #[test]
@@ -512,7 +570,7 @@ mod tests {
     fn games_sort_by_last_played_then_by_name_without_its_article() {
         let mut db = Database::in_memory().unwrap();
         let games = vec![game(1, "The Zephyr", 0), game(2, "an Orchard", 0), game(3, "Moss", 0), game(4, "Late", 50)];
-        db.sync(STEAM, &Library { user: None, games }, NOW).unwrap();
+        db.sync(STEAM, &Library { games, ..Library::default() }, NOW).unwrap();
         assert_eq!(names(&db.snapshot().unwrap().games), ["Late", "Moss", "an Orchard", "The Zephyr"]);
     }
 
@@ -671,7 +729,7 @@ mod tests {
         let mut db = Database::open(&dir.path().join(FILE)).unwrap();
         assert_eq!(db.sync(STEAM, &read, NOW).unwrap(), Synced { added: spec.games.len(), updated: 0, gone: 0 });
         let snapshot = db.snapshot().unwrap();
-        assert_eq!(without_ids(snapshot.clone()), read);
+        assert_eq!(without_ids(snapshot.clone()), games_of(read));
         assert_eq!(snapshot.recent(8), db.recent(8).unwrap());
         assert_eq!(db.sync(STEAM, &source_steam::load(&root).unwrap(), NOW).unwrap(), Synced::default());
 

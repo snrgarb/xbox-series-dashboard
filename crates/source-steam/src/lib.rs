@@ -6,7 +6,10 @@
 //! - `userdata/<id>/config/localconfig.vdf`: persona name, last played, playtime.
 //! - `steamapps/appmanifest_*.acf`: what is installed.
 //! - `appcache/librarycache/<appid>/`: cover, hero and header art.
+//! - `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json`: the user's collections, Steam's Favourites
+//!   and its hidden games (`collections`).
 pub mod appcache;
+pub mod collections;
 pub mod fixture;
 pub mod vdf;
 
@@ -17,13 +20,23 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use vdf::Value;
 
+/// Steam, as a game's `source` names it.
+pub const SOURCE: &str = "steam";
+
 /// Read the Steam install at `steam_root`.
 pub fn load(steam_root: &Path) -> Result<Library> {
     let appcache = child(steam_root, "appcache").context("no appcache folder under the Steam root")?;
     let appinfo_path = child(&appcache, "appinfo.vdf").context("no appcache/appinfo.vdf")?;
     let appinfo = appcache::parse_appinfo(&fs::read(&appinfo_path)?)?;
 
-    let local = load_localconfig(steam_root);
+    let (local, config) = load_localconfig(steam_root);
+    // With no file, or one that is not what is expected, there is no word on collections: which is not "none".
+    let collections = config
+        .as_deref()
+        .map(collections::load)
+        .and_then(|read| read.map_err(|e| eprintln!("steam: the collections were not read: {e:#}")).ok());
+    let (favourites, hidden) = collections.as_ref().map(|c| (&c.favourites, &c.hidden)).unzip();
+    let marked = |set: Option<&HashSet<u32>>, appid: u32| set.is_some_and(|set| set.contains(&appid));
     let installed = installed_apps(steam_root);
 
     // Ownership: apps granted by a cached package. Without packageinfo.vdf,
@@ -55,15 +68,18 @@ pub fn load(steam_root: &Path) -> Result<Library> {
             Some(Game {
                 id: 0,
                 appid,
+                source: SOURCE.to_string(),
                 name,
                 last_played: played.max(manifest_played.unwrap_or(0)),
                 playtime_minutes: minutes,
+                added: 0,
                 installed: manifest_played.is_some(),
                 install_dir: manifest.and_then(|m| m.1.clone()),
                 cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),
                 hero: find("library_hero", None, &["library_hero.jpg"]),
                 header: find("library_header", Some("header_image"), &["header.jpg", "library_header.jpg"]),
-                favourite: false,
+                favourite: marked(favourites, appid),
+                hidden: marked(hidden, appid),
             })
         })
         .collect();
@@ -73,7 +89,8 @@ pub fn load(steam_root: &Path) -> Result<Library> {
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             .then(a.appid.cmp(&b.appid))
     });
-    Ok(Library { user: local.persona, games })
+    let collections = collections.map(|c| c.collections);
+    Ok(Library { user: local.persona, games, collections, ..Library::default() })
 }
 
 /// The Steam install folder from the registry (Windows only).
@@ -89,9 +106,10 @@ struct LocalConfig {
     apps: HashMap<u32, (u64, u32)>,
 }
 
-/// The most recently written `userdata/*/config/localconfig.vdf`.
-fn load_localconfig(steam_root: &Path) -> LocalConfig {
-    let Some(userdata) = child(steam_root, "userdata") else { return LocalConfig::default() };
+/// The most recently written `userdata/*/config/localconfig.vdf`, and the `config` folder it is in: the signed-in
+/// user's.
+fn load_localconfig(steam_root: &Path) -> (LocalConfig, Option<PathBuf>) {
+    let Some(userdata) = child(steam_root, "userdata") else { return (LocalConfig::default(), None) };
     let newest = fs::read_dir(userdata)
         .into_iter()
         .flatten()
@@ -99,11 +117,9 @@ fn load_localconfig(steam_root: &Path) -> LocalConfig {
         .filter(|e| e.file_name().to_string_lossy().parse::<u64>().is_ok_and(|id| id != 0))
         .filter_map(|e| child(&child(&e.path(), "config")?, "localconfig.vdf"))
         .max_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
+    let config = newest.as_deref().and_then(Path::parent).map(Path::to_path_buf);
     let parsed = newest.and_then(|p| fs::read(p).ok()).and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
-    match parsed {
-        Some(v) => parse_localconfig(&v),
-        None => LocalConfig::default(),
-    }
+    (parsed.map_or_else(LocalConfig::default, |v| parse_localconfig(&v)), config)
 }
 
 fn parse_localconfig(v: &Value) -> LocalConfig {

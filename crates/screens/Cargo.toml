@@ -11,6 +11,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 
 [dev-dependencies]
+# The tests' libraries come by way of the library database, which works Home's Groups out.
+library = { path = "../library" }
 input = { path = "../input" }
 render = { path = "../render" }
 shots = { path = "../shots" }

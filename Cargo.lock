@@ -988,6 +988,7 @@ dependencies = [
  "anyhow",
  "model",
  "rusqlite",
+ "serde_json",
  "source-steam",
  "tempfile",
 ]
@@ -1928,6 +1929,7 @@ dependencies = [
  "chrono",
  "image",
  "input",
+ "library",
  "model",
  "render",
  "shots",

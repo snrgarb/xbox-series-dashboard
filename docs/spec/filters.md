@@ -107,11 +107,13 @@ Every field is a column the library database already has (`games`, migration 1, 
 | `sources` | unset / a list of source ids (`"steam"`, later `"xbox"`, `"epic"`, ...) | `games.source` | Any of the listed |
 | `collection` | unset / a collection's row id | `collection_games` | Only `collection` filters set it; a custom rule does not offer it in M3 |
 
-Always, and not a clause: `hidden = 0 AND gone = 0`. A hidden game is in no Group and no tab, as the snapshot already leaves it out (`Database::snapshot`).
+Always, and not a clause: `hidden = 0 AND gone = 0`. A hidden game is in no Group and no tab, as the snapshot already leaves it out of its games (`Database::snapshot`). One rule lifts the first half: `hidden: true`, the built-in Hidden filter's (section 4), which picks the hidden games and only those. It is a key of the rule's JSON like the others, and the editor of section 6 does not offer it.
+
+Each clause as built (`crates/library/src/filters.rs`): `played_within_days: n` is `last_played > 0` and no more than n x 86 400 seconds before now; `added_within_days` the same of `added`; `min_playtime_hours: n` is `playtime_minutes >= 60 n`; `favourite: false` and an empty `sources` are read as they stand (not a favourite; any source) though nothing writes them.
 
 Not available, and so not offered: genre, tag, developer, publisher, release date, age rating, platform, completion status, scores. They come, if at all, with M4's metadata; a rule is stored as JSON (section 7) so a later clause needs no migration.
 
-**`added`** is when the game first came into our database, not when the user bought it. After the first sync every game has the same `added`, so "Recently added" starts as the whole library in name order and only becomes meaningful as games arrive. Steam's own purchase time is not read today (open question 3).
+**`added`** is when the game first came into our database, not when the user bought it. After the first sync every game has the same `added`, so "Recently added" starts as the whole library in name order and only becomes meaningful as games arrive. Steam's own purchase time is not read (open question 3, decided: this is good enough).
 
 ### 3.2 Sorts
 
@@ -122,7 +124,7 @@ Not available, and so not offered: genre, tag, developer, publisher, release dat
 | `added` | `games.added` | Descending | "Recently added" |
 | `playtime` | `games.playtime_minutes` | Descending | "Playtime" |
 
-Rules kept from the Bundle (C/GameListFilter.cs:34-62): a game without the field (never played: `last_played = 0`, `playtime_minutes = 0`) comes **last in either direction**; ties are broken by name ascending. Name order is by `sort_name` (lower case, no leading article), which stands in for Playnite's sorting name.
+Rules kept from the Bundle (C/GameListFilter.cs:34-62): a game without the field (never played: `last_played = 0`, `playtime_minutes = 0`) comes **last in either direction**; ties are broken by name ascending, whichever way the sort goes. Every game has an `added`. Name order is by `sort_name` (lower case, no leading article), which stands in for Playnite's sorting name. A sort the database names that the program does not know is by name, as a preset's unsupported sort is in the Bundle (section 1.1).
 
 "Release date", the fifth option of Full library's Sort dropdown, has no column. Until one exists the dropdown has four options (open question 2). Modified and PlayCount are dropped.
 
@@ -135,19 +137,31 @@ In the `library` crate, when it builds the snapshot. The screens are handed the 
 pub struct Filter {
     pub id: i64,
     pub kind: FilterKind,          // Builtin, Collection, Custom
+    pub key: Option<String>,       // a built-in's: "favourites", "installed", "most-played", "recently-added", "hidden"
     pub name: String,
     pub shown: bool,
+    pub rule: Rule,                // for Settings' editor to show; empty for a collection's
     pub sort: Sort,                // Name, LastPlayed, Added, Playtime
     pub descending: bool,
-    /// Every game the rule picks, in the filter's sort: ids into `Library::games`.
+    /// Every game the rule picks, in the filter's sort: the games' ids, found with `Library::game`.
     pub games: Vec<i64>,
 }
-pub struct Library { pub user: Option<String>, pub games: Vec<Game>, pub filters: Vec<Filter> }
+pub struct Library {
+    pub user: Option<String>,
+    pub games: Vec<Game>,          // not hidden
+    pub hidden: Vec<Game>,         // the hidden ones: only the Hidden filter names them
+    pub filters: Vec<Filter>,
+    pub collections: Option<Vec<Collection>>, // a source's reading only (section 5.2)
+}
 ```
 
-`Library::filters` is in display order and holds **every** filter, shown or not (Settings lists them all); Home and Full library take those with `shown`. Home shows a Group's first 6 games and the next 4 in See all's collage; Full library shows all of them. Unlike the Bundle, every filter's games are evaluated, not only the shown ones: with one SQLite query each over a few hundred games that costs nothing, and Settings can then say how many games a Group holds.
+`Library::filters` is in display order and holds **every** filter, shown or not (Settings lists them all); Home and Full library take those with `shown` and a game (`Library::groups()`). Home shows a Group's first 6 games and the next 4 in See all's collage; Full library shows all of them. Unlike the Bundle, every filter's games are evaluated, not only the shown ones: with one SQLite query each over a few hundred games that costs nothing, and Settings can then say how many games a Group holds.
 
-`model::Game` gains `source: String` and `added: u64`, which the editor's count and the sorts need.
+The rule travels with the filter so that the editor of section 6.3 can show what is set; it is still only the library that works one out. `key` is how code knows a built-in whatever it comes to be called (Home's fallback, 4.1).
+
+`model::Game` gains `source: String` and `added: u64`, which the editor's count and the sorts need, and `hidden: bool`: false for every game of `Library::games`, true for those of `Library::hidden`, and in a source's reading what the store says (section 5.2).
+
+A Library that came from no database (`--library <file.json>`, the fake one, Steam read with nowhere to keep it) has no filters. `app` passes it through a database in memory (`store::with_filters`), so the built-ins and Steam's collections are Home's Groups there too; the screens' tests do the same.
 
 ---
 
@@ -161,19 +175,22 @@ Seeded by the migration, in this order. The first four are the ones issue #8 nam
 | `installed` | Installed | `installed: true` | Name ascending | No |
 | `most-played` | Most played | `played: "played"` | Playtime descending | Yes |
 | `recently-added` | Recently added | (no clause) | Added descending | Yes |
+| `hidden` | Hidden | `hidden: true` | Name ascending | No |
 
-Steam's collections are placed after Favourites as they are first seen (section 5), so a first run reads: Favourites, the user's collections, Most played, Recently added.
+Steam's collections are placed after Favourites as they are first seen (section 5), those seen together in name order, so a first run reads: Favourites, the user's collections by name, Most played, Recently added.
 
 Why Installed is not shown at first: My games & apps' Games is exactly that list (section 1.3), and Home's Recent row is mostly installed games. It exists so one press in Settings brings it to Home.
+
+**Hidden** (decided, issue #49; open question 10) is how a hidden game is found again. It is a built-in like the others, last and not shown, and the user shows it from Settings > Groups as any other: then it is a Group on Home and a tab on Full library while a game is hidden, and gone again when none is (4.1). One flag still drives Home and the tabs alike. Its games are the snapshot's `Library::hidden`, which no other list reads. On Home a hidden game's card shows as any card does; A on it does nothing until the Game hub can open on it (ticket 4), since a launch names a game by its place in `Library::games`, where a hidden game has none ([home.md](home.md) section 11).
 
 ### 4.1 Empty Groups
 
 The Bundle shows a flagged preset's Group even when it matches nothing, and shows the Favourites fallback even before anything is a favourite (section 1.1). Ours:
 
 - A shown filter with **no games is left off Home** and off Full library's tabs. On a first run that is Favourites, and a collection whose games are all hidden or gone. It comes back by itself when it has a game. (This is what Home does today: [home.md](home.md) section 11.)
-- If that leaves **no Group at all** (an empty library, or everything turned off), Home shows the Favourites Group empty, its header and a See all card alone: the Bundle's fallback, so the page under the wide tiles is never blank and Down from the wide tiles has somewhere to go.
+- If that leaves **no Group at all** (an empty library, or everything turned off), Home shows the Favourites Group empty, its header and a See all card alone: the Bundle's fallback, so the page under the wide tiles is never blank and Down from the wide tiles has somewhere to go. It is Favourites whether or not Favourites is shown, under the name the `favourites` filter has.
 
-This is a choice, not a finding (open question 1).
+This is a choice, not a finding (open question 1), and it is decided so (issue #49).
 
 ---
 
@@ -181,16 +198,19 @@ This is a choice, not a finding (open question 1).
 
 ### 5.1 Where Steam keeps them
 
-**UNVERIFIED, from knowledge of Steam's client, to be checked against a real install as the ticket's first step** (the repository's copy of the user's Steam files under `data/` was not read for this spec):
+**Still UNVERIFIED, from knowledge of Steam's client.** The ticket's first step was to check it against a real install, and it could not be done: the repository's copy of the user's Steam files under `data/` holds `appcache/`, `steamapps/` and `userdata/<id>/config/localconfig.vdf` and nothing else, so no `cloudstorage` folder. What that copy does show: `localconfig.vdf` carries no collections (its `WebStorage` block has the library's view state, which collection filter is ticked, and not the collections themselves), so it is not a second place to read them from. The reader (`crates/source-steam/src/collections.rs`) is written to the format below and to doubt it: a key or an entry it does not understand is passed over, an appid may be a number or a number in a string, a `value` may be JSON in a string or an object, and a file that is not a list at all reads as "no word", which changes nothing (5.2). The fixture writes the same format, so the tests prove the reader against the writer and not against Steam. **To do on the TV PC** (open question 8): look at the real file once, and at whether it lags the client.
+
+The format:
 
 - `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json`: a JSON array of `[key, entry]` pairs. A collection's key is `user-collections.<collection id>`; its entry has `timestamp`, `is_deleted` (true for a collection the user removed, with no value) and `value`, itself a JSON string: `{"id": "uc-...", "name": "...", "added": [appid, ...], "removed": [appid, ...]}`.
 - Two ids are Steam's own: `favorite` (its Favourites) and `hidden` (its hidden games).
 - A **dynamic collection** has a `filterSpec` in its value and no complete `added` list: Steam works its games out in the client from store tags and features.
-- The file is the client's cloud-synced copy and is written as Steam syncs, not at once. Older clients kept categories as `tags` under each app in `userdata/<id>/7/remote/sharedconfig.vdf`; nothing current writes it and it is not read.
+- The file is the client's cloud-synced copy and is written as Steam syncs, not at once. Beside it the client is believed to keep `cloud-storage-namespace-1.modified.json`, the changes not yet sent; it is not read. Older clients kept categories as `tags` under each app in `userdata/<id>/7/remote/sharedconfig.vdf`; nothing current writes it and it is not read.
+- The user whose file is read is the one whose `localconfig.vdf` was written last, as for the persona name and the play times.
 
 ### 5.2 How they map in
 
-`source-steam` reads the file into `Library::collections: Vec<Collection { source_id, name, appids }>`; `Database::sync` merges them in the same transaction as the games:
+`source-steam` reads the file into `Library::collections: Option<Vec<Collection { source_id, name, appids }>>`, by name, and marks each game it read `favourite` or `hidden` if Steam's own two collections have it. `None` is "no word": no file, or one that does not parse. `Database::sync` merges them in the same transaction as the games:
 
 | Steam has | The database does |
 |---|---|
@@ -198,12 +218,15 @@ This is a choice, not a finding (open question 1).
 | A collection renamed | Renames the row and its filter |
 | Games added or removed | Replaces the collection's `collection_games` rows. An appid with no row in `games` (a tool, DLC, a game no longer owned) is skipped |
 | A collection deleted in Steam (`is_deleted`, or absent) | Deletes the `collections` row; its filter and its games go with it by cascade. The user's choice of shown and place for it goes too |
-| A dynamic collection | Skipped: not listed at all (open question 4) |
-| The `favorite` collection | Not a collection filter. On the **first** sync of each game only, a game in it gets `favourite = 1`; after that the flag is ours and Steam's later changes do not reach it (open question 5) |
+| A dynamic collection | Skipped: not listed at all (open question 4, decided) |
+| A collection with no name | Skipped |
+| The `favorite` collection | Not a collection filter. On the **first** sync of each game only, a game in it gets `favourite = 1`; after that the flag is ours and Steam's later changes do not reach it (open question 5, decided) |
 | The `hidden` collection | The same, for `hidden = 1`, on the first sync of each game only |
-| No file, or one that does not parse | Collections are left exactly as they are; nothing is deleted. A warning is logged |
+| No file, or one that does not parse | Collections are left exactly as they are; nothing is deleted. A warning is logged (`steam: the collections were not read: ...`) |
 
-What stays the user's across every sync: whether a collection's Group is shown, and where it is in the order. A sync never moves or re-shows one.
+What stays the user's across every sync: whether a collection's Group is shown, and where it is in the order. A sync never moves or re-shows one. A collection renamed in Steam keeps its filter's id, so a page open on it still names it.
+
+**Games that were there first.** "The first sync of each game" would leave out every game already in the database when Steam could first say which are favourites: a database made before migration 2, or a first sync that found no collections file. So the first sync of a source that does carry collections also gives Steam's two marks to the games already there, once (the setting `<source>.marks` records that it has been done), only ever setting a mark and never clearing one. From then on only a game seen for the first time takes them.
 
 Other stores have nothing like collections that we read. A `collections` row carries its `source` so one can be added.
 
@@ -340,7 +363,8 @@ INSERT INTO filters (kind, key, name, rule, sort, descending, shown, position) V
     ('builtin', 'favourites',     'Favourites',     '{"favourite":true}',  'name',     0, 1, 1000),
     ('builtin', 'installed',      'Installed',      '{"installed":true}',  'name',     0, 0, 2000),
     ('builtin', 'most-played',    'Most played',    '{"played":"played"}', 'playtime', 1, 1, 3000),
-    ('builtin', 'recently-added', 'Recently added', '{}',                  'added',    1, 1, 4000);
+    ('builtin', 'recently-added', 'Recently added', '{}',                  'added',    1, 1, 4000),
+    ('builtin', 'hidden',         'Hidden',         '{"hidden":true}',     'name',     0, 0, 5000);
 ```
 
 A rule's JSON, every key optional:
@@ -357,14 +381,15 @@ A rule's JSON, every key optional:
 }
 ```
 
-A collection filter's rule is `{}`: its `collection` column is its rule. A key the program does not know makes the filter match **nothing** and is logged, rather than being ignored and matching too much (a database from a newer version, opened by an older one, is refused anyway by `user_version`).
+The built-in Hidden filter's rule has one key more, `"hidden": true` (3.1). A collection filter's rule is `{}`: its `collection` column is its rule. A key the program does not know, a value it does not know for one, or text that is no JSON object makes the filter match **nothing** and is logged, rather than being ignored and matching too much (a database from a newer version, opened by an older one, is refused anyway by `user_version`). The filter is still listed, with an empty rule.
 
-**Position.** Built-ins are seeded 1000 apart. A collection first seen takes the position midway between the last collection filter (or Favourites) and the filter after it; a new custom filter takes the highest position plus 1000. Move up and Move down swap two filters' positions. When two neighbours' positions are 1 apart and something must go between them, every filter is renumbered 1000 apart in the same transaction.
+**Position.** Built-ins are seeded 1000 apart. A collection first seen takes the position midway between the last collection filter (or Favourites) and the filter after it; a new custom filter takes the highest position plus 1000. Move up and Move down swap two filters' positions. When two neighbours' positions are 1 apart and something must go between them, or two that are to be swapped have the same position, every filter is renumbered 1000 apart in the same transaction.
 
-**API**, on `Database`, beside `set_favourite`:
+**API**, on `Database`, beside `set_favourite` (`crates/library/src/filters.rs`):
 
 ```rust
 pub fn filters(&self) -> Result<Vec<Filter>>;                      // every filter, in order, with its games
+pub fn filters_at(&self, now: u64) -> Result<Vec<Filter>>;         // the same, the "within days" clauses counted from `now`
 pub fn set_filter_shown(&self, filter: i64, shown: bool) -> Result<()>;
 pub fn move_filter(&mut self, filter: i64, by: i32) -> Result<()>;  // -1 up, +1 down
 pub fn add_filter(&mut self, name: &str) -> Result<i64>;            // custom, no clauses, shown, last
@@ -372,7 +397,12 @@ pub fn set_filter(&self, filter: i64, name: &str, rule: &Rule, sort: Sort, desce
 pub fn delete_filter(&self, filter: i64) -> Result<()>;             // custom only
 ```
 
-`snapshot()` fills `Library::filters` from `filters()`. Each of the setters is followed by a new snapshot to the core (`set_library`), which keeps focus on the game or box it was on.
+- `move_filter` counts places among **all** filters, shown or not, as Settings lists them; it stops at the ends, takes any `by` (the filters passed each move one place the other way), and is an error for an id that is no filter's.
+- `set_filter` and `delete_filter` are an error for a built-in, a collection's filter or an id that is no filter's, and change nothing. `set_filter_shown` on an id that is no filter's does nothing, as `set_favourite` does.
+- A name is kept without the spaces around it; an empty one is an error (`add_filter`, `set_filter`). The 40-character limit of 6.3 is the editor's.
+- `model::Rule` is the clauses of 3.1 as a struct of options, `model::Sort` the four sorts with `Sort::default_descending()` for the direction 6.3 gives each.
+
+`snapshot()` fills `Library::filters` from `filters()` (and `snapshot_at(now)` from `filters_at(now)`). Each of the setters is followed by a new snapshot to the core (`set_library`), which keeps focus on the game or box it was on.
 
 ---
 
@@ -411,14 +441,16 @@ Only what follows from the filters; everything else is the page's own spec.
 
 ## 10. Open questions
 
-1. **Empty Groups.** The Bundle shows a Group that matches nothing as a header and a lone See all card. This design leaves an empty filter off Home and off the tabs, except Favourites when nothing else would show (4.1). Is that right, or should a shown Group always show, as in the Bundle?
+Those marked **Decided** were settled with ticket 2 of M3 (issue #49), which built sections 3, 4, 5 and 7: by the issue where it says so, else as this spec recommended. The rest belong to the tickets that build what they ask about (6 and 10) and are still open.
+
+1. **Empty Groups.** The Bundle shows a Group that matches nothing as a header and a lone See all card. This design leaves an empty filter off Home and off the tabs, except Favourites when nothing else would show (4.1). Is that right, or should a shown Group always show, as in the Bundle? **Decided (issue #49): as this design.** Empty Groups are not shown on Home.
 2. **Release date.** Full library's Sort dropdown has "Release date" in the Bundle. Steam's `appinfo.vdf` is believed to carry a release date for most games (UNVERIFIED: `source-steam` reads none today). Add `games.release_date` in M3 so the dropdown keeps five options, or leave it at four until M4's metadata?
-3. **When a game was added.** `games.added` is when we first saw the game, so "Recently added" means little until the library has lived a while. Is Steam's purchase time worth finding (it is not in the files read today), or is this good enough?
-4. **Dynamic collections.** Steam does not store their games. Skip them (this design), or evaluate the parts of a `filterSpec` we could (installed, played), which would show a Group that does not match Steam's?
-5. **Steam's Favourites and hidden games.** Seed our `favourite` and `hidden` once per game from Steam's `favorite` and `hidden` collections (this design), keep them in step with Steam both ways, or ignore Steam's? Seeding once means a game un-favourited in Steam later stays a favourite here.
-6. **One set for Home and the tabs.** In the Bundle one flag drives both. Should Full library's tabs instead list every filter, shown on Home or not, so a Group can be kept off Home but still be a tab?
+3. **When a game was added.** `games.added` is when we first saw the game, so "Recently added" means little until the library has lived a while. Is Steam's purchase time worth finding (it is not in the files read today), or is this good enough? **Decided: good enough.** It is what this design does and what Playnite's own "Added" is (the day Playnite imported the game), so it is what the Bundle's "Recently added" meant too.
+4. **Dynamic collections.** Steam does not store their games. Skip them (this design), or evaluate the parts of a `filterSpec` we could (installed, played), which would show a Group that does not match Steam's? **Decided: skipped**, as this design.
+5. **Steam's Favourites and hidden games.** Seed our `favourite` and `hidden` once per game from Steam's `favorite` and `hidden` collections (this design), keep them in step with Steam both ways, or ignore Steam's? Seeding once means a game un-favourited in Steam later stays a favourite here. **Decided: seeded once**, as this design, with one addition so that games already in the database are not left out (5.2, "Games that were there first").
+6. **One set for Home and the tabs.** In the Bundle one flag drives both. Should Full library's tabs instead list every filter, shown on Home or not, so a Group can be kept off Home but still be a tab? **Decided (issue #49): one set**, as in the Bundle.
 7. **Where the Groups box sits.** Personalisation's empty slot beside Who's playing today? (6.1), because Customise Home lands on that page. Or a box of its own on Theme settings beside Personalisation, Idle, Guide and Discord? Personalisation is already too tall for the screen in the Bundle ([settings.md](settings.md) open question 1); the slot chosen adds no row.
-8. **Collections' file.** Section 5.1's format is from knowledge of Steam's client, not from a file read for this spec. If the cloud-storage file proves stale or absent on the TV PC, the live copy is in the client's LevelDB (`htmlcache/Local Storage/leveldb`), which is far more work to read. Decide once the real file has been looked at.
+8. **Collections' file.** Section 5.1's format is from knowledge of Steam's client, not from a file read for this spec. If the cloud-storage file proves stale or absent on the TV PC, the live copy is in the client's LevelDB (`htmlcache/Local Storage/leveldb`), which is far more work to read. Decide once the real file has been looked at. **Still open.** Ticket 2 could not look: the copy of the user's Steam files under `data/` has no `cloudstorage` folder (5.1), and the TV PC is not to be touched without being asked. The reader is built to the format of 5.1 and changes nothing when it cannot read the file, so a wrong guess costs the collection Groups and nothing else. What settles it: one look at `userdata/<id>/config/cloudstorage/` on the TV PC (is the file there, is it this format, does a collection made in Steam a minute ago show in it), or a first run there that logs `steam: the collections were not read`.
 9. **Reordering by Menu.** Move up and Move down in a menu is the least new drawing. The console itself reorders Groups by picking one up and moving it with the stick. Is the menu enough?
-10. **Hidden games.** No filter ever holds a hidden game (3.1), so once the Tile menu's Hide this game is used there is nowhere to find the game and unhide it ([tile-menu.md](tile-menu.md) open question 4). Recommended: a fifth built-in, "Hidden" (`hidden: true`, the one rule that lifts the always-clause), never a Group on Home, offered only as Full library's last tab and only while something is hidden. It is left out of section 4 until this is decided, since it breaks the rule that one flag drives Home and the tabs alike.
+10. **Hidden games.** No filter ever holds a hidden game (3.1), so once the Tile menu's Hide this game is used there is nowhere to find the game and unhide it ([tile-menu.md](tile-menu.md) open question 4). Recommended: a fifth built-in, "Hidden" (`hidden: true`, the one rule that lifts the always-clause), never a Group on Home, offered only as Full library's last tab and only while something is hidden. **Decided (issue #49), otherwise than recommended:** the fifth built-in, yes, but an ordinary one: not shown at first, and shown by the user from Settings > Groups, where it becomes a Group on Home and a tab alike (section 4). That keeps the rule that one flag drives both. Until ticket 10 builds that page there is no control that shows it.
 11. **A hint bar on one Settings page.** The Groups page shows the Menu hint though the Bundle's Settings shows none (6.2). Keep the exception, or put a visible "..." affordance on the Row instead?

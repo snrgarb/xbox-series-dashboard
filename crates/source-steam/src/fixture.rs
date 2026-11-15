@@ -4,6 +4,9 @@
 //!
 //! Besides the fixture's games it writes three apps `load` must leave out: a tool and a piece of DLC the account's
 //! packages grant, and a game only package 0 grants, which everyone "has" and nobody owns.
+//!
+//! The collections file is written as `collections` reads it. That format is from knowledge of Steam's client and
+//! has not been set against a real file (docs/spec/filters.md, section 5.1); every collection in it is made up.
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -20,6 +23,37 @@ pub struct Fixture {
     pub games: Vec<FixtureGame>,
     /// A program copied into every installed game's folder as `game.exe`. Without one the folders are empty.
     pub game_exe: Option<PathBuf>,
+    /// The user's collections file. `None` writes none, as for an install whose client has never synced any.
+    pub collections: Option<FixtureCollections>,
+}
+
+/// What `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json` says.
+#[derive(Debug, Clone, Default)]
+pub struct FixtureCollections {
+    pub collections: Vec<FixtureCollection>,
+    /// The appids in Steam's own Favourites.
+    pub favourites: Vec<u32>,
+    /// The appids hidden in Steam.
+    pub hidden: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FixtureCollection {
+    /// Steam's id for it: `uc-` and twelve characters.
+    pub id: String,
+    pub name: String,
+    pub appids: Vec<u32>,
+    pub kind: CollectionKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectionKind {
+    /// Filled by the user, game by game: the only kind `load` gives.
+    ByHand,
+    /// Worked out by Steam from a filter; `appids` are the games the user added to it by hand.
+    Dynamic,
+    /// Removed by the user: its key is still in the file, marked deleted, with no value.
+    Deleted,
 }
 
 #[derive(Debug, Clone)]
@@ -71,7 +105,13 @@ impl Fixture {
     ///
     /// The other eight were never played and come after, by name; every second one is installed, and Ember Choir and
     /// Hollow Pines Motel have no art.
+    ///
+    /// Two collections made by hand: Couch co-op (Brass Meridian, Saltwind Rally, Glasswing Atlas, Marrow Street)
+    /// and Short sessions (Lanternfish Deep, Thimble & Thorn, Copperhead Station, and the DLC, which is no game).
+    /// One dynamic and one deleted, which `load` leaves out. Brass Meridian and Ember Choir are in Steam's
+    /// Favourites; nothing is hidden.
     pub fn standard() -> Fixture {
+        use CollectionKind::ByHand;
         let games = [
             ("Ashfall Courier", true, true, Art::Hashed),
             ("Lanternfish Deep", true, true, Art::Flat),
@@ -97,7 +137,31 @@ impl Fixture {
             playtime_minutes: if played { 90 + (6 - i as u32) * 240 } else { 0 },
             art,
         });
-        Fixture { persona: "Tester".into(), user_id: 100_200_300, games: games.collect(), game_exe: None }
+        let games: Vec<FixtureGame> = games.collect();
+        let appids = |of: &[usize]| of.iter().map(|&i| games[i].appid).collect::<Vec<u32>>();
+        let collection = |id: &str, name: &str, appids: Vec<u32>, kind| FixtureCollection {
+            id: id.to_string(),
+            name: name.to_string(),
+            appids,
+            kind,
+        };
+        let collections = FixtureCollections {
+            collections: vec![
+                collection("uc-Qm4tZx81LwPe", "Short sessions", [appids(&[1, 4, 6]), vec![DLC]].concat(), ByHand),
+                collection("uc-B7hNc02KdRsy", "Roguelikes", appids(&[0]), CollectionKind::Dynamic),
+                collection("uc-Vj9aG3fT6uXo", "Couch co-op", appids(&[2, 5, 10, 12]), ByHand),
+                collection("uc-D1eY5pWq8MzC", "An old shelf", Vec::new(), CollectionKind::Deleted),
+            ],
+            favourites: appids(&[2, 8]),
+            hidden: Vec::new(),
+        };
+        Fixture {
+            persona: "Tester".into(),
+            user_id: 100_200_300,
+            games,
+            game_exe: None,
+            collections: Some(collections),
+        }
     }
 }
 
@@ -114,6 +178,18 @@ pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
     fs::write(appcache.join("packageinfo.vdf"), packageinfo(spec))?;
     fs::write(config.join("localconfig.vdf"), localconfig(spec))?;
     fs::write(steamapps.join("libraryfolders.vdf"), libraryfolders(&root, spec))?;
+    let cloud = config.join(crate::collections::FOLDER);
+    match &spec.collections {
+        Some(collections) => {
+            fs::create_dir_all(&cloud)?;
+            fs::write(cloud.join(crate::collections::FILE), cloud_storage(collections))?;
+        }
+        // Written over an install that had one: it has none now.
+        None => match fs::remove_file(cloud.join(crate::collections::FILE)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        },
+    }
     for game in &spec.games {
         if game.installed {
             fs::write(steamapps.join(format!("appmanifest_{}.acf", game.appid)), manifest(game))?;
@@ -326,6 +402,51 @@ fn libraryfolders(root: &Path, spec: &Fixture) -> Vec<u8> {
     map([("libraryfolders", map([("0", library)]))]).to_text().into_bytes()
 }
 
+/// `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json`: a list of `[key, entry]` pairs. A collection's
+/// entry carries its value as JSON in a string. Steam's own two collections are always there, and so is a key of
+/// another kind, which is no collection.
+fn cloud_storage(spec: &FixtureCollections) -> Vec<u8> {
+    use serde_json::{json, Value};
+    let entry = |id: &str, value: Option<Value>| {
+        let key = format!("user-collections.{id}");
+        let mut entry = json!({ "key": key, "timestamp": NEWEST_PLAY, "version": "41" });
+        match value {
+            Some(value) => {
+                entry["value"] = json!(value.to_string());
+                entry["conflictResolutionMethod"] = json!("custom");
+                entry["strMethodId"] = json!("union-collections");
+            }
+            None => entry["is_deleted"] = json!(true),
+        }
+        json!([key, entry])
+    };
+    let own = |id: &str, name: &str, appids: &[u32]| {
+        entry(id, Some(json!({ "id": id, "name": name, "added": appids, "removed": [] })))
+    };
+    let mut pairs = vec![own("favorite", "Favorites", &spec.favourites), own("hidden", "Hidden", &spec.hidden)];
+    for c in &spec.collections {
+        let mut value = json!({ "id": c.id, "name": c.name, "added": c.appids, "removed": [] });
+        match c.kind {
+            CollectionKind::ByHand => {}
+            CollectionKind::Dynamic => {
+                value["filterSpec"] = json!({
+                    "nFormatVersion": 2,
+                    "strSearchText": "",
+                    "filterGroups": [{ "rgOptions": [], "bAcceptUnion": false }],
+                });
+            }
+            CollectionKind::Deleted => {
+                pairs.push(entry(&c.id, None));
+                continue;
+            }
+        }
+        pairs.push(entry(&c.id, Some(value)));
+    }
+    let pinned = json!({ "key": "showcase-pins", "timestamp": NEWEST_PLAY, "value": "[]", "version": "3" });
+    pairs.push(json!(["showcase-pins", pinned]));
+    serde_json::to_vec(&Value::Array(pairs)).expect("JSON values always serialise")
+}
+
 /// `steamapps/appmanifest_<appid>.acf`.
 fn manifest(game: &FixtureGame) -> Vec<u8> {
     let state = map([
@@ -467,6 +588,69 @@ mod tests {
         }
         let played = spec.games.iter().filter(|g| g.last_played > 0);
         assert!(played.clone().count() == 6 && played.map(|g| g.last_played).is_sorted_by(|a, b| a > b));
+    }
+
+    #[test]
+    fn the_standard_fixtures_collections_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let mut spec = Fixture::standard();
+        spec.games.iter_mut().for_each(|g| g.art = Art::None);
+        write(&root, &spec).unwrap();
+        let library = load(&root).unwrap();
+        let named = |names: &[&str]| -> Vec<u32> {
+            names.iter().map(|n| spec.games.iter().find(|g| g.name == *n).unwrap().appid).collect()
+        };
+
+        // Those made by hand, by name: not the dynamic one, nor the deleted one. The DLC's appid is still there:
+        // which appids are games is for whoever takes the collections in.
+        let collections = library.collections.clone().expect("the collections file was written");
+        let names: Vec<&str> = collections.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Couch co-op", "Short sessions"]);
+        assert_eq!(collections[0].source_id, "uc-Vj9aG3fT6uXo");
+        let couch = ["Brass Meridian", "Saltwind Rally", "Glasswing Atlas", "Marrow Street"];
+        assert_eq!(collections[0].appids, named(&couch));
+        let mut short = named(&["Lanternfish Deep", "Thimble & Thorn", "Copperhead Station"]);
+        short.push(DLC);
+        assert_eq!(collections[1].appids, short);
+
+        let favourites: Vec<&str> = library.games.iter().filter(|g| g.favourite).map(|g| g.name.as_str()).collect();
+        assert_eq!(favourites, ["Brass Meridian", "Ember Choir"]);
+        assert!(library.games.iter().all(|g| !g.hidden && g.source == crate::SOURCE));
+
+        // Steam's hidden games are marked, and still read: hiding is the library's to do.
+        spec.collections.as_mut().unwrap().hidden = named(&["Quiet Orbit"]);
+        write(&root, &spec).unwrap();
+        let library = load(&root).unwrap();
+        let hidden: Vec<&str> = library.games.iter().filter(|g| g.hidden).map(|g| g.name.as_str()).collect();
+        assert_eq!((hidden, library.games.len()), (vec!["Quiet Orbit"], spec.games.len()));
+    }
+
+    #[test]
+    fn with_no_collections_file_or_a_broken_one_there_is_no_word_on_collections() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let mut spec = Fixture::standard();
+        spec.games.iter_mut().for_each(|g| g.art = Art::None);
+        write(&root, &spec).unwrap();
+        assert_eq!(load(&root).unwrap().collections.map(|c| c.len()), Some(2));
+
+        // A file that is not what is expected: not "no collections".
+        let file = root.join("userdata").join(spec.user_id.to_string()).join("config");
+        let file = file.join(crate::collections::FOLDER).join(crate::collections::FILE);
+        fs::write(&file, br#"{"not": "a list"}"#).unwrap();
+        let library = load(&root).unwrap();
+        assert_eq!(library.collections, None);
+        assert!(library.games.iter().all(|g| !g.favourite) && library.games.len() == spec.games.len());
+
+        // An empty list is a word: there are none.
+        fs::write(&file, b"[]").unwrap();
+        assert_eq!(load(&root).unwrap().collections, Some(Vec::new()));
+
+        spec.collections = None;
+        write(&root, &spec).unwrap();
+        assert!(!file.exists());
+        assert_eq!(load(&root).unwrap().collections, None);
     }
 
     #[test]

@@ -33,11 +33,13 @@ pub struct Store {
 /// install or the one the registry names; else, with no database and no Steam, the built-in fake one.
 ///
 /// `--screenshot` uses a database only where `--data-dir` names one: drawing a picture leaves nothing behind.
+///
+/// A Library that came from no database has its filters, which are Home's Groups, worked out by one in memory.
 pub fn open(args: &Args) -> (Library, Store) {
     if let Some(path) = &args.library {
         let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
         let library = serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
-        return (library, Store::default());
+        return (with_filters(library), Store::default());
     }
     let window = args.screenshot.is_none();
     let dir = args.data_dir.clone().or_else(|| if window { library::data_dir() } else { None });
@@ -78,7 +80,26 @@ pub fn open(args: &Args) -> (Library, Store) {
         (Some(library), None) => library,
         (None, None) => screens::fake_library(),
     };
-    (library, Store { database, path: path.unwrap_or_default(), steam: later, ..Store::default() })
+    (with_filters(library), Store { database, path: path.unwrap_or_default(), steam: later, ..Store::default() })
+}
+
+/// The Library with the saved filters and their games, if it has none: one read from a file, the fake one, or
+/// Steam's with no database to keep it in. A database in memory takes it in as Steam's and gives its snapshot, so
+/// the built-in filters and Steam's collections are there as they would be from the real one. Its games are given
+/// ids, which last as long as the snapshot.
+fn with_filters(library: Library) -> Library {
+    if !library.filters.is_empty() {
+        return library;
+    }
+    let through = || -> Result<Library> {
+        let mut database = Database::in_memory()?;
+        database.sync(library::STEAM, &library, library::now())?;
+        database.snapshot()
+    };
+    through().unwrap_or_else(|e| {
+        eprintln!("library: no filters: {e:#}");
+        library
+    })
 }
 
 fn read_steam(root: &Path) -> Result<Library> {
@@ -180,7 +201,22 @@ fn flag(setting: Option<&str>, default: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::flag;
+    use super::{flag, with_filters};
+
+    #[test]
+    fn a_library_from_no_database_is_given_the_built_in_filters() {
+        let fake = screens::fake_library();
+        let library = with_filters(fake.clone());
+        let names = |games: &[model::Game]| games.iter().map(|g| g.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&library.games), names(&fake.games));
+        assert_eq!(library.user, fake.user);
+        let groups: Vec<&str> = library.groups().map(|f| f.name.as_str()).collect();
+        assert_eq!(groups, ["Most played", "Recently added"]);
+        let most_played = library.groups().next().unwrap();
+        assert_eq!(library.game(most_played.games[0]).unwrap().name, "Stardew Valley");
+        // One that has its filters keeps them, and its games their ids.
+        assert_eq!(with_filters(library.clone()), library);
+    }
 
     #[test]
     fn a_flag_is_its_default_until_it_says_on_or_off() {

@@ -136,7 +136,7 @@ impl Home {
     pub fn focused_game(&self, library: &Library) -> Option<usize> {
         match self.focus {
             Focus::Recent(i) => (i < Row::of(library).games.len()).then_some(i),
-            Focus::Group { group, card } => groups::of(library).get(group)?.games.get(card).copied(),
+            Focus::Group { group, card } => place(library, groups::of(library).get(group)?.games.get(card)?),
             Focus::TopBar(_) | Focus::Wide(_) => None,
         }
     }
@@ -199,7 +199,8 @@ impl Home {
             }
             (Focus::Group { .. }, Button::B) => self.go_recent(self.last_game_tile(&row), &row),
             (Focus::Group { group, card }, Button::A) => {
-                if let Some(&game) = groups[group].games.get(card) {
+                // A hidden game's card (the Hidden Group, where the user shows it) has no place to launch from.
+                if let Some(game) = groups[group].games.get(card).and_then(|game| place(library, game)) {
                     return self.choose(game);
                 }
             }
@@ -278,9 +279,14 @@ impl Home {
                     wide::draw(ui, on_wide);
                 });
             }
-            groups::draw(ui, library, &groups, on_group);
+            groups::draw(ui, &groups, on_group);
         });
     }
+}
+
+/// A game's place in the library's games, which a hidden game has none in.
+fn place(library: &Library, game: &model::Game) -> Option<usize> {
+    library.games.iter().position(|g| std::ptr::eq(g, game))
 }
 
 /// The middle, across, of the Recent row's tile `i` while it has focus.
