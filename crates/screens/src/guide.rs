@@ -79,6 +79,11 @@ impl Guide {
         self.open
     }
 
+    /// Which entry focus is on, from the top.
+    pub fn focus(&self) -> usize {
+        self.focus
+    }
+
     /// How wide the panel's showing part was when last drawn, in design units: 0 once it has slid away.
     pub fn panel_width(&self) -> f32 {
         WIDTH * self.shown

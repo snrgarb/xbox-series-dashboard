@@ -289,6 +289,11 @@ fn after(dashboard: &mut Dashboard, buttons: &[Button]) -> Focus {
     dashboard.home_focus()
 }
 
+/// What has been asked of the shell, but for the sounds, which tests/sounds.rs is about.
+fn asked(dashboard: &mut Dashboard) -> Vec<Effect> {
+    dashboard.take_effects().into_iter().filter(|effect| !matches!(effect, Effect::Sound(_))).collect()
+}
+
 fn card(group: usize, card: usize) -> Focus {
     Focus::Group { group, card }
 }
@@ -359,7 +364,7 @@ fn a_on_the_profile_opens_the_guide_and_on_a_button_with_no_page_yet_does_nothin
     press(&mut home, &[Up]);
     for _ in 0..4 {
         press(&mut home, &[Right, A]);
-        assert!(!home.guide_open() && home.take_effects().is_empty(), "{:?}", home.home_focus());
+        assert!(!home.guide_open() && asked(&mut home).is_empty(), "{:?}", home.home_focus());
     }
     assert_eq!(after(&mut home, &[Left, Left, Left, Left, A]), Focus::TopBar(TopButton::Profile));
     assert!(home.guide_open());
@@ -435,29 +440,29 @@ fn a_on_a_groups_card_launches_its_game_and_on_see_all_or_play_history_nothing()
     press(&mut home, &[Down, Down, Down]);
     assert_eq!(home.focused_game(), Some(9));
     press(&mut home, &[A]);
-    assert_eq!(home.take_effects(), [Effect::Launch(9)]);
+    assert_eq!(asked(&mut home), [Effect::Launch(9)]);
     press(&mut home, &[Right, Right, Right, Right, Right, Right, A]);
     assert_eq!(home.focused_game(), None);
-    assert!(home.take_effects().is_empty(), "See all's page is yet to come");
+    assert!(asked(&mut home).is_empty(), "See all's page is yet to come");
     press(&mut home, &[B, Right, Right, Right, Right, Right, Right, Right, A]);
     assert_eq!(home.home_focus(), Focus::Recent(7));
-    assert!(home.take_effects().is_empty(), "Play history's page is yet to come");
+    assert!(asked(&mut home).is_empty(), "Play history's page is yet to come");
     press(&mut home, &[Down, A]);
-    assert!(home.take_effects().is_empty(), "nor have the wide tiles'");
+    assert!(asked(&mut home).is_empty(), "nor have the wide tiles'");
 }
 
 #[test]
 fn a_second_a_within_the_double_tap_does_not_launch_twice() {
     let mut home = core();
     press(&mut home, &[Right, A, A, A]);
-    assert_eq!(home.take_effects(), [Effect::Launch(1)]);
+    assert_eq!(asked(&mut home), [Effect::Launch(1)]);
     // Another tile is another choice, however soon.
     press(&mut home, &[Right, A]);
-    assert_eq!(home.take_effects(), [Effect::Launch(2)]);
+    assert_eq!(asked(&mut home), [Effect::Launch(2)]);
     // And so is the same tile once the double tap's 300 ms are over.
     std::thread::sleep(std::time::Duration::from_millis(350));
     press(&mut home, &[A]);
-    assert_eq!(home.take_effects(), [Effect::Launch(2)]);
+    assert_eq!(asked(&mut home), [Effect::Launch(2)]);
 }
 
 #[test]
@@ -465,7 +470,7 @@ fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
     let mut home = core();
     // Installed's second card is Forza Horizon 5, second in the Recent row.
     press(&mut home, &[Down, Down, Right, A]);
-    assert_eq!(home.take_effects(), [Effect::Launch(1)]);
+    assert_eq!(asked(&mut home), [Effect::Launch(1)]);
     home.launch_started(1);
     home.game_ended();
     assert_eq!(home.home_focus(), Focus::Recent(1));
@@ -475,16 +480,16 @@ fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
 fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
     let mut stage = Stage::on_row(screens::fake_library(), HD);
     stage.press(&[Button::Right, Button::Right, Button::A]);
-    assert_eq!(stage.dashboard.take_effects(), [Effect::Launch(2)]);
+    assert_eq!(asked(&mut stage.dashboard), [Effect::Launch(2)]);
     stage.dashboard.launch_started(2);
     // While it starts, and behind it once it runs, Home takes no input.
     stage.press(&[Button::Left, Button::A]);
     stage.dashboard.game_booted();
     stage.press(&[Button::Left, Button::A]);
-    assert!(stage.dashboard.take_effects().is_empty());
+    assert!(stage.dashboard.take_effects().is_empty(), "not so much as a sound");
     // The Guide over the game offers Quit.
     stage.press(&[Button::Guide, Button::Down, Button::A]);
-    assert_eq!(stage.dashboard.take_effects(), [Effect::QuitGame, Effect::GuideClosed]);
+    assert_eq!(asked(&mut stage.dashboard), [Effect::QuitGame, Effect::GuideClosed]);
     stage.dashboard.game_ended();
     assert_eq!(stage.dashboard.playing(), None);
     assert_eq!(stage.dashboard.home_focus(), Focus::Recent(2));

@@ -16,6 +16,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
+use crate::sounds::Sounds;
 use crate::store::Store;
 use crate::{since_start, Args};
 
@@ -50,6 +51,7 @@ struct App {
     launch: Option<Launch>,
     /// The library database: where a newer snapshot comes from, and where Play sessions go.
     store: Store,
+    sounds: Sounds,
 }
 
 pub fn run(args: &Args, library: Library, store: Store) {
@@ -59,6 +61,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
     }
+    // Where --focus put focus is where the Dashboard starts: nothing is heard of getting there.
+    dashboard.take_effects();
     let mut app = App {
         windowed: args.windowed,
         dashboard,
@@ -75,6 +79,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         stale: true,
         presented: false,
         launch: None,
+        sounds: Sounds::open(args, &store),
         store,
     };
     event_loop.run_app(&mut app).expect("event loop");
@@ -115,6 +120,7 @@ impl App {
                     }
                 }
                 Effect::Exit => event_loop.exit(),
+                Effect::Sound(sound) => self.sounds.play(sound),
             }
         }
     }

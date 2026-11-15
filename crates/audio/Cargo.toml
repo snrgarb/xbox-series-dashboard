@@ -1,0 +1,22 @@
+[package]
+name = "audio"
+version = "0.0.0"
+edition = "2021"
+description = "Short sounds: WAV files decoded once, mixed, and played through WASAPI. Silent anywhere but Windows."
+
+[dev-dependencies]
+# For the example, which names the tones as the Dashboard's sounds are named.
+model = { path = "../model" }
+tempfile = "3"
+
+# The version wgpu's DX12 backend already builds. `windows` rather than `windows-sys` because WASAPI is COM.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
