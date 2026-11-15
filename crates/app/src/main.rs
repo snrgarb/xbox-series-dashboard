@@ -16,6 +16,8 @@ pub struct Args {
     screenshot: Option<PathBuf>,
     size: Option<(u32, u32)>,
     focus: usize,
+    /// Buttons to press before the picture is taken, in order.
+    press: Vec<ui::Button>,
     bench: bool,
     windowed: bool,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
@@ -23,8 +25,27 @@ pub struct Args {
 }
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--windowed]
-       dashboard --screenshot <out.png> [--size WxH] [--focus N] [--guide] [--launch-screen] [--bench]
-                 [--clock <text>] [--steam <steam root> | --library <file.json>]";
+       dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,...] [--guide]
+                 [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]";
+
+/// A button by its name on the pad, for `--press`.
+fn button(name: &str) -> Result<ui::Button, String> {
+    use ui::Button::*;
+    Ok(match name.to_ascii_lowercase().as_str() {
+        "up" => Up,
+        "down" => Down,
+        "left" => Left,
+        "right" => Right,
+        "a" => A,
+        "b" => B,
+        "x" => X,
+        "y" => Y,
+        "menu" => Menu,
+        "view" => View,
+        "guide" => Guide,
+        _ => return Err(format!("bad --press: no button {name}")),
+    })
+}
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args::default();
@@ -43,6 +64,7 @@ fn parse_args() -> Result<Args, String> {
                 args.size = Some(size.filter(|&(w, h)| w > 0 && h > 0).ok_or(format!("bad --size {value}"))?);
             }
             "--focus" => args.focus = value()?.parse().map_err(|e| format!("bad --focus: {e}"))?,
+            "--press" => args.press = value()?.split(',').map(button).collect::<Result<_, _>>()?,
             "--bench" => args.bench = true,
             "--windowed" => args.windowed = true,
             "--clock" => args.clock = Some(value()?),

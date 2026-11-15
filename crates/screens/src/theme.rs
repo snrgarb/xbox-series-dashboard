@@ -30,6 +30,8 @@ pub mod glyph {
     pub const LIBRARY: char = '\u{E8F1}';
     pub const SEARCH: char = '\u{E721}';
     pub const SETTINGS: char = '\u{E713}';
+    /// The gear filled in: the Settings button with focus.
+    pub const SETTINGS_SOLID: char = '\u{F8B0}';
     pub const NOTIFICATIONS: char = '\u{E91C}';
     pub const DOWNLOAD: char = '\u{E896}';
     pub const HISTORY: char = '\u{E81C}';

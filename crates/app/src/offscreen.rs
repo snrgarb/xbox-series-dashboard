@@ -22,6 +22,9 @@ pub fn run(args: &Args, library: Library) {
     for _ in 0..args.focus {
         press(&mut dashboard, Button::Right);
     }
+    for &button in &args.press {
+        press(&mut dashboard, button);
+    }
 
     // The first frame goes out before any art is in, as the window's would.
     let index = host.draw(&gpu, &target.view, size, 0.0, wgpu::Color::BLACK, |ui| dashboard.draw(ui));

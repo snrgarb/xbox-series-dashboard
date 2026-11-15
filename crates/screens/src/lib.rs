@@ -90,6 +90,7 @@ impl Dashboard {
         }
         match self.home.press(press.button, &self.library) {
             Some(HomeAction::Launch(game)) if !press.repeat => self.effects.push(Effect::Launch(game)),
+            Some(HomeAction::OpenGuide) if !press.repeat => self.open_guide(),
             _ => {}
         }
     }
@@ -173,26 +174,32 @@ impl Dashboard {
     }
 }
 
-/// Ten games with no art, so Home always has something to show.
+/// Fourteen games with no art, so Home always has something to show: ten played, most recently first, then four
+/// never played; some not installed.
 pub fn fake_library() -> Library {
-    let names = [
-        "Halo Infinite",
-        "Forza Horizon 5",
-        "Sea of Thieves",
-        "Starfield",
-        "Hades II",
-        "Baldur's Gate 3",
-        "Hollow Knight: Silksong",
-        "Microsoft Flight Simulator",
-        "Cyberpunk 2077",
-        "Stardew Valley",
+    // Name, minutes played, installed.
+    let games = [
+        ("Halo Infinite", 600, true),
+        ("Forza Horizon 5", 1250, true),
+        ("Sea of Thieves", 90, true),
+        ("Starfield", 2400, true),
+        ("Hades II", 310, true),
+        ("Baldur's Gate 3", 45, false),
+        ("Hollow Knight: Silksong", 780, true),
+        ("Microsoft Flight Simulator", 1500, true),
+        ("Cyberpunk 2077", 20, false),
+        ("Stardew Valley", 3600, true),
+        ("Age of Empires IV", 0, true),
+        ("Celeste", 0, false),
+        ("Ori and the Will of the Wisps", 0, true),
+        ("Psychonauts 2", 0, false),
     ];
-    let games = names.iter().enumerate().map(|(i, name)| model::Game {
+    let games = games.iter().enumerate().map(|(i, &(name, playtime_minutes, installed))| model::Game {
         appid: 1000 + i as u32,
         name: name.to_string(),
-        last_played: 1_790_000_000 - i as u64 * 86_400,
-        playtime_minutes: 600 - i as u32 * 50,
-        installed: true,
+        last_played: if playtime_minutes > 0 { 1_790_000_000 - i as u64 * 86_400 } else { 0 },
+        playtime_minutes,
+        installed,
         install_dir: None,
         cover: None,
         hero: None,

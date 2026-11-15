@@ -194,6 +194,8 @@ E/RecentRowControl.xaml:55-62; E/HomeTiles.xaml:227-265.
 
 - A `HomeTile`-styled tile (same size, growth, ring, title band reading "Play history"), last in the row, right margin 0.
 - Face: a 2 x 2 grid of up to 4 covers; grid inset 4 from the tile edge, each cover with a 3 margin (so 7 from the edge, 6 between covers), each `UniformToFill`, top-aligned, decoded at 150 wide. No per-cover rounding (only the tile's clip).
+- The grid's inset and the covers' margins are not in the cover's Viewbox: they stay 4 and 3 (authored) as the tile grows, and the four cells share what is left.
+- A game in the collage with no cover leaves its cell empty (the tile's `#FF1A1A1A` shows); the glyph is only for a collage with no games at all (`HasItems` false, E/HomeTiles.xaml:258-260).
 - With no covers: glyph U+E81C (History), icon font 40, white, centred.
 - No source badge, no Running badge, no status.
 
@@ -361,6 +363,8 @@ Applied as `Scroll.Y = -PageOffset`, `TopBarScroll.Y = -TopBarOffset` (E/HomeRow
 ### 7.4 Navigation summary and focus memory
 
 - Vertical order: top bar <-> Recent row <-> wide tiles <-> Group 0 <-> Group 1 ...
+- Only a game's tile sets `lastFocusedGame` (E/RecentRowControl.xaml.cs `OnTileFocused`, which the Play history tile does not have): B on a Group after the Play history tile had focus goes to the game's tile focused before it. The tile Down left (`leftForPromos`) is whichever tile it was, the Play history tile included.
+- Between Groups the place kept is the focused card's index now (E/GroupsControl.xaml.cs:201-209): after a shorter Group has clamped it, Up or Down carries the clamped place on, not the one before.
 - Recent row remembers the last focused **game id** (`lastFocusedGame`); wide tiles remember the last focused **index** (`lastPromo`) and the Recent tile that Down left (`leftForPromos`); Groups remember the last Group index, game id and whether it was See all (E/RecentRowControl.xaml.cs:31-44; E/GroupsControl.xaml.cs:35-39).
 - Down from the Recent row: nearest wide tile by centre x (not the remembered one). Up from the wide tiles: the remembered Recent tile.
 - Down from the wide tiles: always Group 0, first card (memory reset; E/GroupsControl.xaml.cs:124-130). Up from Group 0: the wide tile last focused.
@@ -571,3 +575,18 @@ Font resources: T/Constants.xaml:228-235. 26 px body text is deliberate (Xbox Ac
 - A on a tile is delayed 300 ms before the Game hub opens (double-tap detection).
 - `IsRunning` tile is always first in the Recent row.
 - The console's own reference notes (docs/research/xbox-dashboard-reference.md:142-172) record that focus ring metrics, motion timings, type sizes and the sound catalogue are **not publicly documented**; the Bundle's values come from its own console captures, and the only reference image of Home in the repo is docs/reference/startup/4-home.jpg (no notes file accompanies docs/reference/).
+
+---
+
+## 11. Where the Dashboard's Home differs, for now
+
+What `crates/screens/src/home*` does that the sections above do not say, or does differently until the pages it needs exist.
+
+- **Top bar, Up and Down.** The Bundle leaves these to WPF's directional navigation (section 2.5, UNVERIFIED). The Dashboard's rule: Up from a Recent tile goes to the top bar button whose centre x is nearest the focused tile's; Down from a button goes to the Recent tile whose centre x is nearest the button's, with the row laid out as it is with no tile focused.
+- **A on a game** launches it at once: there is no Game hub to open (M3). A second A on the same tile within the 300 ms double-tap window asks for nothing, so a double tap, which plays in the Bundle too, launches once.
+- **A on the profile** opens the Guide. A on My games & apps, Search, Settings, Notifications, the Play history tile, a wide tile or See all does nothing until its page exists. Menu and Y do nothing; the hint bar (section 10.4), which names them, is not drawn.
+- **Groups** are worked out from the library until there are saved filters (M3): **Installed** (by name) and **Most played** (by time played, most first). A Group with no games is left out rather than shown empty. "Recently added" waits for the library to record when a game was added.
+- **Recent row.** Always seven games and the Play history tile (there is no Show Play history setting yet). Never-played games pad it in the library's order, by name: there is no date added.
+- **Focused top bar glyphs.** Settings swaps to U+F8B0. My games & apps and Notifications keep their outline glyph (the Bundle's filled ones are vector paths) and Search is not emboldened.
+- **Not drawn yet:** the source badge, the Running badge, the install status band, the Score line and the name swap, the status area but for the clock, the wide tiles' subtitles.
+- **Another screen shape.** The rests use the screen's own height in design units (1200 at 16:10), so the wide tiles' rest rises less on a taller screen.

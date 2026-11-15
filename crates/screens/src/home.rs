@@ -1,53 +1,48 @@
-//! Home: the top bar, the Recent row, the wide tiles, and behind them the focused game's art. docs/spec/home.md has
-//! the Bundle's measures, which these are.
-use std::path::PathBuf;
+//! Home: one page that scrolls. The top bar, the Recent row, the wide tiles and the Groups, and behind them the
+//! focused game's art. docs/spec/home.md has the Bundle's measures and rules, which these are.
+//!
+//! This file is where focus is and where it goes; each part of the page draws itself in its own module.
+mod background;
+mod groups;
+mod recent;
+mod tile;
+mod top_bar;
+mod wide;
 
-use model::{Game, Library};
-use ui::{ArtKey, Button, Color, Crop, Ease, Gradient, HAlign, Kind, Rect, Ui, VAlign};
+use std::time::{Duration, Instant};
 
-use crate::theme::{self, glyph, BODY, BODY_SEMIBOLD, MARGIN, ROW_SCALE as S};
+use model::Library;
+use ui::{Button, Ease, Ui};
 
-/// How many games the Recent row holds.
-pub const RECENT_GAMES: usize = 8;
+pub use self::background::hero_art;
+use self::background::Background;
+use self::groups::Group;
+use self::recent::Row;
+pub use self::tile::cover_art;
+pub use self::top_bar::{profile_picture, TopButton};
+use crate::theme::ROW_SCALE as S;
 
-// The Recent row, in the units it is authored in: multiply by ROW_SCALE.
-const TILE: f32 = 153.0;
-const GROWTH: f32 = 92.0;
-const GAP: f32 = 30.0;
-/// The top of the row's box, which is as tall as a focused tile; tiles stand on its bottom.
-const ROW_TOP: f32 = 533.0;
-const TILE_RADIUS: f32 = 6.0;
-/// A tile closes on its size by 63% every 50 ms.
-const GROWTH_TAU: f32 = 0.05;
+/// How many games the Recent row holds, before its Play history tile.
+pub const RECENT_GAMES: usize = recent::GAMES;
 
-const WIDE_WIDTH: f32 = 359.0;
-const WIDE_HEIGHT: f32 = 190.0;
-const WIDE_GAP: f32 = 30.0;
-/// The wide tiles' top, under the Recent row's box and a gap of 24.
-const WIDE_TOP: f32 = ROW_TOP + (TILE + GROWTH + 24.0) * S;
-
-const TOP_BAR_MIDDLE: f32 = 114.0;
-const HERO_FADE_SECONDS: f32 = 0.4;
-const HERO_FADE_SECONDS_REDUCED: f32 = 0.15;
-
-struct WideTile {
-    title: &'static str,
-    from: Color,
-    to: Color,
-    glyph: char,
-}
-
-const WIDE_TILES: [WideTile; 4] = [
-    WideTile { title: "Discord", from: Color::rgb(0x7983F5), to: Color::rgb(0x4752C4), glyph: glyph::CHAT },
-    WideTile { title: "Settings", from: Color::rgb(0x5F6B7A), to: Color::rgb(0x2B323C), glyph: glyph::SETTINGS },
-    WideTile { title: "Achievements", from: Color::rgb(0x3FA34D), to: Color::rgb(0x0E5A1C), glyph: glyph::TROPHY },
-    WideTile { title: "Downloads", from: Color::rgb(0x3A8EE6), to: Color::rgb(0x1A4C8F), glyph: glyph::DOWNLOAD },
-];
+/// The page slides between its rests, and the rows fade as it enters and leaves the Groups, in this long.
+const SLIDE_SECONDS: f32 = 0.3;
+/// How far from the screen's top the Group with focus rests.
+const GROUP_REST: f32 = 64.0;
+/// A second A on the same tile this soon after the first is the same choice, not another.
+const DOUBLE_TAP: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Focus {
+    TopBar(TopButton),
+    /// A tile of the Recent row, from the left. The last is the Play history tile.
     Recent(usize),
     Wide(usize),
+    /// A card of a Group, from the left. The last is See all.
+    Group {
+        group: usize,
+        card: usize,
+    },
 }
 
 /// What a press on Home asks the Dashboard to do.
@@ -55,52 +50,60 @@ pub enum Focus {
 pub enum HomeAction {
     /// Launch the game at this place in the library.
     Launch(usize),
+    /// Open the Guide: the profile was chosen.
+    OpenGuide,
 }
 
-/// A game's cover for a tile: its portrait cover, else its header, else its wide art.
-pub fn cover_art(game: &Game, px: f32) -> Option<ArtKey> {
-    let path = game.cover.as_ref().or(game.header.as_ref()).or(game.hero.as_ref())?;
-    // Decoded 300 wide at 1080p, as the theme decodes it, and in proportion on a larger screen.
-    let width = if px > 1.25 { 600 } else { 300 };
-    Some(ArtKey { path: path.clone(), kind: Kind::Thumb(width) })
+/// Where the page rests: how far it has risen (the Recent row, the wide tiles and the Groups together), and how
+/// far the top bar has.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rest {
+    pub page: f32,
+    pub top_bar: f32,
 }
 
-/// A game's art for the whole screen, and whether it is the blurred stand-in: its background art as it is, else
-/// its cover, blurred, to be drawn overhanging the screen and darkened.
-pub fn hero_art(game: &Game, px: f32) -> Option<(ArtKey, bool)> {
-    let full = |path: &PathBuf| ArtKey { path: path.clone(), kind: Kind::Full((1920.0 * px).ceil() as u32) };
-    match (&game.hero, game.cover.as_ref().or(game.header.as_ref())) {
-        (Some(hero), _) => Some((full(hero), false)),
-        (None, Some(cover)) => Some((ArtKey { path: cover.clone(), kind: Kind::Blurred }, true)),
-        (None, None) => None,
-    }
-}
-
-/// The profile's picture: until Profiles have pictures, the green disc with the contact glyph, or where there is
-/// no icon font the gamertag's initial.
-pub fn profile_picture(ui: &mut Ui, rect: Rect, user: &str) {
-    ui.fill(rect, theme::ACCENT, 999.0);
-    let (cx, cy) = rect.center();
-    if ui.has_font(ui::Font::Icons) {
-        ui.icon(cx, cy, glyph::CONTACT, 26.0, Color::WHITE);
-    } else {
-        let initial: String = user.chars().take(1).flat_map(char::to_uppercase).collect();
-        ui.label_centered(cx, cy - 1.0, &initial, &BODY_SEMIBOLD);
+/// Where the page rests with focus at `focus`, on a screen `screen_height` design units tall. On the top bar and
+/// the Recent row, as laid out. On the wide tiles, risen until the first Group's header and the top third of its
+/// cards show at the screen's foot; the top bar stays. On a Group, its header 64 from the screen's top; the top
+/// bar has gone up with the page from the wide tiles' rest, above the screen.
+pub fn rest(focus: Focus, groups: usize, screen_height: f32) -> Rest {
+    let wide = match groups {
+        0 => 0.0,
+        _ => (groups::top(0) + (groups::CARDS_TOP + groups::CARD_HEIGHT / 3.0) * S - screen_height).max(0.0),
+    };
+    match focus {
+        Focus::TopBar(_) | Focus::Recent(_) => Rest { page: 0.0, top_bar: 0.0 },
+        Focus::Wide(_) => Rest { page: wide, top_bar: 0.0 },
+        Focus::Group { group, .. } => {
+            let page = groups::top(group) - GROUP_REST;
+            Rest { page, top_bar: (page - wide).max(top_bar::BOTTOM) }
+        }
     }
 }
 
 pub struct Home {
     focus: Focus,
+    /// The Recent row's game tile that last had focus: where B on a Group goes back to.
+    last_game: usize,
     /// The Recent tile Down last left, which Up from the wide tiles goes back to.
-    left_recent: usize,
-    /// The background art showing, and the one it is taking over from.
-    hero: Option<(ArtKey, bool)>,
-    hero_before: Option<(ArtKey, bool)>,
+    left_recent: Option<usize>,
+    /// The wide tile that last had focus, which Up from the first Group goes back to.
+    last_wide: usize,
+    /// When A last chose a tile, and which.
+    chosen: Option<(Instant, Focus)>,
+    background: Background,
 }
 
 impl Default for Home {
     fn default() -> Self {
-        Self { focus: Focus::Recent(0), left_recent: 0, hero: None, hero_before: None }
+        Self {
+            focus: Focus::Recent(0),
+            last_game: 0,
+            left_recent: None,
+            last_wide: 0,
+            chosen: None,
+            background: Background::default(),
+        }
     }
 }
 
@@ -111,196 +114,202 @@ impl Home {
 
     /// Puts focus on the Recent row's tile for the game at this place in the library, if it has one.
     pub fn focus_recent(&mut self, game: usize, library: &Library) {
-        if game < library.recent(RECENT_GAMES).len() {
-            self.focus = Focus::Recent(game);
+        if game < Row::of(library).games.len() {
+            self.go_recent(game, &Row::of(library));
         }
     }
 
     /// The game focus is on, by its place in the library.
     pub fn focused_game(&self, library: &Library) -> Option<usize> {
         match self.focus {
-            Focus::Recent(i) if i < library.recent(RECENT_GAMES).len() => Some(i),
-            _ => None,
+            Focus::Recent(i) => (i < Row::of(library).games.len()).then_some(i),
+            Focus::Group { group, card } => groups::of(library).get(group)?.games.get(card).copied(),
+            Focus::TopBar(_) | Focus::Wide(_) => None,
         }
     }
 
     pub fn press(&mut self, button: Button, library: &Library) -> Option<HomeAction> {
-        let count = library.recent(RECENT_GAMES).len();
+        let row = Row::of(library);
+        let groups = groups::of(library);
+        self.keep_focus_in(&row, &groups);
         match (self.focus, button) {
-            (Focus::Recent(i), Button::Left) if i > 0 => self.focus = Focus::Recent(i - 1),
-            (Focus::Recent(i), Button::Right) if i + 1 < count => self.focus = Focus::Recent(i + 1),
-            (Focus::Recent(i), Button::Down) => {
-                // The wide tile whose middle is nearest this tile's.
-                let tiles = recent_rects(count, &|k| if k == i { 1.0 } else { 0.0 });
-                let middle = tiles.get(i).map_or(MARGIN, |r| r.center().0);
-                let nearest = (0..WIDE_TILES.len())
-                    .min_by(|&a, &b| {
-                        let distance = |k: usize| (wide_rect(k).center().0 - middle).abs();
-                        distance(a).total_cmp(&distance(b))
-                    })
-                    .unwrap_or(0);
-                self.left_recent = i;
-                self.focus = Focus::Wide(nearest);
+            // The top bar: along its buttons, stopping at the ends; down to the Recent tile under the button.
+            (Focus::TopBar(at), Button::Left) => self.focus = Focus::TopBar(at.left().unwrap_or(at)),
+            (Focus::TopBar(at), Button::Right) => self.focus = Focus::TopBar(at.right().unwrap_or(at)),
+            (Focus::TopBar(at), Button::Down) => {
+                let tiles = recent::rects_at_rest(row.tiles(), None);
+                self.go_recent(nearest(at.rect().center().0, tiles.iter().map(|r| r.center().0)), &row);
             }
-            (Focus::Recent(i), Button::A) if i < count => return Some(HomeAction::Launch(i)),
-            (Focus::Wide(i), Button::Left) if i > 0 => self.focus = Focus::Wide(i - 1),
-            (Focus::Wide(i), Button::Right) if i + 1 < WIDE_TILES.len() => self.focus = Focus::Wide(i + 1),
-            (Focus::Wide(_), Button::Up) if count > 0 => self.focus = Focus::Recent(self.left_recent.min(count - 1)),
+            (Focus::TopBar(TopButton::Profile), Button::A) => return Some(HomeAction::OpenGuide),
+
+            // The Recent row: along its tiles; up to the top bar's button over the tile; down to the wide tile
+            // under it, remembering the tile for the way back.
+            (Focus::Recent(i), Button::Left) if i > 0 => self.go_recent(i - 1, &row),
+            (Focus::Recent(i), Button::Right) if i + 1 < row.tiles() => self.go_recent(i + 1, &row),
+            (Focus::Recent(i), Button::Up) => self.focus = Focus::TopBar(TopButton::nearest(tile_middle(&row, i))),
+            (Focus::Recent(i), Button::Down) => {
+                self.left_recent = Some(i);
+                self.go_wide(wide::nearest(tile_middle(&row, i)));
+            }
+            (Focus::Recent(i), Button::A) if i < row.games.len() => return self.choose(i),
+
+            // The wide tiles: along them; up to the Recent tile Down left; down into the first Group, at its start.
+            (Focus::Wide(i), Button::Left) if i > 0 => self.go_wide(i - 1),
+            (Focus::Wide(i), Button::Right) if i + 1 < wide::COUNT => self.go_wide(i + 1),
+            (Focus::Wide(_), Button::Up) => {
+                let tile = self.left_recent.filter(|&i| i < row.tiles()).unwrap_or(self.last_game_tile(&row));
+                self.go_recent(tile, &row);
+            }
+            (Focus::Wide(_), Button::Down) if !groups.is_empty() => self.focus = Focus::Group { group: 0, card: 0 },
+
+            // The Groups: along a Group's cards; up and down to the same place in the next Group, or its last
+            // card if it is shorter; up from the first to the wide tile last focused; B back to the Recent row.
+            (Focus::Group { group, card }, Button::Left) if card > 0 => {
+                self.focus = Focus::Group { group, card: card - 1 }
+            }
+            (Focus::Group { group, card }, Button::Right) if card + 1 < groups[group].cards() => {
+                self.focus = Focus::Group { group, card: card + 1 }
+            }
+            (Focus::Group { group: 0, .. }, Button::Up) => self.go_wide(self.last_wide),
+            (Focus::Group { group, card }, Button::Up) => self.go_group(group - 1, card, &groups),
+            (Focus::Group { group, card }, Button::Down) if group + 1 < groups.len() => {
+                self.go_group(group + 1, card, &groups)
+            }
+            (Focus::Group { .. }, Button::B) => self.go_recent(self.last_game_tile(&row), &row),
+            (Focus::Group { group, card }, Button::A) => {
+                if let Some(&game) = groups[group].games.get(card) {
+                    return self.choose(game);
+                }
+            }
             _ => {}
         }
         None
     }
 
+    /// A on a game's tile launches it. A again on the same tile within the double tap's time asks for nothing:
+    /// in the Bundle the pair is one choice (play, where one A opens the Game hub), and it must not launch twice.
+    fn choose(&mut self, game: usize) -> Option<HomeAction> {
+        let now = Instant::now();
+        let again = self.chosen.is_some_and(|(at, tile)| tile == self.focus && now.duration_since(at) < DOUBLE_TAP);
+        self.chosen = Some((now, self.focus));
+        (!again).then_some(HomeAction::Launch(game))
+    }
+
+    fn go_recent(&mut self, tile: usize, row: &Row) {
+        if tile < row.games.len() {
+            self.last_game = tile;
+        }
+        self.focus = Focus::Recent(tile);
+    }
+
+    fn go_wide(&mut self, tile: usize) {
+        self.last_wide = tile;
+        self.focus = Focus::Wide(tile);
+    }
+
+    fn go_group(&mut self, group: usize, card: usize, groups: &[Group]) {
+        self.focus = Focus::Group { group, card: card.min(groups[group].cards() - 1) };
+    }
+
+    /// The Recent row's game tile that last had focus, or with no games the Play history tile.
+    fn last_game_tile(&self, row: &Row) -> usize {
+        self.last_game.min(row.games.len().saturating_sub(1))
+    }
+
+    /// The library may have changed under Home: focus on a tile that is gone moves to the nearest that is left.
+    fn keep_focus_in(&mut self, row: &Row, groups: &[Group]) {
+        match self.focus {
+            Focus::Recent(i) if i >= row.tiles() => self.go_recent(row.tiles() - 1, row),
+            Focus::Group { .. } if groups.is_empty() => self.go_recent(self.last_game_tile(row), row),
+            Focus::Group { group, card } => self.go_group(group.min(groups.len() - 1), card, groups),
+            _ => {}
+        }
+    }
+
     pub fn draw(&mut self, ui: &mut Ui, library: &Library, user: &str, clock: &str) {
-        let games = library.recent(RECENT_GAMES);
-        self.background(ui, games);
-        top_bar(ui, user, clock);
-
-        // The Recent row. Each tile's share of the growth closes on 1 with focus and 0 without; what no tile has
-        // taken widens the gaps, so the row is as wide whatever has focus.
-        let focused = match self.focus {
-            Focus::Recent(i) => Some(i),
-            Focus::Wide(_) => None,
-        };
-        let shares: Vec<f32> = (0..games.len())
-            .map(|i| ui.approach(("recent tile", i), if focused == Some(i) { 1.0 } else { 0.0 }, GROWTH_TAU))
-            .collect();
-        let rects = recent_rects(games.len(), &|i| shares[i]);
-        for (i, (game, &rect)) in games.iter().zip(&rects).enumerate() {
-            game_tile(ui, rect, game, ("recent", i), focused == Some(i));
-        }
-        if let Some(&rect) = focused.and_then(|i| rects.get(i)) {
-            theme::focus_ring(ui, rect, S);
+        let row = Row::of(library);
+        let groups = groups::of(library);
+        self.keep_focus_in(&row, &groups);
+        let (mut on_bar, mut on_recent, mut on_wide, mut on_group) = (None, None, None, None);
+        match self.focus {
+            Focus::TopBar(button) => on_bar = Some(button),
+            Focus::Recent(i) => on_recent = Some(i),
+            Focus::Wide(i) => on_wide = Some(i),
+            Focus::Group { group, card } => on_group = Some((group, card)),
         }
 
-        // The wide tiles.
-        for (i, tile) in WIDE_TILES.iter().enumerate() {
-            let rect = wide_rect(i);
-            ui.gradient(rect, tile.from, tile.to, Gradient::Diagonal, TILE_RADIUS * S);
-            let (cx, cy) = rect.center();
-            ui.icon(cx, cy - 12.0 * S, tile.glyph, 40.0 * S, Color::WHITE);
-            let line = ui.measure(&BODY_SEMIBOLD, tile.title).height;
-            let caption = Rect::new(rect.x + 18.0 * S, rect.bottom() - 14.0 * S - line, rect.w - 36.0 * S, line);
-            ui.paragraph(caption, tile.title, &BODY_SEMIBOLD, HAlign::Left, VAlign::Top, 1);
-            if self.focus == Focus::Wide(i) {
-                theme::focus_ring(ui, rect, S);
+        // Only a Recent game's art shows; with focus anywhere else, the background's base.
+        self.background.draw(ui, on_recent.and_then(|i| row.games.get(i)));
+
+        // The page and the top bar slide to where they rest with focus here. The Recent row and the wide tiles
+        // fade out as the page rises into the Groups, where the wide tiles' foot would show over the header.
+        let rest = rest(self.focus, groups.len(), ui.screen().h);
+        let page = ui.slide("home page", rest.page, SLIDE_SECONDS, Ease::CubicOut);
+        let bar = ui.slide("home top bar", rest.top_bar, SLIDE_SECONDS, Ease::CubicOut);
+        let rows = ui.tween("home rows", if on_group.is_some() { 0.0 } else { 1.0 }, SLIDE_SECONDS, Ease::CubicOut);
+
+        ui.with_offset(0.0, -bar, |ui| top_bar::draw(ui, user, clock, on_bar));
+        ui.with_offset(0.0, -page, |ui| {
+            if rows > 0.0 {
+                ui.with_alpha(rows, |ui| {
+                    recent::draw(ui, &row, on_recent);
+                    wide::draw(ui, on_wide);
+                });
             }
-        }
-    }
-
-    /// The base, then the focused Recent game's art crossfading over the last one's, then the scrim.
-    fn background(&mut self, ui: &mut Ui, games: &[Game]) {
-        let screen = ui.screen();
-        ui.gradient(screen, Color::rgb(0x1E2C1C), Color::rgb(0x0C140B), Gradient::Radial, 0.0);
-
-        // A game with no art leaves the last game's up; a game's art takes over once it is decoded.
-        let wanted = match self.focus {
-            Focus::Recent(i) => games.get(i).and_then(|g| hero_art(g, ui.px())).or(self.hero.clone()),
-            Focus::Wide(_) => None,
-        };
-        if wanted != self.hero {
-            let ready = wanted.as_ref().is_none_or(|(key, _)| matches!(ui.art.get(key), ui::Art::Ready { .. }));
-            if ready {
-                self.hero_before = self.hero.take();
-                self.hero = wanted;
-            }
-        }
-        let seconds = if ui.store.reduce_motion { HERO_FADE_SECONDS_REDUCED } else { HERO_FADE_SECONDS };
-        let layer = |ui: &mut Ui, art: &Option<(ArtKey, bool)>, to: f32| {
-            let Some((key, blurred)) = art else { return 0.0 };
-            let shown = ui.tween_from(("hero", key), 0.0, to, seconds, Ease::Linear);
-            if *blurred {
-                // The blur's soft edges hang 120 off every side of the screen.
-                ui.art(screen.grow(120.0), key, Crop::Top, shown, 0.0);
-                ui.fill(screen, Color::argb(0x99000000).fade(shown), 0.0);
-            } else {
-                ui.art(screen, key, Crop::Top, shown, 0.0);
-            }
-            shown
-        };
-        if self.hero_before != self.hero && layer(ui, &self.hero_before.clone(), 0.0) <= 0.0 {
-            self.hero_before = None;
-        }
-        layer(ui, &self.hero.clone(), 1.0);
-
-        // The scrim: dark at the top for the top bar, darker at the foot for the rows.
-        let stop = |share: f32| screen.h * share;
-        ui.gradient(
-            Rect::new(screen.x, 0.0, screen.w, stop(0.22)),
-            Color::argb(0x99000000),
-            Color::CLEAR,
-            Gradient::Vertical,
-            0.0,
-        );
-        ui.gradient(
-            Rect::new(screen.x, stop(0.4), screen.w, stop(0.6)),
-            Color::CLEAR,
-            Color::argb(0xD9000000),
-            Gradient::Vertical,
-            0.0,
-        );
-    }
-}
-
-/// The Recent row's tiles, each with its share of the growth: standing on one line from the left margin.
-fn recent_rects(count: usize, share: &dyn Fn(usize) -> f32) -> Vec<Rect> {
-    let total: f32 = (0..count).map(share).sum();
-    let gap = GAP + if count > 1 { GROWTH * (1.0 - total).max(0.0) / (count - 1) as f32 } else { 0.0 };
-    let bottom = ROW_TOP + (TILE + GROWTH) * S;
-    let mut x = 0.0;
-    (0..count)
-        .map(|i| {
-            let side = TILE + GROWTH * share(i);
-            let rect = Rect::new(MARGIN + x * S, bottom - side * S, side * S, side * S);
-            x += side + gap;
-            rect
-        })
-        .collect()
-}
-
-fn wide_rect(i: usize) -> Rect {
-    Rect::new(MARGIN + i as f32 * (WIDE_WIDTH + WIDE_GAP) * S, WIDE_TOP, WIDE_WIDTH * S, WIDE_HEIGHT * S)
-}
-
-/// A game's tile: its cover filling it from the top, or its name on the dark tile; with focus, its name on a band
-/// along the foot.
-fn game_tile(ui: &mut Ui, rect: Rect, game: &Game, id: (&str, usize), focused: bool) {
-    let radius = TILE_RADIUS * S;
-    ui.fill(rect, theme::TILE, radius);
-    let has_cover = cover_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, radius));
-    if !has_cover {
-        // Laid out once, for the tile at rest, so it doesn't reflow as the tile grows.
-        let width = (TILE - 20.0) * S;
-        let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * S, width, rect.h - 20.0 * S);
-        ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0);
-    }
-    let band = ui.tween((id, "band"), if focused { 1.0 } else { 0.0 }, if focused { 0.15 } else { 0.1 }, Ease::Linear);
-    if band > 0.0 && has_cover {
-        // Laid out for the tile at its full size, and cut to the tile as it is.
-        let width = (TILE + GROWTH - 16.0) * S;
-        let text = ui.measure_wrapped(&BODY, &game.name, width, 2);
-        let height = text.height + 16.0 * S;
-        ui.with_alpha(band, |ui| {
-            // The tile's own shape, cut to the band: square across the top, the tile's corners at the foot.
-            ui.with_clip(Rect::new(rect.x, rect.bottom() - height, rect.w, height), |ui| {
-                ui.fill(rect, theme::BAND, radius);
-                let lines = Rect::new(rect.x + 8.0 * S, rect.bottom() - height + 8.0 * S, width, text.height);
-                ui.paragraph(lines, &game.name, &BODY, HAlign::Left, VAlign::Top, 2);
-            });
+            groups::draw(ui, library, &groups, on_group);
         });
     }
 }
 
-/// The top bar: the profile at the left, the three round buttons in the middle, the clock and Notifications at the
-/// right.
-fn top_bar(ui: &mut Ui, user: &str, clock: &str) {
-    let picture = Rect::new(MARGIN, TOP_BAR_MIDDLE - 28.0, 56.0, 56.0);
-    profile_picture(ui, picture, user);
-    // Segoe UI sits 2 up on the icons' middle, Bahnschrift 2 down.
-    ui.label_middle(picture.right() + 16.0, TOP_BAR_MIDDLE - 2.0, user, &BODY);
-    for (i, glyph) in [glyph::LIBRARY, glyph::SEARCH, glyph::SETTINGS].into_iter().enumerate() {
-        ui.icon(880.0 + 80.0 * i as f32, TOP_BAR_MIDDLE, glyph, 26.0, Color::WHITE);
+/// The middle, across, of the Recent row's tile `i` while it has focus.
+fn tile_middle(row: &Row, i: usize) -> f32 {
+    recent::rects_at_rest(row.tiles(), Some(i))[i].center().0
+}
+
+/// Which of `middles` is nearest `x`.
+fn nearest(x: f32, middles: impl Iterator<Item = f32>) -> usize {
+    let distances = middles.map(|middle| (middle - x).abs());
+    distances.enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).map_or(0, |(i, _)| i)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 0.05
     }
-    ui.icon(1775.0, TOP_BAR_MIDDLE, glyph::NOTIFICATIONS, 26.0, Color::WHITE);
-    ui.label_right(1725.0, TOP_BAR_MIDDLE + 2.0, clock, &theme::CLOCK);
+
+    /// docs/spec/home.md, section 7.2.
+    #[test]
+    fn the_page_rests_where_the_spec_says() {
+        for focus in [Focus::TopBar(TopButton::Search), Focus::Recent(3)] {
+            assert_eq!(rest(focus, 3, 1080.0), Rest { page: 0.0, top_bar: 0.0 });
+        }
+        let wide = rest(Focus::Wide(0), 3, 1080.0);
+        assert!(close(wide.page, 175.05) && wide.top_bar == 0.0, "{wide:?}");
+        let first = rest(Focus::Group { group: 0, card: 0 }, 3, 1080.0);
+        assert!(close(first.page, 1024.90) && close(first.top_bar, 849.85), "{first:?}");
+        let third = rest(Focus::Group { group: 2, card: 4 }, 3, 1080.0);
+        assert!(close(third.page, 1024.90 + 2.0 * 430.54) && close(third.top_bar, 849.85 + 2.0 * 430.54), "{third:?}");
+    }
+
+    #[test]
+    fn the_wide_tiles_rest_follows_the_screen() {
+        // Tall enough that a third of the first Group's cards shows already: the page stays.
+        assert_eq!(rest(Focus::Wide(0), 2, 1400.0).page, 0.0);
+        // With no Groups there is nothing to bring up.
+        assert_eq!(rest(Focus::Wide(0), 0, 1080.0).page, 0.0);
+        // On a Group the top bar is above the screen however little the page rose to reach it.
+        assert!(rest(Focus::Group { group: 0, card: 0 }, 1, 1080.0).top_bar >= top_bar::BOTTOM);
+    }
+
+    #[test]
+    fn the_groups_are_laid_out_as_the_spec_says() {
+        assert!(close(groups::top(0), 1088.90));
+        assert!(close(groups::top(1), 1519.44));
+        let card = groups::card_rect(0, 6);
+        assert!(close(card.y - groups::top(0), 56.23) && close(card.w, 216.12) && close(card.h, 329.75));
+        assert!(close(card.right(), crate::theme::ROW_RIGHT), "seven cards span the rows' width: {card:?}");
+    }
 }
