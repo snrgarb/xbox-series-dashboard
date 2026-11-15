@@ -1,9 +1,8 @@
 //! The Groups under the wide tiles: each a header over a row of up to six games' cards and a See all card.
 //! Authored in the rows' units: multiply by ROW_SCALE.
 //!
-//! Until there are saved filters (M3) the Groups are worked out from the library.
-use std::cmp::Ordering;
-
+//! The Groups are the library's saved filters that are shown and have a game, in the user's order
+//! (docs/spec/filters.md): which games are in one, and in what order, the library database has worked out.
 use model::{Game, Library};
 use ui::{Rect, Ui};
 
@@ -14,6 +13,10 @@ use crate::theme::{self, glyph, HEADING, MARGIN, ROW_SCALE as S};
 pub const CARDS: usize = 6;
 /// How many covers See all shows, of the games after those.
 const MORE: usize = 4;
+
+/// The built-in filter that is the Group of last resort, by its key, and its name where the library has no such
+/// filter (one that is in no database).
+const FAVOURITES: (&str, &str) = ("favourites", "Favourites");
 
 const CARD_WIDTH: f32 = 194.0;
 pub const CARD_HEIGHT: f32 = 296.0;
@@ -27,55 +30,41 @@ pub const CARDS_TOP: f32 = HEADER + 16.0;
 /// From one Group's top to the next's.
 const PITCH: f32 = CARDS_TOP + CARD_HEIGHT + GAP_ABOVE;
 
-pub struct Group {
-    pub name: &'static str,
-    /// The games on its cards, by their places in the library.
-    pub games: Vec<usize>,
+pub struct Group<'a> {
+    pub name: &'a str,
+    /// The games on its cards.
+    pub games: Vec<&'a Game>,
     /// The games after those, whose covers See all shows.
-    pub more: Vec<usize>,
+    pub more: Vec<&'a Game>,
 }
 
-impl Group {
+impl Group<'_> {
     /// Every card: the games', then See all, the Group's last.
     pub fn cards(&self) -> usize {
         self.games.len() + 1
     }
 }
 
-/// The Groups the library gives: what is installed, by name, and what has been played most. One with no games is
-/// left out.
-pub fn of(library: &Library) -> Vec<Group> {
-    fn lower(game: &Game) -> impl Iterator<Item = char> + '_ {
-        game.name.chars().flat_map(char::to_lowercase)
+/// The Groups the library gives: its filters that are shown and have a game, in order, each with the first of its
+/// games. With none at all, Favourites alone and empty, a header over a See all card, so that the page under the
+/// wide tiles is never blank and Down from them has somewhere to go.
+pub fn of(library: &Library) -> Vec<Group<'_>> {
+    let mut groups = Vec::new();
+    for filter in library.filters.iter().filter(|f| f.shown) {
+        // Only the first few are shown, and this runs every frame: no more of the filter's games are looked up.
+        let mut games: Vec<&Game> = filter.games.iter().filter_map(|&id| library.game(id)).take(CARDS + MORE).collect();
+        if games.is_empty() {
+            continue;
+        }
+        let more = games.split_off(games.len().min(CARDS));
+        groups.push(Group { name: &filter.name, games, more });
     }
-    let by_name = |a: &Game, b: &Game| lower(a).cmp(lower(b));
-    let by_playtime = |a: &Game, b: &Game| b.playtime_minutes.cmp(&a.playtime_minutes);
-    let groups = [
-        group(library, "Installed", |g| g.installed, by_name),
-        group(library, "Most played", |g| g.playtime_minutes > 0, by_playtime),
-    ];
-    groups.into_iter().filter(|g| !g.games.is_empty()).collect()
-}
-
-/// A Group of the games `keep` takes, in `order`; games level in it stay in the library's order.
-fn group(
-    library: &Library,
-    name: &'static str,
-    keep: impl Fn(&Game) -> bool,
-    order: impl Fn(&Game, &Game) -> Ordering,
-) -> Group {
-    let games = &library.games;
-    let compare = |a: &usize, b: &usize| order(&games[*a], &games[*b]).then(a.cmp(b));
-    let mut picked: Vec<usize> = (0..games.len()).filter(|&i| keep(&games[i])).collect();
-    // Only the first few are shown: found without sorting the whole library, as this runs every frame.
-    let shown = CARDS + MORE;
-    if picked.len() > shown {
-        picked.select_nth_unstable_by(shown, compare);
-        picked.truncate(shown);
+    if groups.is_empty() {
+        let favourites = library.filters.iter().find(|f| f.key.as_deref() == Some(FAVOURITES.0));
+        let name = favourites.map_or(FAVOURITES.1, |f| f.name.as_str());
+        groups.push(Group { name, games: Vec::new(), more: Vec::new() });
     }
-    picked.sort_by(compare);
-    let more = picked.split_off(picked.len().min(CARDS));
-    Group { name, games: picked, more }
+    groups
 }
 
 /// A Group's top with the page at rest on the Recent row, in design units. The first is under the Recent row's
@@ -90,20 +79,19 @@ pub fn card_rect(group: usize, card: usize) -> Rect {
 }
 
 /// The Groups, with focus on this card of this Group if on any.
-pub fn draw(ui: &mut Ui, library: &Library, groups: &[Group], focused: Option<(usize, usize)>) {
+pub fn draw(ui: &mut Ui, groups: &[Group], focused: Option<(usize, usize)>) {
     for (g, group) in groups.iter().enumerate() {
         ui.label_middle(MARGIN, top(g) + HEADER * S / 2.0, group.name, &HEADING);
         for card in 0..group.cards() {
             let rect = card_rect(g, card);
             let has_focus = focused == Some((g, card));
-            let title = match group.games.get(card).and_then(|&i| library.games.get(i)) {
+            let title = match group.games.get(card) {
                 Some(game) => {
                     tile::game(ui, rect, game, rect.w, has_focus);
                     game.name.as_str()
                 }
                 None => {
-                    let more = group.more.iter().filter_map(|&i| library.games.get(i));
-                    tile::collage(ui, rect, more, glyph::LIBRARY);
+                    tile::collage(ui, rect, group.more.iter().copied(), glyph::LIBRARY);
                     "See all"
                 }
             };

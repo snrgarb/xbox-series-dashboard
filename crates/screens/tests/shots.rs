@@ -75,6 +75,48 @@ fn library_with_art() -> Library {
     library
 }
 
+/// When the tests' libraries came into their database.
+const ADDED: u64 = 1_780_000_000;
+
+/// A library that has no filters yet (the fake one, as a test changed it) as the library database gives it once
+/// `seed` has had its say, with the saved filters that are Home's Groups. One that has its filters is left alone.
+fn from_database(library: Library, seed: impl FnOnce(&mut library::Database)) -> Library {
+    if !library.filters.is_empty() {
+        return library;
+    }
+    let mut database = library::Database::in_memory().unwrap();
+    database.sync(library::STEAM, &library, ADDED).unwrap();
+    seed(&mut database);
+    database.snapshot().unwrap()
+}
+
+/// The library with the two Groups most of these tests were written on: Installed, by name, and Most played, the
+/// longest played first. The other filters are there and not shown.
+fn two_groups(library: Library) -> Library {
+    from_database(library, |database| {
+        for filter in database.filters().unwrap() {
+            let shown = matches!(filter.key.as_deref(), Some("installed" | "most-played"));
+            database.set_filter_shown(filter.id, shown).unwrap();
+        }
+    })
+}
+
+/// The library as a first run has it, but for two favourites and a Steam collection of five games: Favourites, the
+/// collection, Most played and Recently added are the Groups.
+fn library_with_a_collection() -> Library {
+    from_database(library_with_art(), |database| {
+        let games = database.snapshot().unwrap().games;
+        for game in [&games[3], &games[11]] {
+            database.set_favourite(game.id, true).unwrap();
+        }
+        let appids = [0, 2, 5, 8, 12].map(|i| games[i].appid).to_vec();
+        let collection = model::Collection { source_id: "uc-Vj9aG3fT6uXo".into(), name: "Couch co-op".into(), appids };
+        let mut found = Library { user: Some("Player One".into()), games, ..Library::default() };
+        found.collections = Some(vec![collection]);
+        database.sync(library::STEAM, &found, ADDED).unwrap();
+    })
+}
+
 /// One test at a time draws: lavapipe now and then crashes with many devices drawing at once on as many threads.
 static DRAWING: Mutex<()> = Mutex::new(());
 
@@ -95,7 +137,7 @@ impl Stage {
         let gpu = gpu::init(gpu::instance(None), None);
         let host = Host::new(&gpu, FORMAT, || {});
         let target = Offscreen::new(&gpu, size);
-        let mut dashboard = Dashboard::new(library);
+        let mut dashboard = Dashboard::new(two_groups(library));
         dashboard.set_clock(Some("9:41 AM".into()));
         Self { gpu, host, target, dashboard, _drawing: drawing }
     }
@@ -355,6 +397,28 @@ fn home_see_all_focused() {
     stage.press(&[Button::Down, Button::Down, Button::Down]);
     stage.press(&[Button::Right; 6]);
     stage.check("home-see-all");
+}
+
+/// The Groups a first run shows, from the saved filters: Favourites, a Steam collection after it, then Most played,
+/// each in its own sort. The page is at rest on the first.
+#[test]
+fn home_groups_from_the_saved_filters() {
+    let mut stage = Stage::on_row(library_with_a_collection(), HD);
+    stage.press(&[Button::Down, Button::Down, Button::Right]);
+    stage.check("home-groups-filters");
+}
+
+/// With no Group to show, Favourites shows empty: its header over a See all card alone.
+#[test]
+fn home_favourites_empty() {
+    let library = from_database(library_with_art(), |database| {
+        for filter in database.filters().unwrap() {
+            database.set_filter_shown(filter.id, false).unwrap();
+        }
+    });
+    let mut stage = Stage::on_row(library, HD);
+    stage.press(&[Button::Down, Button::Down]);
+    stage.check("home-favourites-empty");
 }
 
 /// The scrolled rests on a taller screen: there is more of the page under the wide tiles, so it rises less.
@@ -694,7 +758,7 @@ fn core() -> Dashboard {
 
 /// A Dashboard with focus brought down from the profile, where Home starts, to the Recent row's first tile.
 fn on_row(library: Library) -> Dashboard {
-    let mut dashboard = Dashboard::new(library);
+    let mut dashboard = Dashboard::new(two_groups(library));
     press(&mut dashboard, &[Down]);
     dashboard
 }
@@ -834,14 +898,104 @@ fn a_shorter_group_takes_focus_on_its_last_card() {
     assert_eq!(after(&mut home, &[Up]), card(0, 2), "the place it has now, not the one it had before");
 }
 
+/// docs/spec/filters.md, section 4.1.
 #[test]
-fn with_no_groups_down_from_the_wide_tiles_does_nothing() {
-    let mut library = screens::fake_library();
-    for game in &mut library.games {
-        (game.installed, game.playtime_minutes) = (false, 0);
+fn with_no_group_to_show_favourites_is_there_empty_and_down_from_the_wide_tiles_is_its_see_all() {
+    // Nothing installed and nothing played: both shown filters are empty. And a library that is in no database
+    // has no filters at all.
+    let mut nothing = screens::fake_library();
+    for game in &mut nothing.games {
+        (game.installed, game.last_played, game.playtime_minutes) = (false, 0, 0);
     }
-    let mut home = on_row(library);
-    assert_eq!(after(&mut home, &[Down, Down]), Focus::Wide(0));
+    let libraries = [two_groups(nothing), screens::fake_library(), Library::default()];
+    for library in libraries {
+        let mut home = Dashboard::new(library);
+        press(&mut home, &[Down]);
+        assert_eq!(after(&mut home, &[Down, Down]), card(0, 0));
+        assert_eq!(home.focused_game(), None);
+        assert_eq!(after(&mut home, &[Right, Down, A]), card(0, 0), "See all is its only card, and the only Group");
+        assert!(asked(&mut home).is_empty());
+        assert_eq!(after(&mut home, &[Up]), Focus::Wide(0));
+    }
+}
+
+/// The games of the Group's cards, by their places in the library, as focus is walked along it from its start.
+fn cards_games(home: &mut Dashboard, group: usize) -> Vec<usize> {
+    let mut games = Vec::new();
+    while let (Focus::Group { group: at, .. }, Some(game)) = (home.home_focus(), home.focused_game()) {
+        assert_eq!(at, group);
+        games.push(game);
+        press(home, &[Right]);
+    }
+    games
+}
+
+#[test]
+fn the_groups_are_the_shown_filters_that_have_a_game_in_the_users_order() {
+    // As a first run has them: Favourites is shown and empty, so Most played is first and Recently added next.
+    let library = from_database(screens::fake_library(), |_| {});
+    let mut home = Dashboard::new(library);
+    press(&mut home, &[Down, Down, Down]);
+    assert_eq!(cards_games(&mut home, 0), [9, 3, 7, 1, 6, 0], "the longest played first");
+    press(&mut home, &[Down]);
+    assert_eq!(after(&mut home, &[Left; 6]), card(1, 0));
+    assert_eq!(cards_games(&mut home, 1), [10, 5, 11, 8, 1, 4], "all added at once: by name");
+    assert_eq!(after(&mut home, &[Down]), card(1, 6), "two Groups, and no third");
+
+    // The user marks two favourites, shows Installed and moves Most played last: a new snapshot, and Home follows.
+    let library = from_database(screens::fake_library(), |database| {
+        let filters = database.filters().unwrap();
+        let keyed = |key: &str| filters.iter().find(|f| f.key.as_deref() == Some(key)).unwrap().id;
+        let games = database.snapshot().unwrap().games;
+        database.set_favourite(games[12].id, true).unwrap();
+        database.set_favourite(games[4].id, true).unwrap();
+        database.set_filter_shown(keyed("installed"), true).unwrap();
+        database.set_filter_shown(keyed("recently-added"), false).unwrap();
+        database.move_filter(keyed("most-played"), 2).unwrap();
+        let weeknights = database.add_filter("Never played").unwrap();
+        let rule = model::Rule { played: Some(model::Played::Never), ..model::Rule::default() };
+        database.set_filter(weeknights, "Never played", &rule, model::Sort::Name, true).unwrap();
+        database.move_filter(weeknights, -9).unwrap();
+    });
+    home.set_library(library);
+    press(&mut home, &[B, Down, Down]);
+    assert_eq!(cards_games(&mut home, 0), [13, 12, 11, 10], "the user's own Group, first, names downward");
+    press(&mut home, &[Down]);
+    assert_eq!(after(&mut home, &[Left; 6]), card(1, 0));
+    assert_eq!(cards_games(&mut home, 1), [4, 12], "Favourites: Hades II, Ori and the Will of the Wisps");
+    press(&mut home, &[Down]);
+    assert_eq!(after(&mut home, &[Left; 6]), card(2, 0));
+    assert_eq!(cards_games(&mut home, 2), [10, 1, 4, 0, 6, 7], "Installed, by name");
+    press(&mut home, &[Down]);
+    assert_eq!(after(&mut home, &[Left; 6]), card(3, 0));
+    assert_eq!(cards_games(&mut home, 3)[0], 9, "Most played, last now");
+    assert_eq!(after(&mut home, &[Down]), card(3, 6));
+}
+
+/// The Hidden filter is a Group when the user shows it (docs/spec/filters.md, section 4): the hidden games' cards,
+/// which are in no other list.
+#[test]
+fn the_hidden_group_shows_the_hidden_games_when_the_user_shows_it() {
+    let library = from_database(screens::fake_library(), |database| {
+        let games = database.snapshot().unwrap().games;
+        database.set_hidden(games[9].id, true).unwrap();
+        database.set_hidden(games[2].id, true).unwrap();
+        for filter in database.filters().unwrap() {
+            let shown = matches!(filter.key.as_deref(), Some("hidden" | "most-played"));
+            database.set_filter_shown(filter.id, shown).unwrap();
+        }
+    });
+    assert_eq!(library.games.len(), 12);
+    let mut home = Dashboard::new(library);
+    press(&mut home, &[Down, Down, Down]);
+    // Stardew Valley is hidden, so Starfield is the most played of what is left: third in the library now.
+    assert_eq!(home.focused_game(), Some(2));
+    // The last Group: two cards, Sea of Thieves and Stardew Valley, and See all.
+    assert_eq!(after(&mut home, &[Down, Right, Right, Right]), card(1, 2));
+    // A hidden game has no place among the library's games: its card launches nothing until the Game hub opens on it.
+    assert_eq!(after(&mut home, &[Left, A]), card(1, 1));
+    assert_eq!(home.focused_game(), None);
+    assert!(asked(&mut home).is_empty());
 }
 
 #[test]

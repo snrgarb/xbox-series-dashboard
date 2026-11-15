@@ -448,7 +448,7 @@ impl Dashboard {
 }
 
 /// Fourteen games with no art, so Home always has something to show: ten played, most recently first, then four
-/// never played; some not installed.
+/// never played; some not installed. In no database, so with no saved filters: whoever shows it gives it them.
 pub fn fake_library() -> Library {
     // Name, minutes played, installed.
     let games = [
@@ -478,9 +478,9 @@ pub fn fake_library() -> Library {
         cover: None,
         hero: None,
         header: None,
-        favourite: false,
+        ..model::Game::default()
     });
-    Library { user: Some("Player One".into()), games: games.collect() }
+    Library { user: Some("Player One".into()), games: games.collect(), ..Library::default() }
 }
 
 #[cfg(test)]
