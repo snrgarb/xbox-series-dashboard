@@ -115,7 +115,8 @@ try {
 
     # In by the top bar's button: Games, focus on its first game. (Y and B first, so that the log says where Home's
     # focus is.)
-    Press Y 'Search: Open'
+    Press Y 'Search: Key\(Q\); "\|" upper letters, RecentlyAdded \d+'
+    Press B 'Search: RecentlyAdded\(0\) .+; "" away, RecentlyAdded \d+'
     Press B 'Recent\(0\)'
     Press Up 'TopBar\(Profile\)'
     Walk Right 'TopBar\(MyGames\)' 2
@@ -191,7 +192,8 @@ try {
     Walk-ToEdge Up (Nav 'Games') | Out-Null
     Press A 'MyGames: Games: Tile\(0\)'
     Press Right 'MyGames: Games: Tile\(1\)'
-    Press Y 'Search: Open' 'search-over-my-games'
+    Press Y 'Search: Key\(Q\); "\|" upper letters, RecentlyAdded \d+' 'search-over-my-games'
+    Press B 'Search: RecentlyAdded\(0\) .+; "" away, RecentlyAdded \d+'
     Press B 'MyGames: Games: Tile\(1\)' 'back-on-the-game'
 
     # B is Home, wherever focus is on the page.

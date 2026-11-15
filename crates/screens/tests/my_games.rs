@@ -308,9 +308,12 @@ fn y_on_a_game_opens_search_over_the_page_and_b_comes_back_to_the_game() {
     press(&mut page, &[Right, Down]);
     page.take_effects();
     press(&mut page, &[Y]);
-    assert_eq!((page.focus_line().as_str(), page.pages_up()), ("Search: Open", 2));
+    let line = page.focus_line();
+    assert!(line.starts_with("Search: Key(Q); \"|\" upper letters, RecentlyAdded "), "{line}");
+    assert_eq!(page.pages_up(), 2);
     assert!(page.take_effects().is_empty(), "Y is silent");
-    press(&mut page, &[B]);
+    // B twice: Search's keyboard goes, then Search.
+    press(&mut page, &[B, B]);
     assert_eq!((page.focus_line().as_str(), page.pages_up()), ("MyGames: Games: Tile(6)", 1));
     // Not from the nav, nor from Play history or Manage.
     assert_eq!(after(&mut page, &[Left, Left, Y]), "Games: Nav(Games)");
