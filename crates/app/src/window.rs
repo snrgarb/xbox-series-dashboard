@@ -3,7 +3,7 @@
 //! the pad and the keyboard, draws each window when what it shows has changed, and carries out what the Dashboard
 //! asks of the shell.
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use input::Pad;
 use model::Library;
@@ -79,7 +79,23 @@ struct App {
     /// When the library had been read, in ms since the process started.
     library_ready: f64,
     sounds: Sounds,
+    /// Whether Home's last frame left something moving.
+    moving: bool,
+    /// With --log-focus: say where Home's focus went, for a test that must know before it presses on.
+    log_focus: bool,
+    /// The minute of the day Home's last frame showed on its clock.
+    minute: u64,
+    /// With --log-frames: the frames Home's window and the Overlay drew since they were last said, and when.
+    frames: Option<(u32, u32, Instant)>,
 }
+
+/// The minute it is, counted from 1970: what the clock's next change is told by.
+fn minute() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_secs() / 60)
+}
+
+/// How often --log-frames says what was drawn.
+const FRAMES_EVERY: Duration = Duration::from_secs(5);
 
 pub fn run(args: &Args, library: Library, store: Store) {
     shell::log_wgpu();
@@ -117,6 +133,10 @@ pub fn run(args: &Args, library: Library, store: Store) {
         sounds: Sounds::open(args, &store),
         store,
         library_ready: since_start(),
+        moving: false,
+        log_focus: args.log_focus,
+        minute: minute(),
+        frames: args.log_frames.then(|| (0, 0, Instant::now())),
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
@@ -205,6 +225,9 @@ impl App {
         let dt = (now - self.overlay_last_frame).as_secs_f32().min(if self.overlay_moving { 1.0 } else { 0.1 });
         self.overlay_last_frame = now;
         self.overlay_stale = false;
+        if let Some((_, overlay, _)) = &mut self.frames {
+            *overlay += 1;
+        }
         let view = frame.texture.create_view(&Default::default());
         let (gpu, size, dashboard) = (&state.gpu, overlay.size(), &mut self.dashboard);
         // Cleared to nothing: where the Dashboard draws nothing, the game shows.
@@ -344,8 +367,12 @@ impl ApplicationHandler for App {
         }
 
         let pressed = !presses.is_empty();
+        let focus = self.dashboard.home_focus();
         for press in presses {
             self.dashboard.press(press);
+        }
+        if self.log_focus && self.dashboard.home_focus() != focus {
+            eprintln!("focus: {:?}", self.dashboard.home_focus());
         }
         self.overlay_stale |= pressed;
         self.carry_out(event_loop);
@@ -359,9 +386,16 @@ impl ApplicationHandler for App {
         }
 
         let Some(state) = &self.state else { return };
-        // Home's window is drawn when something changed or is moving, and once a second for the clock; not at all
-        // behind a game or under its Launch screen, where it keeps the last frame it showed.
-        let due = self.last_frame.elapsed() >= Duration::from_secs(1);
+        if let Some((home, overlay, since)) = &mut self.frames {
+            if since.elapsed() >= FRAMES_EVERY {
+                eprintln!("frames: home {home}, overlay {overlay} in {:.1} s", since.elapsed().as_secs_f32());
+                (*home, *overlay, *since) = (0, 0, Instant::now());
+            }
+        }
+        // Home's window is drawn when something changed or is moving, and when the minute changes for the clock; not
+        // at all behind a game or under its Launch screen, where it keeps the last frame it showed. The loop looks
+        // every IDLE at most, which is how late the clock can be.
+        let due = minute() != self.minute;
         // And when what was drawn last asked to be drawn again: a delay's end, the swirl's next step.
         let covered = self.dashboard.home_covered();
         let wake = state.host.wake().filter(|_| !covered).map(Duration::from_secs_f32);
@@ -413,12 +447,18 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let began = since_start();
                 let now = Instant::now();
-                // Animations step by a tenth of a second at most; the clock takes all the time there was.
+                // From rest an animation starts with a tenth of a second at most, however long Home sat still. One
+                // that was moving has moved on by as long as this frame is after the last, as the Overlay's does: a
+                // fade takes its time by the clock however few frames a slow renderer gives it.
                 let passed = (now - self.last_frame).as_secs_f32();
-                let dt = passed.min(0.1);
+                let dt = passed.min(if self.moving { 1.0 } else { 0.1 });
                 state.host.store.slept(passed - dt);
                 self.last_frame = now;
                 self.stale = false;
+                self.minute = minute();
+                if let Some((home, ..)) = &mut self.frames {
+                    *home += 1;
+                }
 
                 let frame = match state.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -437,6 +477,7 @@ impl ApplicationHandler for App {
                 let dashboard = &mut self.dashboard;
                 state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
                 state.gpu.queue.present(frame);
+                self.moving = state.host.animating();
                 if self.presented.is_none() {
                     self.presented = Some(Instant::now());
                     let [library, window, gpu, renderer] = state.ready;
