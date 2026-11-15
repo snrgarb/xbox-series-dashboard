@@ -3,7 +3,7 @@
 # Until their own tickets the pages are stand-ins that say only which page they are.
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: Recent(2)` on Home, and
-# `focus: Settings: Rail` with a page on top (the page's name, then where it says its focus is). Passes when every
+# `focus: Settings: Rail: Theme settings` with a page on top (the page's name, then where it says its focus is). Passes when every
 # press is followed by the line expected of it and the Dashboard stays up. The screenshots are to look at.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
@@ -97,18 +97,21 @@ try {
     Press A 'Search: Open'
     Press B 'TopBar\(Search\)' '04-back-on-the-search-button'
     Walk Right 'TopBar\(Settings\)' 2
-    Press A 'Settings: Rail' '05-settings'
+    Press A 'Settings: Rail: Theme settings' '05-settings'
     Press B 'TopBar\(Settings\)'
 
-    # The wide tiles: Discord (Settings on Discord, there being no Discord tab), Settings, Downloads. Each gives
-    # focus back to its tile. Achievements opens the Guide and is not pressed here.
+    # The wide tiles: Discord (Settings, there being no Discord tab), Settings, Downloads. Each gives focus back to
+    # its tile; Settings opens on Theme settings' first box, so B is its rail first. Achievements opens the Guide and
+    # is not pressed here.
     Press Down 'Recent\(\d+\)'
     Press Down 'Wide\(\d\)'
     Walk Left 'Wide\(0\)' 4
-    Press A 'Settings: Discord'
+    Press A 'Settings: Theme settings: Personalisation'
+    Press B 'Settings: Rail: Theme settings'
     Press B 'Wide\(0\)'
     Walk Right 'Wide\(1\)' 2
-    Press A 'Settings: Tile'
+    Press A 'Settings: Theme settings: Personalisation'
+    Press B 'Settings: Rail: Theme settings'
     Press B 'Wide\(1\)'
     Walk Right 'Wide\(3\)' 3
     Press A 'MyGames: Queue'

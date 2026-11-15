@@ -2,6 +2,7 @@
 //! right. Its measures are the screen's own, not the rows': nothing here is multiplied by ROW_SCALE.
 use ui::{Color, Ease, Rect, Ui};
 
+use crate::guide;
 use crate::theme::{self, glyph, BODY, MARGIN};
 
 const MIDDLE: f32 = 114.0;
@@ -86,12 +87,16 @@ pub fn profile_picture(ui: &mut Ui, rect: Rect) {
 pub struct Status<'a> {
     pub user: &'a str,
     pub clock: &'a str,
-    /// Whether a pad is connected: its glyph stands left of the clock.
+    /// Whether a pad is connected: it stands left of the clock.
     pub pad: bool,
+    /// A wireless pad's charge, 0 to 100: its battery in the glyph's place. None for a pad on a cable.
+    pub pad_battery: Option<u8>,
+    /// Settings' Show battery percentages: the figure beside the battery.
+    pub show_percent: bool,
 }
 
 pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
-    let Status { user, clock, pad } = *status;
+    let Status { user, clock, pad, pad_battery, show_percent } = *status;
     let picture = TopButton::Profile.rect();
     profile_picture(ui, picture);
     if focused == Some(TopButton::Profile) {
@@ -122,6 +127,8 @@ pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
     // The status area ends 20 left of Notifications: the clock, and 16 left of it the pad.
     let clock = ui.label_right(1725.0, MIDDLE + 2.0, clock, &theme::CLOCK);
     if pad {
-        ui.icon(1725.0 - clock.width - 16.0 - 12.0, MIDDLE, glyph::GAMEPAD, 24.0, Color::WHITE);
+        // On a cable the pad's glyph; wireless its battery, with its charge beside it unless Settings says not.
+        let battery = guide::Status { pad_battery, show_percent, ..guide::Status::default() };
+        guide::pad_battery(ui, 1725.0 - clock.width - 16.0, MIDDLE, &battery);
     }
 }

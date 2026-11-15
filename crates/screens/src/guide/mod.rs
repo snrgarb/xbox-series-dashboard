@@ -19,6 +19,7 @@ use model::{Library, PowerCommand};
 use ui::{Button, Color, Ease, Gradient, Press, Rect, TextStyle, Ui};
 
 pub use self::entries::{Entry, Kind};
+pub(crate) use self::status::pad_battery;
 pub use self::status::{PcBattery, Status};
 pub use self::utilities::Utility;
 use crate::menu_panel::{self, Answer, MenuPanel, Row};

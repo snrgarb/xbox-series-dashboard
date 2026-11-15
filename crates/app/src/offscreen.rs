@@ -9,7 +9,7 @@ use ui::{Button, Host, Press};
 
 use crate::{fail, since_start, Args};
 
-pub fn run(args: &Args, library: Library) {
+pub fn run(args: &Args, library: Library, options: screens::Options) {
     let out = args.screenshot.as_ref().unwrap();
     let size = args.size.unwrap_or((1920, 1080));
     let gpu = gpu::init(gpu::instance(None), None);
@@ -18,6 +18,7 @@ pub fn run(args: &Args, library: Library) {
     let target = Offscreen::new(&gpu, size);
     let mut host = Host::new(&gpu, FORMAT, || {});
     let mut dashboard = Dashboard::new(library);
+    dashboard.set_options(options);
     dashboard.set_clock(args.clock.clone());
     let press = |dashboard: &mut Dashboard, button| dashboard.press(Press { button, repeat: false });
     // Home starts with focus on the profile: a game to launch or a row to walk is on the Recent row.

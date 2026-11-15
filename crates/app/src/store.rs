@@ -11,6 +11,7 @@ use std::time::Instant;
 use anyhow::Result;
 use library::Database;
 use model::{Game, Library};
+use screens::settings::{Change, Options, Setting};
 
 use crate::{fail, Args};
 
@@ -180,9 +181,24 @@ impl Store {
         self.database.as_ref()?.setting(key).map_err(|e| eprintln!("library: {e:#}")).ok()?
     }
 
-    /// A setting that is on or off: `default` when it has never been set, or says neither.
-    pub fn flag(&self, key: &str, default: bool) -> bool {
-        flag(self.setting(key).as_deref(), default)
+    /// Settings' options as the database has them: each its default until it has been set. Those that are set
+    /// are said in the log, which is how a test knows a change outlived the Dashboard that made it.
+    pub fn options(&self) -> Options {
+        for setting in Setting::ALL {
+            if let Some(value) = self.setting(setting.key()) {
+                eprintln!("settings: {} is {value}", setting.key());
+            }
+        }
+        Options::read(|key| self.setting(key))
+    }
+
+    /// Saves an option Settings changed. With no database it lasts as long as the Dashboard does.
+    pub fn set(&self, change: Change) {
+        let Some(database) = &self.database else { return };
+        match database.set_setting(change.key(), change.value()) {
+            Ok(()) => eprintln!("settings: {} = {}", change.key(), change.value()),
+            Err(e) => eprintln!("settings: {} not saved: {e:#}", change.key()),
+        }
     }
 
     fn snapshot(&self) -> Option<Library> {
@@ -190,18 +206,9 @@ impl Store {
     }
 }
 
-/// On or off, as the settings table holds it.
-fn flag(setting: Option<&str>, default: bool) -> bool {
-    match setting.map(|text| text.trim().to_ascii_lowercase()).as_deref() {
-        Some("true" | "1" | "on" | "yes") => true,
-        Some("false" | "0" | "off" | "no") => false,
-        _ => default,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{flag, with_filters};
+    use super::with_filters;
 
     #[test]
     fn a_library_from_no_database_is_given_the_built_in_filters() {
@@ -216,15 +223,5 @@ mod tests {
         assert_eq!(library.game(most_played.games[0]).unwrap().name, "Stardew Valley");
         // One that has its filters keeps them, and its games their ids.
         assert_eq!(with_filters(library.clone()), library);
-    }
-
-    #[test]
-    fn a_flag_is_its_default_until_it_says_on_or_off() {
-        assert!(flag(None, true));
-        assert!(!flag(None, false));
-        assert!(!flag(Some("false"), true));
-        assert!(!flag(Some(" Off "), true));
-        assert!(flag(Some("1"), false));
-        assert!(flag(Some("perhaps"), true));
     }
 }

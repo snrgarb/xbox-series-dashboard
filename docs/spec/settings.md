@@ -703,6 +703,8 @@ What M3 builds, then: the shell (rail, header, pane of boxes, pages, B levels, e
 
 ## 15. Open questions
 
+Questions 1, 2, 6 and 13 are answered in section 16, with what else building the page (#56) settled.
+
 1. **The sixth Personalisation row.** The Bundle's page runs off a 1080 screen and its last box shifts when focused (6.2). Options: scroll the pane (as Profiles does); put the checkbox boxes two wide and move the info elsewhere; or give every info text the row span. With the Groups entry added and M5's boxes possibly absent in M3, the page's rows change anyway: which layout?
 2. **The rail with one category.** With Playnite settings, More Playnite options and the Debug menu gone, the rail holds only Theme settings. Keep a one-item rail (and the name "Theme settings", which names a Playnite theme), promote Personalisation, Idle, Guide and Discord to rail categories, or something else? And are boxes for features of later milestones shown before those milestones?
 3. **Options that were Playnite's and have no entry of ours**: interface volume, display, language. Which exist in the port, and on which page?
@@ -718,3 +720,74 @@ What M3 builds, then: the shell (rail, header, pane of boxes, pages, B levels, e
 13. **A hint bar on Settings.** The Bundle shows none. Keep it so, or show A Select / B Back as on the other pages?
 14. **Held D-pad repeat** on the rail and in lists is Playnite's and unmeasured (as home.md): the port uses its own repeat everywhere?
 15. **Line counts** of the wrapped texts (6.2, 6.8) are estimates (one line either way), and the Discord page's exact y positions were not derived: to be checked against the Bundle on the TV PC when those pages are built.
+
+---
+
+## 16. Settings in the Dashboard
+
+What `crates/screens/src/settings/` does that the sections above leave open, or does differently. Decided in #56.
+
+### 16.1 What is there in M3
+
+- **The rail keeps its shape with its one category** (open question 2): the title, and one item, **Theme settings**, at y 190. No dividers, there being nothing under them. Up, Down and Left on it do nothing; Right or A goes into the category on its first box; B leaves Settings. The fly-in (10.2) plays between categories and so never plays: nothing of it is built.
+- **Boxes of later milestones are absent** until their milestone (open question 2), and the boxes that are there close up in the grid, row by row:
+
+| Pane | Boxes |
+|---|---|
+| Theme settings | Personalisation (0, 0), Guide (1, 0). Idle (M5) and Discord (M6) come back to the Bundle's places with their features. |
+| Personalisation | Four checkbox boxes, a row each from the top: Background delay (y 210), Reduce motion (359), Show Play history (508), Show battery percentages (657). Boot video, Profiles and Who's playing today? are M5's and go over them when they come; Groups (#57) has its box here too. |
+| Guide | "Guide", its description and Use the Guide, as 6.8. The Now Playing source under it is M5's. |
+
+- **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
+- **No hint bar** (open question 13): as the Bundle.
+
+### 16.2 A pane that would run off the screen scrolls
+
+Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With M3's four rows nothing scrolls at 1080; the rule is there for M5's rows.
+
+The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (x 520), which its picture 29 of Theme settings has not: a clipping accident of that pane's grid, not copied.
+
+### 16.3 Entry points
+
+| From | Opens on | Focus | B |
+|---|---|---|---|
+| Home's top bar button; the Guide's Settings | Theme settings' boxes | the rail's Theme settings | Home: the button; from the Guide, Home's rows |
+| Home's **Settings** wide tile (the Bundle's "Playnite settings" tile, whose category is gone) | Theme settings' boxes | its first box, Personalisation | the rail, then the tile |
+| The Tile menu's Customise Home (`Entry::Personalisation`) | Personalisation | its first box | Theme settings' boxes on Personalisation, the rail, then the tile |
+| Home's **Discord** tile with no Discord tab or the Guide off | Theme settings' boxes until Discord has a page (M6), which it then opens on, focus on Type | its first box | the rail, then the tile |
+
+Left from a pane's first column is B, on the boxes and on the Guide page. From the boxes to the rail and into the category again is its first box, whatever had focus (9.1).
+
+### 16.4 The settings store
+
+Open question 6. Settings are rows of the library database's `settings` table, a key and a value, beside what the library keeps there of its own (`steam.user`, `steam.marks`). The core never sees the database: `screens::Options` is every option's value, typed, each with its default; the executable reads it at start-up (`Options::read`) and hands it to the Dashboard (`Dashboard::set_options`), `--screenshot` too where `--data-dir` names a database. A checkbox turned over is in force at once in the core, which asks for it to be saved with `Effect::Set(Change)`; the executable writes the row then, so a Dashboard that is killed has lost nothing.
+
+| Option | Key | Default |
+|---|---|---|
+| Background delay | `home.background_delay` | on |
+| Reduce motion | `motion.reduce` | off |
+| Show Play history | `home.play_history` | on |
+| Show battery percentages | `status.battery_percent` | on |
+| Use the Guide | `guide.enabled` | on |
+
+Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too). **Saved only once set** is kept: an option has no row until it is changed, so a later change of default reaches those who never chose. Nothing here is secret and nothing is encrypted; Discord's secret and tokens are M6's, and do not go in this table as they are. Every option is shared by every Profile. The log says `settings: <key> is <value>` for each option that is set as the Dashboard starts, and `settings: <key> = <value>` as one is saved.
+
+### 16.5 What each option changes
+
+| Option | In force |
+|---|---|
+| Background delay | Home's background waits 1.5 s or 150 ms on a Recent tile, from the next move of focus |
+| Reduce motion | `ui`'s rule (docs/ui.md): what slides is in place, fades stay, the swirl holds still. From the next frame, in Home's window and on the Overlay |
+| Show Play history | The Recent row is seven games and the Play history tile, or eight games, made again at once. Focus that was on the tile is on the game in its place, and the other way about. A library with no game keeps the tile, so the row is never empty |
+| Show battery percentages | The figure beside the pad's battery and the PC's, on Home's top bar and in the Guide's Status area. Home's top bar draws a wireless pad's battery for it (home.md, 2.4): the cell, and the figure left of it |
+| Use the Guide | As 6.8: the Guide button and a hold of it do nothing, nor Home's profile and Achievements tile, and the Discord tile opens Settings. A Guide that is open stays open until it is closed |
+
+### 16.6 Sounds and the focus log
+
+The Dashboard's one rule for every screen (docs/ui.md, "Sounds") holds here: focus landing on another control is the move sound, a level up or down included, as Playnite's navigation sound is in the Bundle; A that turns a checkbox over is the activation sound, where the Bundle's is unverified (open question 11); B out of Settings is silent.
+
+`--log-focus` says `focus: Settings: ` and then the rail (`Rail: Theme settings`) or the pane and its control (`Theme settings: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above.
+
+### 16.7 The controls, for the pages still to come
+
+`settings::controls` has every control of section 4 as a function that draws it in a rectangle, with or without focus: `settings_box` (a Box with an icon, or a checkbox box with its info text), `row`, `pane_button`, `checkbox_row`, `label` and `description`; `Dropdown` (the box, and its list while open, with the list's own presses and scrolling); `Grid` (a pane of boxes' places, its steps and its scrolling); and `focus_ring` and `glow`. A page is a struct that implements `settings::Pane` (its header, its focus line, `press`, `draw`) and is opened by a box (`boxes::Item::Opens`) of the pane it belongs to; `boxes::Boxes` is a whole pane of boxes made from a list of them. The Row, the pane button and the dropdown are on no page of M3: `crates/screens/tests/settings.rs` builds Idle's page and a list of Rows from them, for their pictures.

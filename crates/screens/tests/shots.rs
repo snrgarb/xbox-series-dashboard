@@ -319,7 +319,7 @@ fn home_swirl_later() {
 #[test]
 fn home_swirl_under_reduce_motion() {
     let mut stage = Stage::new(library_with_art(), HD);
-    stage.host.store.reduce_motion = true;
+    stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
     stage.run(12.0, 0.1);
     stage.check_frame("home-swirl-reduce-motion");
 }
@@ -833,7 +833,7 @@ fn the_swirl_moves_at_thirty_frames_a_second_and_not_at_all_under_reduce_motion(
     // One stage at a time draws.
     drop(stage);
     let mut stage = Stage::new(library_with_art(), HD);
-    stage.host.store.reduce_motion = true;
+    stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
     let start = stage.frame();
     assert!(!stage.host.animating() && stage.host.wake().is_none(), "a swirl standing still asks for no frame");
     stage.run(3.0, 0.1);
@@ -1389,7 +1389,7 @@ fn the_guide_slides_out_and_is_gone() {
 #[test]
 fn under_reduce_motion_the_guide_appears_and_goes_at_once() {
     let mut stage = Stage::on_row(screens::fake_library(), HD);
-    stage.host.store.reduce_motion = true;
+    stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
     let home = stage.frame_after(0.0);
     stage.press(&[Button::Guide]);
     let image = stage.frame_after(0.0);
@@ -1601,7 +1601,7 @@ fn powers_contents_come_in_from_the_left_behind_the_band() {
 #[test]
 fn under_reduce_motion_power_is_there_at_once() {
     let mut stage = guide_at_home();
-    stage.host.store.reduce_motion = true;
+    stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
     stage.frame_after(0.0);
     let mut stage = power_from_its_entry(stage);
     assert_eq!(colour(&stage.frame_after(0.0), 625, 380), [59, 59, 59]);

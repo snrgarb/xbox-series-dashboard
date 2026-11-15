@@ -121,7 +121,7 @@ fn main() {
     let args = parse_args().unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
     let (library, store) = store::open(&args);
     if args.screenshot.is_some() {
-        offscreen::run(&args, library);
+        offscreen::run(&args, library, store.options());
     } else if args.bench || args.size.is_some() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));
     } else {
