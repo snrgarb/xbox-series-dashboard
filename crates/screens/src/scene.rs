@@ -3,7 +3,7 @@
 use model::Library;
 
 use crate::art::{Job, Slot};
-use crate::render::{rgba, Frame, Quad, Rect, TexId, Text, TextKey, TextSys};
+use render::{rgba, Frame, Quad, Rect, TexId, Text, TextKey, TextSys};
 
 /// The theme lays its rows out 1526 wide and scales them to the 1700 between the side margins.
 const K: f32 = 1700.0 / 1526.0;

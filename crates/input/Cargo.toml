@@ -1,0 +1,8 @@
+[package]
+name = "input"
+version = "0.0.0"
+edition = "2021"
+description = "The gamepad, through XInput, and the Guide button."
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse"] }

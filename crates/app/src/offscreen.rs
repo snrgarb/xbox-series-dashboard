@@ -1,10 +1,11 @@
 //! `--screenshot`: Home drawn to a texture with no window, read back and saved as a PNG.
 use model::Library;
 
-use crate::gpu::{self, Gpu};
-use crate::{fail, since_start, Args, Home};
+use render::gpu;
+use render::offscreen::{read_back, wait, FORMAT};
+use screens::Home;
 
-const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+use crate::{fail, since_start, Args};
 
 pub fn run(args: &Args, library: &Library) {
     let out = args.screenshot.as_ref().unwrap();
@@ -70,7 +71,7 @@ pub fn run(args: &Args, library: &Library) {
     // `--launch-screen`: the screenshot is of the focused game's Launch screen.
     home.scene.set_launching(args.launch_screen);
     if args.guide {
-        home.scene.open_guide(crate::window::guide_entries(library, None));
+        home.scene.open_guide(screens::guide_entries(library, None));
         home.scene.guide_move(1);
     }
     home.scene.settle();
@@ -79,33 +80,4 @@ pub fn run(args: &Args, library: &Library) {
     image::save_buffer(out, &pixels, size.0, size.1, image::ColorType::Rgba8)
         .unwrap_or_else(|e| fail(&format!("{}: {e}", out.display())));
     eprintln!("wrote {} ({}x{}) at {:.1} ms", out.display(), size.0, size.1, since_start());
-}
-
-fn wait(gpu: &Gpu, submission_index: Option<wgpu::SubmissionIndex>) {
-    gpu.device.poll(wgpu::PollType::Wait { submission_index, timeout: None }).expect("poll device");
-}
-
-fn read_back(gpu: &Gpu, texture: &wgpu::Texture, size: (u32, u32)) -> Vec<u8> {
-    let row = 4 * size.0 as usize;
-    let padded = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize);
-    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("read back"),
-        size: (padded * size.1 as usize) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = gpu.device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        texture.as_image_copy(),
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buffer,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded as u32), rows_per_image: None },
-        },
-        wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
-    );
-    gpu.queue.submit(Some(encoder.finish()));
-    buffer.map_async(wgpu::MapMode::Read, .., |result| result.expect("map read-back buffer"));
-    wait(gpu, None);
-    let mapped = buffer.get_mapped_range(..).expect("mapped range");
-    mapped.chunks(padded).flat_map(|line| &line[..row]).copied().collect()
 }

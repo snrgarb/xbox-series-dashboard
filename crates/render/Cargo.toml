@@ -1,0 +1,12 @@
+[package]
+name = "render"
+version = "0.0.0"
+edition = "2021"
+description = "The GPU renderer: quads, images and text."
+
+[dependencies]
+wgpu = "30"
+glyphon = "0.12"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+pollster = "1"
+bytemuck = { version = "1", features = ["derive"] }

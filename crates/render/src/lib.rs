@@ -1,4 +1,7 @@
 //! The renderer: a list of rounded, optionally textured quads, then text over them, in one pass.
+pub mod gpu;
+pub mod offscreen;
+
 use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};

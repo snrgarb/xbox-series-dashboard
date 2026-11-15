@@ -5,9 +5,11 @@ use std::path::PathBuf;
 fn main() -> Result<()> {
     let root = match std::env::args_os().nth(1) {
         Some(arg) => PathBuf::from(arg),
-        None => steam::find_steam_root().context("Steam not found; pass the Steam folder as the first argument")?,
+        None => {
+            source_steam::find_steam_root().context("Steam not found; pass the Steam folder as the first argument")?
+        }
     };
-    let lib = steam::load(&root).with_context(|| format!("reading Steam at {}", root.display()))?;
+    let lib = source_steam::load(&root).with_context(|| format!("reading Steam at {}", root.display()))?;
     println!("{}", serde_json::to_string_pretty(&lib)?);
     let g = &lib.games;
     eprintln!(

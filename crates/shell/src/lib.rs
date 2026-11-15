@@ -1,6 +1,16 @@
 //! Launching a game through Steam, with Home's window as its Launch screen: above every window and never taking
 //! focus, hiding Steam's dialogs and the game's splash until the game's own window has been up a moment. Then the
 //! window fades away and hides while the game runs, and Home comes back when it ends.
+use std::sync::OnceLock;
+use std::time::Instant;
+
+static START: OnceLock<Instant> = OnceLock::new();
+
+/// Milliseconds since the process started: since this was first called, which `main` does first of all.
+pub fn since_start() -> f64 {
+    START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
+}
+
 /// What Home's window is showing during a launch.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub enum Showing {
@@ -19,7 +29,7 @@ pub struct Launch;
 
 #[cfg(not(windows))]
 impl Launch {
-    pub fn start(_: u32, name: &str, _: &std::path::Path, _: &winit::window::Window) -> Option<Self> {
+    pub fn start(_: u32, name: &str, _: &std::path::Path, _: *mut std::ffi::c_void) -> Option<Self> {
         eprintln!("launch: {name} can only be started on Windows");
         None
     }
@@ -58,8 +68,6 @@ mod win {
     };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use winit::window::Window;
 
     /// How long the game's window must have been up before the Launch screen leaves: time to draw its first frames.
     const SETTLE: Duration = Duration::from_millis(1500);
@@ -105,9 +113,12 @@ mod win {
     }
 
     impl Launch {
-        pub fn start(appid: u32, name: &str, dir: &Path, window: &Window) -> Option<Self> {
-            let RawWindowHandle::Win32(handle) = window.window_handle().ok()?.as_raw() else { return None };
-            let hwnd = handle.hwnd.get() as HWND;
+        // An HWND is a handle Windows looks up, never a pointer this code follows.
+        #[allow(clippy::not_unsafe_ptr_arg_deref)]
+        pub fn start(appid: u32, name: &str, dir: &Path, hwnd: HWND) -> Option<Self> {
+            if hwnd.is_null() {
+                return None;
+            }
             let mut dir = dir.to_string_lossy().replace('/', "\\").to_lowercase();
             if !dir.ends_with('\\') {
                 dir.push('\\');

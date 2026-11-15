@@ -1,36 +1,12 @@
-//! Home, rendered natively: wgpu for the GPU, winit for the window, glyphon for text.
-mod art;
-mod gpu;
-mod launch;
+//! The executable: Home in a window, or one frame of it drawn offscreen to a PNG.
 mod offscreen;
-mod pad;
-mod render;
-mod scene;
 mod window;
 
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver};
-use std::sync::OnceLock;
-use std::time::Instant;
 
 use model::{Game, Library};
 
-use crate::gpu::Gpu;
-use crate::render::Renderer;
-use crate::scene::Scene;
-
-static START: OnceLock<Instant> = OnceLock::new();
-static CLOCK: OnceLock<String> = OnceLock::new();
-
-/// What the top bar's clock reads: `--clock`'s text, else the time.
-pub fn clock() -> String {
-    CLOCK.get().cloned().unwrap_or_else(|| chrono::Local::now().format("%-I:%M %p").to_string())
-}
-
-/// Milliseconds since the process started (since `main` was entered).
-pub fn since_start() -> f64 {
-    START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
-}
+pub use shell::since_start;
 
 #[derive(Default)]
 pub struct Args {
@@ -83,10 +59,10 @@ fn load_library(args: &Args) -> Library {
         let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
         return serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
     }
-    match args.steam.clone().or_else(steam::find_steam_root) {
+    match args.steam.clone().or_else(source_steam::find_steam_root) {
         Some(root) => {
             let t = std::time::Instant::now();
-            let library = steam::load(&root).unwrap_or_else(|e| fail(&format!("{}: {e}", root.display())));
+            let library = source_steam::load(&root).unwrap_or_else(|e| fail(&format!("{}: {e}", root.display())));
             eprintln!("steam: {} games from {} in {} ms", library.games.len(), root.display(), t.elapsed().as_millis());
             library
         }
@@ -127,59 +103,11 @@ fn fail(message: &str) -> ! {
     std::process::exit(2);
 }
 
-/// Home on a device: the scene, its renderer and the art still on its way from the decoding threads.
-pub struct Home {
-    pub scene: Scene,
-    renderer: Renderer,
-    art: Receiver<art::Loaded>,
-}
-
-impl Home {
-    /// Starts decoding the art at once; `wake` is called from a decoding thread as each piece is ready.
-    pub fn new(
-        gpu: &Gpu,
-        format: wgpu::TextureFormat,
-        output: (u32, u32),
-        library: &Library,
-        focus: usize,
-        wake: impl Fn() + Send + Sync + 'static,
-    ) -> Self {
-        let (scene, jobs) = Scene::new(library, focus, output);
-        let (tx, rx) = channel();
-        art::spawn(jobs, tx, wake);
-        Self { scene, renderer: Renderer::new(&gpu.device, &gpu.queue, format), art: rx }
-    }
-
-    fn take(&mut self, gpu: &Gpu, loaded: art::Loaded) {
-        let tex = (!loaded.mips.is_empty()).then(|| self.renderer.add_texture(&gpu.device, &gpu.queue, &loaded.mips));
-        self.scene.set_art(loaded.slot, tex);
-    }
-
-    /// Uploads whatever art has been decoded since the last call.
-    pub fn take_ready_art(&mut self, gpu: &Gpu) {
-        while let Ok(loaded) = self.art.try_recv() {
-            self.take(gpu, loaded);
-        }
-    }
-
-    /// Waits for the next piece of art and uploads it.
-    pub fn wait_for_art(&mut self, gpu: &Gpu) {
-        if let Ok(loaded) = self.art.recv() {
-            self.take(gpu, loaded);
-        }
-    }
-
-    pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, output: (u32, u32)) -> wgpu::SubmissionIndex {
-        let frame = self.scene.build(&mut self.renderer.text, output);
-        self.renderer.render(&gpu.device, &gpu.queue, target, output, &frame)
-    }
-}
-
 fn main() {
     since_start();
     let args = parse_args().unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
     if let Some(clock) = &args.clock {
-        let _ = CLOCK.set(clock.clone());
+        screens::set_clock(clock.clone());
     }
     let library = load_library(&args);
     if args.screenshot.is_some() {

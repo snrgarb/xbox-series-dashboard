@@ -50,6 +50,12 @@ struct State {
     reserved: [u32; 2],
 }
 
+impl Default for Pad {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Pad {
     pub fn new() -> Self {
         Self {
