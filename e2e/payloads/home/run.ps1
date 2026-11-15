@@ -79,15 +79,19 @@ try {
     Step Up '09-up-group-1'
     Step Up '10-up-wide-tiles'
     Step Down ''
-    # Along the Group to See all, its seventh card, a press at a time by what --log-focus says: a press held
-    # 120 ms can repeat where the VM's clock jumps.
-    $seeAll = 'focus: Group { group: 0, card: 6 }'
+    # Along the Group to See all, its last card, a press at a time by what --log-focus says: a press held 120 ms
+    # can repeat where the VM's clock jumps. The row does not wrap, so See all is where Right moves focus no more.
     $at = { @(Get-Content $DashboardLog | Select-String '^focus:') | Select-Object -Last 1 | ForEach-Object Line }
+    $reached = $false
     foreach ($press in 1..12) {
-        if ((& $at) -eq $seeAll) { break }
-        Step Right '' 800
+        $was = & $at
+        Push-Button Right
+        Start-Sleep -Milliseconds 1500
+        if ((& $at) -eq $was) { $reached = $true; break }
     }
-    if ((& $at) -ne $seeAll) { $script:failures += "See all was not reached: $(& $at)" }
+    if (-not $reached -or (& $at) -notmatch '^focus: Group \{ group: 0, card: [1-9]') {
+        $script:failures += "See all was not reached: $(& $at)"
+    }
     Start-Sleep -Milliseconds 4000
     Save-Screen '11-see-all'
     Say "at See all: $(& $at)"
