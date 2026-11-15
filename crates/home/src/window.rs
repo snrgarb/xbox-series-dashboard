@@ -238,7 +238,9 @@ impl ApplicationHandler for App {
         let Some(state) = &mut self.state else { return };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed && (self.launch.is_none() || state.home.scene.guide_open()) => {
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && (self.launch.is_none() || state.home.scene.guide_open()) =>
+            {
                 let guide = state.home.scene.guide_open();
                 match event.logical_key {
                     Key::Named(NamedKey::Escape) if guide => self.close_guide(),
@@ -266,7 +268,9 @@ impl ApplicationHandler for App {
                 state.home.scene.update(dt);
 
                 let frame = match state.surface.get_current_texture() {
-                    wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+                    wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                        frame
+                    }
                     wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
                     wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                         state.surface.configure(&state.gpu.device, &state.config);

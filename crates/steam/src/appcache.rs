@@ -44,8 +44,7 @@ pub fn parse_appinfo(buf: &[u8]) -> Result<HashMap<u32, Value>> {
         let entry = r.bytes(size).with_context(|| format!("appinfo.vdf: app {appid} truncated"))?;
         let mut er = Reader::new(entry);
         er.bytes(header_len)?;
-        let kv = parse_binary(&mut er, strings.as_deref())
-            .with_context(|| format!("appinfo.vdf: app {appid}"))?;
+        let kv = parse_binary(&mut er, strings.as_deref()).with_context(|| format!("appinfo.vdf: app {appid}"))?;
         // The body is a single root key ("appinfo") wrapping the sections.
         let inner = match kv {
             Value::Map(mut m) if m.len() == 1 && matches!(m[0].1, Value::Map(_)) => m.remove(0).1,

@@ -134,7 +134,11 @@ impl Scene {
             }
             if let Some(path) = &game.hero {
                 let job = Job { slot: Slot::Hero(i), path: path.clone(), target: output };
-                if i == focus { heroes.insert(0, job) } else { heroes.push(job) }
+                if i == focus {
+                    heroes.insert(0, job)
+                } else {
+                    heroes.push(job)
+                }
             }
             tiles.push(Tile {
                 name: game.name.clone(),
@@ -324,12 +328,18 @@ impl Scene {
         let bar_middle = picture.y + picture.h / 2.0;
         let mut line = |frame: &mut Frame, key: TextKey, place: &dyn Fn(f32) -> f32| {
             let (w, line_height, _) = text.measure(&key);
-            frame.texts.push(Text { key, x: place(w), y: bar_middle - line_height / 2.0, clip: screen, color: white(1.0) });
+            frame.texts.push(Text {
+                key,
+                x: place(w),
+                y: bar_middle - line_height / 2.0,
+                clip: screen,
+                color: white(1.0),
+            });
         };
         let initial: String = self.user.chars().take(1).flat_map(char::to_uppercase).collect();
         line(&mut frame, key(&initial, true, 0.0, false), &|w| picture.x + (picture.w - w) / 2.0);
         line(&mut frame, key(&self.user, false, 0.0, false), &|_| picture.x + picture.w + 16.0 * s);
-        let clock = chrono::Local::now().format("%-I:%M %p").to_string();
+        let clock = crate::clock();
         line(&mut frame, key(&clock, true, 0.0, false), &|w| width - MARGIN * s - w);
 
         // The Recent row.
@@ -445,7 +455,13 @@ impl Scene {
                 frame.texts.push(Text { key, x: text_x, y: text_y, clip, color: light(1.0) });
                 if let Some(detail) = &entry.detail {
                     text_y += line_height;
-                    frame.texts.push(Text { key: line(detail, false, 0.0), x: text_x, y: text_y, clip, color: light(0.7) });
+                    frame.texts.push(Text {
+                        key: line(detail, false, 0.0),
+                        x: text_x,
+                        y: text_y,
+                        clip,
+                        color: light(0.7),
+                    });
                 }
             }
             let key = line("A  Select      B  Close", false, 0.0);

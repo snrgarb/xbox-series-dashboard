@@ -1,0 +1,98 @@
+# CI: every pull request and every push to main.
+#   Test      formatting, clippy, the unit tests and the screenshot tests, on Linux. The screenshot tests draw offscreen
+#             through lavapipe and compare with the committed reference images (crates/shots); a failed run uploads
+#             what it drew and where it differs.
+#   Windows   the release build for x86_64-pc-windows-gnullvm, cross-compiled with llvm-mingw as on the development
+#             box, uploaded as an artifact for the end-to-end tests to take.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux
+      - name: lavapipe and the tests' font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 fonts-dejavu-core
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace
+      - name: Upload what the screenshot tests drew
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: target/shots/
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows
+    runs-on: ubuntu-24.04
+    env:
+      LLVM_MINGW: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
+      LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target x86_64-pc-windows-gnullvm
+          rustup default stable
+      - name: Restore llvm-mingw
+        id: mingw
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-mingw
+          key: ${{ env.LLVM_MINGW }}
+      - name: Fetch llvm-mingw
+        if: steps.mingw.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o /tmp/llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW.tar.xz"
+          echo "$LLVM_MINGW_SHA256  /tmp/llvm-mingw.tar.xz" | sha256sum -c
+          mkdir -p ~/llvm-mingw
+          tar -xJf /tmp/llvm-mingw.tar.xz -C ~/llvm-mingw --strip-components=1
+      - name: Put it on the path
+        run: |
+          echo "$HOME/llvm-mingw/bin" >> "$GITHUB_PATH"
+          echo "CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER=x86_64-w64-mingw32-clang" >> "$GITHUB_ENV"
+          echo "CC_x86_64_pc_windows_gnullvm=x86_64-w64-mingw32-clang" >> "$GITHUB_ENV"
+          echo "AR_x86_64_pc_windows_gnullvm=x86_64-w64-mingw32-llvm-ar" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-gnullvm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: target/x86_64-pc-windows-gnullvm/release/*.exe
+          if-no-files-found: error
+          retention-days: 14
