@@ -1,5 +1,6 @@
 //! `--screenshot`: the Dashboard drawn to a texture with no window, read back and saved as a PNG. What the Overlay
-//! would show (`--launch-screen`, the Guide over a game) is drawn over Home's window's picture in the same frame.
+//! would show (`--launch-screen`, the Guide over a game) is drawn over Home's window's picture in the same frame,
+//! and `--toast`'s Toast over both.
 use model::Library;
 use render::gpu;
 use render::offscreen::{wait, FORMAT};
@@ -73,6 +74,10 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
     if args.guide {
         dashboard.open_guide();
         press(&mut dashboard, Button::Down);
+    }
+    // The first is the Toast in the picture: the rest wait behind it.
+    for text in &args.toasts {
+        dashboard.notify(text);
     }
     // Endless animations stand where they do at this moment, the same every run.
     host.store.set_time(10.0);

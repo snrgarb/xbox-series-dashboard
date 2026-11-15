@@ -9,6 +9,7 @@ use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, InvalidateRect,
     SelectObject, SetBkMode, SetTextColor, DT_CENTER, DT_SINGLELINE, DT_VCENTER, PAINTSTRUCT, TRANSPARENT,
 };
+use windows_sys::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{
     RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_SZ,
@@ -184,6 +185,34 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
         }
         _ => return DefWindowProcW(hwnd, message, wparam, lparam),
     }
+    0
+}
+
+/// Posts a notification to the running Dashboard: its text, to the Toast strip's window. 0 when the Dashboard took
+/// it.
+pub fn toast(text: &str) -> i32 {
+    let class = wide(model::post::WINDOW_CLASS);
+    let data = COPYDATASTRUCT {
+        dwData: model::post::COPYDATA_ID,
+        cbData: text.len() as u32,
+        lpData: text.as_ptr() as *mut c_void,
+    };
+    let mut taken = 0usize;
+    let sent = unsafe {
+        let window = FindWindowW(class.as_ptr(), null());
+        if window.is_null() {
+            note("toast: no Dashboard with a Toast strip is running");
+            return 1;
+        }
+        // Waited for, but not for ever: a Dashboard that has hung answers nothing.
+        let data = &data as *const COPYDATASTRUCT as LPARAM;
+        SendMessageTimeoutW(window, WM_COPYDATA, 0, data, SMTO_ABORTIFHUNG, 5000, &mut taken)
+    };
+    if sent == 0 || taken == 0 {
+        note(&format!("toast: the Dashboard did not take {text:?}"));
+        return 1;
+    }
+    note(&format!("toast: posted {text:?}"));
     0
 }
 

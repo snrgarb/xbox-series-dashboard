@@ -5,6 +5,7 @@
 //! It declares two pictures: Home's window's (`draw`) and the Overlay's (`draw_overlay`), the window above every
 //! other that shows the Launch screen and the Guide, over a running game and over Home alike. `overlay` says what
 //! the Overlay is wanted for, which the executable follows by showing and hiding it.
+//! Toasts are a third (`draw_toasts`), for the strip above both.
 pub mod guide;
 pub mod hint_bar;
 pub mod home;
@@ -18,6 +19,7 @@ pub mod settings;
 pub mod spinner;
 pub mod theme;
 pub mod wide_dialog;
+pub mod toasts;
 
 use model::Library;
 pub use model::{PowerCommand, Sound};
@@ -28,6 +30,7 @@ use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
 pub use crate::settings::{Options, Setting};
+use crate::toasts::{Notification, Toast, ToastKind, Toasts};
 
 /// What the Dashboard asks of the shell.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,6 +106,10 @@ pub struct Dashboard {
     has_overlay: bool,
     /// The game being launched or running, by its place in the library.
     playing: Option<usize>,
+    /// The Toasts showing and waiting, and the notifications list.
+    toasts: Toasts,
+    /// Whether Toasts have a window of their own: if not they are drawn in Home's.
+    toast_strip: bool,
     effects: Vec<Effect>,
 }
 
@@ -126,6 +133,8 @@ impl Dashboard {
             launch: LaunchScreen::default(),
             has_overlay: true,
             playing: None,
+            toasts: Toasts::default(),
+            toast_strip: false,
             effects: Vec::new(),
         }
     }
@@ -386,7 +395,12 @@ impl Dashboard {
         }
         if press.button == Button::Guide {
             if !press.repeat && self.options.use_guide {
+                // A tap while a Toast is on screen opens the Guide on what the Toast is about. Opening drops it.
+                let toast = self.toasts.on_screen().map(|toast| toast.kind);
                 self.open_guide();
+                if let Some(toast) = toast.filter(|_| self.guide.is_open()) {
+                    self.open_guide_on(toast);
+                }
             }
             return false;
         }
@@ -561,6 +575,88 @@ impl Dashboard {
         self.guide_overlaid = self.has_overlay;
         // Opened again before the foreground went back: the Overlay still has it, and keeps it.
         self.release_awaited = None;
+        // What the Toasts told of is in the Guide now.
+        self.toasts.drop_all();
+    }
+
+    /// The Guide, just opened by a tap while a Toast of this kind was on screen, shows what the Toast was about
+    /// (docs/spec/guide.md, 9.5).
+    fn open_guide_on(&mut self, toast: ToastKind) {
+        match toast {
+            ToastKind::Notification => self.open_notifications(),
+            ToastKind::Greeting => {
+                let around = Around { library: &self.library, playing: self.playing, discord: self.status.discord };
+                self.guide.show_tab(guide::Tab::ProfileAndSystem, around);
+            }
+        }
+    }
+
+    /// Notifications, in the open Guide. The hook for the Notifications Flyout (#41), which opens here; until there
+    /// is one, focus goes to the Utility that will open it.
+    fn open_notifications(&mut self) {
+        self.guide.focus_utility(guide::Utility::Notifications);
+    }
+
+    /// Whether the Guide's Notifications Flyout is open: a notification that comes meanwhile is listed there and
+    /// makes no Toast. The hook for the Flyout (#41): there is none yet, so it never is.
+    fn notifications_open(&self) -> bool {
+        false
+    }
+
+    /// Posts a notification: it joins the list the Notifications Flyout shows, and tells of itself in a Toast.
+    /// Gives its id in the list.
+    pub fn notify(&mut self, text: &str) -> u64 {
+        let id = self.toasts.record(text);
+        if !self.notifications_open() {
+            // With the Guide off the Guide button does nothing, and the Toast does not say to press it.
+            self.toast(Toast { kind: ToastKind::Notification, text: text.to_string(), prompt: self.options.use_guide });
+        }
+        id
+    }
+
+    /// Every notification posted since the Dashboard started, oldest first: what the Notifications Flyout lists,
+    /// newest first.
+    pub fn notifications(&self) -> &[Notification] {
+        self.toasts.notifications()
+    }
+
+    /// Greets the user, as the Dashboard starts: "Hi <first name>!" in a Toast with no prompt.
+    pub fn greet(&mut self) {
+        let name = self.user.split_whitespace().next().unwrap_or(&self.user);
+        self.toast(Toast { kind: ToastKind::Greeting, text: format!("Hi {name}!"), prompt: false });
+    }
+
+    fn toast(&mut self, toast: Toast) {
+        if self.toasts.post(toast) {
+            self.effects.push(Effect::Sound(Sound::Notification));
+        }
+    }
+
+    /// This much time has passed: what Toasts are timed by, since the Dashboard has no clock. A Toast that begins
+    /// to show asks for its sound. True when what `draw_toasts` draws may have changed.
+    pub fn advance(&mut self, seconds: f32) -> bool {
+        let before = (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some());
+        if self.toasts.advance(seconds) {
+            self.effects.push(Effect::Sound(Sound::Notification));
+        }
+        before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
+    }
+
+    /// The Toasts: which is on screen, how many wait, how many have shown.
+    pub fn toasts(&self) -> &Toasts {
+        &self.toasts
+    }
+
+    /// Says whether Toasts have a window of their own, above every other: the shell's strip. Without one, as until
+    /// told otherwise, they are drawn in Home's window, and so are not seen over a game.
+    pub fn set_toast_strip(&mut self, there: bool) {
+        self.toast_strip = there;
+    }
+
+    /// The Toast on screen, alone: what the strip shows. Drawn over nothing, as the Overlay is.
+    pub fn draw_toasts(&mut self, ui: &mut Ui) {
+        ui.store.reduce_motion = self.options.reduce_motion;
+        self.toasts.draw(ui);
     }
 
     pub fn close_guide(&mut self) {
@@ -693,15 +789,25 @@ impl Dashboard {
             _ => None,
         };
         let show_percent = self.status.show_percent && self.options.show_battery_percent;
-        let status = Status { pad_battery: self.status.pad_battery.or(charge), show_percent, ..self.status.clone() };
+        // The badge counts the notifications the Dashboard itself holds, unless the shell has told of more.
+        let notifications = self.status.notifications.max(self.toasts.notifications().len() as u32);
+        let status =
+            Status { pad_battery: self.status.pad_battery.or(charge), show_percent, notifications, ..self.status.clone() };
         let face = Face { user: &self.user, clock: &clock, pad: self.pad.connected, status: &status };
         self.guide.draw(ui, around, &face);
     }
 
     /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to
-    /// draw it on.
+    /// draw it on; and the Toast, where Toasts have no window of their own.
     pub fn draw(&mut self, ui: &mut Ui) {
         ui.store.reduce_motion = self.options.reduce_motion;
+        self.draw_home(ui);
+        if !self.toast_strip {
+            self.draw_toasts(ui);
+        }
+    }
+
+    fn draw_home(&mut self, ui: &mut Ui) {
         let clock = self.clock();
         // A wireless pad's charge, as the Guide's Status area has it; one on a cable shows its glyph.
         let pad_battery = self.status.pad_battery.or(match self.pad.battery {
@@ -738,10 +844,12 @@ impl Dashboard {
         }
     }
 
-    /// Both in one frame, the Overlay's picture over Home's window's: what an offscreen frame shows.
+    /// All in one frame, the Overlay's picture over Home's window's and the Toast over both: what an offscreen
+    /// frame shows.
     pub fn draw_all(&mut self, ui: &mut Ui) {
-        self.draw(ui);
+        self.draw_home(ui);
         self.draw_overlay(ui);
+        self.draw_toasts(ui);
     }
 }
 

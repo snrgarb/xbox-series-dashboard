@@ -51,7 +51,7 @@ the TV PC, not for here.
 
 ## The fake Steam and the stand-ins
 
-`standin.exe` (`crates/standin`) is four things, and has no console window in any of them:
+`standin.exe` (`crates/standin`) is five things, and has no console window in any of them:
 
 - **`standin make-steam <dir>`** writes a fake Steam install: binary `appcache/appinfo.vdf` and `packageinfo.vdf`, the
   user's `localconfig.vdf`, `steamapps/libraryfolders.vdf`, an `appmanifest_<appid>.acf` and a folder under
@@ -65,7 +65,7 @@ the TV PC, not for here.
 - **`standin make-tones <dir>`** writes a 0.15 s tone under each of the names the Dashboard's sounds have in the
   Bundle (`model::Sound`), a semitone apart. The console's own sounds are in no repository and on no test machine;
   a test points the Dashboard at the tones with `--media <dir>` and has it log what it plays with `--log-sounds`
-  (`audio: 8 sounds from <dir>`, `audio: device "<name>" started, ...` at the first sound, `audio: played <file>`
+  (`audio: 9 sounds from <dir>`, `audio: device "<name>" started, ...` at the first sound, `audio: played <file>`
   for each).
 - **The stand-in game.** Every installed game's folder holds a copy of `standin.exe` named `game.exe`, which shows a
   borderless, full-screen, dark-blue window titled with the game's name (from `game-args.txt` beside it) until it is
@@ -79,6 +79,11 @@ the TV PC, not for here.
 - **The stand-in Steam**, `standin steam-url steam://rungameid/<appid>`: finds the game's folder from its app manifest
   under the `SteamPath` in the registry, starts its `game.exe`, and keeps `HKCU\Software\Valve\Steam\Apps\<appid>\Running`
   at 1 until it exits, as Steam does. For a game that isn't installed it does nothing and exits 1.
+
+- **`standin toast <text>`** posts a notification to the running Dashboard, which lists it and shows its Toast: a
+  `WM_COPYDATA` message to the Toast strip's window (`crates/model/src/post.rs`). It exits 1 when no Dashboard took
+  it. The Dashboard says `toasts: posted "<text>"`, then `toasts: shown "<text>" (Notification), <n> waiting`,
+  `toasts: going` and `toasts: gone` as the Toast comes and goes, each with the time since it started.
 
 `Initialize-FakeSteam` (`payloads/lib/E2E.psm1`) puts them in place for the signed-in user: the fake install at
 `C:\e2e\steam`, `HKCU\Software\Valve\Steam\SteamPath` naming it, and `standin.exe steam-url "%1"` registered as the
@@ -101,12 +106,13 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Initialize-FakeSteam`, `Get-StandInGame`, `Stop-StandInGame` | the fake Steam and its games |
 | `Watch-Pulse <seconds>`, `Test-PulseColour`, `Test-Suspended <pid>` | the colours the stand-in game's pulse showed (two when it runs, one when it is frozen); whether a pixel is the pulse, dimmed or not; whether every thread of a process is suspended |
 
-The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again), `needs-user` (a
-launcher that stays: the Launch screen steps aside for it), `guide-hold` (the Guide on the Overlay at Home and over
-the game, on the monitor of the window in front; the game frozen while it is open, thawed as it closes, and thawed at
-the next start after the Dashboard is killed with the Guide open), `pages` (every way from Home into a page and B
-back from each), `my-games` (My games & apps on the full shelf: along its nav, the grid's edges and its scroll, Play
-history, Manage, and B and Y), and `overlay` and `video` for the spikes.
+The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again), `home` (Home
+walked with the pad), `needs-user` (a launcher that stays: the Launch screen steps aside for it), `guide-hold` (the
+Guide on the Overlay at Home and over the game, on the monitor of the window in front; the game frozen while it is
+open, thawed as it closes, and thawed at the next start after the Dashboard is killed with the Guide open), `pages`
+(every way from Home into a page and B back from each), `my-games` (My games & apps on the full shelf: along its nav,
+the grid's edges and its scroll, Play history, Manage, and B and Y), `toast` (the greeting, Toasts over the game and
+the Guide, the queue, the Guide button during a Toast), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets

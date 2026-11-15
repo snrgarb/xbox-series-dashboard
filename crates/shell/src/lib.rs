@@ -1,12 +1,13 @@
 //! Windows itself: the Overlay, the window above every other that the Launch screen and the Guide are drawn on,
-//! launching a game through Steam and following it until it ends, and holding it still under the Guide. Anywhere
-//! but Windows there is no Overlay, nothing can be launched and nothing is frozen, and the same calls say so or do
-//! nothing.
+//! the Toast strip above it, launching a game through Steam and following it until it ends, and holding it still
+//! under the Guide. Anywhere but Windows there is no Overlay or strip, nothing can be launched and nothing is
+//! frozen, and the same calls say so or do nothing.
 //! Turning the machine off is behind a trait, so that only a run that means it can do it.
 pub mod freeze;
 mod launch;
 pub mod overlay;
 pub mod power;
+pub mod toast_strip;
 
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -14,6 +15,7 @@ use std::time::Instant;
 pub use freeze::Freezer;
 pub use launch::{Launch, Step};
 pub use overlay::{Key, Mode, Overlay};
+pub use toast_strip::ToastStrip;
 
 static START: OnceLock<Instant> = OnceLock::new();
 

@@ -32,10 +32,27 @@ impl Host {
         clear: wgpu::Color,
         declare: impl FnOnce(&mut Ui),
     ) -> wgpu::SubmissionIndex {
+        self.draw_part(gpu, target, output, (output, 0), dt, clear, declare)
+    }
+
+    /// As `draw`, to a target that is a part of a larger output: `part` is the whole output's size in pixels and
+    /// how far down it the target's top is. The frame is declared as for the whole, and the target shows its part.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_part(
+        &mut self,
+        gpu: &Gpu,
+        target: &wgpu::TextureView,
+        output: (u32, u32),
+        part: ((u32, u32), u32),
+        dt: f32,
+        clear: wgpu::Color,
+        declare: impl FnOnce(&mut Ui),
+    ) -> wgpu::SubmissionIndex {
+        let (whole, top) = part;
         self.art.pump(gpu, &mut self.renderer);
         self.store.begin(dt);
         let mut frame = Frame::default();
-        declare(&mut Ui::new(&mut frame, &mut self.renderer.text, &mut self.store, &mut self.art, output));
+        declare(&mut Ui::part(&mut frame, &mut self.renderer.text, &mut self.store, &mut self.art, whole, top));
         self.store.end();
         self.renderer.render(&gpu.device, &gpu.queue, target, output, &frame, clear)
     }

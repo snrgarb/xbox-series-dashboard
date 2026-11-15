@@ -25,10 +25,12 @@ pub enum Sound {
     PromptClose,
     /// The Dashboard is leaving to the desktop. Played to its end before it goes.
     PowerOff,
+    /// A Toast shows.
+    Notification,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 8] = [
+    pub const ALL: [Sound; 9] = [
         Sound::Move,
         Sound::Activate,
         Sound::GuideOpen,
@@ -37,6 +39,7 @@ impl Sound {
         Sound::PromptOpen,
         Sound::PromptClose,
         Sound::PowerOff,
+        Sound::Notification,
     ];
 
     /// The sound's files, by the Bundle's names: one, or several that take turns in this order. The first two are
@@ -51,6 +54,7 @@ impl Sound {
             Sound::PromptOpen => &["PromptOpen.wav"],
             Sound::PromptClose => &["PromptClose.wav"],
             Sound::PowerOff => &["PowerOff.wav"],
+            Sound::Notification => &["Notification.wav"],
         }
     }
 
