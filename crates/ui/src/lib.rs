@@ -260,6 +260,12 @@ impl<'a> Ui<'a> {
         self.push(Quad { feather, ..Quad::ring(rect, color.quad(self.alpha), radius, thickness) });
     }
 
+    /// An arc of the circle `rect` holds: a stroke `thickness` wide just inside it, from `from` to `to` degrees
+    /// clockwise from the top, its ends round.
+    pub fn arc(&mut self, rect: Rect, from: f32, to: f32, thickness: f32, color: Color) {
+        self.push(Quad::arc(rect, color.quad(self.alpha), thickness, from.to_radians(), to.to_radians()));
+    }
+
     /// A texture filling `rect`, cropped to its shape.
     pub fn image(&mut self, rect: Rect, tex: TexId, size: (u32, u32), crop: Crop, alpha: f32, radius: f32) {
         let (iw, ih) = (size.0.max(1) as f32, size.1.max(1) as f32);

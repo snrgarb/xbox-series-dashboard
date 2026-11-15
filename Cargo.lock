@@ -2006,6 +2006,11 @@ dependencies = [
 name = "shell"
 version = "0.0.0"
 dependencies = [
+ "log",
+ "pollster",
+ "render",
+ "wgpu",
+ "windows",
  "windows-sys 0.61.2",
 ]
 

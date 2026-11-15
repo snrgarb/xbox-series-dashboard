@@ -1,64 +1,86 @@
-//! The Launch screen: the launching game's art over everything, its name and three dots that pulse in turn.
+//! The Launch screen: the launching game's art over the whole screen, as the Bundle's, with the game's name and the
+//! Spinner. It is drawn on the Overlay, above every window, so what Steam and the game put up while the game starts
+//! stays behind it; it fades in as a launch starts and away once the game has booted.
 use model::Game;
-use ui::{Color, Crop, Ease, Gradient, HAlign, Rect, TextStyle, Ui, VAlign};
+use ui::{Color, Crop, Ease, Gradient, HAlign, Rect, Ui, VAlign};
 
 use crate::home::hero_art;
+use crate::spinner::spinner;
+use crate::theme;
 
-const FADE_SECONDS: f32 = 0.35;
+/// The Bundle's fade, in and out: 300 ms, WPF's CubicEase EaseOut.
+const FADE_SECONDS: f32 = 0.3;
+/// The Spinner's middle, and how far across it is.
+const SPINNER_Y: f32 = 540.0;
+const SPINNER: f32 = 64.0;
+/// The name's box under the Spinner: the middle three sevenths of the canvas, as the Bundle's status column.
+const NAME: Rect = Rect::new(1920.0 * 2.0 / 7.0, SPINNER_Y + SPINNER / 2.0 + 28.0, 1920.0 * 3.0 / 7.0, 160.0);
 
 #[derive(Default)]
 pub struct LaunchScreen {
     /// The game being launched, while its Launch screen is up or fading.
     game: Option<Game>,
     up: bool,
+    /// How much of it showed when it was last drawn, 0 to 1.
+    shown: f32,
 }
 
 impl LaunchScreen {
     pub fn show(&mut self, game: &Game) {
         self.game = Some(game.clone());
         self.up = true;
+        self.shown = 0.0;
     }
 
     pub fn hide(&mut self) {
         self.up = false;
     }
 
+    /// Up, as far as input goes: not yet told to go.
     pub fn up(&self) -> bool {
         self.up
     }
 
+    /// Whether there is anything of it to draw: up, or still fading away.
+    pub fn showing(&self) -> bool {
+        self.game.is_some()
+    }
+
+    /// Whether it has faded all the way in: nothing under it shows.
+    pub fn covers(&self) -> bool {
+        self.up && self.shown >= 1.0
+    }
+
     pub fn draw(&mut self, ui: &mut Ui) {
-        let shown = ui.tween_from("launch screen", 0.0, if self.up { 1.0 } else { 0.0 }, FADE_SECONDS, Ease::CubicOut);
-        if shown <= 0.0 {
-            if !self.up {
-                self.game = None;
-            }
+        if self.game.is_none() {
             return;
+        }
+        let shown = ui.tween_from("launch screen", 0.0, if self.up { 1.0 } else { 0.0 }, FADE_SECONDS, Ease::CubicOut);
+        self.shown = shown;
+        if shown <= 0.0 && !self.up {
+            self.game = None;
         }
         let Some(game) = &self.game else { return };
         let screen = ui.screen();
         ui.layer();
         ui.with_alpha(shown, |ui| {
-            ui.gradient(screen, Color::rgb(0x12381C), Color::rgb(0x050F08), Gradient::Vertical, 0.0);
+            // The art as Home's hero chooses it: background art as it is, else the cover blurred and darkened,
+            // else black.
+            ui.fill(screen, Color::BLACK, 0.0);
             if let Some((key, blurred)) = hero_art(game, ui.px()) {
                 let rect = if blurred { screen.grow(120.0) } else { screen };
-                ui.art(rect, &key, Crop::Top, 1.0, 0.0);
-                if blurred {
+                if ui.art(rect, &key, Crop::Top, 1.0, 0.0) && blurred {
                     ui.fill(screen, Color::argb(0x99000000), 0.0);
                 }
             }
-            ui.gradient(screen, Color::argb(0x4D000000), Color::argb(0xB3000000), Gradient::Vertical, 0.0);
-            let title = TextStyle::new(ui::Font::Ui, 56.0, 600);
-            let lines = Rect::new(210.0, 0.0, 1500.0, screen.h * 0.7);
-            ui.paragraph(lines, &game.name, &title, HAlign::Center, VAlign::Bottom, 2);
-            let time = ui.time() as f32;
-            let dot = 14.0;
-            for i in 0..3 {
-                let phase = (time * 1.6 - i as f32 * 0.22).rem_euclid(1.0);
-                let glow = 0.25 + 0.75 * (1.0 - (phase * 2.0 - 1.0).abs()).powi(2);
-                let x = 960.0 + (i as f32 - 1.0) * dot * 2.4 - dot / 2.0;
-                ui.fill(Rect::new(x, screen.h * 0.7 + 36.0, dot, dot), Color::WHITE.fade(glow), dot / 2.0);
-            }
+            theme::hero_scrim(ui);
+            // A soft shade behind the Spinner and the name, for bright art: the Bundle's is centred a little under
+            // the middle, 45% of the screen wide and 60% high each way, with a stop this gradient's two leave out.
+            let shade = Rect::new(screen.x + screen.w * 0.05, screen.h * -0.05, screen.w * 0.9, screen.h * 1.2);
+            ui.gradient(shade, Color::argb(0xB3000000), Color::CLEAR, Gradient::Radial, 0.0);
+
+            spinner(ui, 960.0, SPINNER_Y, SPINNER);
+            ui.paragraph(NAME, &game.name, &theme::HEADING, HAlign::Center, VAlign::Top, 2);
         });
     }
 }

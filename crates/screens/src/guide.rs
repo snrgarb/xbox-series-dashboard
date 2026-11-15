@@ -1,5 +1,6 @@
 //! The Guide, as the proof of concept has it: a panel from the left over the dimmed screen, with a short list.
-//! M2 replaces it with the real one, in the Overlay.
+//! Over Home it is drawn in Home's window; over a running game on the Overlay, where its dim is over the game.
+//! M2 replaces it with the real one.
 use model::Library;
 use ui::{Button, Color, Crop, Ease, Rect, Ui};
 
@@ -84,9 +85,9 @@ impl Guide {
         self.focus
     }
 
-    /// How wide the panel's showing part was when last drawn, in design units: 0 once it has slid away.
-    pub fn panel_width(&self) -> f32 {
-        WIDTH * self.shown
+    /// Whether there is anything of it to draw: open, or still sliding away.
+    pub fn showing(&self) -> bool {
+        self.open || self.shown > 0.0
     }
 
     /// The pad while the Guide is open. A's action is returned for the Dashboard to carry out.

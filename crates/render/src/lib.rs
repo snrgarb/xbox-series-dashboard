@@ -84,6 +84,9 @@ pub enum Gradient {
     Radial,
 }
 
+/// The shader's kind for an arc, after the gradients'.
+const ARC: f32 = 4.0;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Quad {
     pub rect: Rect,
@@ -100,6 +103,9 @@ pub struct Quad {
     pub uv: [f32; 4],
     /// Nothing is drawn outside this.
     pub clip: Option<Rect>,
+    /// The part of a ring that is drawn, its ends round: the angle of its middle and half its length, in radians
+    /// clockwise from the top. None draws the whole shape.
+    pub arc: Option<(f32, f32)>,
 }
 
 impl Quad {
@@ -115,6 +121,7 @@ impl Quad {
             tex: WHITE,
             uv: [0.0, 0.0, 1.0, 1.0],
             clip: None,
+            arc: None,
         }
     }
     pub fn gradient(rect: Rect, c0: Rgba, c1: Rgba, gradient: Gradient, radius: f32) -> Self {
@@ -125,6 +132,12 @@ impl Quad {
     }
     pub fn ring(rect: Rect, color: Rgba, radius: f32, thickness: f32) -> Self {
         Self { ring: thickness, ..Self::fill(rect, color, radius) }
+    }
+    /// A stroke `thickness` wide just inside the circle `rect` holds, from `from` to `to` radians clockwise from the
+    /// top, with round ends.
+    pub fn arc(rect: Rect, color: Rgba, thickness: f32, from: f32, to: f32) -> Self {
+        let half = ((to - from) / 2.0).clamp(0.0, std::f32::consts::PI);
+        Self { arc: Some(((from + to) / 2.0, half)), ..Self::ring(rect, color, 0.0, thickness) }
     }
 }
 
@@ -448,8 +461,9 @@ impl Renderer {
                 rect: [q.rect.x, q.rect.y, q.rect.w, q.rect.h],
                 c0: q.c0,
                 c1: q.c1,
-                params: [q.radius, q.ring, q.gradient as u32 as f32, q.feather],
-                uv: q.uv,
+                // An arc is a kind of its own, its angles where a texture's corners would be: it has no texture.
+                params: [q.radius, q.ring, if q.arc.is_some() { ARC } else { q.gradient as u32 as f32 }, q.feather],
+                uv: q.arc.map_or(q.uv, |(middle, half)| [middle, half, 0.0, 0.0]),
                 clip: q.clip.map_or(everything, |c| [c.x, c.y, c.right(), c.bottom()]),
             })
             .collect();

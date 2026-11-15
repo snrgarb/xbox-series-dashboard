@@ -40,6 +40,16 @@ impl Host {
         self.renderer.render(&gpu.device, &gpu.queue, target, output, &frame, clear)
     }
 
+    /// Runs `body` with `store` in the place of the Host's own animated values: a frame for a second window. The
+    /// renderer, the fonts and the art are the same, so nothing is decoded or uploaded twice; only what is moving
+    /// is the window's own, since a value a frame doesn't ask for is forgotten.
+    pub fn with_store<R>(&mut self, store: &mut Store, body: impl FnOnce(&mut Self) -> R) -> R {
+        std::mem::swap(&mut self.store, store);
+        let result = body(self);
+        std::mem::swap(&mut self.store, store);
+        result
+    }
+
     /// Whether another frame is wanted without any input: something is moving, or art is on its way.
     pub fn animating(&self) -> bool {
         self.store.animating() || self.art.pending() > 0

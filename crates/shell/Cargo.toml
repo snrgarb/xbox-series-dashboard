@@ -2,13 +2,21 @@
 name = "shell"
 version = "0.0.0"
 edition = "2021"
-description = "Windows itself: launching and tracking games, z-order and the foreground."
+description = "Windows itself: the Overlay window, launching and tracking games, z-order and the foreground."
+
+[dependencies]
+render = { path = "../render" }
+wgpu = "30"
+log = "0.4"
 
 [target.'cfg(windows)'.dependencies]
+pollster = "1"
+# DirectComposition is COM, which windows-sys leaves out. wgpu's DX12 backend already builds this crate.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_DirectComposition"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
-    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",

@@ -1,4 +1,5 @@
-// One rounded rectangle per instance: filled or a ring, a two-stop gradient, times a texture, cut to a clip rectangle.
+// One rounded rectangle per instance: filled, a ring or an arc of one, a two-stop gradient, times a texture, cut to a
+// clip rectangle.
 // Colours are sRGB values with straight alpha and are blended as they are, in gamma space, as WPF blends: the theme's
 // colours and alphas carry over unchanged.
 struct Globals { size: vec2<f32>, pad: vec2<f32> }
@@ -10,8 +11,8 @@ struct Inst {
     @location(0) rect: vec4<f32>,   // x, y, w, h in pixels
     @location(1) c0: vec4<f32>,     // the gradient's first colour
     @location(2) c1: vec4<f32>,     // its second
-    @location(3) params: vec4<f32>, // corner radius, ring thickness (0 = filled), gradient kind, feather
-    @location(4) uv: vec4<f32>,     // the texture's u0, v0, u1, v1 across the rectangle
+    @location(3) params: vec4<f32>, // corner radius, ring thickness (0 = filled), gradient kind (4 = an arc), feather
+    @location(4) uv: vec4<f32>,     // the texture's u0, v0, u1, v1 across the rectangle; an arc's middle and half length
     @location(5) clip: vec4<f32>,   // x0, y0, x1, y1 in pixels
 }
 
@@ -57,6 +58,20 @@ fn shade(in: VOut, texel: vec4<f32>) -> vec4<f32> {
     }
     if (feather > 1.0) {
         a = a * a * (3.0 - 2.0 * a);
+    }
+    if (in.params.z == 4.0) {
+        // An arc with round ends: the ring's centre line from uv.x - uv.y to uv.x + uv.y radians clockwise from the
+        // top. In a frame whose y axis runs through the arc's middle it is symmetric, so one half is worked out.
+        let stroke = in.params.y * 0.5;
+        let line = min(in.half.x, in.half.y) - stroke;
+        let middle = vec2<f32>(sin(in.uv.x), -cos(in.uv.x));
+        let p = vec2<f32>(abs(in.local.x * middle.y - in.local.y * middle.x), dot(in.local, middle));
+        let end = vec2<f32>(sin(in.uv.y), cos(in.uv.y));
+        var along = abs(length(p) - line);
+        if (end.y * p.x > end.x * p.y) {
+            along = length(p - end * line);
+        }
+        a = clamp(0.5 - (along - stroke) / feather, 0.0, 1.0);
     }
     let cut = min(in.pos.xy - in.clip.xy, in.clip.zw - in.pos.xy);
     a *= clamp(min(cut.x, cut.y) + 0.5, 0.0, 1.0);
