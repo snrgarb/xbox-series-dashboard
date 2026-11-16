@@ -122,6 +122,10 @@ impl Source for Ea {
     }
 
     fn read(&self) -> Result<Option<Found>> {
+        // An empty folder named for the store is no store, and not the machine's: what a test gives.
+        if self.fake.as_deref().is_some_and(source_kit::empty_folder) {
+            return Ok(None);
+        }
         let registry = self.registry()?;
         let client = CLIENT.iter().find_map(|key| registry.value(key, "InstallLocation"));
         let entries = entries(&registry);
@@ -236,6 +240,9 @@ mod tests {
     fn no_ea_app_is_none_and_a_fake_that_is_not_there_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("no ea here");
+        // An empty folder is no store, and never the machine's own.
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(Ea::at(Some(empty.path().to_path_buf())).read().unwrap(), None);
         let error = Ea::at(Some(missing.clone())).read().unwrap_err();
         assert!(format!("{error:#}").starts_with(&missing.display().to_string()), "{error:#}");
         // An empty registry: no client, no game.

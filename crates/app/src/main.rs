@@ -47,6 +47,9 @@ pub struct Args {
     log_focus: bool,
     /// Turning off, restarting and sleeping are said in the log and not done.
     dry_power: bool,
+    /// The program every store's address is given to, as `<program> open-address <address>`, in place of the one
+    /// Windows has registered for it: a test machine whose registry is left alone (`standin.exe`).
+    open_addresses_with: Option<PathBuf>,
     /// A page to start on, in place of Home: one that nothing on Home opens yet.
     page: Option<screens::pages::Open>,
     /// Notifications to post as the Dashboard starts, each telling of itself in a Toast.
@@ -74,7 +77,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
                  [--epic <dir>] [--gog <dir>] [--ea <dir>] [--ubisoft <dir>] [--battlenet <dir>]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
-                 [--toast <text>]... [--notify <text>]... [--allow-toast-posts]
+                 [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
@@ -112,9 +115,9 @@ fn button(name: &str) -> Result<ui::Button, String> {
     })
 }
 
-fn parse_args() -> Result<Args, String> {
+fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
     let mut args = Args::default();
-    let mut it = std::env::args().skip(1);
+    let mut it = given.into_iter();
     while let Some(arg) = it.next() {
         let mut value = || it.next().ok_or(format!("{arg} needs a value"));
         match arg.as_str() {
@@ -144,6 +147,7 @@ fn parse_args() -> Result<Args, String> {
             "--log-frames" => args.log_frames = true,
             "--log-focus" => args.log_focus = true,
             "--dry-power" => args.dry_power = true,
+            "--open-addresses-with" => args.open_addresses_with = Some(value()?.into()),
             "--page" => args.page = Some(page(&value()?)?),
             "--toast" => args.toasts.push(value()?),
             "--allow-toast-posts" => args.allow_toast_posts = true,
@@ -161,7 +165,7 @@ fn fail(message: &str) -> ! {
 
 fn main() {
     since_start();
-    let args = parse_args().unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    let args = parse_args(std::env::args().skip(1)).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
     let (library, store) = store::open(&args);
     if args.screenshot.is_some() {
         offscreen::run(&args, library, store.options());
@@ -169,5 +173,23 @@ fn main() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));
     } else {
         window::run(&args, library, store);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Args, String> {
+        parse_args(args.iter().map(|arg| arg.to_string()))
+    }
+
+    #[test]
+    fn open_addresses_with_names_the_program_and_needs_one() {
+        let args = parse(&["--open-addresses-with", r"C:\Users\Test User\e2e\standin.exe", "--dry-power"]).unwrap();
+        assert_eq!(args.open_addresses_with, Some(PathBuf::from(r"C:\Users\Test User\e2e\standin.exe")));
+        assert!(args.dry_power);
+        assert_eq!(parse(&[]).unwrap().open_addresses_with, None);
+        assert!(parse(&["--open-addresses-with"]).is_err());
     }
 }

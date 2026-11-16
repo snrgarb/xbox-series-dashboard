@@ -145,8 +145,14 @@ pub(crate) mod win {
             WM_NCHITTEST if passive => HTTRANSPARENT as LRESULT,
             // Nothing is drawn through GDI: there is no redirection bitmap to erase.
             WM_ERASEBKGND => 1,
-            // Alt+F4 with the Guide up is not a way to be rid of the Overlay.
-            WM_CLOSE => 0,
+            // Alt+F4 with the Guide up is not a way to be rid of the Overlay: it comes as SC_CLOSE, which would be
+            // a WM_CLOSE.
+            WM_SYSCOMMAND if wparam & 0xFFF0 == SC_CLOSE as WPARAM => 0,
+            // Another program asking the Dashboard to close (taskkill): the Dashboard closes, not the Overlay alone.
+            WM_CLOSE => {
+                crate::ask_to_close("the Overlay");
+                0
+            }
             _ => DefWindowProcW(hwnd, message, wparam, lparam),
         }
     }

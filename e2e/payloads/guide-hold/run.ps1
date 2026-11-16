@@ -23,7 +23,7 @@ $guidePoints = @(
     @{ X = 1230; Y = 700; What = 'the game dimmed'; Colour = $dimmedGame }
 )
 # The record of a frozen game, in the Dashboard's data folder (crates/shell/src/freeze.rs).
-$record = Join-Path $env:LOCALAPPDATA 'XboxSeriesDashboard\frozen-game.txt'
+$record = Join-Path (Get-DashboardDataDir) 'frozen-game.txt'
 
 function Front { $f = Get-Foreground; "$($f.Process) '$($f.Title)'" }
 function Format-Colours($Colours) { (@($Colours) | ForEach-Object { Format-Colour $_ }) -join ', ' }

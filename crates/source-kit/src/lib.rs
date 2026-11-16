@@ -17,6 +17,13 @@ pub fn native(path: &str) -> PathBuf {
     }
 }
 
+/// Whether `dir` is a folder with nothing in it: a fake named for a store that is not there, which a source reads as
+/// no store (and never as "the machine's own, then"). What the tests on the TV PC give every store they made no
+/// fake of (e2e/README.md, safe mode).
+pub fn empty_folder(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_none())
+}
+
 /// Whether two folders are the same one by their paths: case, the kind of slash and a trailing one aside.
 pub fn same_folder(a: &Path, b: &Path) -> bool {
     let plain = |path: &Path| path.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
@@ -52,5 +59,14 @@ mod tests {
         assert_eq!(folder_name(Path::new("D:/Ubisoft/Harborlight/")).as_deref(), Some("Harborlight"));
         assert_eq!(folder_name(Path::new(r"D:\Games\Oxbow Frontier")).as_deref(), Some("Oxbow Frontier"));
         assert_eq!(folder_name(Path::new("/")), None);
+    }
+
+    #[test]
+    fn a_folder_is_empty_only_when_it_is_there_with_nothing_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(empty_folder(dir.path()));
+        assert!(!empty_folder(&dir.path().join("not there")));
+        std::fs::write(dir.path().join("registry.json"), "{}").unwrap();
+        assert!(!empty_folder(dir.path()));
     }
 }

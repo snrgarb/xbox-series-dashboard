@@ -19,8 +19,9 @@ Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
 $failures = @()
 $dashboardTitle = 'Xbox Series Dashboard'
-$epicRoot = 'C:\e2e\epic'
-$gogRoot = 'C:\e2e\gog'
+# C:\e2e\<store> on the VM; under the payload's own folder in safe mode.
+$epicRoot = Get-FakeRoot 'epic'
+$gogRoot = Get-FakeRoot 'gog'
 
 function Focus-Lines { @(Get-DashboardLog | Where-Object { $_ -match '^focus: ' }) }
 function Focus-Now { Focus-Lines | Select-Object -Last 1 }
@@ -172,7 +173,7 @@ try {
 
     # Nothing in this test is a question put to the user, however slow the VM.
     $env:DASHBOARD_NEEDS_USER_MS = '120000'
-    $script:dashboard = Start-Dashboard @('--log-focus', '--epic', $epicRoot, '--gog', $gogRoot)
+    $script:dashboard = Start-Dashboard @('--log-focus', '--epic', "`"$epicRoot`"", '--gog', "`"$gogRoot`"")
     $first = Wait-DashboardLog 'first frame presented' 60
     if (-not $first) { throw 'The Dashboard never presented a frame' }
     Say "started: $first"

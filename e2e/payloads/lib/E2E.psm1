@@ -2,6 +2,13 @@
 # to read and launch from, press a virtual Xbox pad, and look at the screen and the foreground. Imported by each test's
 # run.ps1, which `e2e/run.sh` puts beside this folder as lib\, with dashboard.exe and standin.exe beside run.ps1.
 # Everything a test writes goes to $env:E2E_OUT.
+#
+# Safe mode, with $env:E2E_SAFE at 1, is for a machine that is someone's own (the TV PC, `e2e/htpc/run.sh`): nothing is
+# written to the registry (every write goes through Set-RegistryValue, which throws in safe mode), every fake is under
+# the payload's own folder, the Dashboard is started on the fakes alone (an empty folder for each store with no fake,
+# so the machine's own library is never read), with --dry-power, --open-addresses-with standin.exe (the stand-in
+# stores take the addresses the registry would have given to the real ones: handlers.json beside standin.exe names
+# the fakes) and a data folder of its own, and only processes started from the payload's folder are ever stopped.
 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
 
 $script:Out = $env:E2E_OUT
@@ -9,6 +16,12 @@ $script:Payload = Split-Path $PSScriptRoot -Parent
 $script:DashboardLog = Join-Path $script:Out 'dashboard.log'
 $script:Dashboard = $null
 $script:Pad = $null
+$script:Safe = $env:E2E_SAFE -eq '1'
+# The fakes made so far, by the store's flag (steam, epic, gog): their folders.
+$script:Fakes = @{}
+# Every store the Dashboard reads, by its flag: in safe mode each is given a fake or an empty folder. A store added to
+# the Dashboard is added here too, or a test in safe mode would read the machine's own.
+$script:StoreFlags = @('steam', 'epic', 'gog', 'ea', 'ubisoft', 'battlenet')
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
@@ -34,8 +47,21 @@ public static class E2EDesk {
     }
     public static uint ForegroundPid() { uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid; }
     public static string ForegroundTitle() { var s = new StringBuilder(256); GetWindowText(GetForegroundWindow(), s, 256); return s.ToString(); }
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
+    [DllImport("gdi32.dll")] static extern int GetDeviceCaps(IntPtr dc, int index);
+    // The primary screen's size in real pixels, whatever this process's DPI awareness: DESKTOPHORZRES, DESKTOPVERTRES.
+    public static int[] PhysicalScreen() {
+        IntPtr dc = GetDC(IntPtr.Zero);
+        try { return new int[] { GetDeviceCaps(dc, 118), GetDeviceCaps(dc, 117) }; } finally { ReleaseDC(IntPtr.Zero, dc); }
+    }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern uint GetLongPathName(string s, StringBuilder b, uint n);
+    // A path with no 8.3 short names in it (%TEMP% can have one), as a process's own path has it.
+    public static string LongPath(string p) { var b = new StringBuilder(1024); return GetLongPathName(p, b, 1024) > 0 ? b.ToString() : p; }
 }
 '@
+# Every position this module reads or sends is in real pixels: on a screen scaled to 150% or 200%, as a TV at
+# 3840x2160 is, a process that is not DPI-aware is shown a smaller, made-up screen.
 [E2EDesk]::SetProcessDPIAware() | Out-Null
 
 # ---------------------------------------------------------------------------------------------- what a test reports
@@ -51,21 +77,48 @@ function Say([string] $Text) {
     Write-Host $line
 }
 
-# The whole primary screen, as <Name>.png in the test's output.
-function Save-Screen([string] $Name) {
+# The primary screen's bounds in real pixels. Says once, in steps.txt, when this process is shown other than the real
+# screen (its DPI awareness did not take), which would put every pixel read in the wrong place.
+$script:ScreenChecked = $false
+function Get-ScreenBounds {
     $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    if (-not $script:ScreenChecked) {
+        $script:ScreenChecked = $true
+        $real = [E2EDesk]::PhysicalScreen()
+        if ($real[0] -ne $b.Width -or $real[1] -ne $b.Height) {
+            Say "note: the screen is $($real[0])x$($real[1]) but this test is shown $($b.Width)x$($b.Height): its pixels are not the screen's"
+        }
+    }
+    $b
+}
+
+# The whole primary screen, as <Name>.png in the test's output: at most 1920x1080, a larger screen (the TV's
+# 3840x2160) scaled down to it, as the VM's pictures are and as the Bundle's reference pictures are.
+function Save-Screen([string] $Name) {
+    $b = Get-ScreenBounds
     $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     try {
         $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-        $bmp.Save((Join-Path $script:Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+        $scale = [Math]::Min(1, [Math]::Min(1920 / $b.Width, 1080 / $b.Height))
+        if ($scale -lt 1) {
+            $small = New-Object System.Drawing.Bitmap ([int] ($b.Width * $scale)), ([int] ($b.Height * $scale))
+            $sg = [System.Drawing.Graphics]::FromImage($small)
+            try {
+                $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $sg.DrawImage($bmp, 0, 0, $small.Width, $small.Height)
+                $small.Save((Join-Path $script:Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally { $sg.Dispose(); $small.Dispose() }
+        } else {
+            $bmp.Save((Join-Path $script:Out "$Name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+        }
     } finally { $g.Dispose(); $bmp.Dispose() }
 }
 
 # The colour of one pixel of the primary screen, as R, G and B, 0 to 255: what the compositor shows there, the
 # Overlay included (docs/research/overlay-window.md, "Reading the screen back"). $X and $Y are real pixels.
 function Get-ScreenPixel([int] $X, [int] $Y) {
-    $origin = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Location
+    $origin = (Get-ScreenBounds).Location
     $bmp = New-Object System.Drawing.Bitmap 1, 1
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     try {
@@ -76,12 +129,14 @@ function Get-ScreenPixel([int] $X, [int] $Y) {
 }
 
 # The same at a point of the Dashboard's 1920x1080 canvas, which is scaled to fit the screen whole, centred across and
-# at the top (docs/ui.md, Coordinates): on a 1920x1080 screen the same pixel.
+# at the top (docs/ui.md, Coordinates): on a 1920x1080 screen the same pixel; on the TV's 3840x2160 the middle of the
+# two by two the canvas's pixel is drawn on, not its edge.
 function Get-DesignPixel([double] $X, [double] $Y) {
-    $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $b = Get-ScreenBounds
     $scale = [Math]::Min($b.Width / 1920, $b.Height / 1080)
     $left = ($b.Width - 1920 * $scale) / 2
-    Get-ScreenPixel ([int] [Math]::Round($left + $X * $scale)) ([int] [Math]::Round($Y * $scale))
+    $at = { param($design, $offset) [int] [Math]::Floor($offset + ($design + 0.5) * $scale) }
+    Get-ScreenPixel (& $at $X $left) (& $at $Y 0)
 }
 
 # A colour as "(r, g, b)", for a line in steps.txt. Takes a pixel or three numbers.
@@ -124,6 +179,80 @@ function Wait-Until([scriptblock] $Condition, [double] $Seconds = 10) {
     return $null
 }
 
+# ------------------------------------------------------------------------------------------- the machine, safe or not
+
+# Whether this run is in safe mode ($env:E2E_SAFE is 1): on a machine that is someone's own.
+function Test-SafeMode { $script:Safe }
+
+# Throws in safe mode: for a test that cannot be run without changing someone's own machine, and says why.
+function Assert-VmOnly([string] $Why) {
+    if ($script:Safe) { throw "this test is for the VM only, not safe mode: $Why" }
+}
+
+# Throws in safe mode, saying what was about to be written: called by every registry write, so that a helper written
+# later cannot write one on someone's own machine by mistake.
+function Assert-RegistryWrite([string] $What) {
+    if ($script:Safe) { throw "safe mode (E2E_SAFE=1) writes nothing to the registry, and this was about to: $What" }
+}
+
+# Sets a registry value, its key made if it is not there: the one way this module writes to the registry. $Type is
+# Set-ItemProperty's (String, DWord, ...).
+function Set-RegistryValue([string] $Key, [string] $Name, $Value, [string] $Type = 'String') {
+    Assert-RegistryWrite "$Key\$Name = $Value"
+    if (-not (Test-Path $Key)) { New-Item $Key -Force | Out-Null }
+    Set-ItemProperty $Key $Name $Value -Type $Type
+}
+
+# Where a fake store named $Name goes: in safe mode under the payload's own folder (<payload>\fakes\<name>), which
+# the run removes after; on the VM C:\e2e\<name>, as it always was.
+function Get-FakeRoot([string] $Name) {
+    if ($script:Safe) { Join-Path $script:Payload "fakes\$Name" } else { "C:\e2e\$Name" }
+}
+
+# A folder of the test's own named $Name, for a data folder and the like: in safe mode under the payload's folder,
+# on the VM under %TEMP% as it always was. Not made: the caller makes or empties it.
+function Get-TestFolder([string] $Name) {
+    if ($script:Safe) { Join-Path $script:Payload $Name } else { Join-Path $env:TEMP $Name }
+}
+
+# The data folder the Dashboard keeps its database and its record of a frozen game in when the test gives it none:
+# in safe mode <payload>\data, which Start-Dashboard names; on the VM the user's own, %LOCALAPPDATA%\XboxSeriesDashboard.
+function Get-DashboardDataDir {
+    if ($script:Safe) { Join-Path $script:Payload 'data' } else { Join-Path $env:LOCALAPPDATA 'XboxSeriesDashboard' }
+}
+
+# Says that a fake store is at $Root, for the store's flag $Store (steam, epic, gog): in safe mode the Dashboard is
+# started on it, and the stand-in stores find it through handlers.json beside standin.exe ($Handler, when the store
+# takes addresses: steam, epic). Nothing is written anywhere else.
+function Register-Fake([string] $Store, [string] $Root, [string] $Handler = '') {
+    $script:Fakes[$Store] = [IO.Path]::GetFullPath($Root)
+    if (-not $Handler -or -not $script:Safe) { return }
+    $file = Join-Path $script:Payload 'handlers.json'
+    $handlers = @{}
+    if (Test-Path $file) {
+        (Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $handlers[$_.Name] = $_.Value }
+    }
+    $handlers[$Handler] = $script:Fakes[$Store]
+    [IO.File]::WriteAllText($file, ($handlers | ConvertTo-Json), (New-Object Text.UTF8Encoding $false))
+}
+
+# Whether $Path is under one of the folders this test owns: the payload's, and every fake's.
+function Test-OwnPath([string] $Path) {
+    if (-not $Path) { return $false }
+    $Path = [E2EDesk]::LongPath($Path)
+    foreach ($root in @($script:Payload) + @($script:Fakes.Values)) {
+        $prefix = [E2EDesk]::LongPath([IO.Path]::GetFullPath($root)).TrimEnd('\') + '\'
+        if ($Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    $false
+}
+
+# The processes named $Name (no .exe) that were started from a folder this test owns. Never one by its name alone:
+# on someone's own machine a process of the same name may be theirs.
+function Get-OwnProcess([string] $Name) {
+    @(Get-Process $Name -ErrorAction SilentlyContinue | Where-Object { Test-OwnPath $(try { $_.Path } catch { $null }) })
+}
+
 # ------------------------------------------------------------------------------------------------------ the desktop
 
 # The window in front: its process's id and name, and its title.
@@ -145,11 +274,15 @@ function Set-Foreground([string] $Title) {
 # Windows' own full-screen prompts after sign-in, as "Protect your files and memories by backing up your PC" (its
 # "finish setting up your device" screen, drawn by WebExperienceHostApp), turned off for this user and closed if up:
 # over the Dashboard they take the foreground.
+# In safe mode they are someone's own Windows' to show: nothing is turned off or closed, and a prompt that is up is
+# only said.
 function Close-WindowsPrompts {
-    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement'
-    New-Item $key -Force | Out-Null
-    Set-ItemProperty $key ScoobeSystemSettingEnabled 0 -Type DWord
     $prompts = @(Get-Process WebExperienceHostApp, UserOOBEBroker -ErrorAction SilentlyContinue)
+    if ($script:Safe) {
+        if ($prompts.Count) { Say "note: Windows' prompt is up ($(($prompts | ForEach-Object ProcessName | Sort-Object -Unique) -join ', ')); safe mode leaves it" }
+        return
+    }
+    Set-RegistryValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement' ScoobeSystemSettingEnabled 0 DWord
     if ($prompts.Count) {
         $prompts | Stop-Process -Force -ErrorAction SilentlyContinue
         Say "closed Windows' prompt ($(($prompts | ForEach-Object ProcessName | Sort-Object -Unique) -join ', '))"
@@ -192,9 +325,15 @@ function Disconnect-Pad { if ($script:Pad) { try { $script:Pad.Disconnect() } ca
 
 # Starts dashboard.exe from the payload, with no console window of its own and what it logs (stderr) going to
 # dashboard.log in the test's output. Returns its process. It is not put in front: Get-Foreground says whether it is.
+# In safe mode what the machine must be kept from is added to $Arguments, each unless the test gave its own: every
+# store's flag (the fake made, or an empty folder: the machine's own library is never read), --open-addresses-with
+# standin.exe, --dry-power, and --data-dir <payload>\data.
 function Start-Dashboard([string[]] $Arguments = @()) {
     $exe = Join-Path $script:Payload 'dashboard.exe'
     if (-not (Test-Path $exe)) { throw "No dashboard.exe in $script:Payload" }
+    if ($script:Safe) {
+        $Arguments = @($Arguments) + @(Get-SafeArguments $Arguments)
+    }
     $start = @{ FilePath = $exe; WorkingDirectory = $script:Payload; RedirectStandardError = $script:DashboardLog
                 NoNewWindow = $true; PassThru = $true }
     if ($Arguments.Count) { $start.ArgumentList = $Arguments }  # Start-Process refuses an empty list
@@ -247,12 +386,46 @@ function Wait-Greeting([double] $Seconds = 30) {
     [bool] $gone
 }
 
+# What safe mode adds to the Dashboard's arguments $Given: each, in quotes where it is a folder, unless $Given has it.
+function Get-SafeArguments([string[]] $Given) {
+    $added = @()
+    foreach ($store in $script:StoreFlags) {
+        if ($Given -contains "--$store") { continue }
+        $root = $script:Fakes[$store]
+        if (-not $root) {
+            # An empty folder: no games, and not the machine's.
+            $root = Join-Path $script:Payload "fakes\none\$store"
+            New-Item $root -ItemType Directory -Force | Out-Null
+        }
+        $added += "--$store", "`"$root`""
+    }
+    if ($Given -notcontains '--open-addresses-with') { $added += '--open-addresses-with', "`"$(Join-Path $script:Payload 'standin.exe')`"" }
+    if ($Given -notcontains '--dry-power') { $added += '--dry-power' }
+    if ($Given -notcontains '--data-dir') {
+        $data = Get-DashboardDataDir
+        New-Item $data -ItemType Directory -Force | Out-Null
+        $added += '--data-dir', "`"$data`""
+    }
+    $added
+}
+
+# Ends the Dashboard as a user's taskkill would, without /f: WM_CLOSE to each of its windows, which it must take as
+# the way out. Returns whether it had exited within $Seconds. Only the Dashboard this test started.
+function Close-Dashboard([double] $Seconds = 10) {
+    if (-not $script:Dashboard -or $script:Dashboard.HasExited) { return $true }
+    # Its errors joined to its output by cmd: PowerShell 5.1 would throw at a native program's stderr here.
+    $said = & cmd.exe /c "taskkill /pid $($script:Dashboard.Id) 2>&1"
+    Say "taskkill /pid $($script:Dashboard.Id): $(($said | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join ' ')"
+    $script:Dashboard.WaitForExit([int] ($Seconds * 1000))
+}
+
+# Ends the Dashboard this test started, and any other started from the payload's folder: never one by its name alone.
 function Stop-Dashboard {
     if ($script:Dashboard -and -not $script:Dashboard.HasExited) {
         Stop-Process -Id $script:Dashboard.Id -Force -ErrorAction SilentlyContinue
         $script:Dashboard.WaitForExit(5000) | Out-Null
     }
-    Get-Process dashboard -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-OwnProcess dashboard | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
 # ------------------------------------------------------------------------------------------------- Steam and games
@@ -263,10 +436,12 @@ function Stop-Dashboard {
 # Dashboard asks Steam for is started by the stand-in Steam: the game's folder's game.exe, a copy of standin.exe that
 # shows a full-screen window titled with the game's name.
 # With -FullShelf twelve more are installed, twenty in all, which is rows enough for My games & apps to scroll.
+# In safe mode nothing is registered: the Dashboard is started with --steam $Root and gives its steam:// addresses to
+# `standin open-address`, which finds $Root in handlers.json; and the stand-in Steam writes no Running value.
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-steam.json in the test's output): user, and
 # games, most recently played first, each with source_id (its appid), name, installed, install_dir, last_played, cover, hero, header.
-function Initialize-FakeSteam([string] $Root = 'C:\e2e\steam', [switch] $FullShelf) {
+function Initialize-FakeSteam([string] $Root = (Get-FakeRoot 'steam'), [switch] $FullShelf) {
     $standin = Join-Path $script:Payload 'standin.exe'
     if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
     $json = Join-Path $script:Out 'fake-steam.json'
@@ -277,14 +452,12 @@ function Initialize-FakeSteam([string] $Root = 'C:\e2e\steam', [switch] $FullShe
         throw "standin make-steam exited with $($made.ExitCode): $why"
     }
 
-    New-Item 'HKCU:\Software\Valve\Steam' -Force | Out-Null
-    # As Steam writes it: lower case, forward slashes.
-    Set-ItemProperty 'HKCU:\Software\Valve\Steam' SteamPath ($Root.ToLower() -replace '\\', '/')
-    $class = 'HKCU:\Software\Classes\steam'
-    New-Item "$class\shell\open\command" -Force | Out-Null
-    Set-ItemProperty $class '(default)' 'URL:steam protocol'
-    Set-ItemProperty $class 'URL Protocol' ''
-    Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" steam-url `"%1`""
+    Register-Fake 'steam' $Root 'steam'
+    if (-not $script:Safe) {
+        # As Steam writes it: lower case, forward slashes.
+        Set-RegistryValue 'HKCU:\Software\Valve\Steam' SteamPath ($Root.ToLower() -replace '\\', '/')
+        Register-UrlHandler 'steam' "`"$standin`" steam-url `"%1`""
+    }
 
     $library = Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json
     $games = @($library.games)
@@ -304,25 +477,34 @@ function New-FakeStore([string] $Command, [string] $Root, [string] $Json) {
         $why = Get-Content (Join-Path (Split-Path $Root -Parent) 'standin-error.txt') -Raw -ErrorAction SilentlyContinue
         throw "standin $Command exited with $($made.ExitCode): $why"
     }
+    # The store's flag is the command's name after make-: in safe mode the Dashboard is started on this fake.
+    Register-Fake ($Command -replace '^make-', '') $Root
     Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+# Registers $Command as this user's handler of $Scheme:// addresses, as a store's client does. Never in safe mode
+# (Set-RegistryValue throws there).
+function Register-UrlHandler([string] $Scheme, [string] $Command) {
+    $class = "HKCU:\Software\Classes\$Scheme"
+    Set-RegistryValue $class '(default)' "URL:$Scheme protocol"
+    Set-RegistryValue $class 'URL Protocol' ''
+    Set-RegistryValue "$class\shell\open\command" '(default)' $Command
 }
 
 # Gives the Dashboard an Epic Games Launcher to read, with none installed: a fake at $Root written by `standin
 # make-epic` (three made-up games, two installed and one owned only: crates/source-epic/src/fixture.rs), which the
 # Dashboard reads when started with `--epic $Root`; and standin.exe registered as this user's com.epicgames.launcher://
 # handler with $Root, the stand-in launcher, so a game the Dashboard asks the launcher for is started by it: the game's
-# Binaries\Win64\game.exe, a copy of standin.exe showing a window titled with the game's name.
+# Binaries\Win64\game.exe, a copy of standin.exe showing a window titled with the game's name. In safe mode nothing is
+# registered: `standin open-address` takes the launcher's links, and finds $Root in handlers.json.
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-epic.json in the test's output): games by
 # name, each with source_id (its AppName), name, installed, install_dir.
-function Initialize-FakeEpic([string] $Root = 'C:\e2e\epic') {
+function Initialize-FakeEpic([string] $Root = (Get-FakeRoot 'epic')) {
     $library = New-FakeStore 'make-epic' $Root 'fake-epic.json'
     $standin = Join-Path $script:Payload 'standin.exe'
-    $class = 'HKCU:\Software\Classes\com.epicgames.launcher'
-    New-Item "$class\shell\open\command" -Force | Out-Null
-    Set-ItemProperty $class '(default)' 'URL:com.epicgames.launcher protocol'
-    Set-ItemProperty $class 'URL Protocol' ''
-    Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" epic-url `"$Root`" `"%1`""
+    Register-Fake 'epic' $Root 'epic'
+    if (-not $script:Safe) { Register-UrlHandler 'com.epicgames.launcher' "`"$standin`" epic-url `"$Root`" `"%1`"" }
     $games = @($library.games)
     Say "fake Epic at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
     $library
@@ -335,7 +517,7 @@ function Initialize-FakeEpic([string] $Root = 'C:\e2e\epic') {
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-gog.json in the test's output): games most
 # recently played first, each with source_id (its product id), name, installed, install_dir.
-function Initialize-FakeGog([string] $Root = 'C:\e2e\gog') {
+function Initialize-FakeGog([string] $Root = (Get-FakeRoot 'gog')) {
     $library = New-FakeStore 'make-gog' $Root 'fake-gog.json'
     $games = @($library.games)
     Say "fake GOG at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
@@ -349,7 +531,7 @@ function Initialize-FakeGog([string] $Root = 'C:\e2e\gog') {
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-ea.json in the test's output): games by
 # name, each with source_id (its content id), name, installed, install_dir.
-function Initialize-FakeEa([string] $Root = 'C:\e2e\ea') {
+function Initialize-FakeEa([string] $Root = (Get-FakeRoot 'ea')) {
     $library = New-FakeStore 'make-ea' $Root 'fake-ea.json'
     $games = @($library.games)
     Say "fake EA app at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
@@ -360,18 +542,16 @@ function Initialize-FakeEa([string] $Root = 'C:\e2e\ea') {
 # (made-up games in a registry.json of Installs keys and the client's cache, installed and owned:
 # crates/source-ubisoft/src/fixture.rs), which the Dashboard reads when started with `--ubisoft $Root`; and standin.exe
 # registered as this user's uplay:// handler with $Root, the stand-in client, which starts the game a launch link
-# names: its folder's game.exe, a copy of standin.exe.
+# names: its folder's game.exe, a copy of standin.exe. In safe mode nothing is registered: `standin open-address`
+# takes the uplay:// links, and finds $Root in handlers.json.
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-ubisoft.json in the test's output): games
 # by name, each with source_id (its uplay_id), name, installed, install_dir.
-function Initialize-FakeUbisoft([string] $Root = 'C:\e2e\ubisoft') {
+function Initialize-FakeUbisoft([string] $Root = (Get-FakeRoot 'ubisoft')) {
     $library = New-FakeStore 'make-ubisoft' $Root 'fake-ubisoft.json'
     $standin = Join-Path $script:Payload 'standin.exe'
-    $class = 'HKCU:\Software\Classes\uplay'
-    New-Item "$class\shell\open\command" -Force | Out-Null
-    Set-ItemProperty $class '(default)' 'URL:uplay protocol'
-    Set-ItemProperty $class 'URL Protocol' ''
-    Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" uplay-url `"$Root`" `"%1`""
+    Register-Fake 'ubisoft' $Root 'ubisoft'
+    if (-not $script:Safe) { Register-UrlHandler 'uplay' "`"$standin`" uplay-url `"$Root`" `"%1`"" }
     $games = @($library.games)
     Say "fake Ubisoft Connect at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
     $library
@@ -385,16 +565,16 @@ function Initialize-FakeUbisoft([string] $Root = 'C:\e2e\ubisoft') {
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-battlenet.json in the test's output):
 # games by name, each with source_id (its product code), name, installed, install_dir.
-function Initialize-FakeBattleNet([string] $Root = 'C:\e2e\battlenet') {
+function Initialize-FakeBattleNet([string] $Root = (Get-FakeRoot 'battlenet')) {
     $library = New-FakeStore 'make-battlenet' $Root 'fake-battlenet.json'
     $games = @($library.games)
     Say "fake Battle.net at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
     $library
 }
 
-# The stand-in games running now: the game.exe processes, each with its Path.
+# The stand-in games running now: the game.exe processes started from a fake of this test's, each with its Path.
 function Get-StandInGame {
-    @(Get-Process game -ErrorAction SilentlyContinue)
+    Get-OwnProcess game
 }
 
 # Ends every stand-in game at once, as a game that crashes or is killed ends; the stand-in Steam then says it stopped.
