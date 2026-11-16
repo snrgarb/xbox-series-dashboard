@@ -705,6 +705,15 @@ impl App {
                     let changed = self.store.change_filter(&change);
                     self.show(changed);
                 }
+                // Settings' Games & apps: the database changes, and the screens follow its next snapshot. What it
+                // refuses (a program that is not there) the user is told of.
+                Effect::ByHand(change) => match self.store.by_hand(change) {
+                    Ok(changed) => self.show(changed),
+                    Err(why) => {
+                        self.dashboard.notify(&why);
+                    }
+                },
+                Effect::StartApp(app) => crate::games::start_app(self.dashboard.library(), app, &mut *self.addresses),
                 Effect::Install(game) => {
                     let (library, sources) = (self.dashboard.library(), self.store.sources());
                     crate::games::ask_store(library, sources, game, Ask::Install, &mut *self.addresses);
@@ -1134,6 +1143,10 @@ impl ApplicationHandler for App {
                     // The sources are read once the first frame is out, and wake the window if they have news.
                     let proxy = self.proxy.clone();
                     self.store.sync_in_background(self.dashboard.library(), move || {
+                        let _ = proxy.send_event(());
+                    });
+                    let proxy = self.proxy.clone();
+                    self.store.list_store_apps(move || {
                         let _ = proxy.send_event(());
                     });
                 }

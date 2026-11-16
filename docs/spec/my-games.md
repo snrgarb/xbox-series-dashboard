@@ -522,6 +522,7 @@ Slot and essentials only. E/MyGamesControl.xaml:195-230, 763-787; E/AppTiles.xam
 - **Tile**: clipped to radius 6. Face: white `#FFFFFFFF` with the App's icon inset 18, `Uniform`, over a soft shadow of its own shape (blur 18, depth 3, opacity 0.3); a Microsoft Store app's tile art instead fills the tile edge to edge over `#FF107C10`, no shadow; no icon: glyph U+ECAA as large as the inset allows, `#FF333333` on white (white on the accent for a Store app). Focused: Home's ring (4 thick, radius 14, 8 out, with glow) and a flat `#E6000000` band at the foot with the name, Segoe UI 26 white, `Margin="8"`, wrap, two lines (`MaxHeight="72"`), fading as Home's title band (150 ms after 50; out 100).
 - **Behaviour**: Apps are Playnite's Software tools, in Playnite's order. A starts the App (no Launch screen, no quit prompt, even while a game runs). Left from the first column to the nav; other edges stop. No Tile menu, no hint bar.
 - **Empty**: "Software tools you add in Playnite show up here." at x 548, y 190, Segoe UI 26 `#FF8F8F8F`.
+- **In the port** (#77): Apps are added in Settings, not Playnite, in the order added; the empty line says so ("Apps you add in Settings show up here."). Everything the port decided, and the focus log, is in [apps.md](apps.md).
 
 ---
 

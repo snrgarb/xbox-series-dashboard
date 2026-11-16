@@ -169,6 +169,19 @@ fn field(ui: &mut Ui, rect: Rect, text: &str, lit: bool, edge: Color) {
     line(ui, Rect::new(rect.x + 18.0, rect.y, rect.w - 86.0, rect.h), text, Color::WHITE);
 }
 
+/// A text field: a box drawn as a dropdown box is, holding what was typed, or `placeholder` dimmed while nothing
+/// was. A opens text entry on it, which its pane asks for. (Not the Bundle's: Settings there types nothing in a
+/// field of its own. docs/spec/apps.md, 4.2.)
+pub fn text_field(ui: &mut Ui, rect: Rect, text: &str, placeholder: &str, focused: bool) {
+    field(ui, rect, text, focused, FIELD_EDGE);
+    if text.is_empty() {
+        line(ui, Rect::new(rect.x + 18.0, rect.y, rect.w - 36.0, rect.h), placeholder, TEXT_DIM);
+    }
+    if focused {
+        focus_ring(ui, rect, RING_FIELD);
+    }
+}
+
 /// A checkbox row: a checkbox drawn as a dropdown box is, its glyph in the chevron's place. A turns it over.
 pub fn checkbox_row(ui: &mut Ui, rect: Rect, name: &str, on: bool, focused: bool) {
     field(ui, rect, name, focused, FIELD_EDGE);

@@ -21,6 +21,8 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         Arc::new(source_battlenet::BattleNet::at(args.battlenet.clone())),
         // `--xbox` names a fake drive of Xbox games; else this machine's drives and the user's packages.
         Arc::new(source_xbox::Xbox::at(args.xbox.clone())),
+        // The games added by hand, which are the database's own (docs/spec/apps.md).
+        Arc::new(library::by_hand::Manual),
     ]
 }
 

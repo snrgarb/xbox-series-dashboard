@@ -1,6 +1,6 @@
 # Sources
 
-A **source** is one store's client on this machine: Steam today; Epic, GOG, EA, Ubisoft, Battle.net, Xbox and the games added by hand next (M4). Each is a crate `source-<store>` behind one interface, `model::Source` (`crates/model/src/source.rs`), and the library merges them all into one.
+A **source** is one store's client on this machine: Steam, Epic, GOG, EA, Ubisoft and Battle.net; Xbox next (M4). The games added by hand are a source too, the library's own (below). Each store is a crate `source-<store>` behind one interface, `model::Source` (`crates/model/src/source.rs`), and the library merges them all into one.
 
 ## The interface
 
@@ -37,6 +37,10 @@ A source holds no state that changes: one is made at start and shared, as `Arc<d
 - A game a source no longer lists (uninstalled, or no longer owned) is marked gone and not shown; it keeps its row, its Play sessions, favourite and hidden, and comes back as the same game if the source lists it again.
 - Play sessions, favourite and hidden are the user's: a refresh never touches them. A source's own word on favourites or hidden is taken once, as the game is first seen.
 - The snapshot's `user` is that of the source with the most games shown.
+
+## Games added by hand
+
+The source `manual` (`library::by_hand::Manual`, docs/spec/apps.md) is the user's: its games are added, renamed and removed in Settings' Games & apps, straight into the database (`Database::by_hand`), with `source_id` the program's full path. Its `read` gives nothing, so a sync never touches them; its `start` runs the program in its own folder. Apps are not games and not a source's: they are kept apart, in the `apps` table, and started as they are.
 
 ## Adding a source
 

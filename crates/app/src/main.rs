@@ -4,6 +4,7 @@ mod offscreen;
 mod sounds;
 mod sources;
 mod store;
+mod store_apps;
 mod window;
 
 use std::path::PathBuf;
