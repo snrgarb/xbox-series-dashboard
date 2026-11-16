@@ -14,6 +14,7 @@ mod art;
 mod boot_video;
 pub mod boxes;
 pub mod controls;
+mod discord;
 mod group;
 pub mod groups;
 mod guide;
@@ -44,8 +45,8 @@ pub enum Entry {
     Tile,
     /// Personalisation's page, focus on Groups: the Tile menu's Customise Home.
     Personalisation,
-    /// Home's Discord tile while there is no Discord tab in the Guide. Discord's page comes with M6; until then
-    /// this is as [`Entry::Tile`].
+    /// Home's Discord tile while there is no Discord tab in the Guide: Theme settings > Discord, focus on the
+    /// Client ID's Type; B goes back to Theme settings' boxes with focus on Discord.
     Discord,
 }
 
@@ -149,7 +150,12 @@ impl Settings {
         let boxes: Box<dyn Pane> = Box::new(theme_settings::theme_settings());
         match entry {
             Entry::Rail => Self { on_rail: true, panes: vec![boxes] },
-            Entry::Tile | Entry::Discord => Self { on_rail: false, panes: vec![boxes] },
+            Entry::Tile => Self { on_rail: false, panes: vec![boxes] },
+            Entry::Discord => {
+                let (row, column) = theme_settings::DISCORD;
+                let boxes = Box::new(theme_settings::theme_settings().with_focus(row, column));
+                Self { on_rail: false, panes: vec![boxes, Box::new(discord::Discord::default())] }
+            }
             // Personalisation is Theme settings' first box, where focus is as its boxes are made; on its own boxes
             // focus is on Groups, the box that customises Home (docs/spec/settings.md, 16.3), beside Who's playing
             // today?.

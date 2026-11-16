@@ -128,6 +128,7 @@ mod tests {
             options: Options { idle, ..Options::default() },
             now: std::time::Instant::now(),
             now_playing: crate::now_playing::none(),
+            discord: crate::no_discord(),
         }
     }
 

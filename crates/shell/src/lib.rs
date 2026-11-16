@@ -6,6 +6,7 @@
 //! to install or uninstall a game.
 pub mod account;
 pub mod audio;
+pub mod clipboard;
 pub mod freeze;
 pub mod idle;
 mod launch;

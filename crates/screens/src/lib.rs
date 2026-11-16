@@ -121,6 +121,9 @@ pub enum Effect {
     /// Settings > Personalisation > Boot video chose this one, or Off (docs/spec/start-up.md). The Dashboard has it
     /// already: this is for whoever keeps the settings to save, and it plays from the next start.
     BootVideo(BootVideo),
+    /// Settings > Discord: a Client ID or Secret typed, a Paste, Connect or Disconnect (docs/discord.md). The
+    /// connection answers with how it is now (`Dashboard::set_discord`). Its `Debug` never shows what was typed.
+    Discord(model::discord::Ask),
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.
@@ -227,6 +230,8 @@ pub struct Dashboard {
     now_playing: now_playing::NowPlaying,
     /// The Now Playing card's time, in whole seconds, as last drawn: a turn of it is something to draw.
     now_playing_second: Option<u64>,
+    /// The Discord connection as the shell last told it (docs/discord.md): what Settings > Discord shows.
+    discord: model::discord::Discord,
     /// The Dashboard's clock: where the time it is told (`advance`, `toasts_presented`) has brought it. Nothing in
     /// the Dashboard reads the system's.
     now: Instant,
@@ -283,6 +288,7 @@ impl Dashboard {
             audio: Audio::default(),
             now_playing: now_playing::NowPlaying::default(),
             now_playing_second: None,
+            discord: model::discord::Discord::default(),
             now,
             waiting: None,
             startup: None,
@@ -339,6 +345,7 @@ impl Dashboard {
             options: self.options,
             now: self.now,
             now_playing: &self.now_playing,
+            discord: &self.discord,
         };
         self.pages.library_changed(around);
     }
@@ -364,6 +371,7 @@ impl Dashboard {
             options: self.options,
             now: self.now,
             now_playing: &self.now_playing,
+            discord: &self.discord,
         };
         self.pages.library_changed(around);
         shown
@@ -426,6 +434,18 @@ impl Dashboard {
         self.now_playing = now_playing::NowPlaying::new(saved);
         self.now_playing.set_media(media, self.now);
         self.refresh_guide();
+    }
+
+    /// The Discord connection as it is now (docs/discord.md): Settings > Discord shows it.
+    pub fn set_discord(&mut self, discord: &model::discord::Discord) {
+        if self.discord != *discord {
+            self.discord = discord.clone();
+        }
+    }
+
+    /// The Discord connection as the Dashboard was last told it.
+    pub fn discord(&self) -> &model::discord::Discord {
+        &self.discord
     }
 
     /// Now Playing: the sessions, the source and its choices.
@@ -540,6 +560,7 @@ impl Dashboard {
             options: self.options,
             now: self.now,
             now_playing: &self.now_playing,
+            discord: &self.discord,
         }
     }
 
@@ -581,6 +602,7 @@ impl Dashboard {
             options: self.options,
             now: self.now,
             now_playing: &self.now_playing,
+            discord: &self.discord,
         };
         let taken = self.pages.typed(typed, around);
         self.take_asked();
@@ -745,6 +767,7 @@ impl Dashboard {
                 options: self.options,
                 now: self.now,
                 now_playing: &self.now_playing,
+                discord: &self.discord,
             };
             return match self.pages.tick(around) {
                 pages::Tick::Wait(left) if free => {
@@ -968,6 +991,7 @@ impl Dashboard {
             options: self.options,
             now: self.now,
             now_playing: &self.now_playing,
+            discord: &self.discord,
         };
         match action {
             PageAction::Close => self.close_page(),
@@ -1015,6 +1039,7 @@ impl Dashboard {
                     options: self.options,
                     now: self.now,
                     now_playing: &self.now_playing,
+                    discord: &self.discord,
                 };
                 if !self.pages.open_over(open, around) {
                     self.close_page();
@@ -1117,6 +1142,7 @@ impl Dashboard {
                 options: self.options,
                 now: self.now,
                 now_playing: &self.now_playing,
+                discord: &self.discord,
             };
             let action = self.pages.press(press, around);
             // What the page under text entry asks for as its text is kept: a Group's new name, to save.
@@ -1154,6 +1180,7 @@ impl Dashboard {
                         options: self.options,
                         now: self.now,
                         now_playing: &self.now_playing,
+                        discord: &self.discord,
                     },
                 );
                 self.back_to_button = on_button && press.button == Button::A;
@@ -1183,6 +1210,7 @@ impl Dashboard {
                 options: self.options,
                 now: self.now,
                 now_playing: &self.now_playing,
+                discord: &self.discord,
             },
         );
         self.back_to_button = false;
@@ -1271,6 +1299,8 @@ impl Dashboard {
         }
         match self.pages.top().map(|page| page.state()) {
             Some(state) if !state.is_empty() => format!("{place}; {state}"),
+            // Settings > Discord: how the connection is, which the page has from the shell, not of its own.
+            _ if place.starts_with("Settings: Discord: ") => format!("{place}; {}", self.discord.state_line()),
             _ => place,
         }
     }
@@ -1805,6 +1835,7 @@ impl Dashboard {
             options: self.options,
             now: self.now,
             now_playing: &self.now_playing,
+            discord: &self.discord,
         };
         let (home, library) = (&mut self.home, &self.library);
         self.pages.draw(ui, around, &mut |ui| home.draw(ui, library, &status));
@@ -2139,6 +2170,12 @@ impl Dashboard {
 
 /// Fourteen games with no art, so Home always has something to show: ten played, most recently first, then four
 /// never played; some not installed. In no database, so with no saved filters: whoever shows it gives it them.
+/// Discord not connected, never set up: for a page drawn or pressed outside the Dashboard (a test's).
+pub fn no_discord() -> &'static model::discord::Discord {
+    static NONE: std::sync::OnceLock<model::discord::Discord> = std::sync::OnceLock::new();
+    NONE.get_or_init(model::discord::Discord::default)
+}
+
 pub fn fake_library() -> Library {
     // Name, minutes played, installed.
     let games = [

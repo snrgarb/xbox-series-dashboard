@@ -1,10 +1,10 @@
-//! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). The boxes of
-//! features still to come (Discord) come with them, and those that are here close up in the
-//! grid meanwhile. Games & apps and Art are the port's own.
+//! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). Games & apps
+//! and Art are the port's own.
 use super::added::{self, Added};
 use super::art::Art;
 use super::boot_video::BootVideoPage;
 use super::boxes::{Boxes, Item};
+use super::discord::Discord;
 use super::groups::Groups;
 use super::guide::Guide;
 use super::idle::Idle;
@@ -12,17 +12,20 @@ use super::profiles::Profiles;
 use super::whos_playing::WhosPlayingPage;
 use super::Setting;
 
+/// Where Discord's box is on Theme settings: row, column.
+pub const DISCORD: (usize, usize) = (1, 1);
+
 /// Theme settings' boxes.
 pub fn theme_settings() -> Boxes {
     let personalisation =
         Item::Opens { icon: '\u{E771}', name: "Personalisation", pane: |_| Box::new(personalisation()) };
     let idle = Item::Opens { icon: '\u{E708}', name: "Idle", pane: |_| Box::new(Idle::new()) };
     let guide = Item::Opens { icon: '\u{E7FC}', name: "Guide", pane: |_| Box::new(Guide::new()) };
+    let discord = Item::Opens { icon: '\u{E8F2}', name: "Discord", pane: |_| Box::new(Discord::default()) };
     let added = Item::Opens { icon: '\u{E71D}', name: added::TITLE, pane: |around| Box::new(Added::open(around)) };
-    // The port's own (docs/spec/settings.md, 16.8): beside Games & apps. Idle is in the Bundle's place beside
-    // Personalisation, and Guide under it; Discord's place beside Guide is empty until it comes (M6).
+    // The Bundle's four at its places (6.1), then the port's own row: Games & apps, and Art beside it (16.8).
     let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |_| Box::new(Art::default()) };
-    Boxes::new("Theme settings", vec![vec![personalisation, idle], vec![guide], vec![added, art]])
+    Boxes::new("Theme settings", vec![vec![personalisation, idle], vec![guide, discord], vec![added, art]])
 }
 
 /// Personalisation's boxes: Boot video (docs/spec/start-up.md) and Profiles (docs/spec/profiles.md) on the first

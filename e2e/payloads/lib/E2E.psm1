@@ -408,6 +408,8 @@ function Get-SafeArguments([string[]] $Given) {
     }
     if ($Given -notcontains '--open-addresses-with') { $added += '--open-addresses-with', "`"$(Join-Path $script:Payload 'standin.exe')`"" }
     if ($Given -notcontains '--dry-power') { $added += '--dry-power' }
+    # A pipe no Discord listens on, and no token endpoint: the user's own Discord is never reached (docs/discord.md).
+    if ($Given -notcontains '--discord-pipe') { $added += '--discord-pipe', 'e2e-no-discord' }
     if ($Given -notcontains '--data-dir') {
         $data = Get-DashboardDataDir
         New-Item $data -ItemType Directory -Force | Out-Null

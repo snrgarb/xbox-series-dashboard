@@ -33,6 +33,8 @@ pub struct Around<'a> {
     pub now: Instant,
     /// Settings' Now Playing source and the apps it may be (Settings > Guide).
     pub now_playing: &'a crate::now_playing::NowPlaying,
+    /// The Discord connection as Settings > Discord shows it (docs/discord.md).
+    pub discord: &'a model::discord::Discord,
 }
 
 /// A page to open, and how: each page's own `Entry` says where on it to open and where focus lands.
@@ -474,6 +476,7 @@ mod tests {
             options: settings::Options::default(),
             now: Instant::now(),
             now_playing: crate::now_playing::none(),
+            discord: crate::no_discord(),
         }
     }
 

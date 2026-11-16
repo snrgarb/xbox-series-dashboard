@@ -1,0 +1,174 @@
+//! Discord as the screens see it: the user's own application and the connection to the Discord running on this PC
+//! (docs/discord.md). The `discord` crate keeps it; Settings > Theme settings > Discord shows it and asks for
+//! changes with [`Ask`]; the Guide's Discord tab (#144) names why it can't show Discord with [`Discord::tab_line`].
+//! Nothing secret is ever in it: the Client Secret only as whether one is saved, the tokens not at all.
+
+/// Discord's developer portal, where the user makes the application: the page names it and shows it as a QR code.
+pub const PORTAL_URL: &str = "https://discord.com/developers/applications";
+
+/// The line over the checklist.
+pub const INTRO: &str = "Connect your own Discord application, so the Guide can show you on Discord.";
+
+/// The Connect checklist, in order.
+pub const STEPS: [&str; 4] = [
+    "Create an application at discord.com/developers/applications.",
+    "Under OAuth2, add the redirect http://127.0.0.1.",
+    "Under App Testers, add yourself.",
+    "Paste its Client ID and Client Secret here, then select Connect.",
+];
+
+/// The status line's words, and the Discord tab's, as the Bundle has them.
+pub const NOT_CONNECTED: &str = "Not connected";
+pub const CONNECTING: &str = "Connecting...";
+pub const NOT_RUNNING: &str = "Discord isn't running";
+pub const APPROVE: &str = "Approve the request in Discord";
+pub const RECONNECT_IN_SETTINGS: &str = "Reconnect Discord in settings";
+/// The Discord tab's line while a connect is under way; Settings' status line says [`CONNECTING`].
+pub const CONNECTING_TO_DISCORD: &str = "Connecting to Discord";
+
+/// What Settings' Discord page shows, and whether the Guide has a Discord tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Discord {
+    /// The application's Client ID, or None for none yet. It is public: the page shows it.
+    pub client_id: Option<String>,
+    /// Whether a Client Secret is saved. The Secret itself is never here.
+    pub has_secret: bool,
+    /// Whether tokens are saved, from a Connect until Disconnect.
+    pub has_tokens: bool,
+    /// The status line: "Not connected", "Connected as X", or what went wrong.
+    pub status: String,
+    /// Discord has signed the user in.
+    pub connected: bool,
+    /// A connect is under way: the handshake, a refresh, the Authorize prompt, the token exchange or signing in.
+    pub connecting: bool,
+    /// Discord stopped taking the saved tokens and would not authorize again either: the user has to Connect once
+    /// more. Connect signing in, or Disconnect, clears it.
+    pub needs_reconnect: bool,
+    /// Discord is out of reach and is tried again later by itself (a try is waiting to come).
+    pub retrying: bool,
+    /// Who is signed in, by display name, else username, while connected.
+    pub user: Option<String>,
+}
+
+impl Default for Discord {
+    fn default() -> Self {
+        Self {
+            client_id: None,
+            has_secret: false,
+            has_tokens: false,
+            status: NOT_CONNECTED.into(),
+            connected: false,
+            connecting: false,
+            needs_reconnect: false,
+            retrying: false,
+            user: None,
+        }
+    }
+}
+
+impl Discord {
+    /// Whether Connect does anything: with a Client ID and Secret, and not connected or connecting already.
+    pub fn can_connect(&self) -> bool {
+        self.client_id.is_some() && self.has_secret && !self.connected && !self.connecting
+    }
+
+    /// Whether Disconnect does anything: while connected or connecting, or with tokens saved from before.
+    pub fn can_disconnect(&self) -> bool {
+        self.connected || self.connecting || self.has_tokens
+    }
+
+    /// Whether the Guide has a Discord tab: signed in, or with tokens saved, from the first Connect until
+    /// Disconnect.
+    pub fn has_tab(&self) -> bool {
+        self.connected || self.has_tokens
+    }
+
+    /// The page's state for the focus log, naming neither the Client ID nor the Secret: `client id set, secret
+    /// saved, "Connected as E2E Tester"` (`not set` for either; the status line in quotes).
+    pub fn state_line(&self) -> String {
+        let id = if self.client_id.is_some() { "set" } else { "not set" };
+        let secret = if self.has_secret { "saved" } else { "not set" };
+        format!("client id {id}, secret {secret}, {:?}", self.status)
+    }
+
+    /// What the Discord tab says in Discord's place while it can't show it, or None while signed in: connecting,
+    /// Discord isn't running while it is tried again, else the user has to reconnect in Settings.
+    pub fn tab_line(&self) -> Option<&'static str> {
+        if self.connected {
+            None
+        } else if self.needs_reconnect {
+            Some(RECONNECT_IN_SETTINGS)
+        } else if self.connecting {
+            Some(CONNECTING_TO_DISCORD)
+        } else if self.retrying {
+            Some(NOT_RUNNING)
+        } else {
+            Some(RECONNECT_IN_SETTINGS)
+        }
+    }
+}
+
+/// Which of the application's two fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    ClientId,
+    ClientSecret,
+}
+
+/// What Settings' Discord page asks of the connection.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Ask {
+    /// The Client ID typed: saved at once, trimmed; empty forgets it.
+    ClientId(String),
+    /// The Client Secret typed: saved at once, trimmed. Never shown, never in a log line or `Debug`.
+    ClientSecret(String),
+    /// Paste: the clipboard's text into the field, as typed. A clipboard with no text pastes nothing.
+    Paste(Field),
+    Connect,
+    Disconnect,
+}
+
+impl std::fmt::Debug for Ask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Ask::ClientId(_) => f.write_str("ClientId(..)"),
+            Ask::ClientSecret(_) => f.write_str("ClientSecret(..)"),
+            Ask::Paste(field) => write!(f, "Paste({field:?})"),
+            Ask::Connect => f.write_str("Connect"),
+            Ask::Disconnect => f.write_str("Disconnect"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_needs_both_fields_and_nothing_under_way() {
+        let mut discord = Discord { client_id: Some("1".into()), ..Discord::default() };
+        assert!(!discord.can_connect());
+        discord.has_secret = true;
+        assert!(discord.can_connect());
+        discord.connecting = true;
+        assert!(!discord.can_connect());
+        assert!(discord.can_disconnect());
+    }
+
+    #[test]
+    fn the_tab_says_why_it_cant_show_discord() {
+        let saved = Discord { has_tokens: true, ..Discord::default() };
+        assert!(saved.has_tab());
+        assert_eq!(saved.tab_line(), Some(RECONNECT_IN_SETTINGS));
+        assert_eq!(Discord { retrying: true, ..saved.clone() }.tab_line(), Some(NOT_RUNNING));
+        assert_eq!(Discord { connecting: true, ..saved.clone() }.tab_line(), Some(CONNECTING_TO_DISCORD));
+        assert_eq!(Discord { connected: true, ..saved }.tab_line(), None);
+        assert!(!Discord::default().has_tab());
+    }
+
+    #[test]
+    fn a_secret_is_never_in_debug() {
+        let said = format!("{:?}", Ask::ClientSecret("s3cr3t".into()));
+        assert!(!said.contains("s3cr3t"));
+    }
+}

@@ -17,6 +17,8 @@ model = { path = "../model" }
 library = { path = "../library" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 audio = { path = "../audio" }
+# discord: the fake Discord, on a named pipe of the test's naming.
+discord = { path = "../discord" }
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]

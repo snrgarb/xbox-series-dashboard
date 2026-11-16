@@ -383,6 +383,7 @@ mod tests {
             options: crate::settings::Options::default(),
             now: std::time::Instant::now(),
             now_playing: crate::now_playing::none(),
+            discord: crate::no_discord(),
         };
         let mut last = None;
         for &button in buttons {
