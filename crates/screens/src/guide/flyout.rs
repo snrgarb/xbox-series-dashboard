@@ -192,9 +192,11 @@ pub(super) struct State {
     /// Audio's entries as they were last made: focus follows its entry as Mute and Deafen in Discord come and go.
     audio: Vec<AudioItem>,
     /// The Discord Flyout: whether Discord has had it open (it closes as Discord closes it), and the server B went
-    /// back from, which focus lands on in the servers.
+    /// back from, which focus lands on in the servers, or the server A opened, whose first channel focus lands on.
+    /// Focus stays where it is until Discord shows the one or the other.
     pub(super) seen: bool,
     pub(super) back_to: Option<String>,
+    pub(super) into: Option<String>,
     /// The dropdown whose list is open, and the device focus is on in it.
     list: Option<(Flow, usize)>,
     /// The Now Playing card's control focus is on, under the card.
@@ -211,8 +213,8 @@ impl State {
     /// Opens with focus on the first entry.
     pub fn new(which: Flyout, opening: u32, discord: &Discord) -> Self {
         let audio = AudioItem::of(discord);
-        let (list, control, art, back_to) = (None, None, None, None);
-        Self { which, item: 0, audio, seen: false, back_to, list, control, art, scroll: 0.0, opening }
+        let (list, control, art, back_to, into) = (None, None, None, None, None);
+        Self { which, item: 0, audio, seen: false, back_to, into, list, control, art, scroll: 0.0, opening }
     }
 
     pub(super) fn count(&self, around: Around, discord: &Discord) -> usize {

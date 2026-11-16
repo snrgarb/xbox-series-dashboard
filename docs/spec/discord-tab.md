@@ -113,6 +113,8 @@ afresh; a refusal then keeps those shown.
   focus on Servers. The Call shows once Discord says the user is in it.
 - **B** in a server's goes back to the servers, focus on that server, without asking Discord again; in the servers' it
   closes the Flyout. The Guide button closes the Guide.
+- After A on a server or B, focus stays on the row pressed until Discord shows where it went: the server's channels
+  (focus on the first) or the servers (focus on the server B came from). It never stands on the first row meanwhile.
 - An answer for a Flyout no longer showing (backed out of, or another server opened) is not shown. Discord going
   closes the Flyout and forgets what it answered.
 
@@ -132,7 +134,9 @@ afresh; a refusal then keeps those shown.
 "Late night" (Stand-in Server); not in a call; mute off, deafen off`), and with the Flyout open what it shows, after
 `, flyout Discord <focus>`: its title and the row focus is on (`"Servers" "Stand-in Server" of 3`), `"Servers"
 loading`, `"art club" "No voice channels"`, or a channel with who is in it (`"Stand-in Server" "Late night" of 2: 2 in
-it`, `: Empty`, `: not known yet`).
+it`, `: Empty`, `: not known yet`). The line is said after a press and again after what it asked is carried out, so
+the Flyout loading, B's servers and a Shortcut removed each get their own line. A removed Shortcut leaves the tab as
+Discord confirms it, focus on the next Shortcut, else on Servers.
 
 ## 8. Pictures
 

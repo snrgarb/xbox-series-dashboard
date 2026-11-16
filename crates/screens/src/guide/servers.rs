@@ -40,9 +40,16 @@ pub(super) fn follow(state: &mut State, discord: &Discord) -> bool {
     } else if state.seen {
         return false;
     }
-    if let (Some(id), Browse::Servers { loading: false, servers }) = (&state.back_to, browse) {
-        state.item = servers.iter().position(|server| server.id == *id).unwrap_or(0);
-        state.back_to = None;
+    // Focus moves only once Discord shows where A or B went: until then it stays on the row pressed, and says so.
+    match (&state.into, &state.back_to, browse) {
+        (Some(into), _, Browse::Server { id, .. }) if id == into => {
+            (state.item, state.scroll, state.into) = (0, 0.0, None);
+        }
+        (_, Some(back_to), Browse::Servers { loading: false, servers }) => {
+            state.item = servers.iter().position(|server| server.id == *back_to).unwrap_or(0);
+            (state.scroll, state.back_to) = (0.0, None);
+        }
+        _ => {}
     }
     state.item = state.item.min(browse.len().saturating_sub(1));
     true
@@ -57,17 +64,15 @@ pub(super) fn press(state: &mut State, press: Press, around: Around, discord: &D
     match (press.button, browse) {
         (Button::Up, _) => state.item = state.item.saturating_sub(1),
         (Button::Down, _) => state.item = (state.item + 1).min(count.saturating_sub(1)),
-        (Button::A, Browse::Servers { .. }) if state.item < count => {
-            let at = state.item;
-            (state.item, state.scroll) = (0, 0.0);
-            return ask(DiscordAsk::Server(at));
+        (Button::A, Browse::Servers { servers, .. }) if state.item < count => {
+            (state.into, state.back_to) = (servers.get(state.item).map(|server| server.id.clone()), None);
+            return ask(DiscordAsk::Server(state.item));
         }
         (Button::A, Browse::Server { .. }) if state.item < count => {
             return Outcome::CloseChose(GuideAction::Discord(DiscordAsk::Channel(state.item)));
         }
         (Button::B, Browse::Server { id, .. }) => {
-            state.back_to = Some(id.clone());
-            (state.item, state.scroll) = (0, 0.0);
+            (state.back_to, state.into) = (Some(id.clone()), None);
             return ask(DiscordAsk::Back);
         }
         (Button::B, _) => return Outcome::CloseChose(GuideAction::Discord(DiscordAsk::Close)),

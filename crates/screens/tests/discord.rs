@@ -382,6 +382,93 @@ fn b_goes_back_to_the_servers_onto_the_one_it_came_from_then_closes() {
     assert!(dashboard.guide_open());
 }
 
+/// As on the PC: A on a server is carried out after the press, its channels a frame or more later, the occupants
+/// after that; B's servers come back as it is carried out. Focus stays on the row pressed until Discord shows where
+/// A or B went, and the line says where it really is all along.
+#[test]
+fn focus_stays_on_the_server_pressed_until_discord_shows_its_channels_and_b_comes_back_onto_it() {
+    let lads = ("901", "Stand-in Server");
+    let line = |dashboard: &Dashboard| dashboard.guide_line();
+    let on = |what: &str| format!(", flyout Discord {what}");
+    let mut dashboard = on_tab(&signed_in());
+    press(&mut dashboard, &[A]);
+    dashboard.set_discord(&browsing(Browse::Servers { loading: true, servers: vec![] }));
+    dashboard.set_discord(&browsing(servers(&THREE)));
+    press(&mut dashboard, &[Down, Down]);
+    let on_lads = on("Item(2) \"Servers\" \"Stand-in Server\" of 3");
+    assert!(line(&dashboard).ends_with(&on_lads), "{}", line(&dashboard));
+    asked(&mut dashboard);
+
+    // A: asked, and until Discord answers focus is still on Stand-in Server.
+    press(&mut dashboard, &[A]);
+    assert_eq!(asked(&mut dashboard).len(), 1);
+    assert!(line(&dashboard).ends_with(&on_lads), "after A, before Discord: {}", line(&dashboard));
+    assert_eq!(dashboard.flyout(), Some((Flyout::Discord, FlyoutFocus::Item(2))));
+    dashboard.set_discord(&browsing(Browse::Server {
+        id: lads.0.into(),
+        name: lads.1.into(),
+        loading: true,
+        channels: vec![],
+    }));
+    assert!(line(&dashboard).ends_with(&on("Nothing \"Stand-in Server\" loading")), "{}", line(&dashboard));
+    dashboard.set_discord(&browsing(channels(lads, &[("500", "General", None), ("501", "Late night", None)])));
+    assert!(line(&dashboard).ends_with("Item(0) \"Stand-in Server\" \"General\" of 2: not known yet"));
+    dashboard.set_discord(&browsing(channels(lads, &[("500", "General", Some(0)), ("501", "Late night", Some(2))])));
+    assert!(line(&dashboard).ends_with("Item(0) \"Stand-in Server\" \"General\" of 2: Empty"));
+
+    // B from Late night: the channels still show until Discord shows the servers, then focus is on Stand-in Server.
+    press(&mut dashboard, &[Down, B]);
+    assert_eq!(asked(&mut dashboard), [Effect::Discord(Ask::Browse(BrowseAsk::Back))]);
+    assert!(line(&dashboard).ends_with("Item(1) \"Stand-in Server\" \"Late night\" of 2: 2 in it"));
+    dashboard.set_discord(&browsing(servers(&THREE)));
+    assert!(line(&dashboard).ends_with(&on_lads), "after B: {}", line(&dashboard));
+
+    // A again opens Stand-in Server, the one the line says; its channels known, they show as it is carried out.
+    press(&mut dashboard, &[A]);
+    let ask = BrowseAsk::Server { id: lads.0.into(), name: lads.1.into() };
+    assert_eq!(asked(&mut dashboard), [Effect::Discord(Ask::Browse(ask))]);
+    dashboard.set_discord(&browsing(channels(lads, &[("500", "General", Some(0)), ("501", "Late night", Some(2))])));
+    press(&mut dashboard, &[Down]);
+    assert!(line(&dashboard).ends_with("Item(1) \"Stand-in Server\" \"Late night\" of 2: 2 in it"));
+}
+
+/// As on the PC: the menu closes on A, and Discord confirms the removal after, as the ask is carried out. The tab
+/// drops the Shortcut then, focus on the next one, else on Servers.
+#[test]
+fn a_removed_shortcut_goes_from_the_tab_as_discord_confirms_it_focus_on_the_next_else_servers() {
+    let two = Discord {
+        shortcuts: vec![
+            shortcut("501", "Late night", Some("Stand-in Server")),
+            shortcut("500", "General", Some("Stand-in Server")),
+        ],
+        ..signed_in()
+    };
+    let mut dashboard = on_tab(&two);
+    press(&mut dashboard, &[Button::Menu]);
+    assert_eq!(dashboard.guide().dialog_title(), Some("Late night"));
+    press(&mut dashboard, &[A]);
+    assert_eq!(asked(&mut dashboard), [Effect::Discord(Ask::RemoveShortcut("501".into()))]);
+    // The menu is gone; the Shortcut is there until Discord says.
+    assert!(dashboard.guide_line().starts_with("Discord Entry(2) Shortcut \"Late night\""));
+
+    let mut one = two.clone();
+    one.shortcuts.remove(0);
+    dashboard.set_discord(&one);
+    assert_eq!(items(&dashboard), [Item::Account, Item::Idle, Item::Shortcut(0), Item::Servers]);
+    assert_eq!(
+        dashboard.guide_line(),
+        "Discord Entry(2) Shortcut \"General\" (Stand-in Server); not in a call; mute off, deafen off",
+        "the next Shortcut"
+    );
+
+    // The last one: focus on Servers.
+    press(&mut dashboard, &[Button::Menu, A]);
+    assert_eq!(asked(&mut dashboard), [Effect::Discord(Ask::RemoveShortcut("500".into()))]);
+    dashboard.set_discord(&signed_in());
+    assert_eq!(items(&dashboard), [Item::Account, Item::Idle, Item::Servers]);
+    assert_eq!(dashboard.guide_line(), "Discord Entry(2) Servers; not in a call; mute off, deafen off");
+}
+
 #[test]
 fn the_flyout_closes_as_discord_goes() {
     let mut dashboard = on_tab(&signed_in());
