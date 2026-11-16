@@ -68,6 +68,9 @@ pub const RARITY_FOR: u64 = 7 * 86_400;
 /// How often the running game's files are looked at.
 pub const WATCH: Duration = Duration::from_secs(1);
 
+/// The most an icon may be: Steam's are a few kilobytes.
+const ICON_BYTES: u64 = 4 << 20;
+
 /// The gap between two requests online.
 const GAP: Duration = Duration::from_millis(100);
 
@@ -351,8 +354,9 @@ pub trait Fetch: Send {
     /// figures for the game (Steam answers 403 for an app with none public); an error when it can't be asked now.
     fn rarity(&self, source: &str, source_id: &str) -> Result<Option<HashMap<String, f64>>, Error>;
 
-    /// An icon's bytes.
-    fn icon(&self, url: &str) -> Result<Vec<u8>, Error>;
+    /// An icon's bytes; Ok(None) when the server says it has no such icon (400, 403, 404, 410); an error when it
+    /// can't be asked now (offline, a 429 or 5xx).
+    fn icon(&self, url: &str) -> Result<Option<Vec<u8>>, Error>;
 }
 
 /// The stores' own services.
@@ -392,8 +396,20 @@ impl Fetch for Online {
         Ok(percentages(&json))
     }
 
-    fn icon(&self, url: &str) -> Result<Vec<u8>, Error> {
-        steamgriddb::download(&self.agent, &self.hosts.icon(url))
+    fn icon(&self, url: &str) -> Result<Option<Vec<u8>>, Error> {
+        let url = self.hosts.icon(url);
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Ok(None);
+        }
+        let mut response = self.agent.get(steamgriddb::tidy(&url)).call().map_err(|e| transport(e, "Steam's CDN"))?;
+        match response.status().as_u16() {
+            200..=299 => {}
+            400 | 403 | 404 | 410 => return Ok(None),
+            429 | 503 => return Err(Error::Busy(retry_after(&response))),
+            status => return Err(Error::Failed(format!("Steam's CDN answered {status}"))),
+        }
+        let body = response.body_mut().with_config().limit(ICON_BYTES).read_to_vec();
+        body.map(Some).map_err(|e| transport(e, "Steam's CDN"))
     }
 }
 
@@ -580,6 +596,10 @@ pub struct Follower {
     rarity: VecDeque<i64>,
     /// Icons to fetch, in turn: the game, and the icon's address.
     icons: VecDeque<(i64, String)>,
+    /// The icons the server did not have this run, by address: not asked for again.
+    missing: HashSet<String>,
+    /// Offline, or the icons' server in trouble: no icon is asked for again this run.
+    icons_stopped: bool,
 }
 
 impl Follower {
@@ -592,6 +612,8 @@ impl Follower {
             watched: None,
             rarity: VecDeque::new(),
             icons: VecDeque::new(),
+            missing: HashSet::new(),
+            icons_stopped: false,
         }
     }
 
@@ -646,14 +668,17 @@ impl Follower {
     }
 
     fn want_icon(&mut self, game: i64, a: &Achievement, locked_too: bool) {
-        if !self.icons_online || self.fetch.is_none() {
+        if !self.icons_online || self.fetch.is_none() || self.icons_stopped {
             return;
         }
-        if let (Some(url), None) = (&a.icon, &a.icon_file) {
-            self.icons.push_back((game, url.clone()));
-        }
-        if let (Some(url), None, true) = (&a.icon_locked, &a.icon_locked_file, locked_too) {
-            self.icons.push_back((game, url.clone()));
+        let mut want = |url: &Option<String>, file: &Option<PathBuf>| {
+            let url = url.as_deref().filter(|url| file.is_none() && !url.trim().is_empty())?;
+            let queued = self.icons.iter().any(|(g, u)| *g == game && u == url);
+            (!queued && !self.missing.contains(url)).then(|| self.icons.push_back((game, url.to_string())))
+        };
+        want(&a.icon, &a.icon_file);
+        if locked_too {
+            want(&a.icon_locked, &a.icon_locked_file);
         }
     }
 
@@ -751,28 +776,42 @@ impl Follower {
         a
     }
 
-    /// Fetches one icon into the cache; None when it could not be.
+    /// Fetches one icon into the cache; None when it could not be. One the server does not have, or that is no
+    /// picture, is said once and not asked for again this run; the others go on. Offline, or the server in
+    /// trouble (a 429 or 5xx), no more icons are asked for this run.
     fn fetch_icon(&mut self, db: &Database, game: i64, url: &str) -> Option<PathBuf> {
-        let (dir, fetch) = (db.achievement_icons()?, self.fetch.as_ref()?);
+        let dir = db.achievement_icons()?;
         let found = db.game(game).ok()??;
         if let Some(path) = dir.find(&found.source, &found.source_id, url) {
             return Some(path);
         }
-        match fetch.icon(url) {
-            Ok(bytes) if extension(&bytes).is_some() => match dir.save(&found.source, &found.source_id, url, &bytes) {
-                Ok(path) => Some(path),
-                Err(e) => {
-                    self.say(&format!("achievements: an icon of {} not kept: {e:#}", found.source_id));
-                    None
+        if self.icons_stopped || self.missing.contains(url) {
+            return None;
+        }
+        let file = url.split(['?', '#']).next().unwrap_or(url).rsplit('/').next().unwrap_or(url).to_string();
+        match self.fetch.as_ref()?.icon(url) {
+            Ok(Some(bytes)) if extension(&bytes).is_some() => {
+                match dir.save(&found.source, &found.source_id, url, &bytes) {
+                    Ok(path) => Some(path),
+                    Err(e) => {
+                        self.say(&format!("achievements: an icon of {} not kept: {e:#}", found.source_id));
+                        None
+                    }
                 }
-            },
-            Ok(_) => {
-                self.say(&format!("achievements: an icon of {} is not a picture", found.source_id));
+            }
+            Ok(Some(_)) => {
+                self.missing.insert(url.to_string());
+                self.say(&format!("achievements: an icon of {} is not a picture: {file}", found.source_id));
+                None
+            }
+            Ok(None) => {
+                self.missing.insert(url.to_string());
+                self.say(&format!("achievements: an icon of {} not found: {file}", found.source_id));
                 None
             }
             Err(e) => {
-                // Offline, or the CDN in trouble: no more icons this time.
                 self.say(&format!("achievements: icons not fetched: {}", why(&e)));
+                self.icons_stopped = true;
                 self.icons.clear();
                 None
             }

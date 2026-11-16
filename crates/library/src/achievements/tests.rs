@@ -16,6 +16,11 @@ struct Asked {
     rarity: Vec<String>,
     icons: Vec<String>,
     offline: bool,
+    /// Answers 429.
+    busy: bool,
+    /// Icons, by the end of their address, the server has not got (404), or answers with something else.
+    missing: Vec<String>,
+    not_pictures: Vec<String>,
 }
 
 struct FakeFetch(Arc<Mutex<Asked>>);
@@ -35,13 +40,22 @@ impl Fetch for FakeFetch {
         Ok(Some(known.map(|a| (a.key.to_lowercase(), a.rarity)).collect()))
     }
 
-    fn icon(&self, url: &str) -> Result<Vec<u8>, Error> {
+    fn icon(&self, url: &str) -> Result<Option<Vec<u8>>, Error> {
         let mut asked = self.0.lock().unwrap();
         asked.icons.push(url.to_string());
         if asked.offline {
             return Err(Error::Failed("a picture's server could not be reached".into()));
         }
-        Ok(PNG.to_vec())
+        if asked.busy {
+            return Err(Error::Busy(None));
+        }
+        if asked.missing.iter().any(|m| url.ends_with(m.as_str())) {
+            return Ok(None);
+        }
+        if asked.not_pictures.iter().any(|m| url.ends_with(m.as_str())) {
+            return Ok(Some(b"<html>not here</html>".to_vec()));
+        }
+        Ok(Some(PNG.to_vec()))
     }
 }
 
@@ -236,6 +250,122 @@ fn icons_on_request_and_none_with_art_online_off() {
     s.follower.ask(&mut s.db, Ask::Icons(s.game), NOW).unwrap();
     s.work_all(NOW);
     assert!(s.asked.lock().unwrap().icons.is_empty());
+}
+
+/// The last part of an address.
+fn file_of(url: &str) -> String {
+    url.rsplit('/').next().unwrap().to_string()
+}
+
+/// Every icon of the game's that is fetched on request, until there is no more to do.
+fn fetch_icons(s: &mut Setup) {
+    s.follower.ask(&mut s.db, Ask::Icons(s.game), NOW).unwrap();
+    s.work_all(NOW);
+}
+
+#[test]
+fn an_icon_the_server_has_not_got_is_said_once_and_the_rest_come_in() {
+    let mut s = setup(true);
+    s.follower.read_all(&mut s.db, NOW).unwrap();
+    s.work_all(NOW);
+    let all = s.db.achievements(s.game).unwrap();
+    // Night Route's icon is a 404; No Detours' grey one is a page that is no picture.
+    let missing = all[2].icon.clone().unwrap();
+    let not_picture = all[3].icon_locked.clone().unwrap();
+    s.asked.lock().unwrap().missing.push(file_of(&missing));
+    s.asked.lock().unwrap().not_pictures.push(file_of(&not_picture));
+    s.said();
+
+    fetch_icons(&mut s);
+    let said = s.said();
+    assert_eq!(
+        said,
+        [
+            format!("achievements: an icon of {ACHIEVEMENTS_GAME} not found: {}", file_of(&missing)),
+            format!("achievements: an icon of {ACHIEVEMENTS_GAME} is not a picture: {}", file_of(&not_picture)),
+        ]
+    );
+    let all = s.db.achievements(s.game).unwrap();
+    let cached =
+        all.iter().map(|a| a.icon_file.is_some() as usize + a.icon_locked_file.is_some() as usize).sum::<usize>();
+    assert_eq!(cached, 10);
+    assert!(all[2].icon_file.is_none() && all[3].icon_locked_file.is_none());
+
+    // Asked for again, and unlocked while the game runs: neither is asked of the server again this run.
+    fetch_icons(&mut s);
+    s.follower.ask(&mut s.db, Ask::Playing { game: s.game, since: NOW }, NOW).unwrap();
+    s.follower.look(&mut s.db).unwrap();
+    fixture::unlock_achievement(&s.root, "ACH_NIGHT_ROUTE", NOW + 5).unwrap();
+    let told = s.follower.look(&mut s.db).unwrap();
+    assert_eq!((told.len(), told[0].achievement.icon_file.as_ref()), (1, None));
+    let asked = s.asked.lock().unwrap().icons.clone();
+    assert_eq!(asked.iter().filter(|u| **u == missing).count(), 1, "{asked:?}");
+    assert_eq!(asked.iter().filter(|u| **u == not_picture).count(), 1, "{asked:?}");
+    assert!(s.said().iter().all(|l| !l.contains("not found") && !l.contains("not a picture")));
+}
+
+#[test]
+fn a_busy_or_unreachable_server_stops_icons_for_the_run() {
+    for busy in [true, false] {
+        let mut s = setup(true);
+        s.follower.read_all(&mut s.db, NOW).unwrap();
+        {
+            let mut asked = s.asked.lock().unwrap();
+            (asked.busy, asked.offline) = (busy, !busy);
+        }
+        s.work_all(NOW);
+        let why = if busy { "the service asked to wait" } else { "a picture's server could not be reached" };
+        assert!(s.said().contains(&format!("achievements: icons not fetched: {why}")));
+        // One asked, and none after it: not on request, nor for an unlock.
+        fetch_icons(&mut s);
+        s.follower.ask(&mut s.db, Ask::Playing { game: s.game, since: NOW }, NOW).unwrap();
+        s.follower.look(&mut s.db).unwrap();
+        fixture::unlock_achievement(&s.root, "ACH_NIGHT_ROUTE", NOW + 5).unwrap();
+        assert_eq!(s.follower.look(&mut s.db).unwrap().len(), 1);
+        assert_eq!(s.asked.lock().unwrap().icons.len(), 1);
+    }
+}
+
+#[test]
+fn every_shape_of_icon_a_schema_holds_is_asked_for_at_its_address_and_none_for_none() {
+    use source_steam::achievements::{icon_address, ICONS};
+    let mut s = setup(true);
+    let hash = "4c936bef605fe82e00145c7b37287a13cd690af3";
+    let appid = ACHIEVEMENTS_GAME;
+    let shapes = [
+        format!("{hash}.jpg"),
+        hash.to_uppercase(),
+        "tf_burn_bw".to_string(),
+        "https://cdn.example.com/icons/full.jpg".to_string(),
+        String::new(),
+        "  ".to_string(),
+    ];
+    let list: Vec<Achievement> = shapes
+        .iter()
+        .enumerate()
+        .map(|(i, given)| Achievement {
+            key: format!("K{i}"),
+            name: format!("K{i}"),
+            icon: icon_address(appid, given),
+            icon_locked: icon_address(appid, ""),
+            ..Achievement::default()
+        })
+        .collect();
+    s.db.put_achievements(s.game, &list).unwrap();
+    fetch_icons(&mut s);
+    let asked = s.asked.lock().unwrap().icons.clone();
+    // The hash twice over (with and without its extension, in either case) is one icon, asked once.
+    assert_eq!(
+        asked,
+        [
+            format!("{ICONS}/{appid}/{hash}.jpg"),
+            format!("{ICONS}/{appid}/tf_burn_bw.jpg"),
+            "https://cdn.example.com/icons/full.jpg".to_string(),
+        ]
+    );
+    let all = s.db.achievements(s.game).unwrap();
+    assert!(all[..4].iter().all(|a| a.icon_file.is_some()), "{all:?}");
+    assert!(all[4..].iter().all(|a| a.icon.is_none() && a.icon_file.is_none() && a.icon_locked.is_none()));
 }
 
 #[test]

@@ -97,9 +97,39 @@ pub fn parse_stats(buf: &[u8]) -> Result<HashMap<(u32, u32), u64>> {
     Ok(out)
 }
 
+/// An icon's address from what the schema says of it, None for nothing:
+/// - a full address (`http://`, `https://`) is taken as it is;
+/// - a file name, or a path whose last part is one, is under [`ICONS`]`/<appid>/`, `.jpg` added when it has no
+///   extension and a SHA-1's forty hex digits in lower case, as the CDN has them.
+///
+/// Checked on 2026-11-17 against the CDN with public icons of 1145360 and 440: `<hash>.jpg` and
+/// `tf_..._bw.jpg` are 200; the same without `.jpg` 404 or 503, and the hash in upper case 503.
+pub fn icon_address(appid: u32, given: &str) -> Option<String> {
+    let given = given.trim();
+    if given.is_empty() {
+        return None;
+    }
+    let lower = given.to_ascii_lowercase();
+    if lower.starts_with("https://") || lower.starts_with("http://") {
+        return Some(given.to_string());
+    }
+    let file = given.rsplit(['/', '\\']).next().unwrap_or(given).trim();
+    if file.is_empty() || file == "." || file == ".." {
+        return None;
+    }
+    let (stem, extension) = match file.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => (stem, Some(ext)),
+        _ => (file.trim_end_matches('.'), None),
+    };
+    let hash = stem.len() == 40 && stem.bytes().all(|b| b.is_ascii_hexdigit());
+    let stem = if hash { stem.to_ascii_lowercase() } else { stem.to_string() };
+    let extension = extension.map_or("jpg".to_string(), |ext| if hash { ext.to_ascii_lowercase() } else { ext.into() });
+    Some(format!("{ICONS}/{appid}/{stem}.{extension}"))
+}
+
 /// The game's achievements: the schema's, each unlocked as the stats say, with its icons' addresses.
 pub fn combine(appid: u32, schema: Vec<Defined>, unlocks: &HashMap<(u32, u32), u64>) -> Vec<Achievement> {
-    let icon = |file: Option<String>| file.map(|file| format!("{ICONS}/{appid}/{file}"));
+    let icon = |file: Option<String>| file.and_then(|file| icon_address(appid, &file));
     schema
         .into_iter()
         .map(|d| Achievement {
@@ -382,6 +412,32 @@ mod tests {
         assert_eq!(all[0].icon.as_deref(), Some(&*format!("{ICONS}/4242/aaaa.jpg")));
         assert_eq!(all[0].icon_locked.as_deref(), Some(&*format!("{ICONS}/4242/bbbb.jpg")));
         assert_eq!(all[1].icon, None);
+    }
+
+    #[test]
+    fn an_icon_is_addressed_by_whatever_the_schema_holds() {
+        let hash = "4c936bef605fe82e00145c7b37287a13cd690af3";
+        let at = |file: &str| format!("{ICONS}/7/{file}");
+        let cases: [(&str, Option<String>); 10] = [
+            (&format!("{hash}.jpg"), Some(at(&format!("{hash}.jpg")))),
+            // A hash with no extension, or in upper case: as the CDN has it.
+            (hash, Some(at(&format!("{hash}.jpg")))),
+            (&format!("{}.JPG", hash.to_uppercase()), Some(at(&format!("{hash}.jpg")))),
+            // A name of the older kind keeps its case.
+            ("tf_Burn_bw.jpg", Some(at("tf_Burn_bw.jpg"))),
+            ("tf_Burn_bw", Some(at("tf_Burn_bw.jpg"))),
+            // A path: its last part.
+            (&format!("images/apps/7/{hash}.jpg"), Some(at(&format!("{hash}.jpg")))),
+            // A full address, as it is.
+            ("https://example.com/a/b.png", Some("https://example.com/a/b.png".to_string())),
+            // Nothing: no icon.
+            ("", None),
+            ("   ", None),
+            ("apps/7/", None),
+        ];
+        for (given, want) in cases {
+            assert_eq!(icon_address(7, given), want, "{given:?}");
+        }
     }
 
     #[test]
