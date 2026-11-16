@@ -463,6 +463,22 @@ fn launch_screen_with_no_art() {
     stage.check("launch-screen-no-art");
 }
 
+/// A slow renderer gives a fade two faint frames and a long wait for the third, the game's launcher in plain sight
+/// meanwhile: there the Launch screen is whole in its first frame.
+#[test]
+fn on_a_slow_renderer_the_launch_screen_comes_up_whole() {
+    let mut stage = Stage::new(screens::fake_library(), HD);
+    stage.dashboard.set_slow_renderer(true);
+    stage.dashboard.launch_started(2);
+    stage.frame();
+    assert!(stage.dashboard.overlay_at_rest(), "whole in one frame");
+    assert!(stage.dashboard.home_covered());
+    // Booted: gone in one frame too.
+    stage.dashboard.game_booted();
+    stage.frame();
+    assert!(!stage.dashboard.launch_screen_showing());
+}
+
 /// What the Overlay is wanted for through a launch, and when Home's window has nothing to show.
 #[test]
 fn the_overlay_shows_the_launch_screen_then_the_guide_over_the_game() {

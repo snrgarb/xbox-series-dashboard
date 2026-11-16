@@ -141,7 +141,9 @@ try {
 
     # Y and B first, so that the log says where Home's focus is; then down to the first Group and along it to See
     # all, its last card.
-    Press Y 'Search: Open' | Out-Null
+    Press Y 'Search: Key\(Q\); "\|" upper letters, RecentlyAdded \d+' | Out-Null
+    # B puts Search's keyboard away, and B again leaves it.
+    Press B 'Search: RecentlyAdded\(0\) .+; "" away, RecentlyAdded \d+' | Out-Null
     Press B 'Recent\(0\)' | Out-Null
     Walk Down 'Group \{ group: 0, card: 0 \}' 4
     $seeAll = Walk-ToEdge Right 'Group \{ group: 0, card: [1-9]\d* \}'
