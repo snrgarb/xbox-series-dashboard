@@ -1418,8 +1418,10 @@ impl Dashboard {
     /// The Overlay: the Launch screen, and the Guide. Drawn over nothing, so where it draws nothing the game shows,
     /// or Home.
     pub fn draw_overlay(&mut self, ui: &mut Ui) {
+        // On a slow renderer the Launch screen comes up whole: a fade there is two faint frames and a long wait for
+        // the third, with the game's launcher in plain sight meanwhile.
         ui.store.reduce_motion = self.options.reduce_motion;
-        self.launch.draw(ui);
+        self.launch.draw(ui, self.slow_renderer);
         if self.guide_overlaid {
             self.draw_guide(ui);
         }

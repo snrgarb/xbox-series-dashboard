@@ -51,11 +51,13 @@ impl LaunchScreen {
         self.up && self.shown >= 1.0
     }
 
-    pub fn draw(&mut self, ui: &mut Ui) {
+    /// `whole`: with no fade, in and away.
+    pub fn draw(&mut self, ui: &mut Ui, whole: bool) {
         if self.game.is_none() {
             return;
         }
-        let shown = ui.tween_from("launch screen", 0.0, if self.up { 1.0 } else { 0.0 }, FADE_SECONDS, Ease::CubicOut);
+        let seconds = if whole { 0.0 } else { FADE_SECONDS };
+        let shown = ui.tween_from("launch screen", 0.0, if self.up { 1.0 } else { 0.0 }, seconds, Ease::CubicOut);
         self.shown = shown;
         if shown <= 0.0 && !self.up {
             self.game = None;
