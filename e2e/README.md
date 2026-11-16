@@ -113,6 +113,11 @@ Connect; the fake Battle.net's `Battle.net.exe` is a copy of `standin.exe` that 
 Each says what it started in `standin.log`. In safe mode the fakes are in the test's folder and `uplay://` is not
 registered: `standin open-address` takes it, as it does Steam's and Epic's.
 
+`Initialize-FakeXbox` writes a fake drive of Xbox games at `C:\e2e\xbox` with `standin make-xbox <root>`: a
+`.GamingRoot` naming `XboxGames`, and under it made-up packages (three games, an app with no `MicrosoftGame.config`, a
+game whose manifest is broken), each game's `game.exe` the stand-in game and its logos plain-colour pictures. The
+Dashboard reads it when started with `--xbox <root>`. Nothing is registered by it.
+
 ## Writing a test
 
 A test is a folder under `payloads/` with a `run.ps1` that imports `lib\E2E.psm1`, collects what is wrong in a list,
@@ -130,7 +135,7 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Initialize-FakeSteam`, `Initialize-FakeEpic`, `Initialize-FakeGog`, `Get-StandInGame`, `Stop-StandInGame` | the fakes and their games (only those started from the test's own folders) |
 | `Get-FakeRoot <store>`, `Get-TestFolder <name>`, `Get-DashboardDataDir` | where a fake, a folder of the test's own, and the Dashboard's data folder are, on the VM or in safe mode |
 | `Test-SafeMode`, `Assert-VmOnly <why>`, `Set-RegistryValue`, `Get-OwnProcess <name>` | safe mode (below); the one registry write, which throws in it; processes started from the test's folders |
-| `Initialize-FakeEa`, `Initialize-FakeUbisoft`, `Initialize-FakeBattleNet` | a fake EA app, Ubisoft Connect or Battle.net |
+| `Initialize-FakeEa`, `Initialize-FakeUbisoft`, `Initialize-FakeBattleNet`, `Initialize-FakeXbox` | a fake EA app, Ubisoft Connect, Battle.net or drive of Xbox games |
 | `Watch-Pulse <seconds>`, `Test-PulseColour`, `Test-Suspended <pid>` | the colours the stand-in game's pulse showed (two when it runs, one when it is frozen); whether a pixel is the pulse, dimmed or not; whether every thread of a process is suspended |
 
 The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again, and the Dashboard
@@ -150,7 +155,12 @@ game added as a game and Notepad as an App by typing their paths, the App starte
 launched from its hub and first in the Recent row after, and both removed), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
 the Guide, the queue, the Guide button during a Toast), `stores-ea-ubisoft-battlenet` (a fake of each beside Steam's:
-each read, and one game of each found through Search and launched from its hub through its store), and `overlay` and `video` for the spikes.
+each read, and one game of each found through Search and launched from its hub through its store), `stores-xbox`
+(the fake drive's Tidewater Trials registered for the user as a package of loose files, with developer mode on for the
+run; the machine read with no `--xbox`; the game found through Search, launched from its hub by
+`shell:AppsFolder\<AUMID>`, run from the package's folder, and Home back; the package removed after. Where it cannot
+be registered, or in safe mode, it says why and reads the fake drive with `--xbox` instead, and the launch is left for
+the TV PC), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets

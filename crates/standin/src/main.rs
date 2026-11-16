@@ -42,6 +42,10 @@
 //!       `game.exe`, titled with its name), reads it back as the Dashboard does with `--ea <dir>` (and the others),
 //!       and with --json writes the Library it read there. Battle.net's client in the fake, `Battle.net.exe`, is a
 //!       copy of this program too.
+//!   standin make-xbox <dir> [--json <file>]
+//!       As make-ea, for a fake drive of Xbox games (`source_xbox::fixture`): a `.GamingRoot` and made-up packages,
+//!       each game's `game.exe` a copy of this program, read with `--xbox <dir>`. Tidewater Trials' package is whole,
+//!       as Windows registers a folder of loose files: the end-to-end test registers it on the VM.
 //!   standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
 //!       The stand-in Ubisoft Connect, registered as the `uplay://` handler for the fake at <dir>: starts the game's
 //!       `game.exe` from its install folder and waits for it; asked to install or uninstall, says so in the log and
@@ -53,9 +57,11 @@
 //!   standin open-address <address>
 //!       What `dashboard --open-addresses-with standin.exe` gives every store's address to, on a test machine whose
 //!       registry is left alone (the TV PC): does what the handler registered for the address's scheme would,
-//!       `steam://` as steam-url, `com.epicgames.launcher://` as epic-url and `uplay://` as uplay-url, with each
-//!       fake's folder from `handlers.json` beside this program (`{"steam": "<dir>", "epic": "<dir>", "ubisoft":
-//!       "<dir>"}`, written by the tests' helpers) and never from the registry. A game the stand-in Steam starts this way has no `Running` value written:
+//!       `steam://` as steam-url, `com.epicgames.launcher://` as epic-url and `uplay://` as uplay-url, and Windows
+//!       would with `shell:AppsFolder\<AUMID>`: the fake Xbox drive's game of that app user model ID started from its
+//!       package's folder (its Install and Uninstall, the Store's page and Settings, only said); with each fake's
+//!       folder from `handlers.json` beside this program (`{"steam": "<dir>", "epic": "<dir>", "ubisoft": "<dir>",
+//!       "xbox": "<dir>"}`, written by the tests' helpers) and never from the registry. A game the stand-in Steam starts this way has no `Running` value written:
 //!       the Dashboard follows it by its windows. Exits 2 for a scheme it has no stand-in for, 1 when the fake it
 //!       needs is not in `handlers.json`.
 //!
@@ -85,7 +91,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
-       standin make-ea | make-ubisoft | make-battlenet <dir> [--json <file>]
+       standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>]
@@ -100,17 +106,18 @@ struct Handlers {
     steam: Option<PathBuf>,
     epic: Option<PathBuf>,
     ubisoft: Option<PathBuf>,
+    xbox: Option<PathBuf>,
 }
 
 impl Handlers {
-    /// `{"steam": "<dir>", "epic": "<dir>", "ubisoft": "<dir>"}`, any left out. PowerShell's UTF-8 can start with a
+    /// `{"steam": "<dir>", "epic": "<dir>", "ubisoft": "<dir>", "xbox": "<dir>"}`, any left out. PowerShell's UTF-8 can start with a
     /// byte-order mark, which is passed over.
     fn parse(text: &str) -> Result<Handlers, String> {
         let value: serde_json::Value =
             serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("{HANDLERS_FILE}: {e}"))?;
         let dir =
             |key: &str| value.get(key).and_then(|dir| dir.as_str()).filter(|dir| !dir.is_empty()).map(PathBuf::from);
-        Ok(Handlers { steam: dir("steam"), epic: dir("epic"), ubisoft: dir("ubisoft") })
+        Ok(Handlers { steam: dir("steam"), epic: dir("epic"), ubisoft: dir("ubisoft"), xbox: dir("xbox") })
     }
 
     /// The file beside this program; none there is no fakes.
@@ -136,6 +143,18 @@ fn open_address(handlers: &Handlers, address: &str) -> i32 {
         }
         found
     };
+    // A packaged game's app user model ID, which Windows would activate: the fake drive's game of that ID.
+    if let Some(aumid) = source_xbox::aumid_of(address) {
+        return match fake(&handlers.xbox, "Xbox") {
+            Some(root) => run_game("xbox", source_xbox::fake_game(&root, aumid).as_ref(), aumid),
+            None => 1,
+        };
+    }
+    // What an Xbox game's Install and Uninstall open: the Store's page, Settings' installed apps.
+    if scheme == "ms-windows-store" || address.to_ascii_lowercase().starts_with("ms-settings:") {
+        note(&format!("open-address: asked to open {address}"));
+        return 0;
+    }
     match scheme.as_str() {
         "steam" => match fake(&handlers.steam, "Steam") {
             Some(root) => steam_address(address, Some(&root)),
@@ -253,7 +272,7 @@ fn make_steam(dir: &Path, json: Option<&Path>, mut spec: Fixture) -> Result<(), 
     Ok(())
 }
 
-/// Writes the fake `store` (ea, ubisoft or battlenet) at `dir`, with this program as every installed game's
+/// Writes the fake `store` (ea, ubisoft, battlenet or xbox) at `dir`, with this program as every installed game's
 /// `game.exe`, and reads it back as the Dashboard does.
 fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String> {
     let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -277,6 +296,12 @@ fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String
             let spec = source_battlenet::fixture::Fixture { game_exe: Some(exe), ..standard };
             source_battlenet::fixture::write(&dir, &spec).map_err(written)?;
             (Box::new(source_battlenet::BattleNet::at(Some(dir.clone()))), names(spec.expected()))
+        }
+        "xbox" => {
+            let spec =
+                source_xbox::fixture::Fixture { game_exe: Some(exe), ..source_xbox::fixture::Fixture::standard() };
+            source_xbox::fixture::write(&dir, &spec).map_err(written)?;
+            (Box::new(source_xbox::Xbox::at(Some(dir.clone()))), names(spec.expected()))
         }
         _ => return Err(format!("no fake store {store}")),
     };
@@ -553,7 +578,7 @@ fn run(args: &[String]) -> i32 {
                 2
             }
         },
-        Some(what @ ("make-ea" | "make-ubisoft" | "make-battlenet")) => {
+        Some(what @ ("make-ea" | "make-ubisoft" | "make-battlenet" | "make-xbox")) => {
             let Some((dir, json)) = dir_and_json(&args[1..]) else {
                 note(USAGE);
                 return 2;
@@ -840,7 +865,7 @@ mod tests {
     #[test]
     fn make_store_writes_each_fake_and_reads_it_back() {
         let dir = tempfile::tempdir().unwrap();
-        for store in ["ea", "ubisoft", "battlenet"] {
+        for store in ["ea", "ubisoft", "battlenet", "xbox"] {
             let (root, json) = (dir.path().join(store), dir.path().join(format!("{store}.json")));
             let args = strings(&[&format!("make-{store}"), root.to_str().unwrap(), "--json", json.to_str().unwrap()]);
             assert_eq!(run(&args), 0, "make-{store}");
@@ -889,6 +914,7 @@ mod tests {
                 steam: Some(PathBuf::from(r"C:\Users\Test User\fakes\steam")),
                 epic: Some(PathBuf::from(r"D:\e")),
                 ubisoft: None,
+                xbox: None,
             }
         );
         assert_eq!(Handlers::parse(r#"{"steam": ""}"#).unwrap(), Handlers::default());
@@ -903,8 +929,14 @@ mod tests {
         assert_eq!(run(&strings(&["make-epic", epic.to_str().unwrap()])), 0);
         let ubisoft = dir.path().join("ubisoft");
         assert_eq!(run(&strings(&["make-ubisoft", ubisoft.to_str().unwrap()])), 0);
-        let handlers =
-            Handlers { steam: Some(dir.path().join("steam")), epic: Some(epic.clone()), ubisoft: Some(ubisoft) };
+        let xbox = dir.path().join("xbox");
+        assert_eq!(run(&strings(&["make-xbox", xbox.to_str().unwrap()])), 0);
+        let handlers = Handlers {
+            steam: Some(dir.path().join("steam")),
+            epic: Some(epic.clone()),
+            ubisoft: Some(ubisoft),
+            xbox: Some(xbox),
+        };
 
         // Steam's install and uninstall are said and done nothing more about, as steam-url does.
         assert_eq!(open_address(&handlers, "steam://install/9100040"), 0);
@@ -917,12 +949,19 @@ mod tests {
         // Ubisoft Connect's, as uplay-url does.
         assert_eq!(open_address(&handlers, "uplay://install/90410"), 0);
         assert_eq!(open_address(&handlers, "uplay://launch/90410"), 1);
+        // An Xbox game's, as Windows would activate it: an app user model ID the fake drive has no game of starts
+        // nothing; the Store's page and Settings are said.
+        let unknown = r"shell:AppsFolder\MadeUpStudio.Unknown_0000000000000!Game";
+        assert_eq!(open_address(&handlers, unknown), 1);
+        assert_eq!(open_address(&handlers, "ms-windows-store://pdp/?ProductId=9ZZZMADEUP01"), 0);
+        assert_eq!(open_address(&handlers, "ms-settings:appsfeatures"), 0);
 
         // No fake for the store: nothing done, and never the registry's.
         let none = Handlers::default();
         assert_eq!(open_address(&none, "steam://rungameid/9100030"), 1);
         assert_eq!(open_address(&none, wexford), 1);
         assert_eq!(open_address(&none, "uplay://install/90410"), 1);
+        assert_eq!(open_address(&none, unknown), 1);
         // A scheme with no stand-in, or no address at all.
         assert_eq!(open_address(&handlers, "origin2://game/launch?offerIds=1"), 2);
         assert_eq!(open_address(&handlers, "C:\\Games\\game.exe"), 2);
