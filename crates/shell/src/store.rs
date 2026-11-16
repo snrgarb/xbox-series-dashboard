@@ -17,13 +17,22 @@ pub trait Addresses {
 }
 
 /// Asks the game's store, by way of its source (none for a game of no source the Dashboard has) and `addresses`,
-/// and says in the log what was asked: `store: asked Steam to install <name>: steam://install/<appid>`. A game
+/// and says in the log what was asked: `store: asked Epic Games to install <name>: com.epicgames...`; for Steam's own
+/// program, `store: asking Steam to install <name>: app_install <appid>`, the way it is asked said after. A game
 /// whose store can't be asked is said so and left alone. Whether the store was asked.
 pub fn ask(game: &Game, source: Option<&dyn Source>, ask: Ask, addresses: &mut dyn Addresses) -> bool {
     let what = ask.verb();
     match source.and_then(|source| Some((source.name(), source.ask(game, ask)?))) {
         Some((store, address)) if addresses.open(&address).is_ok() => {
-            eprintln!("store: asked {store} to {what} {}: {address}", game.name);
+            // Steam's own program is only one of two ways of asking it, and the way is taken on a thread of its
+            // own (`crate::steam`), which says which in a line of its own.
+            match &address {
+                Start::Program { args, .. } if crate::steam::is_steam(&address).is_some() => {
+                    let command = source_steam::cef::console_command(args).unwrap_or_else(|| args.join(" "));
+                    eprintln!("store: asking {store} to {what} {}: {command}", game.name);
+                }
+                _ => eprintln!("store: asked {store} to {what} {}: {address}", game.name),
+            }
             return true;
         }
         Some((_, address)) => eprintln!("store: nothing took {address}: {} is as it was", game.name),

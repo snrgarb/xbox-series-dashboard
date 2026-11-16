@@ -195,7 +195,9 @@ try {
         Press Guide "ManageQueue: (Cover|Row)\(0\) of .+" '01b-queued-toast-opened-manage-queue' | Out-Null
         Press B $tilePattern | Out-Null
     }
-    Expect-Logged "^store: asked Steam to install ${firstName}: .*steam\.exe -silent \+app_install $($first.source_id)$" $mark 'Install from the hub' | Out-Null
+    Expect-Logged "^store: asking Steam to install ${firstName}: app_install $($first.source_id)$" $mark 'Install from the hub' | Out-Null
+    # How: the fake has no CEF debugger, so through its steam.exe, its windows watched (#132).
+    Expect-Logged "^store: ran .*steam\.exe -silent \+app_install $($first.source_id) at \d+ ms$" $mark 'Install from the hub, by steam.exe' | Out-Null
     Expect-Steam "steam: asked to install $($first.source_id): -silent \+app_install $($first.source_id)" $steamMark 'Install from the hub'
     Expect-Logged "^queue: $firstName joined, asked for$" $mark 'Install from the hub, the Queue' | Out-Null
     Expect-Logged "^queue: $firstName queued$" $mark 'Install from the hub, Steam took it on' | Out-Null
@@ -266,7 +268,7 @@ try {
     if ($menu -and (Menu-Row $menu) -ne 'Install') { $failures += "a queued game's menu starts with $(Menu-Row $menu), not Install" }
     $mark = Get-DashboardLogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-NotLogged '^store: asked Steam' $mark 'Install of a queued game'
+    Expect-NotLogged '^store: asking Steam' $mark 'Install of a queued game'
 
     # --- Paused, then done: the game leaves the Queue installed, and its hub reads Play.
     $mark = Get-DashboardLogLength
@@ -314,7 +316,7 @@ try {
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Logged "^store: asked Steam to install ${secondName}: .*steam\.exe -silent \+app_install $($second.source_id)$" $mark 'Install from the menu' | Out-Null
+    Expect-Logged "^store: asking Steam to install ${secondName}: app_install $($second.source_id)$" $mark 'Install from the menu' | Out-Null
     Expect-Steam "steam: asked to install $($second.source_id)" $steamMark 'Install from the menu'
     Expect-Logged "^queue: $secondName joined, asked for$" $mark 'Install from the menu, the Queue' | Out-Null
     # Dropped once Steam has taken it on (its manifest seen, Queued): as a player cancels it in Steam.
@@ -333,12 +335,12 @@ try {
     Press Down "TileMenu: Prompt\(Cancel\) of $firstName" | Out-Null
     $mark = Get-DashboardLogLength
     Press A "TileMenu: Menu\(Uninstall\) of $firstName" | Out-Null
-    Expect-NotLogged '^store: asked Steam' $mark 'Uninstall cancelled' 1
+    Expect-NotLogged '^store: asking Steam' $mark 'Uninstall cancelled' 1
     Press A "TileMenu: Prompt\(Uninstall\) of $firstName" | Out-Null
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Logged "^store: asked Steam to uninstall ${firstName}: .*steam\.exe -silent -console \+app_uninstall $($first.source_id)$" $mark 'Uninstall' | Out-Null
+    Expect-Logged "^store: asking Steam to uninstall ${firstName}: app_uninstall $($first.source_id)$" $mark 'Uninstall' | Out-Null
     Expect-Steam "steam: asked to uninstall $($first.source_id)" $steamMark 'Uninstall'
     Expect-Logged "^queue: $firstName uninstalled$" $mark 'Uninstalled' 30 | Out-Null
     Expect-Logged "^toasts: shown `"$firstName was uninstalled`" \(Uninstalled\)" $mark 'Uninstalled, its Toast' 30 | Out-Null

@@ -13,19 +13,23 @@
 //! [`Steam`] is the source the library reads (`model::Source`): it finds the install, reads it with [`load`],
 //! starts a game through Steam's own `steam://` address, installs and uninstalls one as the Bundle does, without
 //! Steam's windows ([`command`]; the shell types it into Steam's console over its CEF debugger where the user has
-//! that on, [`cef`]), and reports the installs Steam has under way from its app manifests ([`installs`]), a running
-//! download's bytes counted live ([`live`]). [`probe`] is `--log-queue-sources`' look at every candidate count.
+//! that on, [`cef`]), and reports the installs Steam has under way from its app manifests ([`installs`]), how far
+//! each has got from Steam's own download overview where the debugger is on ([`overview`]) and else counted live
+//! ([`live`]), none said done while Steam is still at it ([`follow`]). [`probe`] is `--log-queue-sources`' look at
+//! every candidate count.
 pub mod appcache;
 pub mod cef;
 pub mod collections;
 pub mod fixture;
+pub mod follow;
 pub mod installs;
 pub mod live;
+pub mod overview;
 pub mod probe;
 pub mod vdf;
 
 use anyhow::{Context, Result};
-use model::{Ask, Found, Game, Install, InstallState, Library, Source, Start};
+use model::{Ask, Found, Game, Install, Library, Source, Start};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,19 +40,27 @@ use vdf::Value;
 pub const SOURCE: &str = "steam";
 
 /// Steam, as the library reads it and the shell starts its games.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Steam {
     /// The install to read; with none, the one the registry names.
     root: Option<PathBuf>,
-    /// Where each running download's live count starts, by appid ([`live`]): the one thing a source keeps between
-    /// looks, as the Bundle's `SteamDownloads` keeps it.
-    baselines: Arc<Mutex<HashMap<u32, live::Baseline>>>,
+    /// What is kept between looks at the installs under way ([`follow`]): the one thing a source keeps, as the
+    /// Bundle's `SteamDownloads` keeps its baselines.
+    follow: Arc<Mutex<follow::Follow>>,
+    /// The clock `follow` goes by.
+    started: Arc<std::time::Instant>,
+}
+
+impl Default for Steam {
+    fn default() -> Self {
+        Self::at(None)
+    }
 }
 
 impl Steam {
     /// The Steam install at `root`, or with none the one the registry names (`--steam` on the command line).
     pub fn at(root: Option<PathBuf>) -> Self {
-        Self { root, baselines: Arc::default() }
+        Self { root, follow: Arc::default(), started: Arc::new(std::time::Instant::now()) }
     }
 
     fn root(&self) -> Option<PathBuf> {
@@ -124,35 +136,20 @@ impl Source for Steam {
     }
 
     /// From the app manifests in every library folder ([`installs::under_way`]), with the registry's `Updating` as
-    /// a second word on a download that has just started, for the install the registry names only; a running
-    /// download's bytes counted live from what Steam's client has written ([`live`]).
+    /// a second word, for the install the registry names only; how far each has got and whether it is done as
+    /// [`follow`] works it out, from Steam's download overview where its CEF debugger is on and Steam runs
+    /// ([`overview`]), else from what Steam's client has written ([`live`]).
     fn installs(&self) -> Option<Vec<Install>> {
         let root = self.installed_root()?;
         let registry = self.root.is_none();
-        let found = installs::under_way(&steamapps_dirs(&root), &|appid| registry && registry::updating(appid));
-        let running = found.iter().any(|(_, state, _)| state.downloading());
-        let writes = if running { live::writes(&root) } else { None };
-        let mut baselines = self.baselines.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        baselines.retain(|appid, _| found.iter().any(|(id, state, _)| id == appid && state.downloading()));
-        let installs = found
-            .into_iter()
-            .map(|(appid, state, counts)| {
-                let state = match state {
-                    InstallState::Downloading { .. } => {
-                        let mut baseline = baselines.get(&appid).copied();
-                        let state = live::downloading(&mut baseline, &counts, writes);
-                        match baseline {
-                            Some(baseline) => baselines.insert(appid, baseline),
-                            None => baselines.remove(&appid),
-                        };
-                        state
-                    }
-                    state => state,
-                };
-                Install { source_id: appid.to_string(), state }
-            })
-            .collect();
-        Some(installs)
+        let updating = |appid| registry && registry::updating(appid);
+        let found = installs::under_way(&steamapps_dirs(&root), &updating);
+        let mut follow = self.follow.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let busy = !found.is_empty() || follow.busy();
+        let writes = if busy { live::writes(&root) } else { None };
+        // Steam's own word, where it can be had: its debugger opened and its client running.
+        let overview = (writes.is_some() && cef::enabled(&root)).then(overview::read).and_then(Result::ok);
+        Some(follow.look(found, overview.as_ref(), writes, &updating, self.started.elapsed().as_secs_f64()))
     }
 
     /// Asking is all it takes: `+app_uninstall` asks the user nothing.

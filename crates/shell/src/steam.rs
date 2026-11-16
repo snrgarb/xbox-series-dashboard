@@ -191,8 +191,9 @@ mod win {
         }
         let started =
             std::process::Command::new(exe).args(args).current_dir(folder).creation_flags(CREATE_NO_WINDOW).spawn();
-        if let Err(e) = started {
-            log(&format!("could not run {} {}: {e}", exe.display(), args.join(" ")));
+        match started {
+            Ok(_) => log(&format!("ran {} {}", exe.display(), args.join(" "))),
+            Err(e) => log(&format!("could not run {} {}: {e}", exe.display(), args.join(" "))),
         }
         if locked {
             std::thread::sleep(LOCK_FOR);

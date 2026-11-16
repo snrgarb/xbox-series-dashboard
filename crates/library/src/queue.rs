@@ -280,11 +280,19 @@ pub struct Follower {
     read_at: HashMap<&'static str, u64>,
     /// Each downloading game's bytes and speed, by game.
     samples: HashMap<i64, Sample>,
+    /// Each downloading game's speed as its store says it, by game: shown in place of the sample's.
+    told: HashMap<i64, u64>,
 }
 
 impl Follower {
     pub fn new(sources: Vec<Arc<dyn Source>>) -> Self {
-        Self { sources, uninstalls: HashMap::new(), read_at: HashMap::new(), samples: HashMap::new() }
+        Self {
+            sources,
+            uninstalls: HashMap::new(),
+            read_at: HashMap::new(),
+            samples: HashMap::new(),
+            told: HashMap::new(),
+        }
     }
 
     /// The Queue as the database has it, each download with the speed it has been given.
@@ -296,9 +304,11 @@ impl Follower {
         Ok(queue)
     }
 
-    /// The game's download speed in bits a second, to the whole bit.
+    /// The game's download speed in bits a second, to the whole bit: its store's, where it says, else the one
+    /// worked out from its bytes.
     fn speed(&self, game: i64) -> Option<u64> {
-        self.samples.get(&game).and_then(|sample| sample.speed).map(|speed| speed.round() as u64)
+        let worked_out = || self.samples.get(&game).and_then(|sample| sample.speed).map(|speed| speed.round() as u64);
+        self.told.get(&game).copied().or_else(worked_out)
     }
 
     /// Each download's bytes as they are now, at `at`: its speed worked out again. Whether any speed changed.
@@ -399,10 +409,14 @@ impl Follower {
         }
         let rows = db.rows()?;
         let mut seen: Vec<i64> = Vec::new();
+        let told_before = std::mem::take(&mut self.told);
         for (&key, installs) in &reports {
             for install in installs {
                 let Some(game) = db.game_of(key, &install.source_id)? else { continue };
                 seen.push(game);
+                if let Some(speed) = install.speed.filter(|_| install.state.downloading()) {
+                    self.told.insert(game, speed);
+                }
                 match rows.iter().find(|row| row.game == game) {
                     Some(row) if row.reported && row.state == install.state => {}
                     Some(row) => {
@@ -424,6 +438,8 @@ impl Follower {
                 }
             }
         }
+        // A store's own speed that changed is the Queue moving, as bytes are.
+        polled.moved |= self.told != told_before;
 
         // What its source no longer has, or never had: ended, or to be looked at again.
         let mut ended: Vec<&Row> = Vec::new();
@@ -702,8 +718,7 @@ mod tests {
         }
 
         fn report(&self, installs: &[(&str, InstallState)]) {
-            *self.installs.lock().unwrap() =
-                installs.iter().map(|&(id, state)| Install { source_id: id.into(), state }).collect();
+            *self.installs.lock().unwrap() = installs.iter().map(|&(id, state)| Install::new(id, state)).collect();
         }
 
         fn set_installed(&self, id: &str, installed: bool) {

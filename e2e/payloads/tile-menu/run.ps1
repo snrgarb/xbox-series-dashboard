@@ -196,7 +196,7 @@ try {
     Press A "TileMenu: Prompt\(Uninstall\) of $game" | Out-Null
     $mark = Get-DashboardLogLength
     Press A 'Recent\(\d+\)' '07-uninstall-asked' | Out-Null
-    Expect-Logged "^store: asked Steam to uninstall ${game}: .*steam\.exe -silent -console \+app_uninstall \d+$" $mark 'Uninstall' | Out-Null
+    Expect-Logged "^store: asking Steam to uninstall ${game}: app_uninstall \d+$" $mark 'Uninstall' | Out-Null
     Expect-Steam 'steam: asked to uninstall \d+: -silent -console \+app_uninstall \d+' 'Uninstall'
     $gone = Wait-DashboardLog "^queue: $game uninstalled$" 30 $mark
     if ($gone) { Say "Uninstall: $gone" } else { $failures += "the Dashboard never saw $installed uninstalled" }
@@ -215,7 +215,7 @@ try {
     Walk Up "TileMenu: Menu\(Install\) of $absent"
     $mark = Get-DashboardLogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Logged "^store: asked Steam to install ${absent}: .*steam\.exe -silent \+app_install \d+$" $mark 'Install' | Out-Null
+    Expect-Logged "^store: asking Steam to install ${absent}: app_install \d+$" $mark 'Install' | Out-Null
     Expect-Steam 'steam: asked to install \d+: -silent \+app_install \d+' 'Install'
     Expect-Logged "^queue: $absent joined, asked for$" $mark 'Install, the Queue' | Out-Null
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }

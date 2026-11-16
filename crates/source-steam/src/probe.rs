@@ -20,13 +20,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::installs::{self, Counts};
-use crate::{cef, live};
-
-/// The script that gives the client's download overview once, or `none` after two seconds.
-const OVERVIEW: &str = "new Promise(resolve => { let reg = null; \
-    const done = text => { if (reg) reg.unregister(); resolve(text); }; \
-    reg = SteamClient.Downloads.RegisterForDownloadOverview(o => done(JSON.stringify(o))); \
-    setTimeout(() => done('none'), 2000); })";
+use crate::{cef, live, overview};
 
 /// Looks, one after another, at the Steam at a folder.
 pub struct Probe {
@@ -51,16 +45,23 @@ impl Probe {
         let registry = self.registry;
         let found = installs::under_way(&libraries, &|appid| registry && crate::registry::updating(appid));
         self.baselines.retain(|appid, _| found.iter().any(|(id, ..)| id == appid));
+        // Steam's overview, whole: what it says of an app whose manifest says it is done is wanted too (#132).
+        let read = cef::enabled(&self.root).then(overview::read);
+        let cef = read.as_ref().map(|read| match read {
+            Ok(overview) => overview.raw.clone(),
+            Err(why) => why.clone(),
+        });
         if found.is_empty() {
-            return Vec::new();
+            let at = self.start.elapsed().as_secs_f64();
+            return match read {
+                Some(Ok(overview)) if overview.working_on(overview.appid) => {
+                    vec![format!("queue-sources: no manifest under way at {at:.1} s; cef {}", overview.raw)]
+                }
+                _ => Vec::new(),
+            };
         }
         let io = win::steam_io(&self.root);
         let network = win::network_in();
-        let cef = cef::enabled(&self.root).then(|| match cef::evaluate(&cef::PORTS, cef::SHARED, OVERVIEW) {
-            Ok(cef::Evaluated::Value(text)) => text.chars().take(400).collect(),
-            Ok(other) => format!("{other:?}"),
-            Err(why) => format!("unreachable ({why})"),
-        });
         found
             .into_iter()
             .map(|(appid, state, counts)| {

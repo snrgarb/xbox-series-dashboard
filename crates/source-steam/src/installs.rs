@@ -109,10 +109,7 @@ pub fn under_way(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<(
 
 /// The installs under way in these `steamapps` folders, by their manifests alone ([`under_way`]).
 pub fn read(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<Install> {
-    under_way(steamapps, updating)
-        .into_iter()
-        .map(|(appid, state, _)| Install { source_id: appid.to_string(), state })
-        .collect()
+    under_way(steamapps, updating).into_iter().map(|(appid, state, _)| Install::new(appid.to_string(), state)).collect()
 }
 
 #[cfg(test)]
@@ -152,7 +149,7 @@ mod tests {
         let quiet = 9_100_040; // Quiet Orbit, not installed.
         let read = |updating: &dyn Fn(u32) -> bool| read(&steamapps, updating);
         assert_eq!(read(&|_| false), []);
-        let install = |state| vec![Install { source_id: quiet.to_string(), state }];
+        let install = |state| vec![Install::new(quiet.to_string(), state)];
 
         fixture::write_progress(&root, quiet, Progress::Queued).unwrap();
         assert_eq!(read(&|_| false), install(InstallState::Queued));
