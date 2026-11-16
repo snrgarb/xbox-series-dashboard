@@ -14,6 +14,10 @@ pub use shell::since_start;
 pub struct Args {
     library: Option<PathBuf>,
     steam: Option<PathBuf>,
+    /// A folder standing for the Epic Games Launcher's (`source_epic::Places::under`).
+    epic: Option<PathBuf>,
+    /// A folder standing for GOG's (`source_gog::Places::under`).
+    gog: Option<PathBuf>,
     /// The folder the library database is in, in place of the user's own.
     data_dir: Option<PathBuf>,
     launch_screen: bool,
@@ -63,7 +67,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 }
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
-                 [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
+                 [--epic <dir>] [--gog <dir>] [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
@@ -112,6 +116,8 @@ fn parse_args() -> Result<Args, String> {
             "--launch-screen" => args.launch_screen = true,
             "--guide" => args.guide = true,
             "--steam" => args.steam = Some(value()?.into()),
+            "--epic" => args.epic = Some(value()?.into()),
+            "--gog" => args.gog = Some(value()?.into()),
             "--data-dir" => args.data_dir = Some(value()?.into()),
             "--screenshot" => args.screenshot = Some(value()?.into()),
             "--size" => {

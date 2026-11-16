@@ -1,0 +1,17 @@
+[package]
+name = "source-gog"
+version = "0.0.0"
+edition = "2021"
+description = "GOG's games, from what their installers and GOG Galaxy leave on the machine."
+
+[dependencies]
+model = { path = "../model" }
+anyhow = "1"
+serde_json = "1"
+# Galaxy's database: read by the source, written by the fixture.
+rusqlite = { version = "0.42", features = ["bundled"] }
+# For the fixture's generated art only: Galaxy caches WebP.
+image = { version = "0.25", default-features = false, features = ["webp"] }
+
+[dev-dependencies]
+tempfile = "3"

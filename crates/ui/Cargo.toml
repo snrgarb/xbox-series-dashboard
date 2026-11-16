@@ -7,4 +7,4 @@ description = "The UI layer: drawing in design units, animation, art, and the pa
 [dependencies]
 render = { path = "../render" }
 wgpu = "30"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
