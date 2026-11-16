@@ -19,10 +19,11 @@ use anyhow::{Context, Result};
 use model::achievement::{Achievement, AchievementSource};
 
 use crate::vdf::{self, Value};
+/// Where an achievement's icon file is on Steam's CDN, followed by `/<appid>/<file>`. The older
+/// `cdn.steamstatic.com/steamcommunity/public/images/apps` has no icons for newer games (404); this host has both.
 
-/// Where an achievement's icon file is on Steam's CDN, followed by `/<appid>/<file>`. Checked on 2026-11-17 with a
 /// well-known public icon (Portal 2's, appid 620): 200, `image/jpeg`.
-pub const ICONS: &str = "https://cdn.steamstatic.com/steamcommunity/public/images/apps";
+pub const ICONS: &str = "https://shared.steamstatic.com/community_assets/images/apps";
 
 /// The folder the files are in, under the Steam root.
 const STATS: [&str; 2] = ["appcache", "stats"];
