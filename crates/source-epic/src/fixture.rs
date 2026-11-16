@@ -1,17 +1,19 @@
-//! Writes a fake Epic Games Launcher's files: the old launcher's manifests, its install list and its catalogue
-//! cache, as `load` reads them, with made-up games installed under the same folder. Test support, for the unit tests
-//! here and for the end-to-end tests' stand-in launcher (`crates/standin`), which writes it on a test VM that has no
-//! Epic and is registered there for the launcher's links.
+//! Writes a fake Epic Games Launcher's files: the install helper's records of a current launcher, the old launcher's
+//! manifests, its install list and its catalogue cache, as `load` reads them, with made-up games installed under the
+//! same folder. Test support, for the unit tests here and for the end-to-end tests' stand-in launcher
+//! (`crates/standin`), which writes it on a test VM that has no Epic and is registered there for the launcher's links.
 //!
 //! The folder is laid out as `Places::under` reads it: `<root>` is `%ProgramData%\Epic`, and the games are installed
-//! under `<root>\Games`. Besides the games it writes a piece of DLC and an Unreal Engine plugin, which `load` leaves
-//! out. No art: the launcher caches none.
+//! under `<root>\Games`. Besides the games it writes a piece of DLC and an Unreal Engine plugin, and the launcher's
+//! own components in the install helper's other folder, which `load` all leaves out. No art: the launcher caches
+//! none.
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
+use crate::install_helper::{self, Record as HelperRecord};
 use crate::Places;
 
 /// Every installed game's program, relative to its folder: what the manifest's `LaunchExecutable` says.
@@ -33,8 +35,20 @@ pub struct FixtureGame {
     pub item_id: String,
     pub name: String,
     pub kind: Kind,
-    /// With a manifest and a folder; else only in the catalogue cache, which is owned and not installed.
+    /// With a record and a folder; else only in the catalogue cache, which is owned and not installed.
     pub installed: bool,
+    /// Which launcher's record says so.
+    pub record: Record,
+}
+
+/// Where an item's install is recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Record {
+    /// The old launcher's `Manifests\*.item` and `LauncherInstalled.dat`.
+    Manifest,
+    /// A current launcher's install helper, `EpicOnlineServicesShared\InstallHelper\InstalledItems\*.egi`: `Installed`
+    /// for an installed item, else `Incomplete`, an install in progress.
+    InstallHelper,
 }
 
 /// What an item is, which only a game is as `load` reads it.
@@ -62,31 +76,32 @@ impl FixtureGame {
 impl Fixture {
     /// Three made-up games of the account's, and two items `load` leaves out:
     ///
-    /// | item                     | installed | what            |
-    /// |--------------------------|-----------|-----------------|
-    /// | Kiteborne                | yes       | a game          |
-    /// | Rusted Vigil             | yes       | a game          |
-    /// | Wexford Hollow           | no        | a game, owned   |
-    /// | Kiteborne: Night Market  | yes       | its DLC         |
-    /// | Lantern Shader Pack      | yes       | an engine plugin|
+    /// | item                     | installed | recorded by                 | what            |
+    /// |--------------------------|-----------|-----------------------------|-----------------|
+    /// | Kiteborne                | yes       | install helper              | a game          |
+    /// | Rusted Vigil             | yes       | manifest                    | a game          |
+    /// | Wexford Hollow           | no        | install helper, Incomplete  | a game, owned   |
+    /// | Kiteborne: Night Market  | yes       | manifest                    | its DLC         |
+    /// | Lantern Shader Pack      | yes       | manifest                    | an engine plugin|
     ///
     /// Every name starts with a letter no game of Steam's fixture has in it (K, R, W), so a test finds each by
     /// Search with one key.
     pub fn standard() -> Fixture {
         let games = [
-            ("Kiteborne", Kind::Game, true),
-            ("Rusted Vigil", Kind::Game, true),
-            ("Wexford Hollow", Kind::Game, false),
-            ("Kiteborne: Night Market", Kind::Dlc, true),
-            ("Lantern Shader Pack", Kind::Plugin, true),
+            ("Kiteborne", Kind::Game, true, Record::InstallHelper),
+            ("Rusted Vigil", Kind::Game, true, Record::Manifest),
+            ("Wexford Hollow", Kind::Game, false, Record::InstallHelper),
+            ("Kiteborne: Night Market", Kind::Dlc, true, Record::Manifest),
+            ("Lantern Shader Pack", Kind::Plugin, true, Record::Manifest),
         ];
-        let games = games.iter().enumerate().map(|(i, &(name, kind, installed))| FixtureGame {
+        let games = games.iter().enumerate().map(|(i, &(name, kind, installed, record))| FixtureGame {
             app_name: hex(i as u64 * 3 + 1),
             namespace: hex(i as u64 * 3 + 2),
             item_id: hex(i as u64 * 3 + 3),
             name: name.to_string(),
             kind,
             installed,
+            record,
         });
         Fixture { games: games.collect(), game_exe: None }
     }
@@ -104,17 +119,45 @@ pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
     let places = Places::under(&root);
     let manifests = places.manifests();
     fs::create_dir_all(&manifests)?;
+    let helper = places.installed_items();
+    fs::create_dir_all(&helper)?;
+    fs::write(
+        helper.join("Revision.json"),
+        json!({ "timestamp": 639_304_121_332_864_408u64, "number": 3 }).to_string(),
+    )?;
+    // The launcher's own components, in the install helper's other folder: not games.
+    let components = root.join("EpicOnlineServices").join("InstallHelper").join("InstalledItems");
+    fs::create_dir_all(&components)?;
+    for (n, name) in ["overlay", "service", "support"].into_iter().enumerate() {
+        let dir = root.join("Launcher").join(name);
+        fs::create_dir_all(&dir)?;
+        let state = if name == "overlay" { "Incomplete" } else { "Installed" };
+        let id = hex(100 + n as u64);
+        let record = helper_record(name, &id, &id, &id, state, &dir);
+        fs::write(components.join(format!("{name}.egi")), install_helper::write_record(&record))?;
+    }
     let mut installed = Vec::new();
-    for game in spec.games.iter().filter(|game| game.installed) {
+    for game in spec.games.iter().filter(|game| game.installed || game.record == Record::InstallHelper) {
         // DLC goes in its game's folder, as Epic installs it.
         let owner = spec.games.iter().find(|other| other.kind == Kind::Game && game.name.starts_with(&other.name));
         let dir = match (game.kind, owner) {
             (Kind::Dlc, Some(owner)) => owner.install_dir(&root),
             _ => game.install_dir(&root),
         };
-        let guid = game.app_name.to_uppercase();
-        fs::write(manifests.join(format!("{guid}.item")), manifest(game, &dir, &guid).to_string())?;
-        installed.push(json!({ "InstallLocation": dir, "AppName": game.app_name, "AppVersion": "1.0.0" }));
+        if game.record == Record::InstallHelper {
+            let state = if game.installed { "Installed" } else { "Incomplete" };
+            let record = helper_record(&game.app_name, &game.namespace, &game.item_id, &game.item_id, state, &dir);
+            let file = helper.join(format!("{}.egi", record.installation_id));
+            fs::write(file, install_helper::write_record(&record))?;
+            if !game.installed {
+                // An install in progress: its folder is not the game's yet.
+                continue;
+            }
+        } else {
+            let guid = game.app_name.to_uppercase();
+            fs::write(manifests.join(format!("{guid}.item")), manifest(game, &dir, &guid).to_string())?;
+            installed.push(json!({ "InstallLocation": dir, "AppName": game.app_name, "AppVersion": "1.0.0" }));
+        }
         if game.kind == Kind::Game {
             let exe = game.exe(&root);
             fs::create_dir_all(exe.parent().expect("a program is in a folder"))?;
@@ -130,6 +173,25 @@ pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
     let catcache = places.catcache();
     fs::create_dir_all(catcache.parent().expect("the catalogue cache is in a folder"))?;
     fs::write(catcache, crate::to_base64(Value::Array(catalogue).to_string().as_bytes()))
+}
+
+/// An install helper's record, as the sample in docs/research/stores.md: `Installed` with the build's size, or
+/// `Incomplete` with the size of the build being installed.
+fn helper_record(app: &str, namespace: &str, item: &str, installation: &str, state: &str, dir: &Path) -> HelperRecord {
+    let done = state == "Installed";
+    HelperRecord {
+        installation_id: installation.to_uppercase(),
+        state: state.to_string(),
+        app_name: app.to_string(),
+        namespace: namespace.to_string(),
+        item_id: item.to_string(),
+        dir: dir.to_path_buf(),
+        exe: if done { EXE.to_string() } else { String::new() },
+        version: if done { "1.0.0".into() } else { String::new() },
+        size: if done { 4_200_000_000 } else { 0 },
+        pending_version: if done { String::new() } else { "1.0.0".into() },
+        pending_size: if done { 0 } else { 4_200_000_000 },
+    }
 }
 
 /// An installed item's manifest, as the sample in docs/research/stores.md.

@@ -29,7 +29,7 @@ The witnesses, and why each is trusted:
 
 | Store | Installed games come from | Owned, not installed, without sign-in | Launch | Install from outside | Uninstall from outside | A fake on the VM |
 | --- | --- | --- | --- | --- | --- | --- |
-| Epic | `Manifests\*.item` (JSON) | **Yes**, if the launcher was signed in once: `catcache.bin` | `com.epicgames.launcher://apps/…?action=launch&silent=true` | Opens the launcher (an install link exists but shows the old dialog) | No: opens the launcher's library | Files only. Easy |
+| Epic | `InstallHelper\InstalledItems\*.egi` (JSON) on a current launcher; `Manifests\*.item` (JSON) on older ones | **Yes**, if the launcher was signed in once: `catcache.bin` | `com.epicgames.launcher://apps/…?action=launch&silent=true` | Opens the launcher (an install link exists but shows the old dialog) | No: opens the launcher's library | Files only. Easy |
 | GOG | Registry `GOG.com\Games\<id>` and `goggame-<id>.info` | **Yes**, if Galaxy was signed in once: `galaxy-2.0.db` (SQLite) | The game's own exe, or `GalaxyClient.exe /command=runGame` | `GalaxyClient.exe /command=installGame` (Galaxy must be running) | `unins000.exe` in the game folder | Registry and files. Easy |
 | EA app | Uninstall keys whose uninstaller is EA's, and `__Installer\installerdata.xml` | **No** | `origin2://game/launch?offerIds=<id>` | No: opens the app's library | The key's own `UninstallString` | Registry and files. Easy; the launch link needs a stand-in handler |
 | Ubisoft Connect | Registry `Ubisoft\Launcher\Installs\<id>` | **Yes**, if the client was signed in once: the `configurations` cache | `uplay://launch/<id>` | `uplay://install/<id>` | `uplay://uninstall/<id>` | Registry and one small protobuf file. Easy; stand-in handler |
@@ -46,7 +46,23 @@ Three things hold for every store:
 
 ### Installed games
 
-**`%PROGRAMDATA%\Epic\EpicGamesLauncher\Data\Manifests\*.item`**, one JSON file per installed item. [code: [Playnite `EpicLauncher.cs`][pe-epic-launcher], [GameFinder `EGSHandler.cs`][gf-egs], [rai-pal `legacy.rs`][rp-legacy]]
+**A current launcher records its installs through Epic Online Services' install helper** [observed on a real machine on 2026-11-16: Epic Games Launcher installed that day, build EpicInstaller-20.3.3, one game installed]. There, `Data\Manifests` did not exist (the launcher's own log warned it could not write `.item` files there), `LauncherInstalled.dat` was `{"InstallationList": []}`, and `%LOCALAPPDATA%\com.epicgames.eglv2` was absent. The install was in:
+
+**`%PROGRAMDATA%\Epic\EpicOnlineServicesShared\InstallHelper\InstalledItems\<installationId>.egi`**, one JSON object per installation on one line, beside a `.lock` and `Revision.json` (`{"timestamp":639304121332864408,"number":3}`). Made up, tokens left out:
+
+```json
+{"v4":{"installationId":"5F0A3C7E41B94D2E9A8B6C1D0E2F3A4B","state":"Installed","revision":"08DE1A2B3C4D5E6F0000000000000003","dir":"C:\\Program Files\\Epic Games\\Lanternfall","metaDir":"C:\\Program Files\\Epic Games\\Lanternfall\\.egstore","manifestPath":"C:\\Program Files\\Epic Games\\Lanternfall\\.egstore\\5F0A3C7E41B94D2E9A8B6C1D0E2F3A4B.manifest","pendingManifestPath":"C:\\Program Files\\Epic Games\\Lanternfall\\.egstore\\Pending\\5F0A3C7E41B94D2E9A8B6C1D0E2F3A4B.manifest","platform":"Windows","sandboxId":"4b7d2e9a1c3f4e5d8a6b0c1d2e3f4a5b","itemId":"e2a4c6f8b0d14e3fa5c7d9e1b3f5a7c9","artifactId":"9c1f0e7b2a6d4c53b8e0a1d2f3c4b5a6","tags":[],"pendingTags":[],"stagedVersion":"","manifestData":{"version":"1.4.2","launchCommand":"","launchExe":"Lanternfall.exe","prereqSHA1Hash":"","buildSize":6232287802},"pendingManifestData":{"version":"","launchCommand":"","launchExe":"","prereqSHA1Hash":"","buildSize":0},"manifestUris":["https://…"]}}
+```
+
+- `artifactId` is the `AppName`, `sandboxId` the `CatalogNamespace`, `itemId` the `CatalogItemId`: the three parts of the launch link, and `itemId` the key into the catalogue cache (the real one had the game, `id` = `itemId`, `namespace` = `sandboxId`, `releaseInfo[].appId` = `artifactId` with platform `Windows`).
+- `state` was `Installed` for the game; the launcher's own `overlay.egi` was `Incomplete`, so other states exist. `pendingManifestData` presumably describes a build being installed [inferred].
+- `dir` is the install folder, `manifestData.launchExe` the program relative to it, `manifestData.buildSize` the size in bytes.
+- The game's folder held only `.egstore\<installationId>.manifest`, a binary manifest (no `.mancpn`).
+- The launcher's own components (`overlay.egi`, `service.egi`, `support.egi`) are in the sibling `%PROGRAMDATA%\Epic\EpicOnlineServices\InstallHelper\InstalledItems\`: not games, and not read.
+
+No other reader cited here knows this folder; `source-epic` reads it beside the files below and lets its record win for the same `AppName`.
+
+**`%PROGRAMDATA%\Epic\EpicGamesLauncher\Data\Manifests\*.item`**, one JSON file per installed item, on older launchers. [code: [Playnite `EpicLauncher.cs`][pe-epic-launcher], [GameFinder `EGSHandler.cs`][gf-egs], [rai-pal `legacy.rs`][rp-legacy]]
 
 The folder can be elsewhere. GameFinder reads `HKCU\Software\Epic Games\EOS`, value `ModSdkMetadataDir`, first and falls back to the path above [code]. rai-pal reads `HKLM\SOFTWARE\Epic Games\EpicGamesLauncher`, value `AppDataPath` (the `Data` folder) [code]; whether that key sits under `WOW6432Node` was not checked.
 
@@ -119,16 +135,18 @@ Decoded, made up:
 ```
 
 - A game is an item with a `categories` entry whose `path` is `games` [code: rai-pal]. Playnite's signed-in path filters harder (must have `applications`, must not be `digitalextras`, DLC has a `mainGameItem`) [code]; whether `catcache.bin` carries `mainGameItem` was not checked.
-- `id` matches a manifest's `CatalogItemId`; `releaseInfo[0].appId` is the `AppName`. An item with no matching manifest is owned and not installed.
+- `id` matches a manifest's `CatalogItemId`; `releaseInfo[0].appId` is the `AppName` [code: rai-pal]. `source-epic` takes the Windows release's `appId` (`releaseInfo[].platform` has `Windows`), else the first one named. An item with no matching install record is owned and not installed.
+- The real machine's cache (2026-11-16) held 152 entries for its account; each entry also has `developer`, and `keyImages` with `width` and `height` (`DieselGameBox` 1360x766 and `DieselGameBoxTall` 510x680 for the one game looked at). The Dashboard read 0 games from it before #112, with no word why: whether the file could not be opened (that error was passed over in silence) or every entry failed the game test is not settled. The log line now says `catcache <games> of <entries>`, and a read error is its own line.
+- **Is it proof of ownership?** It is the account's library as the launcher last cached it, which is what this section and rai-pal take it for; nothing better exists without a sign-in. `source-epic` lists its games as owned, with the limits above (signed in once; a stale cache can list games since lost), and takes nothing else as ownership: an install helper's record that is not done adds no game.
 - Play time and last played are not in it. Playnite gets them from Epic's service with a signed-in token. [code]
 
-**A new launcher keeps different files** [reported: only rai-pal reads them, in [`modern.rs`][rp-modern]; nothing else confirms it and I could not look at one]. Under `%LOCALAPPDATA%\com.epicgames.eglv2`:
+**The eglv2 launcher keeps different files** [reported: only rai-pal reads them, in [`modern.rs`][rp-modern]; nothing else confirms it, and the one real machine looked at (build EpicInstaller-20.3.3, 2026-11-16) had no `com.epicgames.eglv2` folder]. Under `%LOCALAPPDATA%\com.epicgames.eglv2`:
 
 - `cache\prod\account\<account>\library-cache.json`: `{"items":[{"appId":{"namespaceId","itemId","appName"},"title","owned"}]}`.
 - `cache\prod\catalog-cache.json`: `{"items":{"<itemId>":{"item":{…the same catalogue item as above…}}}}`.
 - `installations.jsonl`: one JSON object a line, `installationId`, `complete`, `dir`, `itemId`, `launchExecutable`; the last line for an `installationId` wins, and only `complete: true` counts.
 
-rai-pal tries these first and falls back to the files above when they hold no games. `source-epic` should do the same, and #74 should confirm on a real machine which launcher the TV PC has.
+rai-pal tries these first and falls back to the files above when they hold no games. `source-epic` does the same, with the install helper's records over either.
 
 ### Art
 
@@ -141,7 +159,7 @@ rai-pal tries these first and falls back to the files above when they hold no ga
 - **Launch:** `com.epicgames.launcher://apps/<CatalogNamespace>%3A<CatalogItemId>%3A<AppName>?action=launch&silent=true`, opened as a URL (ShellExecute). [code: Playnite's `GameLaunchUrlMask`, rai-pal's `app_uri`] The older short form `com.epicgames.launcher://apps/<AppName>?action=launch&silent=true` is what Steam ROM Manager still writes [code: [`epic.parser.ts`][srm-epic]]. The launcher starts if it is not running.
 - **Install:** `com.epicgames.launcher://apps/<AppName>?action=install` exists, but Playnite stopped using it: "it shows the old installation dialog … it doesn't show install progress correctly … until somebody figures out how to invoke install via new install dialog, we just open library page". It opens `com.epicgames.launcher://store/library` and polls the manifests every 10 s. [code: [`EpicGameController.cs`][pe-epic-ctl]] rai-pal offers the three-part form with `?action=install` [code]. Neither is silent: the user confirms in the launcher.
 - **Uninstall:** nothing from outside. Playnite opens the library page and polls until the manifest is gone. [code]
-- **Progress of an install** is not in any file read here. The Queue (#78) can show an Epic game as installing only between "we opened the launcher" and "its manifest appeared" [inferred].
+- **Progress of an install:** a current launcher's `.egi` says an install is not done (`state` other than `Installed`) and what the build being installed will take (`pendingManifestData.version`, `buildSize`) [observed on the launcher's own component; for a game, inferred]. How far along it is, is in no file read here. `source_epic::install_helper::records` gives the Queue (#78) those records.
 
 ### Running and ended
 
@@ -158,7 +176,9 @@ Files only, no registry, no client:
 
 ### Unknown
 
-- Whether the TV PC's launcher writes the old files, the new ones, or both.
+- Whether the TV PC's launcher writes the old files, the eglv2 ones, or the install helper's. One real machine with a launcher installed on 2026-11-16 wrote only the install helper's (and the catalogue cache).
+- Which `state` values an `.egi` takes besides `Installed` and `Incomplete`, and what a game's record says during an update.
+- Why the real machine's 152-entry `catcache.bin` gave no games before #112 (above).
 - Everything about `catcache.bin` beyond the fields above: when it is rewritten, whether it survives sign-out, whether it lists items the account no longer owns.
 - Whether the three-part install link opens the new install dialog today.
 - No way found to read an install's progress.

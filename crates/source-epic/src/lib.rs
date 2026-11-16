@@ -1,7 +1,11 @@
 //! Reads the Epic Games Launcher's own files into a `model::Library` (docs/research/stores.md, "Epic Games Store").
 //!
-//! Two launchers leave two sets of files, and the new one's are read first (`modern`), the older ones when the new
-//! give no games:
+//! Launchers of different years leave different files. A game installed by a current launcher is recorded by Epic
+//! Online Services' install helper (`install_helper`); the library itself comes from the eglv2 launcher's caches
+//! (`modern`) where they give games, else from the older files:
+//! - `%ProgramData%\Epic\EpicOnlineServicesShared\InstallHelper\InstalledItems\*.egi`: one JSON record per
+//!   installation, the newest record, which wins over the others for the same `AppName` (seen on a real machine with
+//!   launcher build EpicInstaller-20.3.3, which wrote neither manifests nor eglv2 files).
 //! - `%ProgramData%\Epic\EpicGamesLauncher\Data\Manifests\*.item`: one JSON file per installed item; DLC and Unreal
 //!   Engine content are left out.
 //! - `%ProgramData%\Epic\UnrealEngineLauncher\LauncherInstalled.dat`: a second install list, which only puts right
@@ -9,8 +13,8 @@
 //! - `%ProgramData%\Epic\EpicGamesLauncher\Data\Catalog\catcache.bin`: the account's library as the launcher last
 //!   cached it, base64 of a JSON array, which is what lists the games that are owned and not installed. It is there
 //!   only when the launcher was signed in on this PC once.
-//! - `%LOCALAPPDATA%\com.epicgames.eglv2`: the new launcher's `installations.jsonl` and its library and catalogue
-//!   caches (`modern`).
+//! - `%LOCALAPPDATA%\com.epicgames.eglv2`: the eglv2 launcher's `installations.jsonl` and its library and catalogue
+//!   caches (`modern`), known from one project only and absent on the real machine.
 //!
 //! No art on disk: the launcher caches its pictures' addresses, not the pictures. Those addresses (a catalogue
 //! item's `keyImages`, on Epic's CDN) are the game's `OnlineArt`, which the art lookup downloads (#110). No play
@@ -19,6 +23,7 @@
 //! [`Epic`] is the source the library reads (`model::Source`): it starts a game, and asks for one to be installed,
 //! through the launcher's `com.epicgames.launcher://` links, the launcher checking the game is the user's.
 pub mod fixture;
+pub mod install_helper;
 mod modern;
 
 use std::collections::HashMap;
@@ -59,14 +64,15 @@ impl Epic {
     /// The item of the game, as the launcher's files have it now.
     fn item(&self, game: &Game) -> Option<Item> {
         let places = self.places()?;
-        items(&places).ok()?.into_iter().find(|item| item.app_name == game.source_id)
+        reading(&places).ok()?.items.into_iter().find(|item| item.app_name == game.source_id)
     }
 }
 
 /// Where the launcher keeps its files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Places {
-    /// `%ProgramData%\Epic`: the manifests, the catalogue cache and `LauncherInstalled.dat`.
+    /// `%ProgramData%\Epic`: the install helper's records, the manifests, the catalogue cache and
+    /// `LauncherInstalled.dat`.
     pub data: PathBuf,
     /// `%LOCALAPPDATA%\com.epicgames.eglv2`: the new launcher's.
     pub modern: Option<PathBuf>,
@@ -104,9 +110,17 @@ impl Places {
         self.data.join("UnrealEngineLauncher").join("LauncherInstalled.dat")
     }
 
-    /// Whether either launcher has left its lists here: with neither, it is not installed.
+    /// `EpicOnlineServicesShared\InstallHelper\InstalledItems`: the install helper's records of the games.
+    pub fn installed_items(&self) -> PathBuf {
+        install_helper::folder(&self.data)
+    }
+
+    /// Whether any launcher has left its lists here: with none, it is not installed.
     fn any(&self) -> bool {
-        self.manifests().is_dir() || self.catcache().is_file() || self.modern.as_deref().is_some_and(modern::any)
+        self.manifests().is_dir()
+            || self.catcache().is_file()
+            || self.installed_items().is_dir()
+            || self.modern.as_deref().is_some_and(modern::any)
     }
 }
 
@@ -127,8 +141,12 @@ impl Source for Epic {
         if !places.any() {
             return Ok(None);
         }
-        let library = load(&places).with_context(|| places.data.display().to_string())?;
-        Ok(Some(Found { library, from: places.data.display().to_string() }))
+        let reading = reading(&places).with_context(|| places.data.display().to_string())?;
+        let from = match reading.parts.is_empty() {
+            true => places.data.display().to_string(),
+            false => format!("{} ({})", places.data.display(), reading.parts.join(", ")),
+        };
+        Ok(Some(Found { library: library(reading.items), from }))
     }
 
     /// The launcher's link, `com.epicgames.launcher://apps/<namespace>%3A<item>%3A<app>?action=launch&silent=true`:
@@ -167,6 +185,8 @@ pub(crate) struct Item {
     pub namespace: String,
     pub item_id: String,
     pub title: String,
+    /// Who made it, as the catalogue names them; empty where it does not.
+    pub developer: String,
     /// Where it is installed, and its program relative to there.
     pub install: Option<(PathBuf, String)>,
     /// What it takes on disk, where the manifest says.
@@ -220,14 +240,19 @@ pub fn parse_link(url: &str) -> Option<(String, String)> {
 /// The program of the installed game `app_name`: its install folder joined to its `LaunchExecutable`. For the
 /// stand-in launcher on a test machine, which starts it as the launcher would.
 pub fn executable(places: &Places, app_name: &str) -> Option<PathBuf> {
-    let item = items(places).ok()?.into_iter().find(|item| item.app_name == app_name)?;
+    let item = reading(places).ok()?.items.into_iter().find(|item| item.app_name == app_name)?;
     let (dir, exe) = item.install?;
     Some(exe.split(['/', '\\']).filter(|part| !part.is_empty()).fold(dir, |path, part| path.join(part)))
 }
 
 /// Reads the launcher's files at `places`.
 pub fn load(places: &Places) -> Result<Library> {
-    let mut games: Vec<Game> = items(places)?
+    Ok(library(reading(places)?.items))
+}
+
+/// The library of `items`, by name.
+fn library(items: Vec<Item>) -> Library {
+    let mut games: Vec<Game> = items
         .into_iter()
         .map(|item| Game {
             source: SOURCE.to_string(),
@@ -237,24 +262,111 @@ pub fn load(places: &Places) -> Result<Library> {
             size_on_disk: item.size,
             install_dir: item.install.map(|(dir, _)| dir),
             online: item.art,
+            developers: Some(item.developer).filter(|d| !d.is_empty()).into_iter().collect(),
             ..Game::default()
         })
         .collect();
     games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.source_id.cmp(&b.source_id)));
-    Ok(Library { games, ..Library::default() })
+    Library { games, ..Library::default() }
 }
 
-/// Every game of the library: the new launcher's, else the old one's.
-fn items(places: &Places) -> Result<Vec<Item>> {
-    match places.modern.as_deref().map(modern::items).transpose()?.flatten() {
-        Some(items) if !items.is_empty() => Ok(items),
-        _ => legacy(places),
+/// What was read, and what each of the launcher's files gave for the log line (`InstallHelper 1 of 1, catcache 3 of
+/// 152`: its games of its entries).
+struct Reading {
+    items: Vec<Item>,
+    parts: Vec<String>,
+}
+
+/// Every game of the library: the eglv2 launcher's, else the old one's, with the install helper's records over
+/// either.
+fn reading(places: &Places) -> Result<Reading> {
+    let mut parts = Vec::new();
+    let catalogue = Catalogue::read(places, &mut parts);
+    let mut items = match places.modern.as_deref().map(modern::items).transpose()?.flatten() {
+        Some(items) if !items.is_empty() => {
+            parts.insert(0, format!("eglv2 {}", items.len()));
+            items
+        }
+        _ => legacy(places, &catalogue, &mut parts)?,
+    };
+    if let Some(records) = install_helper::records(&places.installed_items()) {
+        let installed = records.iter().filter(|record| record.installed()).count();
+        parts.insert(0, format!("InstallHelper {installed} of {}", records.len()));
+        merge(&mut items, records, &catalogue);
+    }
+    Ok(Reading { items, parts })
+}
+
+/// The catalogue cache: its games, and every entry by its catalogue id, game or not, to name an installed game by.
+#[derive(Debug, Default)]
+struct Catalogue {
+    games: Vec<Item>,
+    by_id: HashMap<String, Item>,
+}
+
+impl Catalogue {
+    /// `catcache.bin`, if it is there. One that cannot be read is said in the log, and is empty.
+    fn read(places: &Places, parts: &mut Vec<String>) -> Catalogue {
+        let file = places.catcache();
+        let entries = match fs::read(&file) {
+            Ok(bytes) => catcache(&bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Catalogue::default(),
+            Err(e) => Err(e.into()),
+        };
+        let entries = entries.unwrap_or_else(|e| {
+            eprintln!("epic: {}: {e:#}", file.display());
+            parts.push("catcache unread".into());
+            Vec::new()
+        });
+        if entries.is_empty() {
+            return Catalogue::default();
+        }
+        let games: Vec<Item> = entries.iter().filter_map(catalogue_item).collect();
+        parts.push(format!("catcache {} of {}", games.len(), entries.len()));
+        let by_id = entries.iter().map(catalogue_entry).filter(|item| !item.item_id.is_empty());
+        Catalogue { games, by_id: by_id.map(|item| (item.item_id.clone(), item)).collect() }
+    }
+}
+
+/// The install helper's records over the games read: a game's newest record says whether it is installed, where and
+/// how big. A record that is done names a game the others do not know, by the catalogue where it has the item, else
+/// by its folder; one that is not done adds no game.
+fn merge(items: &mut Vec<Item>, mut records: Vec<install_helper::Record>, catalogue: &Catalogue) {
+    // Two records of one game: the done one counts.
+    records.sort_by_key(install_helper::Record::installed);
+    for record in records {
+        let install = record.installed().then(|| (record.dir.clone(), record.exe.clone()));
+        let size = if install.is_some() { record.size } else { 0 };
+        if let Some(item) = items.iter_mut().find(|item| item.app_name == record.app_name) {
+            item.install = install;
+            item.size = size;
+            if item.namespace.is_empty() || item.item_id.is_empty() {
+                (item.namespace, item.item_id) = (record.namespace, record.item_id);
+            }
+            continue;
+        }
+        if install.is_none() {
+            continue;
+        }
+        let known = catalogue.by_id.get(&record.item_id);
+        let folder = record.dir.file_name().map(|name| name.to_string_lossy().into_owned());
+        let title = known.map(|item| item.title.clone()).filter(|title| !title.is_empty());
+        items.push(Item {
+            title: title.or(folder).unwrap_or_else(|| record.app_name.clone()),
+            developer: known.map(|item| item.developer.clone()).unwrap_or_default(),
+            art: known.map(|item| item.art.clone()).unwrap_or_default(),
+            app_name: record.app_name,
+            namespace: record.namespace,
+            item_id: record.item_id,
+            install,
+            size,
+        });
     }
 }
 
 /// The old launcher's games: the installed ones from their manifests, and the rest of the account's from the
 /// catalogue cache.
-fn legacy(places: &Places) -> Result<Vec<Item>> {
+fn legacy(places: &Places, catalogue: &Catalogue, parts: &mut Vec<String>) -> Result<Vec<Item>> {
     let manifests = places.manifests();
     let mut files: Vec<PathBuf> = match fs::read_dir(&manifests) {
         Ok(entries) => entries
@@ -270,10 +382,10 @@ fn legacy(places: &Places) -> Result<Vec<Item>> {
     let listed = listed.unwrap_or_default();
 
     let mut items: Vec<Item> = Vec::new();
-    for file in files {
+    for file in &files {
         // A manifest can be empty or broken (people edit them when moving games): that one is said and passed
         // over. One of DLC or engine content is passed over in silence.
-        let text = fs::read_to_string(&file).unwrap_or_default();
+        let text = fs::read_to_string(file).unwrap_or_default();
         if serde_json::from_str::<Value>(&text).is_err() {
             eprintln!("epic: {}: not a manifest, passed over", file.display());
             continue;
@@ -289,6 +401,7 @@ fn legacy(places: &Places) -> Result<Vec<Item>> {
             namespace: manifest.namespace,
             item_id: manifest.item_id,
             title: manifest.title,
+            developer: String::new(),
             install: Some((dir.clone(), manifest.exe)),
             size: manifest.size,
             art: OnlineArt::default(),
@@ -300,27 +413,24 @@ fn legacy(places: &Places) -> Result<Vec<Item>> {
             None => items.push(item),
         }
     }
+    if manifests.is_dir() {
+        parts.insert(0, format!("manifests {} of {}", items.len(), files.len()));
+    }
 
-    let catalogue = match fs::read(places.catcache()) {
-        Ok(bytes) => catcache(&bytes).unwrap_or_else(|e| {
-            eprintln!("epic: {}: {e:#}", places.catcache().display());
-            Vec::new()
-        }),
-        Err(_) => Vec::new(),
-    };
-    for owned in catalogue {
+    for owned in &catalogue.games {
         let installed = items.iter_mut().find(|item| {
             (!owned.item_id.is_empty() && item.item_id == owned.item_id) || item.app_name == owned.app_name
         });
         match installed {
             Some(item) => {
                 if item.title.is_empty() {
-                    item.title = owned.title;
+                    item.title = owned.title.clone();
                 }
-                // The manifest names no pictures: the catalogue's.
-                item.art = owned.art;
+                // The manifest names no pictures and no developer: the catalogue's.
+                item.developer = owned.developer.clone();
+                item.art = owned.art.clone();
             }
-            None => items.push(owned),
+            None => items.push(owned.clone()),
         }
     }
     Ok(items)
@@ -384,16 +494,19 @@ fn launcher_installed(text: &str) -> HashMap<String, PathBuf> {
         .collect()
 }
 
-/// `catcache.bin`'s games: base64 of a JSON array of catalogue items.
-fn catcache(bytes: &[u8]) -> Result<Vec<Item>> {
+/// `catcache.bin`'s entries: base64 of a JSON array of catalogue items. A byte-order mark before the JSON and
+/// nulls or white space after it are let be.
+fn catcache(bytes: &[u8]) -> Result<Vec<Value>> {
     let json = base64(bytes).context("not base64")?;
-    let value: Value = serde_json::from_slice(&json).context("not JSON")?;
-    let Some(list) = value.as_array() else { bail!("not a list") };
-    Ok(list.iter().filter_map(catalogue_item).collect())
+    let json = json.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&json);
+    let end = json.iter().rposition(|&b| b != 0 && !b.is_ascii_whitespace()).map_or(0, |last| last + 1);
+    let value: Value = serde_json::from_slice(&json[..end]).context("not JSON")?;
+    let Value::Array(list) = value else { bail!("not a list") };
+    Ok(list)
 }
 
 /// A catalogue item, if it is a game: it has the `games` category, is not an extra or DLC, and names its
-/// `AppName` (`releaseInfo[0].appId`).
+/// `AppName` (`releaseInfo[].appId`) and its title.
 pub(crate) fn catalogue_item(value: &Value) -> Option<Item> {
     let categories = value.get("categories").and_then(Value::as_array);
     let paths: Vec<&str> =
@@ -402,21 +515,39 @@ pub(crate) fn catalogue_item(value: &Value) -> Option<Item> {
     if !has("games") || has("digitalextras") || (has("addons") && !has("addons/launchable")) {
         return None;
     }
-    if value.get("mainGameItem").is_some_and(|main| !main.is_null()) {
+    // DLC names its game. A real launcher's cache gives every entry a `mainGameItem`, an empty object on a game
+    // (seen 2026-11-16), so only one that names an id counts.
+    let main = value.get("mainGameItem").and_then(|main| main.get("id")).and_then(Value::as_str);
+    if main.is_some_and(|id| !id.is_empty()) {
         return None;
     }
+    let item = catalogue_entry(value);
+    (!item.app_name.is_empty() && !item.title.is_empty()).then_some(item)
+}
+
+/// What a catalogue entry says, game or not. Its `AppName` is the `appId` of its Windows release, else of its first
+/// release that names one.
+fn catalogue_entry(value: &Value) -> Item {
     let text = |key: &str| value.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
-    let app = value.pointer("/releaseInfo/0/appId").and_then(Value::as_str).unwrap_or_default();
-    let title = text("title");
-    (!app.is_empty() && !title.is_empty()).then(|| Item {
-        app_name: app.to_string(),
+    let releases = value.get("releaseInfo").and_then(Value::as_array).into_iter().flatten();
+    fn app(release: &Value) -> Option<&str> {
+        release.get("appId").and_then(Value::as_str).filter(|app| !app.is_empty())
+    }
+    let windows = |release: &&Value| {
+        let platforms = release.get("platform").and_then(Value::as_array).into_iter().flatten();
+        platforms.filter_map(Value::as_str).any(|platform| platform.eq_ignore_ascii_case("Windows"))
+    };
+    let app = releases.clone().filter(windows).find_map(app).or_else(|| releases.clone().find_map(app));
+    Item {
+        app_name: app.unwrap_or_default().to_string(),
         namespace: text("namespace"),
         item_id: text("id"),
-        title,
+        title: text("title"),
+        developer: text("developer"),
         install: None,
         size: 0,
         art: key_images(value),
-    })
+    }
 }
 
 /// Standard base64, as `catcache.bin` holds it: white space anywhere and the padding are let be.
@@ -544,6 +675,8 @@ mod tests {
         assert_eq!(item(json!([{ "path": "applications" }]), json!({})), None);
         assert_eq!(item(json!([{ "path": "games" }, { "path": "digitalextras" }]), json!({})), None);
         assert_eq!(item(games.clone(), json!({ "mainGameItem": { "id": "e2a4" } })), None);
+        // A real cache gives a game an empty one.
+        assert!(item(games.clone(), json!({ "mainGameItem": { "namespace": "", "id": "" } })).is_some());
         assert_eq!(item(games.clone(), json!({ "releaseInfo": [] })), None);
 
         // Its key images, as the store's own art online: https only, nothing square.
@@ -647,6 +780,131 @@ mod tests {
         assert_eq!(load(&places).unwrap().games.len(), 1);
     }
 
+    /// Writes `records` as the install helper's, and `catalogue` as the catalogue cache, under `places`.
+    fn helper(places: &Places, records: &[install_helper::Record], catalogue: Value) {
+        fs::create_dir_all(places.installed_items()).unwrap();
+        for record in records {
+            let file = places.installed_items().join(format!("{}.egi", record.installation_id));
+            fs::write(file, install_helper::write_record(record)).unwrap();
+        }
+        fs::create_dir_all(places.catcache().parent().unwrap()).unwrap();
+        fs::write(places.catcache(), to_base64(catalogue.to_string().as_bytes())).unwrap();
+    }
+
+    fn catalogued(app: &str, title: &str) -> Value {
+        json!({
+            "id": format!("item-{app}"), "namespace": format!("ns-{app}"), "title": title, "developer": "Playtonic",
+            "categories": [{ "path": "public" }, { "path": "games" }, { "path": "applications" }],
+            "releaseInfo": [{ "appId": app, "platform": ["Windows"] }],
+            "keyImages": [{ "type": "DieselGameBoxTall", "url": format!("https://cdn1.epicgames.com/{app}/tall.jpg") }],
+        })
+    }
+
+    #[test]
+    fn a_current_launchers_install_helper_says_what_is_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Epic");
+        let places = Places::under(&root);
+        let games = dir.path().join("Epic Games");
+        for folder in ["Kiteborne", "Uncatalogued", "Pending", "Owned"] {
+            fs::create_dir_all(games.join(folder)).unwrap();
+        }
+        use install_helper::record;
+        helper(
+            &places,
+            &[
+                record("kite", "Installed", &games.join("Kiteborne")),
+                // Installed, and the catalogue cache does not know it: named by its folder.
+                record("uncat", "Installed", &games.join("Uncatalogued")),
+                // An install in progress of a game nothing else lists: no game.
+                record("pending", "Incomplete", &games.join("Pending")),
+                // An install in progress of an owned game: owned, not installed.
+                record("owned", "Incomplete", &games.join("Owned")),
+            ],
+            json!([catalogued("kite", "Kiteborne"), catalogued("owned", "Wexford Hollow")]),
+        );
+        // The launcher's own components, done and with their folders there, are in the other folder: not games.
+        let components = root.join("EpicOnlineServices").join("InstallHelper").join("InstalledItems");
+        fs::create_dir_all(&components).unwrap();
+        for name in ["overlay", "service", "support"] {
+            let record = record(name, "Installed", &games);
+            fs::write(components.join(format!("{name}.egi")), install_helper::write_record(&record)).unwrap();
+        }
+
+        let library = load(&places).unwrap();
+        let said: Vec<(&str, &str, bool, Option<PathBuf>, u64)> = library
+            .games
+            .iter()
+            .map(|g| (g.source_id.as_str(), g.name.as_str(), g.installed, g.install_dir.clone(), g.size_on_disk))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                ("kite", "Kiteborne", true, Some(games.join("Kiteborne")), 6_200_000_000),
+                ("uncat", "Uncatalogued", true, Some(games.join("Uncatalogued")), 6_200_000_000),
+                ("owned", "Wexford Hollow", false, None, 0),
+            ]
+        );
+        let kite = &library.games[0];
+        assert_eq!(kite.developers, ["Playtonic"]);
+        assert_eq!(kite.online.cover.as_deref(), Some("https://cdn1.epicgames.com/kite/tall.jpg"));
+        assert!(library.games[1].developers.is_empty());
+        assert_eq!(executable(&places, "kite"), Some(games.join("Kiteborne").join("Game.exe")));
+
+        // Started through the launcher's three-part link, from the record's sandbox and item.
+        let epic = Epic::at(Some(root.clone()));
+        let uncat = &library.games[1];
+        let link = "com.epicgames.launcher://apps/ns-uncat%3Aitem-uncat%3Auncat?action=launch&silent=true";
+        assert_eq!(epic.start(uncat), Some(Start::Address(link.into())));
+        let found = epic.read().unwrap().unwrap();
+        assert_eq!(found.from, format!("{} (InstallHelper 2 of 4, catcache 2 of 2)", root.display()));
+    }
+
+    #[test]
+    fn an_install_helpers_record_wins_over_a_manifest_of_the_same_game() {
+        let dir = tempfile::tempdir().unwrap();
+        let places = Places::under(&dir.path().join("Epic"));
+        let games = dir.path().join("Games");
+        for folder in ["Old", "New", "B"] {
+            fs::create_dir_all(games.join(folder)).unwrap();
+        }
+        fs::create_dir_all(places.manifests()).unwrap();
+        fs::write(places.manifests().join("a.item"), manifest("a", &games.join("Old"), &["games"])).unwrap();
+        fs::write(places.manifests().join("b.item"), manifest("b", &games.join("B"), &["games"])).unwrap();
+        use install_helper::record;
+        // `a` moved by a current launcher; `b` being installed again by one.
+        let a = record("a", "Installed", &games.join("New"));
+        let b = record("b", "Incomplete", &games.join("B"));
+        // Two records of one game: the done one counts, whichever file comes first.
+        let stale = install_helper::Record { installation_id: "0".into(), ..record("a", "Incomplete", &games) };
+        helper(&places, &[a, b, stale], json!([catalogued("a", "Lanternfall")]));
+
+        let library = load(&places).unwrap();
+        let said: Vec<(&str, &str, bool, Option<PathBuf>, u64)> = library
+            .games
+            .iter()
+            .map(|g| (g.source_id.as_str(), g.name.as_str(), g.installed, g.install_dir.clone(), g.size_on_disk))
+            .collect();
+        assert_eq!(
+            said,
+            [("a", "Game a", true, Some(games.join("New")), 6_200_000_000), ("b", "Game b", false, None, 0),]
+        );
+        assert_eq!(library.games[0].developers, ["Playtonic"], "the catalogue's, as for a manifest");
+    }
+
+    #[test]
+    fn a_catalogue_cache_with_a_byte_order_mark_or_nulls_is_read_and_the_windows_release_names_the_app() {
+        let entry = json!({
+            "id": "i", "title": "Lanternfall", "categories": [{ "path": "games" }],
+            "releaseInfo": [{ "appId": "", "platform": ["Mac"] }, { "appId": "mac", "platform": ["Mac"] }, { "appId": "win", "platform": ["Windows"] }],
+        });
+        let json = format!("\u{feff}[{entry}]\0\0\r\n");
+        let read = catcache(to_base64(json.as_bytes()).as_bytes()).unwrap();
+        assert_eq!(catalogue_item(&read[0]).unwrap().app_name, "win");
+        let no_windows = json!({ "id": "i", "title": "T", "categories": [{ "path": "games" }], "releaseInfo": [{ "appId": "" }, { "appId": "mac" }] });
+        assert_eq!(catalogue_item(&no_windows).unwrap().app_name, "mac");
+    }
+
     #[test]
     fn epic_as_a_source() {
         let dir = tempfile::tempdir().unwrap();
@@ -656,7 +914,9 @@ mod tests {
         let epic = Epic::at(Some(root.clone()));
         assert_eq!((epic.key(), epic.name()), ("epic", "Epic Games"));
         let found = epic.read().unwrap().expect("a launcher");
-        assert_eq!(found.from, root.display().to_string());
+        // Where its games came from, each place's games of its entries.
+        let from = format!("{} (InstallHelper 1 of 2, manifests 1 of 3, catcache 3 of 5)", root.display());
+        assert_eq!(found.from, from);
         assert_eq!(found.library, load(&Places::under(&root)).unwrap());
 
         let installed = found.library.games.iter().find(|g| g.installed).unwrap();
