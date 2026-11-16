@@ -151,7 +151,7 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Get-ScreenPixel`, `Get-DesignPixel`, `Test-Colour`, `Format-Colour` | the screen's colour at a pixel, or at a point of the Dashboard's 1920x1080 canvas; whether it is a given colour; a colour for `steps.txt` |
 | `Get-Foreground`, `Set-Foreground`, `Close-WindowsPrompts` | the window in front; put one in front; Windows' own full-screen prompts closed |
 | `Connect-Pad`, `Push-Button`, `Disconnect-Pad` | the virtual pad |
-| `Start-Dashboard [-Arguments ...]`, `Stop-Dashboard` | the Dashboard, its stderr to `dashboard.log` |
+| `Start-Dashboard [-Arguments ...] [-Startup]`, `Stop-Dashboard` | the Dashboard, its stderr to `dashboard.log`; with `--no-startup` (straight to Home, no Boot video) unless `-Startup` |
 | `Get-DashboardLog`, `Get-DashboardLogLength`, `Wait-DashboardLog <pattern> <seconds> [-After <lines>]` | what it logged |
 | `Close-Dashboard [<seconds>]` | the Dashboard asked to close as `taskkill` without `/f` asks; whether it went |
 | `Initialize-FakeSteam`, `Initialize-FakeEpic`, `Initialize-FakeGog`, `Get-StandInGame`, `Stop-StandInGame` | the fakes and their games (only those started from the test's own folders) |
@@ -195,7 +195,10 @@ client, one dropped, one done with Manage Queue up and focus going with it to Re
 through), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
 Home, in Games a screenful at a time and in Full library, a Game hub of each store's, Search finding two stores' games
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
-each), and `overlay` and `video` for the spikes.
+each), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
+its first frame, its end and Home's first frame logged in that order, then Off set on Settings with the pad and the
+Dashboard straight to Home at the next start; it needs `video-spike.exe`, so build `-p video-spike` too), and
+`overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets

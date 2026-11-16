@@ -1,7 +1,7 @@
 //! Decoding, on a thread of its own: one Source Reader gives the picture as RGB32 frames in system memory and the
-//! sound as PCM. Frames go to the window over a short queue, so decoding runs a few frames ahead of the screen and
-//! no further; the sound is kept about a second ahead of the picture.
-use std::path::PathBuf;
+//! sound as PCM. Frames go out over a short queue, so decoding runs a few frames ahead of the screen and no
+//! further; the sound is kept about a second ahead of the picture.
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
@@ -15,10 +15,8 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_SDK_VERSION,
 };
 use windows::Win32::Media::MediaFoundation::{
-    IMF2DBuffer, IMFAttributes, IMFDXGIDeviceManager, IMFMediaType, IMFSample, IMFSourceReader, MFAudioFormat_PCM,
-    MFCreateAttributes, MFCreateDXGIDeviceManager, MFCreateMediaType, MFCreateSourceReaderFromURL,
-    MFCreateWaveFormatExFromMFMediaType, MFGetStrideForBitmapInfoHeader, MFMediaType_Audio, MFMediaType_Video,
-    MFVideoFormat_RGB32, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
+    IMF2DBuffer, IMFDXGIDeviceManager, IMFMediaType, IMFSample, IMFSourceReader, MFAudioFormat_PCM, MFMediaType_Audio,
+    MFMediaType_Video, MFVideoFormat_RGB32, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
     MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_PD_DURATION,
     MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED, MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READERF_ERROR,
     MF_SOURCE_READER_ALL_STREAMS, MF_SOURCE_READER_D3D_MANAGER, MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING,
@@ -31,64 +29,34 @@ use windows::Win32::System::Variant::VT_UI8;
 
 use super::audio::{self, Playback};
 use super::{hr, pair, subtype_name, wide, MediaFoundation, Step};
-use crate::log;
+use crate::{Clock, Event, Frame, Options, Picture};
 
 const VIDEO: u32 = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
 const AUDIO: u32 = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
 /// How far ahead of the picture the sound is decoded, in seconds.
 const AUDIO_LEAD: f64 = 1.0;
-/// Frames decoded and waiting for the window: [`spawn`]'s queue length.
-pub const QUEUE: usize = 4;
+/// Frames decoded and waiting to be shown: [`spawn`]'s queue length.
+const QUEUE: usize = 4;
 
-pub struct Options {
-    pub file: PathBuf,
-    pub audio: bool,
-    pub dxva: bool,
-    pub basic_processing: bool,
-}
-
-/// What the file turned out to hold.
-pub struct Opened {
-    /// The picture's size in its own pixels.
-    pub size: (u32, u32),
-    /// Each pixel's shape, width to height.
-    pub pixel_aspect: (u32, u32),
-    pub playback: Arc<Playback>,
-}
-
-pub struct Frame {
-    /// When it is to be shown, in seconds of media time.
-    pub time: f64,
-    /// Rows of B, G, R, X bytes from the top, four times the width apart.
-    pub pixels: Vec<u8>,
-    /// What the decoder and the colour conversion took for this frame.
-    pub decode_ms: f64,
-    /// What copying it out of Media Foundation's buffer took.
-    pub copy_ms: f64,
-}
-
-pub enum Event {
-    Opened(Opened),
-    Frame(Frame),
-    End,
-    Failed(String),
-}
-
-/// Starts decoding `options.file`. The first event is `Opened` or `Failed`; then frames in order, until `End` or
-/// `Failed`. `recycled` takes back the pixel buffers of frames done with, to be filled again.
-pub fn spawn(options: Options, recycled: Receiver<Vec<u8>>) -> Receiver<Event> {
+/// Starts decoding `file`. The first event is `Opened` or `Failed`; then frames in order, until `End` or
+/// `Failed`. `recycled` takes back the pixel buffers of frames done with, to be filled again. The clock is the
+/// sound's, or with no sound the system's from the first frame on.
+pub fn spawn(file: &Path, options: Options, recycled: Receiver<Vec<u8>>) -> (Receiver<Event>, Arc<dyn Clock>) {
     let (events, receiver) = std::sync::mpsc::sync_channel(QUEUE);
-    let thread = std::thread::Builder::new().name("decode".into());
+    let playback = Playback::new();
+    let (file, clock): (PathBuf, Arc<dyn Clock>) = (file.to_path_buf(), playback.clone());
     let failed = events.clone();
-    let spawned = thread.spawn(move || {
-        if let Err(e) = decode(&options, &events, &recycled) {
+    let spawned = std::thread::Builder::new().name("video".into()).spawn(move || {
+        if let Err(e) = decode(&file, &options, &playback, &events, &recycled) {
             let _ = events.send(Event::Failed(e));
         }
+        // Whatever stopped it, the sound goes with it.
+        playback.end_audio();
     });
     if let Err(e) = spawned {
-        let _ = failed.send(Event::Failed(format!("no decode thread: {e}")));
+        let _ = failed.send(Event::Failed(format!("no decoding thread: {e}")));
     }
-    receiver
+    (receiver, clock)
 }
 
 /// How a frame lies in the buffers the reader hands out.
@@ -104,7 +72,7 @@ struct Layout {
 }
 
 impl Layout {
-    fn of(media_type: &IMFMediaType) -> Result<Layout, String> {
+    fn of(media_foundation: &MediaFoundation, media_type: &IMFMediaType) -> Result<Layout, String> {
         let coded = pair(media_type, &MF_MT_FRAME_SIZE).ok_or("the decoded video has no frame size")?;
         // The aperture is an MFVideoArea: two MFOffsets (a fraction then a whole number, 16 bits each) and a SIZE.
         let mut area = [0u8; 16];
@@ -119,7 +87,7 @@ impl Layout {
         }
         let stride = unsafe { media_type.GetUINT32(&MF_MT_DEFAULT_STRIDE) }
             .map(|stride| stride as i32)
-            .or_else(|_| unsafe { MFGetStrideForBitmapInfoHeader(MFVideoFormat_RGB32.data1, coded.0) })
+            .or_else(|_| media_foundation.mf.stride(MFVideoFormat_RGB32.data1, coded.0))
             .unwrap_or(4 * coded.0 as i32);
         let pixel_aspect =
             pair(media_type, &MF_MT_PIXEL_ASPECT_RATIO).filter(|&(x, y)| x > 0 && y > 0).unwrap_or((1, 1));
@@ -127,10 +95,20 @@ impl Layout {
     }
 }
 
-fn decode(options: &Options, events: &SyncSender<Event>, recycled: &Receiver<Vec<u8>>) -> Result<(), String> {
-    let _media_foundation = MediaFoundation::start()?;
-    let reader = open_reader(options)?;
-    let playback = Playback::new();
+fn decode(
+    file: &Path,
+    options: &Options,
+    playback: &Arc<Playback>,
+    events: &SyncSender<Event>,
+    recycled: &Receiver<Vec<u8>>,
+) -> Result<(), String> {
+    // A full path: Media Foundation reads the name as a URL, not against the working directory.
+    let file = std::path::absolute(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    if !file.is_file() {
+        return Err(format!("{}: no such file", file.display()));
+    }
+    let media_foundation = MediaFoundation::start()?;
+    let reader = open_reader(&media_foundation, &file, options)?;
 
     // The picture: the first video stream, decoded and converted to RGB32.
     let (native_subtype, fps) = unsafe {
@@ -138,45 +116,52 @@ fn decode(options: &Options, events: &SyncSender<Event>, recycled: &Receiver<Vec
         reader.SetStreamSelection(VIDEO, true).step("no video stream in the file")?;
         let native = reader.GetNativeMediaType(VIDEO, 0).step("the video stream's format")?;
         let fps = pair(&native, &MF_MT_FRAME_RATE).filter(|&(_, d)| d > 0).map_or(0.0, |(n, d)| n as f64 / d as f64);
-        let wanted = MFCreateMediaType().step("MFCreateMediaType")?;
+        let wanted = media_foundation.mf.create_media_type()?;
         wanted.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).step("SetGUID")?;
         wanted.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32).step("SetGUID")?;
         reader.SetCurrentMediaType(VIDEO, None, &wanted).step("no decoder to RGB32 for the video stream")?;
         (native.GetGUID(&MF_MT_SUBTYPE).map(|s| subtype_name(&s)).unwrap_or_else(|_| "?".into()), fps)
     };
     let current = unsafe { reader.GetCurrentMediaType(VIDEO) }.step("the decoded video's format")?;
-    let mut layout = Layout::of(&current)?;
+    let mut layout = Layout::of(&media_foundation, &current)?;
 
     // The sound: the first audio stream as PCM, if there is one and a device to play it.
-    let sound = if options.audio { open_audio(&reader, &playback) } else { Err("--no-audio".into()) };
+    let sound = if options.audio && options.volume > 0.0 {
+        open_audio(&media_foundation, &reader, playback, options.volume)
+    } else {
+        Err("not asked for".into())
+    };
     let mut audio_left = sound.is_ok();
     if !audio_left {
         let _ = unsafe { reader.SetStreamSelection(AUDIO, false) };
     }
 
     let (_, _, w, h) = layout.shown;
-    log!(
-        "video: opened {w}x{h} {fps:.2} fps {}, video {native_subtype} -> RGB32{}, audio {}",
+    eprintln!(
+        "video: opened {} {w}x{h} {fps:.2} fps {}, video {native_subtype} -> RGB32{}, sound {}",
+        file.display(),
         duration(&reader).map_or("unknown length".into(), |seconds| format!("{seconds:.2} s")),
-        if options.dxva { " (--dxva)" } else { "" },
-        sound.as_ref().map_or("none", |(format, _)| format.as_str()),
+        if options.dxva { " (dxva)" } else { "" },
+        match &sound {
+            Ok((format, device)) => format!("{format} on \"{device}\""),
+            Err(why) => format!("none ({why})"),
+        },
     );
-    match &sound {
-        Ok((_, device)) => log!("audio: device \"{device}\" opened"),
-        Err(why) => log!("audio: none ({why})"),
-    }
-    let opened = Opened { size: (w, h), pixel_aspect: layout.pixel_aspect, playback: playback.clone() };
-    if events.send(Event::Opened(opened)).is_err() {
+    let picture = Picture { size: (w, h), pixel_aspect: layout.pixel_aspect };
+    if events.send(Event::Opened(picture)).is_err() {
         return Ok(());
     }
 
     let (mut video_time, mut audio_time) = (0.0, 0.0);
     loop {
+        if playback.closed() {
+            return Ok(());
+        }
         if audio_left && audio_time < video_time + AUDIO_LEAD {
             let (flags, time, sample) = read(&reader, AUDIO).step("reading sound")?;
             if let Some(sample) = sample {
                 audio_time = time + unsafe { sample.GetSampleDuration() }.unwrap_or(0) as f64 / 1e7;
-                queue_sound(&sample, time, &playback).step("the decoded sound's buffer")?;
+                queue_sound(&sample, time, playback).step("the decoded sound's buffer")?;
             }
             if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
                 playback.end_audio();
@@ -189,7 +174,8 @@ fn decode(options: &Options, events: &SyncSender<Event>, recycled: &Receiver<Vec
         let (flags, time, sample) = read(&reader, VIDEO).step("reading video")?;
         let decode_ms = before.elapsed().as_secs_f64() * 1000.0;
         if flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32 != 0 {
-            let changed = Layout::of(&unsafe { reader.GetCurrentMediaType(VIDEO) }.step("the video's new format")?)?;
+            let changed = unsafe { reader.GetCurrentMediaType(VIDEO) }.step("the video's new format")?;
+            let changed = Layout::of(&media_foundation, &changed)?;
             if changed.shown.2 != layout.shown.2 || changed.shown.3 != layout.shown.3 {
                 return Err(format!("the video changed size part-way, to {}x{}", changed.shown.2, changed.shown.3));
             }
@@ -215,11 +201,9 @@ fn decode(options: &Options, events: &SyncSender<Event>, recycled: &Receiver<Vec
     }
 }
 
-fn open_reader(options: &Options) -> Result<IMFSourceReader, String> {
+fn open_reader(media_foundation: &MediaFoundation, file: &Path, options: &Options) -> Result<IMFSourceReader, String> {
+    let attributes = media_foundation.mf.create_attributes(2)?;
     unsafe {
-        let mut attributes: Option<IMFAttributes> = None;
-        MFCreateAttributes(&mut attributes, 2).step("MFCreateAttributes")?;
-        let attributes = attributes.ok_or("MFCreateAttributes gave nothing")?;
         // The video processor converts the decoder's NV12 to RGB32 (and deinterlaces, should a file need it).
         let processing = if options.basic_processing {
             &MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING
@@ -229,22 +213,24 @@ fn open_reader(options: &Options) -> Result<IMFSourceReader, String> {
         attributes.SetUINT32(processing, 1).step("SetUINT32")?;
         if options.dxva {
             if options.basic_processing {
-                log!("video: --dxva ignored, --basic-processing is software only");
+                eprintln!("video: dxva left out, the basic processing is software only");
             } else {
-                match device_manager() {
+                match device_manager(media_foundation) {
                     Ok(manager) => attributes.SetUnknown(&MF_SOURCE_READER_D3D_MANAGER, &manager).step("SetUnknown")?,
-                    Err(e) => log!("video: --dxva unavailable ({e}), decoding in software"),
+                    Err(e) => eprintln!("video: no dxva ({e}), decoding in software"),
                 }
             }
         }
-        let url = wide(&options.file);
-        MFCreateSourceReaderFromURL(PCWSTR(url.as_ptr()), &attributes)
-            .map_err(|e| format!("can't open {}: {}", options.file.display(), hr(&e)))
     }
+    let url = wide(file);
+    media_foundation
+        .mf
+        .create_source_reader(PCWSTR(url.as_ptr()), &attributes)
+        .map_err(|e| format!("can't open {}: {}", file.display(), hr(&e)))
 }
 
 /// A Direct3D 11 device for Media Foundation to decode on, behind the manager the Source Reader takes.
-fn device_manager() -> Result<IMFDXGIDeviceManager, String> {
+fn device_manager(media_foundation: &MediaFoundation) -> Result<IMFDXGIDeviceManager, String> {
     unsafe {
         let mut device = None;
         let flags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT;
@@ -263,9 +249,7 @@ fn device_manager() -> Result<IMFDXGIDeviceManager, String> {
         let device = device.ok_or("D3D11CreateDevice gave nothing")?;
         // The decoder uses the device from its own threads.
         let _ = device.cast::<ID3D11Multithread>().step("ID3D11Multithread")?.SetMultithreadProtected(true);
-        let (mut token, mut manager) = (0, None);
-        MFCreateDXGIDeviceManager(&mut token, &mut manager).step("MFCreateDXGIDeviceManager")?;
-        let manager = manager.ok_or("MFCreateDXGIDeviceManager gave nothing")?;
+        let (token, manager) = media_foundation.mf.create_device_manager()?;
         manager.ResetDevice(&device, token).step("IMFDXGIDeviceManager::ResetDevice")?;
         Ok(manager)
     }
@@ -273,19 +257,23 @@ fn device_manager() -> Result<IMFDXGIDeviceManager, String> {
 
 /// Sets the first audio stream to decode to PCM and opens a device for it. Returns the format's description and the
 /// device's name, or why there is no sound.
-fn open_audio(reader: &IMFSourceReader, playback: &Arc<Playback>) -> Result<(String, String), String> {
+fn open_audio(
+    media_foundation: &MediaFoundation,
+    reader: &IMFSourceReader,
+    playback: &Arc<Playback>,
+    volume: f32,
+) -> Result<(String, String), String> {
     unsafe {
         reader.SetStreamSelection(AUDIO, true).map_err(|_| "the file has no audio stream")?;
         let native = reader.GetNativeMediaType(AUDIO, 0).step("the audio stream's format")?;
         let native = native.GetGUID(&MF_MT_SUBTYPE).map(|s| subtype_name(&s)).unwrap_or_else(|_| "?".into());
-        let wanted = MFCreateMediaType().step("MFCreateMediaType")?;
+        let wanted = media_foundation.mf.create_media_type()?;
         wanted.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).step("SetGUID")?;
         wanted.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM).step("SetGUID")?;
         reader.SetCurrentMediaType(AUDIO, None, &wanted).step("no decoder to PCM for the audio stream")?;
         let current = reader.GetCurrentMediaType(AUDIO).step("the decoded sound's format")?;
 
-        let (mut wave, mut size) = (std::ptr::null_mut(), 0u32);
-        MFCreateWaveFormatExFromMFMediaType(&current, &mut wave, Some(&mut size), 0).step("the sound's wave format")?;
+        let (wave, size) = media_foundation.mf.wave_format(&current)?;
         if wave.is_null() {
             return Err("the sound has no wave format".into());
         }
@@ -293,7 +281,7 @@ fn open_audio(reader: &IMFSourceReader, playback: &Arc<Playback>) -> Result<(Str
         let format = std::slice::from_raw_parts(wave as *const u8, size as usize).to_vec();
         let (channels, rate, bits) = ((*wave).nChannels, (*wave).nSamplesPerSec, (*wave).wBitsPerSample);
         CoTaskMemFree(Some(wave as *const _));
-        let device = audio::open(playback, format)?;
+        let device = audio::open(playback, format, volume)?;
         Ok((format!("{native} -> PCM {rate} Hz {channels} ch {bits}-bit"), device))
     }
 }

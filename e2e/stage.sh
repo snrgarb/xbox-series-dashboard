@@ -25,6 +25,8 @@ stage_payload() {
     cp -r "$here/payloads/lib" "$stage/lib"
     # Whatever else was built goes too: the spikes' exes, for the payloads that run them.
     cp "$repo/target/x86_64-pc-windows-gnullvm/release"/*.exe "$stage/" 2>/dev/null || true
+    # And whatever was built beside the Dashboard under test (CI's build, downloaded), which wins over a local build.
+    cp "$(dirname "$exe")"/*.exe "$stage/" 2>/dev/null || true
     cp "$exe" "$stage/dashboard.exe"
     cp "$standin" "$stage/standin.exe"
 

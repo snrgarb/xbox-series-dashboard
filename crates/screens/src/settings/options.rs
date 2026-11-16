@@ -4,6 +4,8 @@
 //! each [`Change`] the Dashboard asks for (`Effect::Set`). An option is in the table only once it has been set, so
 //! one that was never touched follows its default, whatever that comes to be.
 
+pub use crate::startup::{BootVideo, Found};
+
 /// An option that is on or off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Setting {
@@ -74,6 +76,10 @@ impl Change {
     }
 }
 
+/// The settings row that holds the Boot video chosen (Settings > Personalisation > Boot video): a
+/// [`BootVideo::key`], `Off` among them. None until one is chosen, which is the Bundle's Xbox Series X.
+pub const BOOT_VIDEO: &str = "startup.boot_video";
+
 /// The settings row that holds the user's SteamGridDB key (`library::art::KEY_SETTING`). The core is told only
 /// whether there is one: what it is never comes back from the database to the screens.
 pub const ART_KEY: &str = "art.steamgriddb_key";
@@ -90,6 +96,11 @@ pub struct Options {
     pub art_online: bool,
     /// A SteamGridDB key has been entered (Settings > Art): with art online on, SteamGridDB is asked too.
     pub art_key: bool,
+    /// The Boot video chosen (docs/spec/start-up.md), which plays as the Dashboard starts if it is found.
+    pub boot_video: BootVideo,
+    /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
+    /// looks as it starts (`Dashboard::set_boot_videos`).
+    pub boot_videos: Found,
 }
 
 impl Default for Options {
@@ -103,6 +114,8 @@ impl Default for Options {
             use_guide: of(Setting::UseGuide),
             art_online: of(Setting::DownloadArtOnline),
             art_key: false,
+            boot_video: BootVideo::DEFAULT,
+            boot_videos: Found::NONE,
         }
     }
 }
@@ -118,6 +131,9 @@ impl Options {
             }
         }
         options.art_key = stored(ART_KEY).is_some_and(|key| !key.trim().is_empty());
+        if let Some(video) = stored(BOOT_VIDEO).as_deref().and_then(BootVideo::from_key) {
+            options.boot_video = video;
+        }
         options
     }
 
@@ -177,6 +193,18 @@ mod tests {
         let options = Options::read(stored);
         let expected = Options { background_delay: false, reduce_motion: true, ..Options::default() };
         assert_eq!(options, expected);
+        assert_eq!(options.boot_video, BootVideo::XboxSeriesX, "the Bundle's, until one is chosen");
+    }
+
+    #[test]
+    fn the_boot_video_chosen_is_read_and_one_the_table_garbles_is_the_default() {
+        let read = |value: &str| {
+            let value = value.to_string();
+            Options::read(move |key| (key == BOOT_VIDEO).then(|| value.clone())).boot_video
+        };
+        assert_eq!(read("Off"), BootVideo::Off);
+        assert_eq!(read("XboxOne"), BootVideo::XboxOne);
+        assert_eq!(read("the best one"), BootVideo::XboxSeriesX);
     }
 
     #[test]

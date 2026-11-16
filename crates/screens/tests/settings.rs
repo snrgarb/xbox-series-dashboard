@@ -12,7 +12,7 @@ use screens::home::{Focus, TopButton};
 use screens::pages::{Around, Open, Page};
 use screens::settings::boxes::{Boxes, Item};
 use screens::settings::controls::{self, Dropdown, FIELD_HEIGHT, FIELD_WIDTH, LEFT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH};
-use screens::settings::{Change, Entry, Options, Pane, Setting, Settings, Step};
+use screens::settings::{BootVideo, Change, Entry, Found, Options, Pane, Setting, Settings, Step, BOOT_VIDEO};
 use screens::{Dashboard, Effect};
 use ui::host::Offscreen;
 use ui::Button::{self, Down, Guide, Left, LeftBumper, Menu, Right, RightBumper, Up, A, B, X, Y};
@@ -66,11 +66,11 @@ fn settings(database: &library::Database) -> Dashboard {
     dashboard
 }
 
-/// Personalisation, focus on the checkbox box this far down it: under Groups, its first box.
+/// Personalisation, focus on the checkbox box this far down it: under Boot video and Groups.
 fn personalisation(database: &library::Database, down: usize) -> Dashboard {
     let mut dashboard = settings(database);
     press(&mut dashboard, &[Right, A]);
-    press(&mut dashboard, &vec![Down; down + 1]);
+    press(&mut dashboard, &vec![Down; down + 2]);
     dashboard.take_effects();
     dashboard
 }
@@ -119,16 +119,17 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
 
-    // Personalisation: Groups, then a checkbox box a row.
+    // Personalisation: Boot video and Profiles, Groups under Boot video, then a checkbox box a row.
     press(&mut dashboard, &[A, A]);
-    let boxes = ["Groups", "Background delay", "Reduce motion", "Show Play history", "Show battery percentages"];
+    let boxes =
+        ["Boot video", "Groups", "Background delay", "Reduce motion", "Show Play history", "Show battery percentages"];
     for name in boxes {
         assert_eq!(dashboard.focus_line(), format!("Settings: Personalisation: {name}"));
         press(&mut dashboard, &[Right, Down]);
     }
     assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Show battery percentages", "the foot stops");
-    press(&mut dashboard, &[Up, Up, Up, Up, Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Groups", "the top stops");
+    press(&mut dashboard, &[Up; 6]);
+    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Boot video", "the top stops");
     // Left steps back to Theme settings' boxes, focus on the box that opened the page.
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
@@ -341,6 +342,8 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         use_guide: false,
         art_online: true,
         art_key: false,
+        boot_video: BootVideo::XboxSeriesX,
+        boot_videos: Found::NONE,
     };
     assert_eq!(dashboard.options(), left);
 
@@ -503,11 +506,127 @@ fn settings_theme_settings_box_focused() {
 #[test]
 fn settings_personalisation_checkbox_focused() {
     let mut stage = settings_stage();
-    stage.press(&[Right, A, Down]);
+    stage.press(&[Right, A, Down, Down]);
     stage.check("settings-personalisation-checkbox");
     // Another box, turned over: its info moves with focus, and nothing else does.
     stage.press(&[Down, Down, A]);
     stage.check("settings-personalisation-play-history-off");
+}
+
+/// The media folder with these boot videos in it, as the executable finds them.
+fn found(videos: &[BootVideo]) -> Found {
+    videos.iter().fold(Found::NONE, |found, video| found.with(*video))
+}
+
+/// Personalisation's first box, Boot video, focused: Profiles beside it, Groups under it.
+#[test]
+fn settings_personalisation_boot_video_box() {
+    let mut stage = settings_stage();
+    stage.press(&[Right, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Personalisation: Boot video");
+    stage.check("settings-personalisation-boot-video");
+}
+
+/// The Boot video page with every video found, the Bundle's default ticked and focused; then focus on another
+/// Row, the tick where it was.
+#[test]
+fn settings_boot_video() {
+    let mut stage = settings_stage();
+    stage.dashboard.set_options(Options { boot_videos: found(&BootVideo::ALL), ..Options::default() });
+    stage.press(&[Right, A, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Boot video: Xbox Series X (2020); ticked");
+    stage.check("settings-boot-video");
+    stage.press(&[Up, Up, Up]);
+    stage.check("settings-boot-video-focus-moved");
+}
+
+/// The page with no video found: the line says so, and Off is the one Row.
+#[test]
+fn settings_boot_video_none_found() {
+    let mut stage = settings_stage();
+    stage.press(&[Right, A, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Boot video: Off; ticked");
+    stage.check("settings-boot-video-none-found");
+}
+
+/// The Boot video page, as the executable starts the Dashboard: these videos found, this one chosen.
+fn boot_video_page(database: &library::Database, videos: &[BootVideo]) -> Dashboard {
+    let mut dashboard = settings(database);
+    let options = dashboard.options();
+    dashboard.set_options(Options { boot_videos: found(videos), ..options });
+    press(&mut dashboard, &[Right, A, A]);
+    dashboard.take_effects();
+    dashboard
+}
+
+#[test]
+fn boot_video_lists_off_and_the_videos_found_in_the_bundles_order_focus_on_the_one_ticked() {
+    let database = database();
+    let mut dashboard = boot_video_page(&database, &[BootVideo::XboxSeriesX, BootVideo::Xbox, BootVideo::XboxOne]);
+    // The Bundle's default, Xbox Series X, is ticked until a choice is made, and focus opens on it.
+    assert_eq!(dashboard.focus_line(), "Settings: Boot video: Xbox Series X (2020); ticked");
+    let mut rows = Vec::new();
+    press(&mut dashboard, &[Up; 5]);
+    for _ in 0..5 {
+        rows.push(dashboard.focus_line());
+        press(&mut dashboard, &[Down]);
+    }
+    assert_eq!(
+        rows,
+        [
+            "Settings: Boot video: Off",
+            "Settings: Boot video: Xbox (2001)",
+            "Settings: Boot video: Xbox One (2013)",
+            "Settings: Boot video: Xbox Series X (2020); ticked",
+            "Settings: Boot video: Xbox Series X (2020); ticked",
+        ],
+        "the top and the foot stop"
+    );
+    // Left, Right and the rest do nothing; B is Personalisation, on Boot video.
+    dashboard.take_effects();
+    press(&mut dashboard, &[Left, Right, X, Y, Menu]);
+    assert_eq!(dashboard.focus_line(), "Settings: Boot video: Xbox Series X (2020); ticked");
+    assert!(dashboard.take_effects().is_empty());
+    press(&mut dashboard, &[B]);
+    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Boot video");
+}
+
+#[test]
+fn a_sets_the_boot_video_at_once_focus_stays_and_it_is_saved_and_read_back() {
+    let database = database();
+    let mut dashboard = boot_video_page(&database, &[BootVideo::XboxSeriesX, BootVideo::Xbox360]);
+    // A on the Row already ticked does nothing.
+    press(&mut dashboard, &[A]);
+    assert!(dashboard.take_effects().is_empty());
+    press(&mut dashboard, &[Up, Up, A]);
+    assert_eq!(dashboard.focus_line(), "Settings: Boot video: Off; ticked");
+    assert_eq!(dashboard.options().boot_video, BootVideo::Off);
+    let effects = dashboard.take_effects();
+    assert_eq!(effects.last(), Some(&Effect::BootVideo(BootVideo::Off)), "{effects:?}");
+    // Saved as the executable saves it, it is the choice the next time.
+    database.set_setting(BOOT_VIDEO, BootVideo::Off.key()).unwrap();
+    assert_eq!(start(&database).options().boot_video, BootVideo::Off);
+    press(&mut dashboard, &[Down, A]);
+    assert_eq!(dashboard.take_effects().last(), Some(&Effect::BootVideo(BootVideo::Xbox360)));
+    // A held A sets nothing again.
+    dashboard.press(Press { button: A, repeat: true });
+    assert!(dashboard.take_effects().is_empty());
+}
+
+#[test]
+fn a_choice_whose_video_is_gone_ticks_off_and_is_kept_until_another_is_made() {
+    let database = database();
+    database.set_setting(BOOT_VIDEO, BootVideo::XboxOneX.key()).unwrap();
+    let mut dashboard = settings(&database);
+    let options = dashboard.options();
+    assert_eq!(options.boot_video, BootVideo::XboxOneX);
+    dashboard.set_options(Options { boot_videos: found(&[BootVideo::Xbox]), ..options });
+    press(&mut dashboard, &[Right, A, A]);
+    assert_eq!(dashboard.focus_line(), "Settings: Boot video: Off; ticked", "Off is what plays");
+    // A on it makes Off the choice.
+    dashboard.take_effects();
+    press(&mut dashboard, &[A]);
+    assert_eq!(dashboard.take_effects().last(), Some(&Effect::BootVideo(BootVideo::Off)));
 }
 
 /// The Bundle's picture 35: the Guide page, focus on Use the Guide, the Now Playing source Spotify under it.

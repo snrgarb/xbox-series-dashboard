@@ -1,79 +1,28 @@
 //! The Dashboard's sounds: where their files are found, and the playing of them.
 //!
 //! The files are the console's, which belong to Microsoft and are not in this repository (#10). They are looked
-//! for when the window starts, by the names the Bundle gives them (`model::Sound::files`), in the first of these
-//! places that has any of them:
-//!
-//! 1. `--media <dir>`: `<dir>\sounds` if there is one, else `<dir>` itself. With `--media`, nowhere else.
-//! 2. `<data dir>\media\sounds`, the data folder being `--data-dir`'s or `%LOCALAPPDATA%\XboxSeriesDashboard`.
-//! 3. The Bundle, where it is installed in Playnite: its extension's `Sounds` and its theme's `audio`, under
-//!    `%APPDATA%\Playnite` (an installed Playnite) or `%LOCALAPPDATA%\Playnite` (a portable one left where the
-//!    installer would put it).
+//! for when the window starts, by the names the Bundle gives them (`model::Sound::files`), in the media folder's
+//! sounds (`media_folder`): the first place that has any of them.
 //!
 //! A sound with no file there is silent, and with no place at all so is the Dashboard.
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use audio::Audio;
 use model::Sound;
 
+use crate::media_folder::{self, Kind, Place};
 use crate::store::Store;
 use crate::Args;
 
-/// The Bundle's extension and theme, as Playnite names their folders.
-const BUNDLE_EXTENSION: &str = "XboxSeries_eb759ff1-325b-4c34-9a64-d9704f72612b";
-const BUNDLE_THEME: &str = "XboxSeries_Dashboard";
-
 /// The volume, 0 to 1, in the library database's settings.
-const VOLUME: &str = "sound.volume";
+pub const VOLUME: &str = "sound.volume";
 /// Whether sounds are off, `true` or `false`, in the same place.
-const MUTED: &str = "sound.muted";
+pub const MUTED: &str = "sound.muted";
 
 pub struct Sounds {
     audio: Audio,
     /// Whose turn it is among each sound's files, by the sound's place in `Sound::ALL`.
     turns: [usize; Sound::ALL.len()],
-}
-
-/// A place sounds may be: one folder, or the Bundle's two.
-struct Place {
-    folders: Vec<PathBuf>,
-}
-
-impl Place {
-    fn find(&self, file: &str) -> Option<PathBuf> {
-        self.folders.iter().map(|folder| folder.join(file)).find(|path| path.is_file())
-    }
-
-    fn name(&self) -> String {
-        let names: Vec<String> = self.folders.iter().map(|folder| folder.display().to_string()).collect();
-        names.join(" and ")
-    }
-}
-
-/// The places to look, in order.
-fn places(media: Option<&Path>, data_dir: Option<&Path>, playnite: &[PathBuf]) -> Vec<Place> {
-    if let Some(media) = media {
-        let sounds = media.join("sounds");
-        return vec![Place { folders: vec![if sounds.is_dir() { sounds } else { media.to_path_buf() }] }];
-    }
-    let mut places = Vec::new();
-    places.extend(data_dir.map(|dir| Place { folders: vec![dir.join("media").join("sounds")] }));
-    places.extend(playnite.iter().map(|playnite| Place {
-        folders: vec![
-            playnite.join("Extensions").join(BUNDLE_EXTENSION).join("Sounds"),
-            playnite.join("Themes").join("Fullscreen").join(BUNDLE_THEME).join("audio"),
-        ],
-    }));
-    places
-}
-
-/// Where Playnite keeps its extensions and themes, if it is on this machine.
-fn playnite_folders() -> Vec<PathBuf> {
-    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
-    if !cfg!(windows) {
-        return Vec::new();
-    }
-    ["APPDATA", "LOCALAPPDATA"].iter().filter_map(|name| Some(var(name)?.join("Playnite"))).collect()
 }
 
 /// Loads every file of every sound from the first of `places` that has any. Says where they came from, or that
@@ -95,15 +44,11 @@ fn load(audio: &mut Audio, places: &[Place]) {
         eprintln!("audio: {loaded} sounds from {}", place.name());
         return;
     }
-    let looked: Vec<String> = places.iter().map(Place::name).collect();
-    eprintln!(
-        "audio: no sounds (looked in {})",
-        if looked.is_empty() { "no folder".into() } else { looked.join(", ") }
-    );
+    eprintln!("audio: no sounds (looked in {})", media_folder::looked(places));
 }
 
 /// A volume as the settings table holds it: a number from 0 to 1.
-fn volume(setting: Option<&str>) -> f32 {
+pub fn volume(setting: Option<&str>) -> f32 {
     let Some(text) = setting else { return 1.0 };
     match text.trim().parse::<f32>() {
         Ok(volume) if volume.is_finite() => volume.clamp(0.0, 1.0),
@@ -114,7 +59,7 @@ fn volume(setting: Option<&str>) -> f32 {
     }
 }
 
-fn muted(setting: Option<&str>) -> bool {
+pub fn muted(setting: Option<&str>) -> bool {
     matches!(setting.map(|text| text.trim().to_ascii_lowercase()).as_deref(), Some("true" | "1" | "on" | "yes"))
 }
 
@@ -124,7 +69,8 @@ impl Sounds {
     pub fn open(args: &Args, store: &Store) -> Sounds {
         let mut audio = Audio::new();
         let data_dir = args.data_dir.clone().or_else(library::data_dir);
-        load(&mut audio, &places(args.media.as_deref(), data_dir.as_deref(), &playnite_folders()));
+        let playnite = media_folder::playnite_folders();
+        load(&mut audio, &media_folder::places(Kind::Sounds, args.media.as_deref(), data_dir.as_deref(), &playnite));
         let (level, off) = (volume(store.setting(VOLUME).as_deref()), muted(store.setting(MUTED).as_deref()));
         audio.set_volume(level);
         audio.set_muted(off);
@@ -148,7 +94,14 @@ impl Sounds {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
+    use crate::media_folder::{BUNDLE_EXTENSION, BUNDLE_THEME};
+
+    fn places(media: Option<&Path>, data_dir: Option<&Path>, playnite: &[PathBuf]) -> Vec<Place> {
+        media_folder::places(Kind::Sounds, media, data_dir, playnite)
+    }
 
     /// A folder of tones under some of the sounds' names.
     fn tones(dir: &Path, names: &[&str]) {

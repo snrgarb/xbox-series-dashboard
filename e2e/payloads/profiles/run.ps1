@@ -105,7 +105,7 @@ function Open-Profiles([string] $First, [string] $Name = '') {
     Walk Right 'TopBar\(Settings\)' 5
     Press A 'Settings: Rail: Theme settings'
     Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Groups'
+    Press A 'Settings: Personalisation: Boot video'
     Press Right 'Settings: Personalisation: Profiles' $Name
     Press A "Settings: Profiles: $([regex]::Escape($First))"
 }

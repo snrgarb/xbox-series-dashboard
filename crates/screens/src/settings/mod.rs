@@ -11,6 +11,7 @@
 mod add;
 mod added;
 mod art;
+mod boot_video;
 pub mod boxes;
 pub mod controls;
 mod group;
@@ -22,7 +23,8 @@ mod theme_settings;
 
 use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
-pub use self::options::{Change, Options, Setting, ART_KEY};
+pub use self::boot_video::{ABOUT as BOOT_VIDEO_ABOUT, NONE_FOUND as NO_BOOT_VIDEOS};
+pub use self::options::{BootVideo, Change, Found, Options, Setting, ART_KEY, BOOT_VIDEO};
 use crate::hint_bar::{self, Hint};
 use crate::keyboard;
 use crate::pages::{Around, Dialog, Page, PageAction};
@@ -38,7 +40,7 @@ pub enum Entry {
     /// Home's Settings tile, which in the Bundle is "Playnite settings" and opens that category on its first box.
     /// That category is gone: the tile opens the one there is, Theme settings, on its first box.
     Tile,
-    /// Personalisation's page, focus on its first box: the Tile menu's Customise Home.
+    /// Personalisation's page, focus on Groups: the Tile menu's Customise Home.
     Personalisation,
     /// Home's Discord tile while there is no Discord tab in the Guide. Discord's page comes with M6; until then
     /// this is as [`Entry::Tile`].
@@ -146,8 +148,9 @@ impl Settings {
         match entry {
             Entry::Rail => Self { on_rail: true, panes: vec![boxes] },
             Entry::Tile | Entry::Discord => Self { on_rail: false, panes: vec![boxes] },
-            // Personalisation is Theme settings' first box, where focus is as its boxes are made.
-            Entry::Personalisation => Self::showing(Box::new(theme_settings::personalisation())),
+            // Personalisation is Theme settings' first box, where focus is as its boxes are made; on its own boxes
+            // focus is on Groups, the box that customises Home (docs/spec/settings.md, 16.3).
+            Entry::Personalisation => Self::showing(Box::new(theme_settings::personalisation().with_focus(1, 0))),
         }
     }
 

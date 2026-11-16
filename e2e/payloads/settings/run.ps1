@@ -137,9 +137,10 @@ try {
     Press B 'Settings: Theme settings: Guide'
     Walk Left 'Settings: Theme settings: Personalisation' 3
 
-    # Personalisation: Groups, then a checkbox box a row, the focused one's info beside it. Background delay off,
-    # Reduce motion on.
-    Press A 'Settings: Personalisation: Groups'
+    # Personalisation: Boot video and Profiles, Groups, then a checkbox box a row, the focused one's info beside it.
+    # Background delay off, Reduce motion on.
+    Press A 'Settings: Personalisation: Boot video'
+    Press Down 'Settings: Personalisation: Groups'
     Press Down 'Settings: Personalisation: Background delay' '31-settings-personalisation-checkbox'
     Turn-Over 'home.background_delay' 'false' '31-background-delay-off'
     Press Down 'Settings: Personalisation: Reduce motion'
@@ -170,7 +171,8 @@ try {
     # And the page shows them so: the first box unticked, the second ticked. Then both put back as they were.
     Open-Settings
     Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Groups'
+    Press A 'Settings: Personalisation: Boot video'
+    Press Down 'Settings: Personalisation: Groups'
     Press Down 'Settings: Personalisation: Background delay' '31-after-restart'
     Turn-Over 'home.background_delay' 'true'
     Press Down 'Settings: Personalisation: Reduce motion'

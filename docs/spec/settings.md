@@ -249,7 +249,7 @@ E/PersonalisationPane.xaml:119-278; a grid of two auto columns and six auto rows
 
 | Box | (c, r) | Rectangle at rest | Kind | Icon / checkbox |
 |---|---|---|---|---|
-| Boot video | (0, 0) | 520, 210, 437, 131 | opens a page (6.3, **M5**) | U+E714 |
+| Boot video | (0, 0) | 520, 210, 437, 131 | opens a page (6.3, built in #126) | U+E714 |
 | Profiles | (1, 0) | 975, 210, 437, 131 | opens a page (6.5, **M5**) | U+E716 |
 | Who's playing today? | (0, 1) | 520, 359, 437, 131 | opens a page (6.4, **M5**) | U+E748 |
 | Background delay | (0, 2) | 520, 508, 437, 131 | checkbox box | U+E73A on (default) |
@@ -278,13 +278,15 @@ The first three span their own row and the next (`Grid.RowSpan="2"`), so that te
 
 Open question 1 is what the port does instead.
 
-### 6.3 ... > Personalisation > Boot video - **M5** (layout only)
+### 6.3 ... > Personalisation > Boot video - built in #126 (start-up.md 2)
 
 E/PersonalisationPane.xaml:281-286; names at E/PersonalisationPane.xaml.cs:29-40.
 
 - y 210: "Plays as Playnite starts in Fullscreen. Any button skips it." (MutedText, one line, 34.58 tall), 26 under it.
 - Then nine Rows (section 4.3), x 520..1412, row i at y 270.58 + 74 i (the last ends at 928.58): **Off**, **Xbox (2001)**, **Xbox 360 (2005)**, **Xbox 360 Slim (2010)**, **Xbox 360 Special Edition (2012)**, **Xbox One (2013)**, **Xbox One X (2017)**, **Xbox Series S (2020)**, **Xbox Series X (2020)** (the default, C/ExtensionCore.Startup.cs:360).
 - The one that plays is ticked. The page opens with focus **on the ticked row** (E/PersonalisationPane.xaml.cs:355-359). A sets and saves; no preview plays.
+
+The port's page (start-up.md 2): the line is "Plays as the Dashboard starts. Any button skips it.", and the Rows are Off and the videos **found** in the media folder, in this order; with none found the line says so and Off is alone.
 
 ### 6.4 ... > Personalisation > Who's playing today? - **M5** (layout only)
 
@@ -737,7 +739,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 | Pane | Boxes |
 |---|---|
 | Theme settings | Personalisation (0, 0), Guide (1, 0). Idle (M5) and Discord (M6) come back to the Bundle's places with their features. |
-| Personalisation | **Groups** (0, 0) (filters.md 6.1) and **Profiles** (1, 0), at the Bundle's place (#125, profiles.md 4); then four checkbox boxes, a row each: Background delay (y 359), Reduce motion (508), Show Play history (657), Show battery percentages (806). Boot video and Who's playing today? are M5's and go over them when they come, and Groups then takes the Bundle's empty slot, (1, 1). |
+| Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Groups** (0, 1) (filters.md 6.1), in Who's playing today?'s place until #127 brings it, when Groups takes the Bundle's empty slot, (1, 1); then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
 | Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
 
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
@@ -745,7 +747,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 ### 16.2 A pane that would run off the screen scrolls
 
-Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With M3's five rows (Groups, then the four checkbox boxes) nothing scrolls at 1080; the rule is there for M5's rows.
+Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With six rows (Boot video and Profiles, Groups, then the four checkbox boxes) the last box's foot is at 1086 and its info text runs lower: the pane scrolls with focus on it, which the Bundle's page could not (6.2).
 
 The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (x 520), which its picture 29 of Theme settings has not: a clipping accident of that pane's grid, not copied.
 
@@ -755,7 +757,7 @@ The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (
 |---|---|---|---|
 | Home's top bar button; the Guide's Settings | Theme settings' boxes | the rail's Theme settings | Home: the button; from the Guide, Home's rows |
 | Home's **Settings** wide tile (the Bundle's "Playnite settings" tile, whose category is gone) | Theme settings' boxes | its first box, Personalisation | the rail, then the tile |
-| The Tile menu's Customise Home (`Entry::Personalisation`) | Personalisation | its first box, Groups (#57) | Theme settings' boxes on Personalisation, the rail, then the tile |
+| The Tile menu's Customise Home (`Entry::Personalisation`) | Personalisation | Groups (#57), the box that customises Home; the Bundle's is its first box, Boot video | Theme settings' boxes on Personalisation, the rail, then the tile |
 | Home's **Discord** tile with no Discord tab or the Guide off | Theme settings' boxes until Discord has a page (M6), which it then opens on, focus on Type | its first box | the rail, then the tile |
 
 Left from a pane's first column is B, on the boxes and on the Guide page. From the boxes to the rail and into the category again is its first box, whatever had focus (9.1).
@@ -772,6 +774,7 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Show battery percentages | `status.battery_percent` | on |
 | Use the Guide | `guide.enabled` | on |
 | Download art online (16.8) | `art.online` | on |
+| Boot video (start-up.md 2) | `startup.boot_video` | `XboxSeriesX`; a name, not `true` or `false`, saved by `Effect::BootVideo` |
 
 The same table keeps `profile.last`, the id of the Profile signed in last (profiles.md 1); the Profiles themselves are the `profiles` table's (profiles.md 2).
 

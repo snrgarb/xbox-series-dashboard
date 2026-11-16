@@ -451,7 +451,20 @@ impl Store {
                 eprintln!("settings: {} is {value}", setting.key());
             }
         }
+        if let Some(value) = self.setting(screens::settings::BOOT_VIDEO) {
+            eprintln!("settings: {} is {value}", screens::settings::BOOT_VIDEO);
+        }
         Options::read(|key| self.setting(key))
+    }
+
+    /// Saves the Boot video Settings chose (docs/spec/start-up.md): it plays from the next start.
+    pub fn set_boot_video(&self, video: screens::BootVideo) {
+        let Some(database) = &self.database else { return };
+        let key = screens::settings::BOOT_VIDEO;
+        match database.set_setting(key, video.key()) {
+            Ok(()) => eprintln!("settings: {key} = {}", video.key()),
+            Err(e) => eprintln!("settings: {key} not saved: {e:#}"),
+        }
     }
 
     /// Saves an option Settings changed. With no database it lasts as long as the Dashboard does.

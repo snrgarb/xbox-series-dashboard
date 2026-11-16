@@ -329,9 +329,12 @@ function Disconnect-Pad { if ($script:Pad) { try { $script:Pad.Disconnect() } ca
 # In safe mode what the machine must be kept from is added to $Arguments, each unless the test gave its own: every
 # store's flag (the fake made, or an empty folder: the machine's own library is never read), --open-addresses-with
 # standin.exe, --dry-power, and --data-dir <payload>\data.
-function Start-Dashboard([string[]] $Arguments = @()) {
+# Every test starts at Home, with no Start-up (`--no-startup`): a machine with the Bundle has its boot videos, and the
+# default one would play. -Startup is for the test of Start-up itself (boot-video).
+function Start-Dashboard([string[]] $Arguments = @(), [switch] $Startup) {
     $exe = Join-Path $script:Payload 'dashboard.exe'
     if (-not (Test-Path $exe)) { throw "No dashboard.exe in $script:Payload" }
+    if (-not $Startup -and @($Arguments) -notcontains '--no-startup') { $Arguments = @($Arguments) + @('--no-startup') }
     if ($script:Safe) {
         $Arguments = @($Arguments) + @(Get-SafeArguments $Arguments)
     }

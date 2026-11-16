@@ -27,6 +27,7 @@ use winit::keyboard::{Key, NamedKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::sounds::Sounds;
+use crate::startup::Playing;
 use crate::store::Store;
 use crate::{since_start, Args};
 
@@ -120,8 +121,14 @@ struct App {
     last_frame: Instant,
     /// A frame is wanted whatever else: the first, or after a resize.
     stale: bool,
-    /// When Home's first frame was presented.
+    /// When the window's first frame was presented: Start-up's, or Home's with none. The sources are read from
+    /// then on, behind the Boot video.
     presented: Option<Instant>,
+    /// When Home's first frame was presented, once Start-up is over: the Overlay, the greeting and the art
+    /// lookup wait for it.
+    home_presented: Option<Instant>,
+    /// The Boot video, while it plays (docs/spec/start-up.md).
+    boot_video: Option<Playing>,
     launch: Option<Launch>,
     /// Holds the running game still while the Guide is open over it, and lets it go as the Guide hands the
     /// foreground back (docs/spec/guide.md, 7.2). After `launch` here, so it outlives it.
@@ -273,7 +280,9 @@ pub fn run(args: &Args, library: Library, store: Store) {
     let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(args.clock.clone());
     // Settings' options, as they were left (docs/spec/settings.md, section 7).
-    let options = store.options();
+    let mut options = store.options();
+    // The Boot video is opened before the window, so it decodes while the window and the GPU are made.
+    let boot_video = Playing::start(args, &store, &mut options);
     if !options.use_guide {
         eprintln!("guide: off ({}): the Guide button does nothing", Setting::UseGuide.key());
     }
@@ -295,6 +304,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
     }
     // Where --focus put focus is where the Dashboard starts: nothing is heard of getting there.
     dashboard.take_effects();
+    // Start-up, over all of that until it is done: the Boot video, if one plays.
+    dashboard.start_up(boot_video.is_some());
     let mut app = App {
         windowed: args.windowed,
         dashboard,
@@ -328,6 +339,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
         last_frame: Instant::now(),
         stale: true,
         presented: None,
+        home_presented: None,
+        boot_video,
         launch: None,
         freezer,
         release_wait: None,
@@ -759,6 +772,8 @@ impl App {
                         }
                     }
                 }
+                // Plays from the next start.
+                Effect::BootVideo(video) => self.store.set_boot_video(video),
                 // The user's marks go to the library database, and what it says then is what the screens show.
                 Effect::Favourite { game, on } => {
                     let marked = self.store.set_favourite(game, on);
@@ -820,6 +835,18 @@ impl App {
         }
         // A Profile signed in by the core itself (`Dashboard::sign_in`) changed before its effect was carried out.
         self.log_profile();
+    }
+
+    /// The Boot video while it plays: drawn every refresh, and let go as it ends, fails, runs too long or a press
+    /// skips it, when Start-up goes on and Home is drawn.
+    fn follow_boot_video(&mut self) {
+        let Some(playing) = &mut self.boot_video else { return };
+        if playing.ended(self.dashboard.boot_video_playing()).is_some() {
+            self.boot_video = None;
+            self.dashboard.boot_video_ended();
+        }
+        self.stale = true;
+        self.overlay_stale = true;
     }
 
     /// Looks up the art the stores gave none for, with the key that is kept: what comes in wakes the loop.
@@ -957,7 +984,7 @@ impl ApplicationHandler for App {
         self.dashboard.set_slow_renderer(self.cpu_renderer || self.home_took > SLOW_FRAME);
         // After Home's first frame, and once Home has come to rest or a while has passed, so the Overlay costs
         // neither the start-up nor the first art its time. A launch that comes sooner makes it then.
-        if let (Some(presented), Some(state)) = (self.presented, &self.state) {
+        if let (Some(presented), Some(state)) = (self.home_presented, &self.state) {
             let at_rest = !self.stale && !state.host.animating() && state.host.art.pending() == 0;
             if at_rest || presented.elapsed() >= OVERLAY_AFTER {
                 self.make_overlay();
@@ -1000,7 +1027,7 @@ impl ApplicationHandler for App {
             }
         }
         // Art for the games a store gave none for, once the stores have been read and the first frame is out.
-        if !self.art_started && self.presented.is_some() && self.store.sources_read() {
+        if !self.art_started && self.home_presented.is_some() && self.store.sources_read() {
             self.start_art();
         }
         if self.take_art() {
@@ -1139,6 +1166,7 @@ impl ApplicationHandler for App {
             }
         }
 
+        self.follow_boot_video();
         let Some(state) = &self.state else { return };
         if let Some((frames, since)) = &mut self.frames {
             if since.elapsed() >= FRAMES_EVERY {
@@ -1215,7 +1243,9 @@ impl ApplicationHandler for App {
                     // Esc is B, and at Home with nothing open it is the way out. On a page it closes what B
                     // closes: text entry first, dropping the text (docs/spec/search.md, 8.4).
                     Key::Named(NamedKey::Escape) => {
-                        let nothing_open = !self.dashboard.guide_open() && self.dashboard.pages_up() == 0;
+                        let nothing_open = !self.dashboard.guide_open()
+                            && self.dashboard.pages_up() == 0
+                            && !self.dashboard.starting_up();
                         if nothing_open && self.dashboard.playing().is_none() {
                             event_loop.exit();
                         }
@@ -1276,9 +1306,21 @@ impl ApplicationHandler for App {
                 let acquired = Instant::now();
                 let view = frame.texture.create_view(&Default::default());
                 let size = (state.config.width, state.config.height);
+                if let Some(playing) = &mut self.boot_video {
+                    let refresh = state.window.current_monitor().and_then(|m| m.refresh_rate_millihertz());
+                    let refresh = refresh.map_or(1.0 / 60.0, |rate| 1000.0 / f64::from(rate.max(1)));
+                    playing.before_frame(&mut state.host, &state.gpu, &mut self.dashboard, refresh);
+                }
                 let dashboard = &mut self.dashboard;
                 state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
                 state.gpu.queue.present(frame);
+                if let Some(playing) = &mut self.boot_video {
+                    playing.after_present();
+                }
+                if self.home_presented.is_none() && !self.dashboard.starting_up() {
+                    self.home_presented = Some(Instant::now());
+                    eprintln!("startup: Home's first frame at {:.0} ms", since_start());
+                }
                 if self.frames.is_some() {
                     self.frame_times[0].frame(now, acquired, Instant::now(), self.moving);
                 }
