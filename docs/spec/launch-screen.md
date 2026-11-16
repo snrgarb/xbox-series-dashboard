@@ -1,0 +1,25 @@
+# The Launch screen, and the backdrop behind a game
+
+From pressing Play until Home is back, the Windows desktop is never seen (#164, asked for by the user: "make sure the windows desktop is hidden completely with the game splash screen in the background then fade back to the home screen on exit"). The Bundle's glossary entry is `CONTEXT.md`, "Launch screen". Its sources are `C/ExtensionCore.LaunchScreen.cs`, `C/LaunchScreenState.cs`, `E/LaunchScreenWindow.xaml(.cs)`, `T/Views/GameStatus.xaml` (game-hub.md 11) and `C/ExtensionCore.cs` `OnGameStopped` / `ReturnHomeFrom`. The port's code is `crates/screens/src/launch.rs` (the pictures), `crates/shell/src/launch.rs` (following the game, z-order), `crates/app/src/window.rs` (drawing Home's window) and `crates/standin` (the stand-in game).
+
+## 1. What happened before #164
+
+Read from the code at `235150a`, before any change. Each moment, which of the Dashboard's windows is up, and what is on screen.
+
+| Moment | Home's window | Overlay | What is seen |
+|---|---|---|---|
+| Play pressed (`Effect::Launch`, `Launch::start`) | Shown, in front, drawn until the Launch screen has faded in over it (`home_covered`), then not drawn | Shown `Passive` over the monitor of the window in front, topmost, never activated; the Launch screen fades in over 300 ms (whole at once on a slow renderer) | Home, then the Launch screen |
+| The store's and the launcher's windows | Under them, as it was | Raised above everything at each look (every 200 ms, `overlay.raise()`) | The Launch screen. A gap between a launcher closing and the game opening is covered too: the Overlay is still up |
+| The game's first frame (a window of a program in the game's folder covering 60% of the screen) | As it was | As it was | The Launch screen; the game's window is given the foreground |
+| Booted (that window up 1.5 s, or another window has held the foreground 5 s, or two minutes with no window) | **Hidden** (`ShowWindow(SW_HIDE)`, `Launch::reveal`) | The Launch screen fades away over 300 ms, then hidden | The game. **Round a game that does not fill the screen (windowed, borderless at another size): the desktop and the taskbar**, since nothing of the Dashboard's is behind it |
+| The game running | Hidden; not drawn | Hidden, but for the Guide, the Idle screen and Toasts (its own strip) | The game, the desktop round it |
+| The game's window goes: it exits, crashes, is quit or force quit | Still hidden. The launch's look sees nothing of the game; it waits until neither the desktop nor the store has shown anything of it for 2 s (`GONE`; for Steam the store's word is `HKCU\Software\Valve\Steam\Apps\<appid>\Running`, which Steam clears in its own time) | Hidden (or the Guide, for Quit) | **The desktop: the wallpaper, the taskbar and whatever window Windows activates next**, for at least 2 s and as long as Steam takes to clear `Running` |
+| Ended | Shown and given the foreground (`restore`: `SetWindowPos`, the Alt tap, `SetForegroundWindow`), drawn afresh: Home, focus on the game's tile | | Home appears at once, with no fade |
+| Quit or Force quit from the Guide | Hidden until ended, then shown behind the Guide without the foreground | The Guide stays; its dim is over the desktop once the game has gone; it closes 500 ms after the game has ended | The Guide over the desktop, then over Home |
+| A game that hands off to another process (a launcher starting the real game, a game restarting itself) | Hidden while the game runs | Hidden | The desktop between the first window going and the second coming. While the game starts the Overlay covers the hand-off |
+| Home or a page chosen in the Guide over a game | Shown in front of the game (`show_home`), drawn | | Home; back to the game hides it again (`show_game`) |
+| Exit to desktop | The Dashboard exits after the leaving sound; the game runs on | | The desktop, as meant |
+
+**The reason for the user's report:** Home's window is hidden from the moment the game boots (`reveal`) until the launch has ended (`GONE` after the last of the game, `restore`). Nothing of the Dashboard's is on screen while the game runs, so whatever Windows has behind the game, the desktop, shows round a game that does not fill the screen and through the whole of the time between the game's window going and the launch ending. The Launch screen lives on the Overlay, which is hidden once the game has booted and is not shown again on exit.
+
+**The Bundle.** Playnite's Fullscreen window is never hidden while a game runs: it stays behind the game showing Playnite's game status view, which the Bundle draws to match the Launch screen ("so the Launch screen's fade-out reveals the same picture", `T/Views/GameStatus.xaml` 1-12: the game's art as Home's hero chooses it, the scrim, the shade, the cover and "{Game} is running…"). When the game stops, `ReturnHomeFrom` brings Playnite to the front on Home (`playnite.BringToFront(DashboardPage.Home)`), with no animation of its own. The only fade the Bundle has between the game's picture and what is under it is the Launch screen's own: **300 ms, WPF's `CubicEase` `EaseOut`** (`E/LaunchScreenWindow.xaml.cs`, `FadeDuration`).
