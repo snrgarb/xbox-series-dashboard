@@ -115,7 +115,7 @@ impl Shell {
 }
 
 #[test]
-fn the_groups_box_is_personalisations_first_and_opens_a_row_for_every_filter_then_new_group() {
+fn the_groups_box_is_where_customise_home_lands_and_opens_a_row_for_every_filter_then_new_group() {
     let mut shell = Shell::new();
     shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
     assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
@@ -372,7 +372,7 @@ impl Stage {
     }
 }
 
-/// Personalisation, focus on Groups: its first box, alone on its row, the checkbox boxes under it.
+/// Personalisation, focus on Groups: under Boot video, alone on its row, the checkbox boxes under it.
 #[test]
 fn settings_personalisation_groups() {
     let mut stage = Stage::groups();

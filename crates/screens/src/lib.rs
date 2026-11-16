@@ -22,6 +22,7 @@ pub mod profile;
 pub mod search;
 pub mod settings;
 pub mod spinner;
+pub mod startup;
 pub mod theme;
 pub mod tile_menu;
 pub mod toasts;
@@ -38,6 +39,8 @@ use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
 pub use crate::settings::{Options, Setting};
+pub use crate::startup::{BootVideo, Found};
+use crate::startup::{Phase, Startup};
 pub use crate::toasts::Notification;
 use crate::toasts::{Toast, ToastKind, Toasts};
 
@@ -111,6 +114,9 @@ pub enum Effect {
     /// (`Dashboard::sign_in`). A new snapshot follows, as for a favourite, and every place a Profile shows follows
     /// it (docs/spec/profiles.md).
     Profile(ProfileChange),
+    /// Settings > Personalisation > Boot video chose this one, or Off (docs/spec/start-up.md). The Dashboard has it
+    /// already: this is for whoever keeps the settings to save, and it plays from the next start.
+    BootVideo(BootVideo),
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.
@@ -222,6 +228,9 @@ pub struct Dashboard {
     now: Instant,
     /// How long from `now` until the double tap's wait is over, if one is waited out (`wait_out`).
     waiting: Option<Duration>,
+    /// Start-up, while it shows (docs/spec/start-up.md): full screen over everything, with the pad and the Guide
+    /// button to itself.
+    startup: Option<Startup>,
     effects: Vec<Effect>,
 }
 
@@ -256,6 +265,7 @@ impl Dashboard {
             now_playing_second: None,
             now: Instant::now(),
             waiting: None,
+            startup: None,
             effects: Vec::new(),
         }
     }
@@ -516,7 +526,11 @@ impl Dashboard {
 
     /// Whether a page over Home is what a press goes to now.
     fn page_has_pad(&self) -> bool {
-        !self.guide.is_open() && !self.launch.up() && self.playing.is_none() && !self.pages.is_empty()
+        self.startup.is_none()
+            && !self.guide.is_open()
+            && !self.launch.up()
+            && self.playing.is_none()
+            && !self.pages.is_empty()
     }
 
     /// What a physical keyboard typed that is text's: letters, Space, Backspace. It goes to the page that has the
@@ -542,6 +556,10 @@ impl Dashboard {
     /// (docs/spec/guide.md, 7.1): a tap closes an open Guide as the button is let go, and opens a closed one when
     /// the tap is told, 300 ms after the button went down; a hold opens Power, with no panel.
     pub fn pad_event(&mut self, event: PadEvent) {
+        if self.startup.is_some() {
+            self.startup_pad_event(event);
+            return;
+        }
         let guide = Press { button: Button::Guide, repeat: false };
         match event {
             PadEvent::Press(press) => {
@@ -607,6 +625,9 @@ impl Dashboard {
     fn pass(&mut self, seconds: f32) {
         // To the microsecond: steps a test adds up land where it says, not a hair short.
         self.now += Duration::from_micros((f64::from(seconds) * 1e6).round().max(0.0) as u64);
+        if let Some(startup) = &mut self.startup {
+            startup.advance(seconds);
+        }
         self.timed |= self.wait_out();
         // The Now Playing card's time turned a second: it is drawn again.
         let second = self.now_playing_second();
@@ -822,6 +843,10 @@ impl Dashboard {
     /// opening, after the sound of what opened it; a move along its rows; A on a row, which in a prompt is the
     /// sound of its closing; B at every level. A move with nowhere to go is silent there too.
     pub fn press(&mut self, press: Press) {
+        if self.startup.is_some() {
+            self.startup_press(press);
+            return;
+        }
         let now = self.now;
         let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
@@ -894,6 +919,11 @@ impl Dashboard {
                 if let Some(source) = self.now_playing.choose(&source) {
                     self.effects.push(Effect::NowPlayingSource(source));
                 }
+            }
+            // Plays from the next start: the Boot video page ticks it at once.
+            PageAction::Effect(Effect::BootVideo(video)) => {
+                self.options.boot_video = video;
+                self.effects.push(Effect::BootVideo(video));
             }
             // Whether there is a key is the Dashboard's to show; the key itself goes on to be kept.
             PageAction::Effect(Effect::ArtKey(key)) => {
@@ -1115,6 +1145,9 @@ impl Dashboard {
     /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail: Theme settings`). A press that
     /// changes this moved focus.
     fn focus_place(&self) -> String {
+        if let Some(startup) = &self.startup {
+            return startup.focus();
+        }
         match self.pages.top() {
             Some(page) => format!("{}: {}", page.name(), page.focus()),
             None => format!("{:?}", self.home.focus()),
@@ -1160,6 +1193,9 @@ impl Dashboard {
     /// after it what the page says of its state beyond focus, if it says any (`TextEntry: A; "Ha|" lower letters`).
     pub fn focus_line(&self) -> String {
         let place = self.focus_place();
+        if self.startup.is_some() {
+            return place;
+        }
         match self.pages.top().map(|page| page.state()) {
             Some(state) if !state.is_empty() => format!("{place}; {state}"),
             _ => place,
@@ -1592,6 +1628,9 @@ impl Dashboard {
     /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to
     /// draw it on; and the Toast, where Toasts have no window of their own.
     pub fn draw(&mut self, ui: &mut Ui) {
+        if self.draw_startup(ui) {
+            return;
+        }
         self.draw_home(ui);
         if !self.toast_strip {
             self.draw_toasts(ui);
@@ -1653,9 +1692,107 @@ impl Dashboard {
     /// All in one frame, the Overlay's picture over Home's window's and the Toast over both: what an offscreen
     /// frame shows.
     pub fn draw_all(&mut self, ui: &mut Ui) {
+        if self.draw_startup(ui) {
+            return;
+        }
         self.draw_home(ui);
         self.draw_overlay(ui);
         self.draw_toasts(ui);
+    }
+
+    // --- Start-up (docs/spec/start-up.md) ---
+
+    /// Start-up begins, as the Dashboard starts: with the Boot video if one is to play (`video`: it was chosen and
+    /// found, and the executable has it opening), else at once with what follows it. Over everything until it ends,
+    /// with the pad and the Guide button its own.
+    pub fn start_up(&mut self, video: bool) {
+        if video {
+            self.startup = Some(Startup::boot_video());
+        } else {
+            self.after_boot_video();
+        }
+    }
+
+    /// Whether Start-up shows: nothing else is drawn, and every press is its.
+    pub fn starting_up(&self) -> bool {
+        self.startup.is_some()
+    }
+
+    /// Whether the Boot video is what shows: the executable plays it while this says so, and stops it when it
+    /// stops saying so (a press skipped it).
+    pub fn boot_video_playing(&self) -> bool {
+        self.startup.as_ref().is_some_and(|startup| startup.phase() == Phase::BootVideo)
+    }
+
+    /// The video's first frame is in this texture, `aspect` wide to high: it shows from the next frame on, and a
+    /// press skips it a moment after (`startup::SKIP_AFTER`).
+    pub fn boot_video_picture(&mut self, tex: ui::TexId, aspect: f32) {
+        if let Some(startup) = self.startup.as_mut().filter(|startup| startup.phase() == Phase::BootVideo) {
+            startup.set_picture(tex, aspect);
+        }
+    }
+
+    /// The Boot video has ended, or could not play, or ran too long: Start-up goes on.
+    pub fn boot_video_ended(&mut self) {
+        if self.boot_video_playing() {
+            self.after_boot_video();
+        }
+    }
+
+    /// What comes after the Boot video, or at once with it Off.
+    ///
+    /// **The hook for #127**: Who's playing today? and Signing you in go here, as `startup::Phase`s of their own
+    /// that end Start-up as Signing you in has shown, the Profile signed in (`sign_in`) and greeted. Until they come,
+    /// Start-up ends with the video: Home shows, and the executable greets the Profile signed in last
+    /// (`greet`) once Toasts have somewhere to show.
+    fn after_boot_video(&mut self) {
+        self.startup = None;
+    }
+
+    /// A press while Start-up shows. Any button skips the Boot video, once its picture has been up a moment; no
+    /// sound, as in the Bundle. Nothing else is told of it.
+    fn startup_press(&mut self, press: Press) {
+        let Some(startup) = &self.startup else { return };
+        if startup.phase() == Phase::BootVideo && startup.takes_presses() && !press.repeat {
+            self.after_boot_video();
+        }
+    }
+
+    /// The pad while Start-up shows: a button going down is a press, the Guide button's release or hold too. What
+    /// is still to come of a Guide button press Start-up took (its tap, its release after a hold) does nothing
+    /// once Home shows: the Guide does not open behind the video.
+    fn startup_pad_event(&mut self, event: PadEvent) {
+        let guide = Press { button: Button::Guide, repeat: false };
+        match event {
+            PadEvent::Press(press) => self.startup_press(press),
+            // A hold: its release follows, and no tap.
+            PadEvent::GuideHeld => {
+                self.guide_button_spent = true;
+                self.startup_press(guide);
+            }
+            // The release of a hold Start-up took ends that press; a tap's has its tap still to come.
+            PadEvent::Release(Button::Guide) => {
+                if !std::mem::take(&mut self.guide_button_spent) {
+                    self.guide_button_spent = true;
+                    self.startup_press(guide);
+                }
+            }
+            PadEvent::GuideTap => self.guide_button_spent = false,
+            PadEvent::Release(_) => {}
+        }
+    }
+
+    /// Start-up's picture, if it shows. Home is drawn under it once, unseen, as the picture first shows, so its
+    /// art is decoded behind the video.
+    fn draw_startup(&mut self, ui: &mut Ui) -> bool {
+        let Some(warm) = self.startup.as_mut().map(Startup::warm_home) else { return false };
+        if warm {
+            ui.with_alpha(0.0, |ui| self.draw_home(ui));
+        }
+        if let Some(startup) = &self.startup {
+            startup.draw(ui);
+        }
+        true
     }
 }
 

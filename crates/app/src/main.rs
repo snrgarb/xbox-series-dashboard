@@ -1,8 +1,10 @@
 //! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG.
 mod games;
+mod media_folder;
 mod offscreen;
 mod sounds;
 mod sources;
+mod startup;
 mod store;
 mod store_apps;
 mod window;
@@ -41,8 +43,12 @@ pub struct Args {
     windowed: bool,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
     clock: Option<String>,
-    /// The folder the sounds are in, in place of the data folder's and the Bundle's.
+    /// The folder the sounds and boot videos are in, in place of the data folder's and the Bundle's
+    /// (`media_folder`).
     media: Option<PathBuf>,
+    /// Start at Home, with no Start-up: no Boot video whatever is chosen. What the tests start with, but the one
+    /// that asks for Start-up.
+    no_startup: bool,
     /// Every sound played is a line in the log.
     log_sounds: bool,
     /// Say every few seconds how many frames were drawn: what an idle Dashboard is checked by.
@@ -97,7 +103,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
                  [--epic <dir>] [--gog <dir>] [--ea <dir>] [--ubisoft <dir>] [--battlenet <dir>]
                  [--xbox <dir>]
-                 [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
+                 [--media <dir>] [--no-startup] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--fake-media [--fake-media-art <picture>]]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>]
@@ -168,6 +174,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--windowed" => args.windowed = true,
             "--clock" => args.clock = Some(value()?),
             "--media" => args.media = Some(value()?.into()),
+            "--no-startup" => args.no_startup = true,
             "--log-sounds" => args.log_sounds = true,
             "--log-frames" => args.log_frames = true,
             "--log-focus" => args.log_focus = true,

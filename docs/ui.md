@@ -20,6 +20,7 @@ The Dashboard is a fixed set of 10-foot screens steered by a pad. Its navigation
 | `input` | The pad through XInput, turned into `PadEvent`s: presses (with direction repeat), releases, the Guide button's tap and hold. Whether a pad is connected and what powers it. |
 | `shell` | Windows itself: the Overlay window, the Toast strip above it, launching a game and following it, and holding it still under the Guide. |
 | `audio` | Short sounds: WAV files decoded once, mixed on a thread of its own, played through WASAPI. Silent anywhere but Windows. |
+| `media` | Video: a file decoded by Media Foundation (loaded at run time) into frames for a texture, its sound through WASAPI, the picture paced by the sound's clock. The Boot video's ([spec/start-up.md](spec/start-up.md)); fails at once anywhere but Windows. |
 | `model` | The domain, with no I/O: a game, the library, a filter, a Play session; and `Source`, the one interface every store is behind ([sources.md](sources.md)). |
 | `library` | The library database: every source merged into one SQLite file, and the snapshots the screens are given. |
 | `source-steam` | Steam, as a `Source`: its install read, its games started and asked of it through `steam://` addresses. The other stores' crates come beside it. |

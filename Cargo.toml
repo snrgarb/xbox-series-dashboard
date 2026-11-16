@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/model", "crates/library", "crates/source-steam", "crates/source-epic", "crates/source-gog","crates/render", "crates/ui", "crates/screens", "crates/input", "crates/shell", "crates/audio", "crates/app", "crates/shots", "crates/standin", "spikes/*",
+members = ["crates/model", "crates/library", "crates/source-steam", "crates/source-epic", "crates/source-gog","crates/render", "crates/ui", "crates/screens", "crates/input", "crates/shell", "crates/audio", "crates/media", "crates/app", "crates/shots", "crates/standin", "spikes/*",
     "crates/source-kit", "crates/source-ea", "crates/source-ubisoft", "crates/source-battlenet", "crates/source-xbox",
 ]
 

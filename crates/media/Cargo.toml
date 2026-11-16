@@ -1,0 +1,25 @@
+[package]
+name = "media"
+version = "0.0.0"
+edition = "2021"
+description = "Video: a file decoded by Media Foundation on a thread of its own, its sound on the default device, and the clock its picture is paced by. Nothing to play anywhere but Windows."
+
+# The version wgpu's DX12 backend already builds, so this adds no second copy. `windows` rather than `windows-sys`
+# because Media Foundation and WASAPI are COM. Media Foundation's own functions are found at run time
+# (`win::mf`), never imported: a Windows without it (an N edition) starts the Dashboard all the same, with no video.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Media_Audio",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Performance",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }

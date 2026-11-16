@@ -77,7 +77,7 @@ impl Shell {
     fn profiles() -> Self {
         let mut shell = Self::new();
         shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-        shell.press(&[Right, A]);
+        shell.press(&[Up, Right, A]);
         assert_eq!(shell.focus(), "Settings: Profiles: Tester");
         shell
     }
@@ -149,13 +149,18 @@ impl Shell {
 fn profiles_is_personalisations_second_box_and_lists_every_profile_then_add_profile() {
     let mut shell = Shell::new();
     shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    // Groups stays first, where Customise Home lands; Profiles beside it, in the Bundle's place.
+    // Customise Home lands on Groups, under Boot video; Profiles is beside Boot video, in the Bundle's place.
     assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
+    shell.press(&[Up]);
+    assert_eq!(shell.focus(), "Settings: Personalisation: Boot video");
     shell.press(&[Right]);
     assert_eq!(shell.focus(), "Settings: Personalisation: Profiles");
+    // Down from Profiles is the row below's one box.
+    shell.press(&[Down]);
+    assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
     shell.press(&[Down]);
     assert_eq!(shell.focus(), "Settings: Personalisation: Background delay");
-    shell.press(&[Up, Right, A]);
+    shell.press(&[Up, Up, Right, A]);
     assert_eq!(shell.focus(), "Settings: Profiles: Tester");
     // Left at the first column does nothing on the page; Right is Add profile; the row's end stops.
     shell.press(&[Left]);
@@ -398,7 +403,7 @@ impl Stage {
     }
 }
 
-/// Personalisation, focus on Profiles beside Groups.
+/// Personalisation, focus on Profiles beside Boot video.
 #[test]
 fn settings_personalisation_profiles() {
     let mut stage = Stage::profiles();
@@ -457,7 +462,7 @@ fn settings_profile_picture() {
 fn settings_profile_picture_hint() {
     let mut shell = Shell::offering(Vec::new());
     shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    shell.press(&[Right, A, A, Down, A]);
+    shell.press(&[Up, Right, A, A, Down, A]);
     assert_eq!(shell.focus(), "Settings: Picture: Shape 0; worn");
     Stage::over(shell).check("settings-profile-picture-hint");
 }

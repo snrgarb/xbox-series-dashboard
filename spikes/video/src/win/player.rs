@@ -1,7 +1,5 @@
 //! The window: borderless full screen (or 1280x720 with `--windowed`), each decoded frame written to one texture
 //! and drawn as a quad when the clock reaches its time. Any key ends it, as does the end of the file.
-use std::sync::atomic::Ordering;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -13,8 +11,8 @@ use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Fullscreen, Window, WindowId};
 
-use super::audio::Playback;
-use super::decode::{self, Event, Frame, Opened};
+use media::{Status, Video};
+
 use crate::fit::letterbox;
 use crate::{log, since_start, Play};
 
@@ -46,39 +44,25 @@ struct Player {
     seconds: Option<f64>,
     size: (u32, u32),
     pixel_aspect: (u32, u32),
-    playback: Arc<Playback>,
-    events: Receiver<Event>,
-    recycle: Sender<Vec<u8>>,
+    video: Video,
     screen: Option<Screen>,
-    /// The frame decoded but not yet due.
-    next: Option<Frame>,
     ended: bool,
-    /// The first frame's time, once it has been written to the texture.
-    first: Option<f64>,
     /// When the first frame was presented.
     started: Option<Instant>,
     presented: u64,
-    dropped: u64,
     tally: Tally,
     last_stats: Instant,
     result: Result<(), String>,
 }
 
 pub fn run(args: &Play) -> Result<(), String> {
-    let (recycle, recycled) = std::sync::mpsc::channel();
-    // A full path: Media Foundation resolves the name as a URL, not against the working directory.
-    let file = std::path::absolute(&args.file).map_err(|e| format!("{}: {e}", args.file.display()))?;
-    if !file.is_file() {
-        return Err(format!("{}: no such file", file.display()));
+    if !args.file.is_file() {
+        return Err(format!("{}: no such file", args.file.display()));
     }
     let options =
-        decode::Options { file, audio: !args.no_audio, dxva: args.dxva, basic_processing: args.basic_processing };
-    let events = decode::spawn(options, recycled);
-    let Opened { size, pixel_aspect, playback } = match events.recv() {
-        Ok(Event::Opened(opened)) => opened,
-        Ok(Event::Failed(e)) => return Err(e),
-        _ => return Err("the decoder stopped before opening the file".into()),
-    };
+        media::Options { audio: !args.no_audio, volume: 1.0, dxva: args.dxva, basic_processing: args.basic_processing };
+    let mut video = Video::open(&args.file, options);
+    let media::Picture { size, pixel_aspect } = video.wait_open()?;
 
     let event_loop = EventLoop::new().map_err(|e| format!("no display: {e}"))?;
     // Drawn every vertical blank, where each frame's time is checked against the clock.
@@ -88,66 +72,41 @@ pub fn run(args: &Play) -> Result<(), String> {
         seconds: args.seconds,
         size,
         pixel_aspect,
-        playback,
-        events,
-        recycle,
+        video,
         screen: None,
-        next: None,
         ended: false,
-        first: None,
         started: None,
         presented: 0,
-        dropped: 0,
         tally: Tally::default(),
         last_stats: Instant::now(),
         result: Ok(()),
     };
     let run = event_loop.run_app(&mut player);
-    player.playback.close();
-    let decoded = player.playback.decoded.load(Ordering::Relaxed);
-    log!("video: done decoded={decoded} presented={} dropped={}", player.presented, player.dropped);
+    let decoded = player.video.decoded();
+    log!("video: done decoded={decoded} presented={} dropped={}", player.presented, player.video.dropped);
     run.map_err(|e| format!("event loop: {e}"))?;
     player.result
 }
 
 impl Player {
-    /// The frame to show now, if one has come due: the latest whose time the clock has reached. Earlier ones that
-    /// were never shown count as dropped.
-    fn due_frame(&mut self, early: f64) -> Option<Frame> {
-        let now = self.playback.now();
-        let mut due: Option<Frame> = None;
-        loop {
-            if self.next.is_none() && !self.ended {
-                match self.events.try_recv() {
-                    Ok(Event::Frame(frame)) => {
-                        self.tally.frames += 1;
-                        self.tally.decode_ms += frame.decode_ms;
-                        self.tally.copy_ms += frame.copy_ms;
-                        self.next = Some(frame);
-                    }
-                    Ok(Event::End) | Err(TryRecvError::Disconnected) => self.ended = true,
-                    Ok(Event::Failed(e)) => {
-                        self.result = Err(e);
-                        self.ended = true;
-                    }
-                    Ok(Event::Opened(_)) | Err(TryRecvError::Empty) => {}
-                }
-            }
-            // The first frame goes up as soon as it is decoded; the clock starts from it.
-            let first = self.first.is_none() && due.is_none();
-            match self.next.take() {
-                Some(frame) if first || (self.started.is_some() && frame.time <= now + early) => {
-                    if let Some(skipped) = due.replace(frame) {
-                        self.dropped += 1;
-                        let _ = self.recycle.send(skipped.pixels);
-                    }
-                }
-                waiting => {
-                    self.next = waiting;
-                    return due;
-                }
-            }
+    /// The frame to show now, if one has come due: the latest whose time the clock has reached (`media::Video::due`).
+    /// Notes whether the video has ended.
+    fn due_frame(&mut self, early: f64) -> Option<media::Frame> {
+        let due = self.video.due(early);
+        if let Some(frame) = &due {
+            self.tally.frames += 1;
+            self.tally.decode_ms += frame.decode_ms;
+            self.tally.copy_ms += frame.copy_ms;
         }
+        match self.video.status() {
+            Status::Ended => self.ended = true,
+            Status::Failed(e) => {
+                self.result = Err(e);
+                self.ended = true;
+            }
+            Status::Opening | Status::Playing => {}
+        }
+        due
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
@@ -155,13 +114,12 @@ impl Player {
         let due = self.due_frame(early);
         let Some(screen) = &mut self.screen else { return };
         if let Some(frame) = due {
-            self.first.get_or_insert(frame.time);
             let before = Instant::now();
             screen.renderer.update_video_texture(&screen.gpu.queue, screen.texture, &frame.pixels, 4 * self.size.0);
             self.tally.uploads += 1;
             self.tally.upload_ms += before.elapsed().as_secs_f64() * 1000.0;
             self.presented += 1;
-            let _ = self.recycle.send(frame.pixels);
+            self.video.recycle(frame.pixels);
         }
 
         let target = match screen.surface.get_current_texture() {
@@ -185,17 +143,17 @@ impl Player {
         screen.renderer.render(&screen.gpu.device, &screen.gpu.queue, &view, screen_size, &frame, black);
         screen.gpu.queue.present(target);
 
-        if let (None, Some(time)) = (self.started, self.first) {
+        if self.started.is_none() && self.presented > 0 {
             self.started = Some(Instant::now());
             self.last_stats = Instant::now();
-            self.playback.start(time);
+            self.video.presented();
             log!("video: first frame presented at {:.0} ms", since_start());
         }
         if self.last_stats.elapsed() >= Duration::from_secs(1) && self.started.is_some() {
             self.stats();
         }
         let out_of_time = self.started.zip(self.seconds).is_some_and(|(at, s)| at.elapsed().as_secs_f64() >= s);
-        if self.ended && self.next.is_none() {
+        if self.ended {
             if self.result.is_ok() {
                 log!("video: end of stream");
             }
@@ -212,13 +170,13 @@ impl Player {
         let per = |sum: f64, count: u32| if count > 0 { sum / count as f64 } else { 0.0 };
         log!(
             "video: stats decoded={} presented={} dropped={} avg_decode_ms={:.2} avg_upload_ms={:.2} avg_copy_ms={:.2} clock={:.3}",
-            self.playback.decoded.load(Ordering::Relaxed),
+            self.video.decoded(),
             self.presented,
-            self.dropped,
+            self.video.dropped,
             per(tally.decode_ms, tally.frames),
             per(tally.upload_ms, tally.uploads),
             per(tally.copy_ms, tally.frames),
-            self.playback.now(),
+            self.video.clock(),
         );
         self.last_stats = Instant::now();
     }

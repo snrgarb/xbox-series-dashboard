@@ -1,6 +1,7 @@
-//! The sound, through WASAPI in shared mode, and the clock the picture is paced by: the position of the sound the
-//! device has played. With no sound (none in the file, no device, `--no-audio`, or the device lost part-way) the
-//! clock runs on the system's monotonic clock instead.
+//! The sound, through WASAPI in shared mode on the default device (the one the `audio` crate's sounds play on), and
+//! the clock the picture is paced by: the position of the sound the device has played. With no sound (none in the
+//! file, no device, none asked for, or the device lost part-way) the clock runs on the system's monotonic clock
+//! instead.
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -9,7 +10,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{
     eConsole, eRender, IAudioClient, IAudioClock, IAudioRenderClient, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+    ISimpleAudioVolume, MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, WAVEFORMATEX,
 };
 use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
@@ -18,7 +19,7 @@ use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerforma
 use windows::Win32::System::Variant::VT_LPWSTR;
 
 use super::{Com, Step};
-use crate::log;
+use crate::Clock;
 
 /// How much sound the device's buffer holds, in 100 ns units: enough to ride out a late wake-up of the feeding
 /// thread.
@@ -31,7 +32,7 @@ const PREROLL_SECONDS: f64 = 0.1;
 const STALL: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Copy)]
-enum Clock {
+enum Time {
     /// Media time standing still: before the first frame, or while the device has nothing to play.
     Stopped(f64),
     /// Media time `media` was reached at `at` and has moved with the system's clock since.
@@ -46,10 +47,10 @@ struct Pcm {
     ended: bool,
 }
 
-/// What the decoder, the thread feeding the sound device and the window share: the clock, the decoded sound waiting
-/// to be played, and the count of frames decoded.
+/// What the decoder, the thread feeding the sound device and whoever shows the picture share: the clock, the
+/// decoded sound waiting to be played, and the count of frames decoded.
 pub struct Playback {
-    clock: Mutex<Clock>,
+    time: Mutex<Time>,
     pcm: Mutex<Pcm>,
     /// A device is playing the sound and driving the clock.
     audio: AtomicBool,
@@ -62,7 +63,7 @@ pub struct Playback {
 impl Playback {
     pub fn new() -> Arc<Playback> {
         Arc::new(Playback {
-            clock: Mutex::new(Clock::Stopped(0.0)),
+            time: Mutex::new(Time::Stopped(0.0)),
             pcm: Mutex::new(Pcm::default()),
             audio: AtomicBool::new(false),
             go: AtomicBool::new(false),
@@ -71,25 +72,9 @@ impl Playback {
         })
     }
 
-    /// Media time now, in seconds.
-    pub fn now(&self) -> f64 {
-        match *self.clock.lock().unwrap() {
-            Clock::Stopped(media) => media,
-            Clock::Running { media, at } => media + at.elapsed().as_secs_f64(),
-        }
-    }
-
-    /// The first frame, of media time `media`, is on screen: starts the sound, or with none the clock.
-    pub fn start(&self, media: f64) {
-        self.go.store(true, Ordering::SeqCst);
-        if !self.audio.load(Ordering::SeqCst) {
-            self.run_free(media);
-        }
-    }
-
-    /// Playback is over: the sound stops.
-    pub fn close(&self) {
-        self.closed.store(true, Ordering::SeqCst);
+    /// Playing is over: whoever shows it has let it go.
+    pub fn closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
     }
 
     /// Queues decoded sound whose first sample is at media time `time`. Dropped when no device is playing.
@@ -107,7 +92,7 @@ impl Playback {
     }
 
     fn run_free(&self, media: f64) {
-        *self.clock.lock().unwrap() = Clock::Running { media, at: Instant::now() };
+        *self.time.lock().unwrap() = Time::Running { media, at: Instant::now() };
     }
 
     /// The device is gone or has played everything: from here the clock runs by itself, if it has been started.
@@ -120,32 +105,56 @@ impl Playback {
     }
 }
 
-/// Opens the default sound device for `format` (a `WAVEFORMATEX` and whatever follows it, as bytes) on a thread of
-/// its own, which then plays what [`Playback::push`] queues once [`Playback::start`] has been called. Returns the
-/// device's name, or why there is no sound.
-pub fn open(playback: &Arc<Playback>, format: Vec<u8>) -> Result<String, String> {
+impl Clock for Playback {
+    fn now(&self) -> f64 {
+        match *self.time.lock().unwrap() {
+            Time::Stopped(media) => media,
+            Time::Running { media, at } => media + at.elapsed().as_secs_f64(),
+        }
+    }
+
+    fn start(&self, media: f64) {
+        self.go.store(true, Ordering::SeqCst);
+        if !self.audio.load(Ordering::SeqCst) {
+            self.run_free(media);
+        }
+    }
+
+    fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
+    fn decoded(&self) -> u64 {
+        self.decoded.load(Ordering::Relaxed)
+    }
+}
+
+/// Opens the default sound device for `format` (a `WAVEFORMATEX` and whatever follows it, as bytes) at `volume` on
+/// a thread of its own, which then plays what [`Playback::push`] queues once the clock has been started. Returns
+/// the device's name, or why there is no sound.
+pub fn open(playback: &Arc<Playback>, format: Vec<u8>, volume: f32) -> Result<String, String> {
     let (opened, result) = mpsc::channel();
     let playback = playback.clone();
-    let thread = std::thread::Builder::new().name("audio".into()).spawn(move || {
+    let thread = std::thread::Builder::new().name("video sound".into()).spawn(move || {
         let com = match Com::start() {
             Ok(com) => com,
             Err(e) => return drop(opened.send(Err(e))),
         };
-        let device = match Device::open(&format) {
+        let device = match Device::open(&format, volume) {
             Ok(device) => device,
             Err(e) => return drop(opened.send(Err(e))),
         };
         playback.audio.store(true, Ordering::SeqCst);
         let _ = opened.send(Ok(device.name.clone()));
         if let Err(e) = device.play(&playback) {
-            log!("audio: stopped ({e}); the picture carries on by the system clock");
+            eprintln!("video: the sound stopped ({e}); the picture carries on by the system's clock");
         }
         playback.release_clock();
         drop(device);
         drop(com);
     });
-    thread.map_err(|e| format!("no audio thread: {e}"))?;
-    result.recv().unwrap_or(Err("the audio thread died".into()))
+    thread.map_err(|e| format!("no sound thread: {e}"))?;
+    result.recv().unwrap_or(Err("the sound thread died".into()))
 }
 
 struct Device {
@@ -161,7 +170,7 @@ struct Device {
 }
 
 impl Device {
-    fn open(format: &[u8]) -> Result<Device, String> {
+    fn open(format: &[u8], volume: f32) -> Result<Device, String> {
         if format.len() < size_of::<WAVEFORMATEX>() {
             return Err("the decoder gave no wave format".into());
         }
@@ -194,6 +203,11 @@ impl Device {
             let buffer_frames = client.GetBufferSize().step("IAudioClient::GetBufferSize")?;
             let render: IAudioRenderClient = client.GetService().step("IAudioClient::GetService(render)")?;
             let clock: IAudioClock = client.GetService().step("IAudioClient::GetService(clock)")?;
+            // The stream's own volume, under the system's: the Dashboard's sound volume.
+            if volume < 1.0 {
+                let level: ISimpleAudioVolume = client.GetService().step("IAudioClient::GetService(volume)")?;
+                level.SetMasterVolume(volume.clamp(0.0, 1.0), std::ptr::null()).step("SetMasterVolume")?;
+            }
             let description = format!("{rate} Hz {channels} ch {bits}-bit");
             Ok(Device { name, client, render, clock, buffer_frames, frame_bytes, rate, description })
         }
@@ -210,7 +224,7 @@ impl Device {
         let mut last_moved = Instant::now();
         let mut scratch = Vec::new();
         loop {
-            if playback.closed.load(Ordering::SeqCst) {
+            if playback.closed() {
                 break;
             }
             if !started {
@@ -249,8 +263,8 @@ impl Device {
                 unsafe { self.client.Start() }.step("IAudioClient::Start")?;
                 started = true;
                 last_moved = Instant::now();
-                log!(
-                    "audio: device \"{}\" started, {}, buffer {} ms",
+                eprintln!(
+                    "video: sound started on \"{}\", {}, buffer {} ms",
                     self.name,
                     self.description,
                     self.buffer_frames as u64 * 1000 / self.rate as u64
@@ -266,9 +280,9 @@ impl Device {
                 last_moved = Instant::now();
                 let age = Duration::from_nanos((counter_now().saturating_sub(counter) * 100).min(500_000_000));
                 let at = last_moved.checked_sub(age).unwrap_or(last_moved);
-                *playback.clock.lock().unwrap() = Clock::Running { media, at };
+                *playback.time.lock().unwrap() = Time::Running { media, at };
             } else if last_moved.elapsed() > STALL {
-                *playback.clock.lock().unwrap() = Clock::Stopped(media);
+                *playback.time.lock().unwrap() = Time::Stopped(media);
             }
             // Everything has gone to the device: the caller lets the clock run on by itself.
             if ended && padding == 0 && queued_frames == 0 {

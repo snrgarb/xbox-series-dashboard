@@ -65,7 +65,7 @@ The Media Engine plays the file itself: it decodes, plays the sound, keeps sync,
 - the same shared D3D11-to-D3D12 texture as B.1, with all of B's `unsafe` and hal coupling, or
 - a WIC bitmap, which is a CPU copy again and no better than A.
 
-It also needs a COM callback object (`IMFMediaEngineNotify`) implemented in Rust, which pulls in the `windows` crate's `implement` feature and its macros. **C is the least code for sound and sync, and that is the part A turned out to need the least code for anyway:** the WASAPI feeder and the clock are about 300 lines [spike: `spikes/video/src/win/audio.rs`].
+It also needs a COM callback object (`IMFMediaEngineNotify`) implemented in Rust, which pulls in the `windows` crate's `implement` feature and its macros. **C is the least code for sound and sync, and that is the part A turned out to need the least code for anyway:** the WASAPI feeder and the clock are about 300 lines [spike: `spikes/video/src/win/audio.rs`, now `crates/media/src/win/audio.rs`].
 
 One thing C would do better: it follows the default device when the user changes it. A stops the sound and carries on silent when its device goes; following a change of device is a listed follow-up below.
 
@@ -76,6 +76,14 @@ One thing C would do better: it follows the default device when the user changes
 - **`media`** owns the decoder thread, the sound thread and the clock, and hands `screens` a stream of `(time, pixels)` and a clock to compare against. It does not need to know about wgpu.
 - **The `windows` crate, not `windows-sys`.** Media Foundation and WASAPI are COM, and `windows-sys` has no COM interfaces. The spike depends on `windows` 0.62, the version `wgpu-hal` already builds for DX12, so nothing is compiled twice.
 - **Windows N.** `video-spike.exe` imports `mfplat.dll`, `mfreadwrite.dll` and `mf.dll` statically (checked with `llvm-objdump -p`). An N edition without the Media Feature Pack has none of them, and the process would not start at all. In the product, `media` must load Media Foundation at run time and treat its absence as "no video", or the whole Dashboard fails to start on those machines. [inference: not tried on an N edition]
+
+## Since the spike: the `media` crate (#126)
+
+The spike's playback, path A, is now `crates/media`, which the Dashboard plays its Boot video with (docs/spec/start-up.md) and the spike plays through too: `media::Video` (opened on a decoding thread, its frames taken as they come due by the clock, its pixels given back to be filled again), the WASAPI feeder and clock (`media::win::audio`, as the spike's, with the stream's volume set through `ISimpleAudioVolume`), and the decoder (`media::win::decode`). What changed on the way:
+
+- **Media Foundation is loaded at run time** (`media::win::mf`): `mfplat.dll` and `mfreadwrite.dll` by `LoadLibraryExW` from System32, each function by `GetProcAddress`. Without them a video fails to open ("no Media Foundation on this Windows") and the Dashboard starts all the same: the Windows N point above. The COM interfaces' methods need no import, only the free functions.
+- **Anywhere but Windows** `Video::open` fails at once, so the core's tests and `--screenshot` run on Linux.
+- `make_clip` and the test pattern stay in the spike, which is still built and run by the `video` payload, and makes the `boot-video` payload's clip.
 
 ## Not done in the spike
 

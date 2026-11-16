@@ -24,6 +24,7 @@ screens = { path = "../screens" }
 input = { path = "../input" }
 shell = { path = "../shell" }
 audio = { path = "../audio" }
+media = { path = "../media" }
 wgpu = "30"
 winit = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }
