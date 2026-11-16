@@ -145,11 +145,13 @@ pub fn source_badge_at(ui: &mut Ui, tile: Rect, source: Source, scale: f32) {
 pub fn game(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: bool) {
     let radius = RADIUS * S;
     ui.fill(rect, theme::TILE, radius);
-    let has_cover = cover_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, radius));
-    if !has_cover {
+    // A cover downloaded while the Dashboard runs fades in over the name.
+    let key = cover_art(game, ui.px());
+    let cover = ui.art_arriving((&game.source, &game.source_id, &game.name), rect, key.as_ref(), Crop::Top, radius);
+    if cover < 1.0 {
         let width = name_width - 20.0 * S;
         let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * S, width, rect.h - 20.0 * S);
-        ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0);
+        ui.with_alpha(1.0 - cover, |ui| ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0));
     }
     if let Some(source) = source(game).filter(|_| !focused) {
         source_badge(ui, rect, source);

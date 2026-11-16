@@ -40,12 +40,15 @@ pub fn draw(ui: &mut Ui, rect: Rect, id: impl Hash, tile: &Tile) {
     let Tile { game, focused, running } = *tile;
     let band = band(ui, id, focused);
     ui.fill(rect, theme::TILE, RADIUS);
-    let has_cover = cover_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, RADIUS));
-    if !has_cover {
+    // A cover downloaded while the Dashboard runs fades in over the name, as on Home's tiles.
+    let key = cover_art(game, ui.px());
+    let cover = ui.art_arriving((&game.source, &game.source_id, &game.name), rect, key.as_ref(), Crop::Top, RADIUS);
+    if cover < 1.0 {
         // The Bundle's tile has no fallback of its own (Playnite supplies a default cover): here it is the game's
         // name, as on Home's tiles, which gives way to the title band.
         let lines = rect.grow(-10.0);
-        ui.with_alpha(1.0 - band, |ui| ui.paragraph(lines, &game.name, &TEXT, HAlign::Center, VAlign::Center, 0));
+        let name = (1.0 - band) * (1.0 - cover);
+        ui.with_alpha(name, |ui| ui.paragraph(lines, &game.name, &TEXT, HAlign::Center, VAlign::Center, 0));
     }
     // The source's badge goes at once as focus comes, and the title takes its corner.
     if let Some(source) = source(game).filter(|_| !focused) {

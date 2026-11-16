@@ -65,6 +65,13 @@
 //!       the Dashboard follows it by its windows. Exits 2 for a scheme it has no stand-in for, 1 when the fake it
 //!       needs is not in `handlers.json`.
 //!
+//!   standin serve-art [--port <n>] [--key <key>]
+//!       The stand-in SteamGridDB (`library::art::fake`), on 127.0.0.1 at <n> (any free port without one), for
+//!       `dashboard --art-service http://127.0.0.1:<n>`: it takes only <key> ("e2e-key" without one), finds a game
+//!       of any name searched for, and gives every game a plain picture of each kind, an orange cover, a teal hero
+//!       and a violet header. Says `serve-art: listening on http://127.0.0.1:<n>` and then a line a request (its
+//!       path, and whether it had the key), until it is killed.
+//!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -87,6 +94,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin open-address <address>
+       standin serve-art [--port <n>] [--key <key>]
        standin toast <text>";
 
 /// The file beside this program that names the fakes `open-address` takes addresses for.
@@ -601,6 +609,7 @@ fn run(args: &[String]) -> i32 {
                 }
             }
         }
+        Some("serve-art") => serve_art(&args[1..]),
         Some("game") => parsed_game(&args[1..]),
         Some("steam-url") => match args.get(1) {
             Some(url) => steam_address(url, None),
@@ -653,6 +662,76 @@ fn named(name: &str) -> bool {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     std::process::exit(run(&args));
+}
+
+/// The colour of the stand-in SteamGridDB's pictures, by kind: what a test looks for on screen.
+pub const ART_COLOURS: [(library::art::Kind, [u8; 3]); 3] = [
+    (library::art::Kind::Cover, [0xF0, 0x80, 0x10]),
+    (library::art::Kind::Hero, [0x10, 0xA0, 0xA0]),
+    (library::art::Kind::Header, [0x80, 0x30, 0xD0]),
+];
+
+/// A plain PNG of a kind's colour, of its shape.
+fn art_picture(kind: library::art::Kind) -> Vec<u8> {
+    use library::art::Kind;
+    let (width, height) = match kind {
+        Kind::Cover => (60, 90),
+        Kind::Hero => (192, 62),
+        Kind::Header => (92, 43),
+    };
+    let colour = ART_COLOURS.iter().find(|(k, _)| *k == kind).map_or([0; 3], |(_, colour)| *colour);
+    let image = image::RgbImage::from_pixel(width, height, image::Rgb(colour));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).expect("a PNG in memory");
+    png.into_inner()
+}
+
+fn serve_art(args: &[String]) -> i32 {
+    let (mut port, mut key) = (0u16, "e2e-key".to_string());
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match (arg.as_str(), it.next()) {
+            ("--port", Some(value)) => match value.parse() {
+                Ok(value) => port = value,
+                Err(_) => {
+                    note(&format!("serve-art: bad --port {value}"));
+                    return 2;
+                }
+            },
+            ("--key", Some(value)) => key = value.clone(),
+            _ => {
+                note(USAGE);
+                return 2;
+            }
+        }
+    }
+    let picture: library::art::fake::Painter = std::sync::Arc::new(|_, kind| art_picture(kind));
+    let script = library::art::fake::Script { any_name: true, ..library::art::fake::Script::new(&key, picture) };
+    let service = match library::art::fake::FakeService::start(port, script) {
+        Ok(service) => service,
+        Err(e) => {
+            note(&format!("serve-art: port {port}: {e}"));
+            return 1;
+        }
+    };
+    note(&format!("serve-art: listening on {}", service.url()));
+    let mut said = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let requests = service.requests();
+        for request in &requests[said..] {
+            let keyed = request.authorization.as_deref() == Some(format!("Bearer {key}").as_str());
+            let with = if request.authorization.is_none() {
+                "no key"
+            } else if keyed {
+                "the key"
+            } else {
+                "another key"
+            };
+            note(&format!("serve-art: {} ({with})", request.path));
+        }
+        said = requests.len();
+    }
 }
 
 #[cfg(test)]

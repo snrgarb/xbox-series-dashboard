@@ -13,6 +13,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde_json = "1"
 # SQLite built from the source rusqlite carries: nothing to install on Windows, and the same one everywhere.
 rusqlite = { version = "0.42", features = ["bundled"] }
+# Art from SteamGridDB (docs/sources.md, "Art"): a small blocking HTTP client, TLS by rustls, no async runtime.
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 source-steam = { path = "../source-steam" }

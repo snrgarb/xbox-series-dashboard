@@ -402,6 +402,20 @@ impl<'a> Ui<'a> {
         }
     }
 
+    /// As `art`, for what may have no picture at first and be given one while it is on screen (art downloaded while
+    /// the Dashboard runs, docs/sources.md "Art"): `key` is None while there is none. Under `id`, a picture that
+    /// comes after the first frame fades in over [`ART_FADE_SECONDS`]; one there from the first is drawn at once,
+    /// as soon as it is decoded. Gives how much of it shows, 0 while there is none, so that what stands in for it (a
+    /// tile's name) can be drawn under it until it is whole.
+    pub fn art_arriving(&mut self, id: impl Hash, rect: Rect, key: Option<&ArtKey>, crop: Crop, radius: f32) -> f32 {
+        let target = if key.is_some() { 1.0 } else { 0.0 };
+        let shown = self.tween(("art arriving", id), target, ART_FADE_SECONDS, Ease::Linear);
+        match key {
+            Some(key) if shown > 0.0 && self.art(rect, key, crop, shown, radius) => shown,
+            _ => 0.0,
+        }
+    }
+
     /// A piece of art filling `rect`, once it is decoded; false until then, or if it can't be.
     pub fn art(&mut self, rect: Rect, key: &ArtKey, crop: Crop, alpha: f32, radius: f32) -> bool {
         match self.art.get(key) {
@@ -570,3 +584,6 @@ impl<'a> Ui<'a> {
 
 /// A solid white texture's id, for a quad with no image.
 pub const NO_TEXTURE: TexId = WHITE;
+
+/// How long a picture that comes late takes to fade in (`Ui::art_arriving`).
+pub const ART_FADE_SECONDS: f32 = 0.25;

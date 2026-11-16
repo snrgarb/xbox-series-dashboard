@@ -87,6 +87,10 @@ the TV PC, not for here.
   `toasts: posted "<text>"`, then `toasts: shown "<text>" (Notification), <n> waiting`, `toasts: going` and
   `toasts: gone` as the Toast comes and goes, each with the time since it started and each once the frame that shows
   it has been presented.
+- **`standin serve-art --port <n> --key <key>`** is a stand-in SteamGridDB on `127.0.0.1:<n>` until it is killed, for
+  `dashboard --art-service http://127.0.0.1:<n>`: it takes only `<key>`, finds a game of any name, and gives each one
+  a plain orange cover (`F08010`), teal hero and violet header. It says `serve-art: listening on <url>` and then
+  `serve-art: <path> (no key|the key|another key)` a request in `standin.log`. No test asks the real service.
 
 Every start shows the greeting's Toast, "Hi <user>!", for five seconds, low in the middle of the screen. A test that
 looks at Home or taps the Guide button waits it out first: `Wait-Greeting`.

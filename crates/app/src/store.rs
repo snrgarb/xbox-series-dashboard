@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use library::art::{self, ArtDir, Event, Lookup, Pace, Service};
 use library::sources::Read;
 use library::Database;
 use model::{ByHand, FilterChange, Game, Library, Source, StoreApp};
@@ -27,8 +28,10 @@ pub struct Store {
     sources: Vec<Arc<dyn Source>>,
     /// The sources are still to be read, the Library on screen having come from the database.
     pending: bool,
-    /// Hears from the thread that syncs when it has changed the database.
-    synced: Option<Receiver<()>>,
+    /// Hears from the thread that syncs when it is done, and whether it changed the database.
+    synced: Option<Receiver<bool>>,
+    /// SteamGridDB's address: its own, or a test's (`--art-service`).
+    art_service: String,
     /// A game is running, and `game_booted` has been told so.
     booted: bool,
     /// The running game's Play session.
@@ -50,11 +53,30 @@ pub struct Store {
 /// A Library that came from no database has its filters, which are Home's Groups, worked out by one in memory.
 pub fn open(args: &Args) -> (Library, Store) {
     let sources = crate::sources::all(args);
+    let art_service = args.art_service.clone().unwrap_or_else(|| art::SERVICE.to_string());
     if let Some(path) = &args.library {
         let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
-        let library = serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
+        let library: Library =
+            serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
+        // With a data folder, the file's games go into its database as their sources' are: its settings and its
+        // art cache are then theirs.
+        if let Some(dir) = &args.data_dir {
+            let path = dir.join(library::FILE);
+            let into = |library: &Library| -> Result<(Library, Database)> {
+                let mut database = Database::open(&path)?;
+                let library = through(&mut database, library)?;
+                Ok((library, database))
+            };
+            match into(&library) {
+                Ok((library, database)) => {
+                    let store = Store { database: Some(database), path, sources, art_service, ..Store::default() };
+                    return (library, store);
+                }
+                Err(e) => eprintln!("library: {}: {e:#}", path.display()),
+            }
+        }
         let (library, database) = with_filters(library);
-        return (library, Store { database, sources, ..Store::default() });
+        return (library, Store { database, sources, art_service, ..Store::default() });
     }
     let window = args.screenshot.is_none();
     let dir = args.data_dir.clone().or_else(|| if window { library::data_dir() } else { None });
@@ -102,7 +124,7 @@ pub fn open(args: &Args) -> (Library, Store) {
     // The marks the user makes (a favourite, a hidden game) go to the database the Library on screen came from.
     let (library, memory) = with_filters(library);
     let database = memory.or(database);
-    (library, Store { database, path: path.unwrap_or_default(), sources, pending, ..Store::default() })
+    (library, Store { database, path: path.unwrap_or_default(), sources, pending, art_service, ..Store::default() })
 }
 
 /// What the sources read, put together with no database: every game of each in one Library.
@@ -126,8 +148,21 @@ fn with_filters(library: Library) -> (Library, Option<Database>) {
     if !library.filters.is_empty() {
         return (library, None);
     }
-    let through = || -> Result<(Library, Option<Database>)> {
+    let in_memory = || -> Result<(Library, Option<Database>)> {
         let mut database = Database::in_memory()?;
+        let library = through(&mut database, &library)?;
+        Ok((library, Some(database)))
+    };
+    in_memory().unwrap_or_else(|e| {
+        eprintln!("library: no filters: {e:#}");
+        (library, None)
+    })
+}
+
+/// Takes a Library's games into a database, each as its source's (a made-up game, of none, as Steam's), and gives
+/// its snapshot: what `with_filters` does in memory.
+fn through(database: &mut Database, library: &Library) -> Result<Library> {
+    {
         let key =
             |game: &Game| if game.source.is_empty() { source_steam::SOURCE.to_string() } else { game.source.clone() };
         let first = library.games.first().map_or(source_steam::SOURCE.to_string(), key);
@@ -142,12 +177,8 @@ fn with_filters(library: Library) -> (Library, Option<Database>) {
         for (source, games) in &by_source {
             database.sync(source, games, library::now())?;
         }
-        Ok((database.snapshot()?, Some(database)))
-    };
-    through().unwrap_or_else(|e| {
-        eprintln!("library: no filters: {e:#}");
-        (library, None)
-    })
+        database.snapshot()
+    }
 }
 
 /// Merges what the sources were read as into the database; gives the snapshot after.
@@ -173,18 +204,24 @@ impl Store {
         self.synced = Some(synced);
         std::thread::spawn(move || {
             let read = library::sources::read(&sources);
-            if read.found.is_empty() {
-                return;
-            }
-            match Database::open(&path).and_then(|mut database| sync(&mut database, &read)) {
-                Ok(library) if library != shown => {
-                    let _ = changed.send(());
-                    wake();
-                }
-                Ok(_) => {}
-                Err(e) => eprintln!("library: {}: {e:#}", path.display()),
-            }
+            let news = !read.found.is_empty()
+                && match Database::open(&path).and_then(|mut database| sync(&mut database, &read)) {
+                    Ok(library) => library != shown,
+                    Err(e) => {
+                        eprintln!("library: {}: {e:#}", path.display());
+                        false
+                    }
+                };
+            // Done, with news or none: the art lookup waits for this.
+            let _ = changed.send(news);
+            wake();
         });
+    }
+
+    /// The sources have been read, or are not to be: what the art lookup waits for, so that it looks up the games
+    /// the stores have now.
+    pub fn sources_read(&self) -> bool {
+        !self.pending && self.synced.is_none()
     }
 
     /// Every source, in order: what a game is started and asked of its store through.
@@ -214,8 +251,10 @@ impl Store {
         if let Some(apps) = self.listed.as_ref().and_then(|listed| listed.try_recv().ok()) {
             (self.store_apps, self.listed, changed) = (apps, None, true);
         }
-        if self.synced.as_ref().is_some_and(|synced| synced.try_recv().is_ok()) {
-            (self.synced, changed) = (None, true);
+        // The sync is done, with news or none: only news is a new snapshot (the art lookup waits for either).
+        if let Some(news) = self.synced.as_ref().and_then(|synced| synced.try_recv().ok()) {
+            self.synced = None;
+            changed |= news;
         }
         changed.then(|| self.snapshot()).flatten()
     }
@@ -338,7 +377,82 @@ impl Store {
         }
     }
 
-    fn snapshot(&self) -> Option<Library> {
+    /// Our art cache, where there is a database in a data folder to keep it beside.
+    fn art_dir(&self) -> Option<ArtDir> {
+        self.database.as_ref()?.art_dir().cloned()
+    }
+
+    /// The user's SteamGridDB key, if one is kept and the service has not refused it.
+    fn art_key(&self) -> Option<String> {
+        if self.setting(art::REFUSED_SETTING).is_some() {
+            return None;
+        }
+        self.setting(art::KEY_SETTING).filter(|key| !key.trim().is_empty())
+    }
+
+    /// The service, asked with the user's key: none without a key, or with no art cache to download into.
+    fn art_service(&self) -> Option<(ArtDir, Service)> {
+        let key = self.art_key()?;
+        Some((self.art_dir()?, Service::new(&self.art_service, &key)))
+    }
+
+    /// Looks up, on threads of their own, the art the stores gave none for: of the games of `library` that lack a
+    /// picture, those our cache has not got, from SteamGridDB, only with a key (docs/sources.md, "Art"). `tell` is
+    /// told as pictures come in. None when there is nothing to do it with.
+    pub fn look_up_art(&self, library: &Library, tell: impl Fn(Event) + Send + Sync + 'static) -> Option<Lookup> {
+        let (dir, service) = self.art_service()?;
+        let log: art::Log = std::sync::Arc::new(|line| eprintln!("{line}"));
+        Some(Lookup::start(dir, service, art::wanted(library), library::now(), Pace::default(), log, tell))
+    }
+
+    /// The same here and now, for a picture drawn offscreen: gives the snapshot after, or `library` as it was.
+    pub fn art_now(&self, library: Library) -> Library {
+        let Some((dir, service)) = self.art_service() else { return library };
+        let log: art::Log = std::sync::Arc::new(|line| eprintln!("{line}"));
+        let summary = Lookup::run_now(dir, service, art::wanted(&library), library::now(), Pace::default(), log);
+        if summary.found == 0 {
+            return library;
+        }
+        self.snapshot().unwrap_or(library)
+    }
+
+    /// Keeps the user's SteamGridDB key, or forgets it; that the service refused the last one is forgotten with it.
+    /// The log says it was set, never what it is.
+    pub fn set_art_key(&self, key: Option<&str>) {
+        let Some(database) = &self.database else { return };
+        let saved = match key {
+            Some(key) => database.set_setting(art::KEY_SETTING, key.trim()),
+            None => database.delete_setting(art::KEY_SETTING),
+        };
+        let saved = saved.and_then(|()| database.delete_setting(art::REFUSED_SETTING));
+        match (saved, key) {
+            (Ok(()), Some(_)) => eprintln!("settings: {} set", art::KEY_SETTING),
+            (Ok(()), None) => eprintln!("settings: {} forgotten", art::KEY_SETTING),
+            (Err(e), _) => eprintln!("settings: {} not saved: {e:#}", art::KEY_SETTING),
+        }
+    }
+
+    /// The service refused the key: no lookups until another is entered, this run or the next.
+    pub fn art_key_refused(&self) {
+        if let Some(database) = &self.database {
+            if let Err(e) = database.set_setting(art::REFUSED_SETTING, "true") {
+                eprintln!("settings: {e:#}");
+            }
+        }
+    }
+
+    /// Removes the art downloaded into the data folder, and nothing of a store's: gives the snapshot after.
+    pub fn clear_art(&self) -> Option<Library> {
+        let dir = self.art_dir()?;
+        match dir.clear() {
+            Ok(pictures) => eprintln!("art: cleared {pictures} pictures"),
+            Err(e) => eprintln!("art: {e:#}"),
+        }
+        self.snapshot()
+    }
+
+    /// The library database's snapshot as it is now: what the screens show after art has come in.
+    pub fn snapshot(&self) -> Option<Library> {
         let library = self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()?;
         Some(Library { store_apps: self.store_apps.clone(), ..library })
     }
