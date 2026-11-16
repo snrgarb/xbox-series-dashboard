@@ -124,7 +124,13 @@ mod win {
             WM_NCHITTEST => HTTRANSPARENT as LRESULT,
             // Nothing is drawn through GDI: there is no redirection bitmap to erase.
             WM_ERASEBKGND => 1,
-            WM_CLOSE => 0,
+            // Alt+F4 does not close the strip (SC_CLOSE would be a WM_CLOSE); another program asking the Dashboard
+            // to close (taskkill) closes the Dashboard.
+            WM_SYSCOMMAND if wparam & 0xFFF0 == SC_CLOSE as WPARAM => 0,
+            WM_CLOSE => {
+                crate::ask_to_close("the Toast strip");
+                0
+            }
             _ => DefWindowProcW(hwnd, message, wparam, lparam),
         }
     }

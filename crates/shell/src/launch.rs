@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use model::{Game, Source};
 
+use crate::store::Addresses;
 use crate::{Freezer, Overlay};
 
 /// What a look at the launch found.
@@ -27,7 +28,14 @@ pub struct Launch(());
 
 #[cfg(not(windows))]
 impl Launch {
-    pub fn start(game: &Game, _: Arc<dyn Source>, _: &Path, _: *mut c_void, _: bool) -> Option<Self> {
+    pub fn start(
+        game: &Game,
+        _: Arc<dyn Source>,
+        _: &Path,
+        _: *mut c_void,
+        _: bool,
+        _: &mut dyn Addresses,
+    ) -> Option<Self> {
         eprintln!("launch: {} can only be started on Windows", game.name);
         None
     }
@@ -70,7 +78,7 @@ pub use win::Launch;
 
 #[cfg(windows)]
 mod win {
-    use super::{c_void, Arc, Duration, Freezer, Game, Overlay, Path, Source, Step};
+    use super::{c_void, Addresses, Arc, Duration, Freezer, Game, Overlay, Path, Source, Step};
     use crate::take_foreground;
     use std::time::Instant;
     use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
@@ -152,8 +160,8 @@ mod win {
     impl Launch {
         /// Asks the game's source for it: its store's address opened, or its program run. `dir` is the folder it is
         /// installed in, whose windows are the game's; `home` is Home's window, which has the foreground;
-        /// `launch_screen` is whether there is an Overlay to show the Launch screen on. None, having said why, when
-        /// the game can't be started.
+        /// `launch_screen` is whether there is an Overlay to show the Launch screen on; `addresses` opens what the
+        /// source gives. None, having said why, when the game can't be started.
         // An HWND is a handle Windows looks up, never a pointer this code follows.
         #[allow(clippy::not_unsafe_ptr_arg_deref)]
         pub fn start(
@@ -162,6 +170,7 @@ mod win {
             dir: &Path,
             home: *mut c_void,
             launch_screen: bool,
+            addresses: &mut dyn Addresses,
         ) -> Option<Self> {
             if home.is_null() {
                 return None;
@@ -175,9 +184,8 @@ mod win {
                 dir.push('\\');
             }
             // Home has the foreground, and with it the right to let the store and the game take it.
-            let result = crate::shell_open(&start);
-            if result <= 32 {
-                eprintln!("launch: {} didn't take {start} ({result})", source.name());
+            if let Err(why) = addresses.open(&start) {
+                eprintln!("launch: {} didn't take {start} ({why})", source.name());
                 return None;
             }
             let screen = if launch_screen { "Launch screen up" } else { "no Overlay, so no Launch screen" };

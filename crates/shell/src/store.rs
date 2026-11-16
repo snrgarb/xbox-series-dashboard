@@ -1,16 +1,19 @@
 //! Asking a game's store to install or uninstall it (docs/spec/tile-menu.md, sections 10 and 13). Until the
 //! Queue (M4) that is what the game's source gives (`model::Source::ask`: the store's own address for it, or a
 //! program to run), opened as Windows opens it: the store shows its own window and does the rest. Only
-//! [`SystemAddresses`] opens anything, which the executable makes only when it runs in its window; a test has a
-//! [`Recorded`], which keeps what it was asked.
+//! [`SystemAddresses`] and [`ProgramAddresses`] open anything, which the executable makes only when it runs in its
+//! window; a test has a [`Recorded`], which keeps what it was asked.
+use std::path::{Path, PathBuf};
+
 use model::{Game, Source, Start};
 
 pub use model::Ask;
 
 /// Whoever opens what a store is asked by: the seam between what the Dashboard asks of a store and Windows.
 pub trait Addresses {
-    /// Opens an address with whatever program is registered for it, or runs a program. False when nothing took it.
-    fn open(&mut self, start: &Start) -> bool;
+    /// Opens an address with whatever program is registered for it, or runs a program. Says why when nothing took
+    /// it: on Windows, ShellExecute's answer.
+    fn open(&mut self, start: &Start) -> Result<(), String>;
 }
 
 /// Asks the game's store, by way of its source (none for a game of no source the Dashboard has) and `addresses`,
@@ -19,7 +22,7 @@ pub trait Addresses {
 pub fn ask(game: &Game, source: Option<&dyn Source>, ask: Ask, addresses: &mut dyn Addresses) {
     let what = ask.verb();
     match source.and_then(|source| Some((source.name(), source.ask(game, ask)?))) {
-        Some((store, address)) if addresses.open(&address) => {
+        Some((store, address)) if addresses.open(&address).is_ok() => {
             eprintln!("store: asked {store} to {what} {}: {address}", game.name)
         }
         Some((_, address)) => eprintln!("store: nothing took {address}: {} is as it was", game.name),
@@ -34,9 +37,9 @@ pub struct Recorded {
 }
 
 impl Addresses for Recorded {
-    fn open(&mut self, start: &Start) -> bool {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
         self.opened.push(start.to_string());
-        true
+        Ok(())
     }
 }
 
@@ -46,14 +49,50 @@ pub struct SystemAddresses;
 
 impl Addresses for SystemAddresses {
     #[cfg(windows)]
-    fn open(&mut self, start: &Start) -> bool {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
         // Home has the foreground, and with it the right to let the store's window take it.
-        crate::shell_open(start) > 32
+        match crate::shell_open(start) {
+            result if result > 32 => Ok(()),
+            result => Err(result.to_string()),
+        }
     }
 
     #[cfg(not(windows))]
-    fn open(&mut self, _start: &Start) -> bool {
-        false
+    fn open(&mut self, _start: &Start) -> Result<(), String> {
+        Err("only Windows opens anything".into())
+    }
+}
+
+/// Every address given to one program to open, in place of the program Windows has registered for it: `<program>
+/// open-address <address>`, run in the program's folder (`dashboard --open-addresses-with <program>`). A test
+/// machine whose registry must not be touched has the stand-in stores take the addresses this way. A program to
+/// run is run as Windows runs it.
+#[derive(Debug, Clone)]
+pub struct ProgramAddresses {
+    program: PathBuf,
+}
+
+impl ProgramAddresses {
+    pub fn new(program: &Path) -> Self {
+        Self { program: program.to_path_buf() }
+    }
+
+    /// What is run in place of `start`: an address becomes the program given it; a program stays as it is.
+    pub fn through(&self, start: &Start) -> Start {
+        match start {
+            Start::Address(address) => Start::Program {
+                path: self.program.clone(),
+                args: vec!["open-address".into(), address.clone()],
+                dir: self.program.parent().filter(|dir| !dir.as_os_str().is_empty()).map(PathBuf::from),
+            },
+            program => program.clone(),
+        }
+    }
+}
+
+impl Addresses for ProgramAddresses {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
+        SystemAddresses.open(&self.through(start))
     }
 }
 
@@ -100,5 +139,35 @@ mod tests {
         ask(&game(""), Some(&Fake), Ask::Uninstall, &mut addresses);
         ask(&game("5"), None, Ask::Uninstall, &mut addresses);
         assert_eq!(addresses.opened, ["fake://install/9100040", "fake://uninstall/9100010"]);
+    }
+
+    #[test]
+    fn a_program_given_the_addresses_is_run_with_each_in_its_own_folder() {
+        let folder = Path::new("e2e").join("Test User");
+        let program = folder.join("standin.exe");
+        let through = ProgramAddresses::new(&program);
+        let launch = "com.epicgames.launcher://apps/ns%3Aitem%3AKite?action=launch&silent=true";
+        let run = through.through(&Start::Address(launch.into()));
+        assert_eq!(
+            run,
+            Start::Program {
+                path: program.clone(),
+                args: vec!["open-address".into(), launch.into()],
+                dir: Some(folder.clone()),
+            }
+        );
+        // As ShellExecute is given it: the address one argument, whatever it has in it.
+        assert_eq!(run.target(), program.to_string_lossy());
+        assert_eq!(run.folder(), Some(folder));
+        assert_eq!(run.parameters().as_deref(), Some(format!("open-address {launch}").as_str()));
+        let spaced = through.through(&Start::Address("steam://run/1 2".into()));
+        assert_eq!(spaced.parameters().as_deref(), Some("open-address \"steam://run/1 2\""));
+        // A program to run is not an address: run as it is.
+        let game = Start::Program { path: "game.exe".into(), args: vec!["-x".into()], dir: None };
+        assert_eq!(through.through(&game), game);
+        // A program named with no folder runs in the working folder.
+        let bare =
+            ProgramAddresses::new(Path::new("standin.exe")).through(&Start::Address("steam://rungameid/1".into()));
+        assert!(matches!(bare, Start::Program { dir: None, .. }), "{bare:?}");
     }
 }

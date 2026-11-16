@@ -28,6 +28,24 @@ pub fn since_start() -> f64 {
     START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0
 }
 
+/// Set when another program asks the Dashboard to close through the Overlay's or the Toast strip's window.
+static CLOSE_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether another program has asked the Dashboard to close since this was last called: a `WM_CLOSE` posted to the
+/// Overlay's or the Toast strip's window, as `taskkill` without `/f` posts one to every top-level window of the
+/// process. Home's own window is asked as any window is (winit's `CloseRequested`). Alt+F4 is not such a request:
+/// those windows never take it.
+pub fn close_asked() -> bool {
+    CLOSE_ASKED.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Says that `window` was asked to close, and has the Dashboard close.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn ask_to_close(window: &str) {
+    eprintln!("window: asked to close (WM_CLOSE to {window}) at {:.0} ms", since_start());
+    CLOSE_ASKED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// wgpu's own warnings and errors, which say why a swap chain could not be made.
 struct WgpuLog;
 
