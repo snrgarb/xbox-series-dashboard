@@ -1,8 +1,9 @@
-//! What the idle panel shows, one card at a time (docs/spec/idle-screen.md, 4): the last games played and tips. The
-//! Bundle's nearly-finished games and last unlocks come from PlayniteAchievements, and the port has no achievements
-//! yet; they join the pool when it has.
+//! What the idle panel shows, one card at a time (docs/spec/idle-screen.md, 4): the nearly-finished games, the last
+//! unlocks, the last games played and tips.
+use std::path::PathBuf;
+
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
-use model::{GameKey, Library};
+use model::{Game, GameKey, Library};
 use ui::Button;
 
 /// How many cards the pool holds of each kind but tips, which are all in it.
@@ -11,6 +12,10 @@ const OF_A_KIND: usize = 5;
 /// What a card tells of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
+    /// One of the games with the most achievements unlocked without all: its locked one most players have.
+    CloseAchievement,
+    /// One of the last achievements unlocked.
+    RecentUnlock,
     /// One of the last games played.
     RecentlyPlayed,
     /// A tip, text only, with the pad drawn in its art's place.
@@ -36,6 +41,33 @@ pub struct Card {
     pub prompt: &'static str,
     /// The pad's buttons a tip is about, filled on its pad.
     pub buttons: &'static [Button],
+    /// An achievement's Score, at the top left with the G, and whether it is Rare, with the diamond before it.
+    pub score: Option<u32>,
+    pub rare: bool,
+    /// How far the game has got with its achievements, 0 to 1: the share at the top right and the bar under it.
+    pub progress: Option<f32>,
+    /// An achievement's icon, large over the art, once fetched.
+    pub icon: Option<PathBuf>,
+}
+
+impl Card {
+    /// A card with nothing of an achievement's.
+    fn plain(kind: Kind, title: String, prompt: &'static str) -> Self {
+        Self {
+            kind,
+            header: None,
+            title,
+            label: None,
+            description: None,
+            game: None,
+            prompt,
+            buttons: &[],
+            score: None,
+            rare: false,
+            progress: None,
+            icon: None,
+        }
+    }
 }
 
 /// One of the tips: its text, a button it names in braces as the Bundle writes it ("{Y}"), and the buttons it is
@@ -45,9 +77,9 @@ struct Tip {
     buttons: &'static [Button],
 }
 
-/// The Bundle's tips, as they apply to the port: those about the Guide only while it is on. Those about Discord, the
-/// Score and the Boot video are left out until those come (M6, achievements, #126); Playnite's filter presets are
-/// Settings' Groups here.
+/// The Bundle's tips, as they apply to the port: those about the Guide only while it is on. Those about Discord and
+/// the Boot video are left out until those come (M6, #126); Playnite's filter presets are Settings' Groups here.
+/// The one about the Score is [`SCORE_TIP`].
 const TIPS: [Tip; 8] = [
     Tip { text: "Press {Guide} anywhere, even in a game, to open the Guide.", buttons: &[Button::Guide] },
     Tip { text: "Press {Start} on a game tile to play it, favourite it or manage it.", buttons: &[Button::Menu] },
@@ -67,38 +99,108 @@ const TIPS: [Tip; 8] = [
     Tip { text: "See what's playing in the Guide's Audio, under Now Playing.", buttons: &[Button::Guide] },
 ];
 
+/// The Bundle's tip about the Score, only while there is a Score to see: it adds up every game's achievements here,
+/// not every platform's, Steam's being the only ones read.
+const SCORE_TIP: Tip = Tip { text: "Your Score adds up achievements across every game.", buttons: &[] };
+
 /// A tip's text with its buttons named in words, as the port writes them until it draws a button's glyph in a line of
 /// text: "{Y}" is "Y", "{Start}" "Menu", "{Guide}" "the Guide button".
 fn words(text: &str) -> String {
     text.replace("{Guide}", "the Guide button").replace("{Start}", "Menu").replace("{Y}", "Y").replace("{X}", "X")
 }
 
-/// Every card of the pool, unshuffled: the last games played, then the tips, those about the Guide only with the
-/// Guide on (Settings > Guide). `today` is the date, which "Played yesterday" is counted from.
+/// Every card of the pool, unshuffled: the nearly-finished games and the last unlocks while there are achievements,
+/// the last games played, then the tips, those about the Guide only with the Guide on (Settings > Guide). `today`
+/// is the date, which "Played yesterday" is counted from.
 pub fn pool(library: &Library, use_guide: bool, today: NaiveDate) -> Vec<Card> {
     let mut played: Vec<_> = library.games.iter().filter(|game| game.last_played > 0).collect();
     played.sort_by_key(|game| std::cmp::Reverse(game.last_played));
     let games = played.into_iter().take(OF_A_KIND).map(|game| Card {
-        kind: Kind::RecentlyPlayed,
         header: Some(format!("Played {}", when(local_date(game.last_played), today))),
-        title: game.name.clone(),
         label: Some("Recently played".into()),
         description: playtime(game.playtime_minutes).map(|played| format!("{played} played")),
         game: Some(game.key()),
-        prompt: "See game",
-        buttons: &[],
+        ..Card::plain(Kind::RecentlyPlayed, game.name.clone(), "See game")
     });
-    let tips = TIPS.iter().filter(|tip| use_guide || !tip.buttons.contains(&Button::Guide)).map(|tip| Card {
-        kind: Kind::Tip,
+    let achievements = library.achievements.totals.is_some();
+    let score_tip = achievements.then_some(&SCORE_TIP);
+    let tips = TIPS.iter().chain(score_tip).filter(|tip| use_guide || !tip.buttons.contains(&Button::Guide));
+    let tips = tips.map(|tip| Card {
         header: Some("Tip".into()),
-        title: words(tip.text),
-        label: None,
-        description: None,
-        game: None,
-        prompt: "Got it",
         buttons: tip.buttons,
+        ..Card::plain(Kind::Tip, words(tip.text), "Got it")
     });
-    games.chain(tips).collect()
+    let mut cards = Vec::new();
+    if achievements {
+        cards.extend(close_achievements(library));
+        cards.extend(recent_unlocks(library, today));
+    }
+    cards.extend(games.chain(tips));
+    cards
+}
+
+/// The games in the library, never hidden ones, by their id in the library database.
+fn shown(library: &Library, id: i64) -> Option<&Game> {
+    library.games.iter().find(|game| game.id == id && id != 0)
+}
+
+/// The nearly-finished games: the most achievements unlocked without all, those nearer finished first among as
+/// many, then by name; each the game and its locked achievement most players have, "Ashfall Courier - Night Route"
+/// (the game alone with none to name), that one's Score, Rarity and description, and the game's progress.
+fn close_achievements(library: &Library) -> Vec<Card> {
+    let mut close: Vec<_> = library
+        .achievements
+        .games
+        .iter()
+        .filter(|p| p.unlocked > 0 && p.unlocked < p.of)
+        .filter_map(|p| Some((p, shown(library, p.game)?)))
+        .collect();
+    let share = |p: &model::achievement::GameProgress| f64::from(p.unlocked) / f64::from(p.of);
+    close.sort_by(|(a, a_game), (b, b_game)| {
+        b.unlocked
+            .cmp(&a.unlocked)
+            .then(share(b).total_cmp(&share(a)))
+            .then_with(|| a_game.name.to_lowercase().cmp(&b_game.name.to_lowercase()))
+    });
+    let card = |(progress, game): (&model::achievement::GameProgress, &Game)| {
+        let next = library.achievements.next_of(game.id);
+        let title = next.map_or(game.name.clone(), |next| format!("{} - {}", game.name, next.name));
+        Card {
+            label: Some("Close achievement".into()),
+            description: next.and_then(|next| next.description.clone()),
+            game: Some(game.key()),
+            score: next.map(|next| next.score()),
+            rare: next.is_some_and(|next| next.is_rare()),
+            progress: Some(share(progress) as f32),
+            ..Card::plain(Kind::CloseAchievement, title, "See game")
+        }
+    };
+    close.into_iter().take(OF_A_KIND).map(card).collect()
+}
+
+/// The last unlocks of games in the library, never hidden ones, newest first: each with when atop, "Unlocked 2 days
+/// ago" ("Unlocked" alone for a time not known), its Score and Rare, its game and name, "Ashfall Courier - Ash
+/// Runner", its description and its icon.
+fn recent_unlocks(library: &Library, today: NaiveDate) -> Vec<Card> {
+    let unlocks = library.achievements.recent.iter().filter_map(|unlock| Some((unlock, shown(library, unlock.game)?)));
+    let card = |(unlock, game): (&model::achievement::Unlock, &Game)| {
+        let a = &unlock.achievement;
+        let header = match a.unlocked {
+            Some(at) if at > 0 => format!("Unlocked {}", when(local_date(at), today)),
+            _ => "Unlocked".to_string(),
+        };
+        Card {
+            header: Some(header),
+            label: Some("Achievement unlocked".into()),
+            description: a.description.clone(),
+            game: Some(game.key()),
+            score: Some(a.score()),
+            rare: a.is_rare(),
+            icon: a.icon_file.clone(),
+            ..Card::plain(Kind::RecentUnlock, format!("{} - {}", game.name, a.name), "See game")
+        }
+    };
+    unlocks.take(OF_A_KIND).map(card).collect()
 }
 
 /// A playtime as the card words it, "12 h" or under an hour "45 min"; None under a minute.
@@ -195,6 +297,62 @@ mod tests {
         let cards = pool(&library, false, today);
         assert!(cards.iter().all(|card| !card.buttons.contains(&Button::Guide)));
         assert!(cards.iter().all(|card| !card.title.contains("Guide")));
+    }
+
+    #[test]
+    fn with_achievements_the_nearly_finished_and_the_last_unlocks_come_first() {
+        use model::achievement::{Achievement, GameProgress, Totals, Unlock};
+        let mut library = crate::fake_library();
+        let today = local_date(library.games[0].last_played).succ_opt().unwrap();
+        // Without totals, no achievement cards.
+        assert!(pool(&library, true, today).iter().all(|card| card.score.is_none()));
+
+        for (i, game) in library.games.iter_mut().enumerate() {
+            game.id = i as i64 + 1;
+        }
+        let a = |key: &str, rarity: f64, unlocked: Option<u64>| Achievement {
+            key: key.into(),
+            name: key.into(),
+            description: Some(format!("Do {key}.")),
+            rarity: Some(rarity),
+            unlocked,
+            ..Achievement::default()
+        };
+        let progress = |game, unlocked, of| GameProgress { game, unlocked, of, score: 0 };
+        library.achievements.totals = Some(Totals { score: 95, unlocked: 6, of: 16, games: 4 });
+        // Halo 2 of 6, Hades II 3 of 4, Starfield 2 of 4 (as many as Halo, nearer finished), Celeste all of 2.
+        library.achievements.games = vec![progress(1, 2, 6), progress(5, 3, 4), progress(4, 2, 4), progress(12, 2, 2)];
+        library.achievements.next = vec![
+            Unlock { game: 5, achievement: a("Night Bloom", 7.5, None) },
+            Unlock { game: 1, achievement: a("Legend", 40.0, None) },
+        ];
+        let at = library.games[0].last_played;
+        library.achievements.recent = vec![
+            Unlock { game: 5, achievement: a("Blessed", 50.0, Some(at)) },
+            Unlock { game: 1, achievement: a("Spartan", 2.0, Some(0)) },
+        ];
+        let cards = pool(&library, true, today);
+        let close: Vec<_> = cards.iter().filter(|card| card.kind == Kind::CloseAchievement).collect();
+        let titles: Vec<&str> = close.iter().map(|card| card.title.as_str()).collect();
+        assert_eq!(titles, ["Hades II - Night Bloom", "Starfield", "Halo Infinite - Legend"]);
+        assert_eq!((close[0].score, close[0].rare, close[0].progress), (Some(30), true, Some(0.75)));
+        assert_eq!(close[0].label.as_deref(), Some("Close achievement"));
+        assert_eq!(close[0].description.as_deref(), Some("Do Night Bloom."));
+        assert_eq!((close[1].score, close[1].description.as_deref()), (None, None));
+
+        let unlocks: Vec<_> = cards.iter().filter(|card| card.kind == Kind::RecentUnlock).collect();
+        assert_eq!(unlocks[0].title, "Hades II - Blessed");
+        assert_eq!(unlocks[0].header.as_deref(), Some("Unlocked yesterday"));
+        assert_eq!((unlocks[0].score, unlocks[0].rare), (Some(15), false));
+        assert_eq!(unlocks[0].label.as_deref(), Some("Achievement unlocked"));
+        assert_eq!(
+            (unlocks[1].header.as_deref(), unlocks[1].score, unlocks[1].rare),
+            (Some("Unlocked"), Some(50), true)
+        );
+        // They come before the games played, and the tips are all there, the Score's with them.
+        assert_eq!(cards[0].kind, Kind::CloseAchievement);
+        assert_eq!(cards.iter().filter(|card| card.kind == Kind::Tip).count(), TIPS.len() + 1);
+        assert!(cards.iter().any(|card| card.title == SCORE_TIP.text));
     }
 
     #[test]

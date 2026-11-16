@@ -22,6 +22,10 @@ fn tip(n: u8) -> Card {
         game: None,
         prompt: "Got it",
         buttons: &[],
+        score: None,
+        rare: false,
+        progress: None,
+        icon: None,
     }
 }
 
@@ -164,7 +168,7 @@ fn the_wake_press_on_a_card_says_which_card_showed() {
     idle.tick(start + secs(6), pool);
     let showing = idle.card().map(|(_, card)| card.clone());
     assert!(showing.is_some());
-    assert_eq!(idle.press(press(Button::Y), start + secs(7)), Pressed::Woke(showing.clone()));
+    assert_eq!(idle.press(press(Button::Y), start + secs(7)), Pressed::Woke(showing.clone().map(Box::new)));
     // The card stays to fade out with the dim.
     assert_eq!(idle.card().map(|(_, card)| card.clone()), showing);
 }

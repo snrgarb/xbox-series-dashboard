@@ -1,11 +1,12 @@
 //! The hub's row of cards (docs/spec/game-hub.md, section 5): the cover, and whatever the library can tell of the
 //! game. A card with nothing to show is left out, and those after it close up to the left.
+use model::achievement::GameProgress;
 use model::Game;
 use ui::{ArtKey, Color, Crop, Font, HAlign, Kind, Rect, TextStyle, Ui, VAlign, DESIGN_WIDTH};
 
 use super::text;
-use crate::home;
 use crate::theme::{self, BODY};
+use crate::{achievement, home};
 
 /// The cards' top: under the title's line (56.4), the facts' (54), and 32 of margins, from the content's top at 128.
 pub const TOP: f32 = 270.4;
@@ -23,7 +24,7 @@ const TITLE: TextStyle = TextStyle::new(Font::Ui, 20.0, 700);
 /// A card's title with the 12 under it.
 const TITLE_HEIGHT: f32 = 38.6;
 /// A label and its value: two lines of 34.58, 2 between them and 10 after.
-const PAIR_HEIGHT: f32 = 81.16;
+pub const PAIR_HEIGHT: f32 = 81.16;
 const VALUE_DOWN: f32 = 36.58;
 /// A value stops this far short of its column's end.
 const VALUE_MARGIN: f32 = 16.0;
@@ -54,9 +55,8 @@ impl Card {
 /// The rows of Your game stats that have something to say: how long the game was played, how many times (the Play
 /// sessions the Dashboard recorded), and when last.
 ///
-/// The Bundle's Completion row is not here: it is a Playnite notion with no store behind it. Its Achievements row
-/// (M6) comes last, under these: until then nothing is drawn in its place, as the Bundle draws nothing for a game
-/// with no achievement data.
+/// The Bundle's Completion row is not here: it is a Playnite notion with no store behind it. The Achievements row
+/// comes last, under these, for a game that has achievements ([`achievements_row`]).
 fn stats(game: &Game) -> Vec<(&'static str, String)> {
     let mut rows = Vec::new();
     if game.playtime_minutes > 0 {
@@ -83,13 +83,14 @@ fn info(game: &Game) -> Vec<(&'static str, String)> {
     pairs
 }
 
-/// The cards that show for this game, left to right, on the Game hub page or on Game details. The Bundle's About
-/// and Description are in neither: no file of Steam's on this machine holds a game's description.
-pub fn showing(game: &Game, details: bool) -> Vec<Card> {
+/// The cards that show for this game, left to right, on the Game hub page or on Game details, `progress` how far
+/// it has got with its achievements if it has any. The Bundle's About and Description are in neither: no file of
+/// Steam's on this machine holds a game's description.
+pub fn showing(game: &Game, details: bool, progress: Option<&GameProgress>) -> Vec<Card> {
     let mut cards = vec![Card::Cover];
     if details {
         cards.push(Card::Trailer);
-    } else if !stats(game).is_empty() {
+    } else if !stats(game).is_empty() || progress.is_some() {
         cards.push(Card::Stats);
     }
     if !info(game).is_empty() {
@@ -119,7 +120,7 @@ fn cover_key(game: &Game, px: f32) -> Option<ArtKey> {
 }
 
 /// Draws the cards, and the focus ring round the one with focus, over all of them.
-pub fn draw(ui: &mut Ui, game: &Game, cards: &[Card], focus: Option<Card>) {
+pub fn draw(ui: &mut Ui, game: &Game, cards: &[Card], focus: Option<Card>, progress: Option<&GameProgress>) {
     let rects = rects(cards, focus);
     // A row wider than the screen is cut at the screen's edges, and 24 above and below the cards for the ring.
     let screen = ui.screen();
@@ -131,8 +132,12 @@ pub fn draw(ui: &mut Ui, game: &Game, cards: &[Card], focus: Option<Card>) {
                 Card::Trailer => trailer(ui, rect, game),
                 Card::Stats => {
                     let inner = titled(ui, rect, "Your game stats");
-                    for (row, (label, value)) in stats(game).iter().enumerate() {
+                    let rows = stats(game);
+                    for (row, (label, value)) in rows.iter().enumerate() {
                         pair(ui, inner.x, inner.y + row as f32 * PAIR_HEIGHT, inner.w, label, value);
+                    }
+                    if let Some(progress) = progress {
+                        achievements_row(ui, inner.x, inner.y + rows.len() as f32 * PAIR_HEIGHT, inner.w, progress);
                     }
                 }
                 Card::Info => {
@@ -151,8 +156,27 @@ pub fn draw(ui: &mut Ui, game: &Game, cards: &[Card], focus: Option<Card>) {
     });
 }
 
+/// The Achievements row (GameDetails.xaml, StatsAchievements): "Achievements"; under it the count unlocked, "2 / 6",
+/// and at the right the share, "33%", dimmer; then the bar, `width` long. Returns how tall it is: two lines of
+/// 34.58, the 2 and 10 round the second, and the bar's 6.
+pub fn achievements_row(ui: &mut Ui, x: f32, y: f32, width: f32, progress: &GameProgress) -> f32 {
+    line(ui, x, y, width, "Achievements", &BODY);
+    let count = format!("{} / {}", progress.unlocked, progress.of);
+    line(ui, x, y + VALUE_DOWN, width, &count, &BODY);
+    let percent = format!("{}%", achievement::percent(progress.unlocked, progress.of));
+    let room = Rect::new(x, y + VALUE_DOWN, width, BODY.size * 1.5);
+    ui.paragraph(room, &percent, &BODY.color(theme::TEXT_DIM), HAlign::Right, VAlign::Top, 1);
+    let bar_top = y + VALUE_DOWN + ROW_LINE + 10.0;
+    let share = if progress.of == 0 { 0.0 } else { progress.unlocked as f32 / progress.of as f32 };
+    achievement::bar(ui, Rect::new(x, bar_top, width, 6.0), share);
+    bar_top + 6.0 - y
+}
+
+/// A row's line: Segoe UI 26's, 34.58.
+const ROW_LINE: f32 = 34.58;
+
 /// A card's fill and title. Returns where its rows go.
-fn titled(ui: &mut Ui, rect: Rect, title: &str) -> Rect {
+pub fn titled(ui: &mut Ui, rect: Rect, title: &str) -> Rect {
     ui.fill(rect, FILL, RADIUS);
     let inner = Rect::new(rect.x + PADDING.0, rect.y + PADDING.1, rect.w - 2.0 * PADDING.0, rect.h - 2.0 * PADDING.1);
     line(ui, inner.x, inner.y, inner.w, title, &TITLE);
@@ -166,7 +190,7 @@ fn line(ui: &mut Ui, x: f32, y: f32, width: f32, text: &str, style: &TextStyle) 
 }
 
 /// A label with its value under it, in a column `width` wide.
-fn pair(ui: &mut Ui, x: f32, y: f32, width: f32, label: &str, value: &str) {
+pub fn pair(ui: &mut Ui, x: f32, y: f32, width: f32, label: &str, value: &str) {
     line(ui, x, y, width, label, &BODY);
     line(ui, x, y + VALUE_DOWN, width - VALUE_MARGIN, value, &BODY);
 }
@@ -221,15 +245,18 @@ mod tests {
     #[test]
     fn a_card_with_nothing_to_show_is_left_out() {
         let game = told();
-        assert_eq!(showing(&game, false), [Card::Cover, Card::Stats, Card::Info]);
-        assert_eq!(showing(&game, true), [Card::Cover, Card::Trailer, Card::Info]);
+        assert_eq!(showing(&game, false, None), [Card::Cover, Card::Stats, Card::Info]);
+        assert_eq!(showing(&game, true, None), [Card::Cover, Card::Trailer, Card::Info]);
         // A game the library knows only the name of: the cover alone, and on Game details its art.
         let bare = Game { name: "Bare".into(), ..Game::default() };
-        assert_eq!(showing(&bare, false), [Card::Cover]);
-        assert_eq!(showing(&bare, true), [Card::Cover, Card::Trailer]);
+        assert_eq!(showing(&bare, false, None), [Card::Cover]);
+        assert_eq!(showing(&bare, true, None), [Card::Cover, Card::Trailer]);
         // Never played, but Steam says who made it.
         let unplayed = Game { playtime_minutes: 0, play_count: 0, last_played: 0, ..told() };
-        assert_eq!(showing(&unplayed, false), [Card::Cover, Card::Info]);
+        assert_eq!(showing(&unplayed, false, None), [Card::Cover, Card::Info]);
+        // Never played, with achievements: Your game stats has their row alone.
+        let progress = GameProgress { game: 1, unlocked: 0, of: 6, score: 0 };
+        assert_eq!(showing(&unplayed, false, Some(&progress)), [Card::Cover, Card::Stats, Card::Info]);
     }
 
     #[test]

@@ -53,6 +53,8 @@ pub enum Open {
     TileMenu(tile_menu::Entry),
     /// Manage Queue, over whatever asked for it (`manage_queue::open`).
     ManageQueue,
+    /// A game's Achievements page, over its Game hub (`achievements`).
+    Achievements(crate::achievements::Entry),
 }
 
 impl Open {
@@ -72,6 +74,7 @@ impl Open {
             Open::KeyboardStandIn => Box::new(keyboard::stand_in::StandIn::open()),
             Open::TileMenu(entry) => Box::new(tile_menu::TileMenu::open(entry, around)?),
             Open::ManageQueue => Box::new(manage_queue::ManageQueue::open(around)),
+            Open::Achievements(entry) => Box::new(crate::achievements::Achievements::open(entry, around)?),
         })
     }
 }
@@ -232,6 +235,16 @@ pub trait Page {
     fn behind(&self) -> Option<u64> {
         None
     }
+
+    /// For a page that shows one game's whole list of achievements, which no snapshot of the library carries: that
+    /// game's id in the library database. The shell reads the list and gives it ([`Page::set_achievements`]) as the
+    /// page opens, and again as icons come in or the library changes.
+    fn achievements_wanted(&self) -> Option<i64> {
+        None
+    }
+
+    /// The game's whole list, in its store's order, as the library database has it now.
+    fn set_achievements(&mut self, _game: i64, _list: Vec<model::achievement::Achievement>) {}
 }
 
 fn behind_key(page: u64) -> (&'static str, u64) {
@@ -323,6 +336,18 @@ impl Stack {
     pub fn library_changed(&mut self, around: Around) {
         for page in &mut self.pages {
             page.library_changed(around);
+        }
+    }
+
+    /// The game whose whole list of achievements the topmost page that shows one wants ([`Page::achievements_wanted`]).
+    pub fn achievements_wanted(&self) -> Option<i64> {
+        self.pages.iter().rev().find_map(|page| page.achievements_wanted())
+    }
+
+    /// Gives a game's whole list to every page that is up and wants it.
+    pub fn set_achievements(&mut self, game: i64, list: Vec<model::achievement::Achievement>) {
+        for page in self.pages.iter_mut().filter(|page| page.achievements_wanted() == Some(game)) {
+            page.set_achievements(game, list.clone());
         }
     }
 

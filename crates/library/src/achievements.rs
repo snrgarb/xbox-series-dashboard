@@ -22,7 +22,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use model::achievement::{Achievement, AchievementSource, Achievements, GameProgress, Totals, Unlock, RECENT};
+use model::achievement::{
+    nearest_locked, Achievement, AchievementSource, Achievements, GameProgress, Totals, Unlock, RECENT,
+};
 use model::Library;
 use rusqlite::{params, OptionalExtension};
 
@@ -252,17 +254,20 @@ impl Database {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// What a snapshot carries: the totals over every game that is not gone, how far each has got, and the last
-    /// unlocks, newest first.
+    /// What a snapshot carries: the totals over every game that is not gone, how far each has got, the locked one
+    /// nearest to hand of each game part done, and the last unlocks, newest first.
     pub fn achievement_summary(&self) -> Result<Achievements> {
         let icons = self.achievement_icons();
         let mut games: Vec<GameProgress> = Vec::new();
+        // Each game's list, in its store's order, while it is read.
+        let mut lists: Vec<Vec<Achievement>> = Vec::new();
         {
-            let mut rows = self.conn.prepare(&format!("SELECT {ROW} WHERE g.gone = 0 ORDER BY a.game"))?;
+            let mut rows = self.conn.prepare(&format!("SELECT {ROW} WHERE g.gone = 0 ORDER BY a.game, a.position"))?;
             for row in rows.query_map([], |row| row_achievement(row, None))? {
                 let (game, a) = row?;
                 if games.last().is_none_or(|last| last.game != game) {
                     games.push(GameProgress { game, ..GameProgress::default() });
+                    lists.push(Vec::new());
                 }
                 let progress = games.last_mut().expect("just pushed");
                 progress.of += 1;
@@ -270,8 +275,18 @@ impl Database {
                     progress.unlocked += 1;
                     progress.score += u64::from(a.score());
                 }
+                lists.last_mut().expect("just pushed").push(a);
             }
         }
+        let next = games
+            .iter()
+            .zip(&lists)
+            .filter(|(progress, _)| progress.unlocked > 0 && progress.unlocked < progress.of)
+            .filter_map(|(progress, list)| {
+                let achievement = nearest_locked(list)?.clone();
+                Some(Unlock { game: progress.game, achievement })
+            })
+            .collect();
         if games.is_empty() {
             return Ok(Achievements::default());
         }
@@ -289,7 +304,7 @@ impl Database {
             .query_map([], |row| row_achievement(row, icons.as_ref()))?
             .map(|row| row.map(|(game, achievement)| Unlock { game, achievement }))
             .collect::<rusqlite::Result<_>>()?;
-        Ok(Achievements { totals: Some(totals), recent, games })
+        Ok(Achievements { totals: Some(totals), recent, games, next })
     }
 }
 

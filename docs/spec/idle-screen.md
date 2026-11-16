@@ -51,6 +51,8 @@ Toasts neither wake the screen nor count as input. A game stopping changes nothi
 
 | Kind | Header | Title | Label | Description | Prompt | Y |
 |---|---|---|---|---|---|---|
+| Close achievement (5 games: the most achievements unlocked without all, then the nearer finished, then by name) | - (the Score row: the Rare diamond, the G disc 46 with the G knocked out in the panel's colour, the Score bold 46 13 after it; the game's share at the right; a 10-tall bar under it, `#008080` on `#838383`, 29 down; the title 40 under the bar) | "Ashfall Courier - Night Route" (the game's next achievement), or the game alone with none to name | "Close achievement" | the achievement's | See game | as Recently played |
+| Recent unlock (the last 5 unlocked) | "Unlocked yesterday" ("Unlocked" with no time known), at the right, the Score row at the left | "Ashfall Courier - Ash Runner" | "Achievement unlocked" | the achievement's | See game | as Recently played; its icon 320 square at y 600 over the game's art, which is darkened `#80000000` under it |
 | Recently played (the last 5 played) | "Played yesterday" | the game's name | "Recently played" | "12 h played" or "45 min played" | See game | wakes it and opens the game's Game hub, unless a game is running |
 | Tip | "Tip" | the tip | - | - | Got it | wakes it |
 
@@ -66,6 +68,7 @@ The tips are the Bundle's that apply to the port. The ones about the Guide are l
 - On the keyboard, {X} is backspace, {Y} is space, {Start} is Enter.
 - See what's downloading in My games & apps › Manage › Queue.
 - See what's playing in the Guide's Audio, under Now Playing.
+- Your Score adds up achievements across every game. (Only while there is a Score.)
 
 ## 5. Waking
 
@@ -100,7 +103,9 @@ Last on the **Overlay** (`docs/spec/guide.md`), over the Launch screen, the Guid
 
 ## 9. Differences from the Bundle
 
-- **No achievement cards.** The Bundle's nearly-finished games and last unlocks come from PlayniteAchievements, which the port has not got. Only Recently played and tips are in the pool.
-- **Tips:** the ones about Discord, the Score and the Boot video are left out until those come. The button tokens are written as words ("Y", "Menu", "the Guide button") rather than drawn as glyphs in the line.
+- **Achievement cards come from Steam's files** ([../achievements.md](../achievements.md), #141), not PlayniteAchievements: only Steam games have them. They are in the pool only while there are totals, and only for games in the library, never hidden ones.
+- **The nearly-finished card's achievement** is the game's locked one most players have (`model::achievement::nearest_locked`: the highest known rarity, secret ones and unnamed ones never), where PlayniteAchievements names it.
+- **The Score tip** says "across every game" where the Bundle's says "across every platform": the port reads Steam's alone. It is in the pool only while there is a Score.
+- **Tips:** the ones about Discord and the Boot video are left out until those come. The button tokens are written as words ("Y", "Menu", "the Guide button") rather than drawn as glyphs in the line.
 - **The tip's pad** is plain shapes (rings and rounded rectangles), not the Bundle's traced outline. The Guide button is a ring.
 - **Dim after on Never** keeps the screen awake. The Bundle turns the display off; the port does not touch the display (an open question for the plan).

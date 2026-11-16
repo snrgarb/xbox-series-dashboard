@@ -8,11 +8,12 @@
 //!
 //! Menu anywhere, and A on Manage, open the game's Tile menu (`tile_menu`, without its Manage game row); A on
 //! Install is the Tile menu's Install; A on Queue opens Manage Queue over the hub (`manage_queue`), which B there
-//! comes back from. **Hook for the tickets to come:** the Achievements row's in `cards::stats` (M6).
+//! comes back from. A on Your game stats of a game with achievements opens its Achievements page in the hub's
+//! place (`achievements`), which B there comes back from.
 mod actions;
-mod backdrop;
-mod cards;
-mod text;
+pub(crate) mod backdrop;
+pub(crate) mod cards;
+pub(crate) mod text;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -105,6 +106,20 @@ fn facts(game: &Game) -> String {
     facts.into_iter().flatten().collect::<Vec<_>>().join(" \u{2022} ")
 }
 
+/// How far the game has got with its achievements, if it has any: a game in no library database has none.
+fn progress<'a>(game: &Game, library: &'a Library) -> Option<&'a model::achievement::GameProgress> {
+    library.achievements.of(game.id).filter(|_| game.id != 0)
+}
+
+/// The hub's header: the game's name, and a line under it (the facts on the hub, what the page is on the
+/// Achievements page). Neither wraps.
+pub(crate) fn header(ui: &mut Ui, title: &str, line: &str) {
+    let title_rect = Rect::new(cards::LEFT, TOP, WIDTH, TITLE_HEIGHT * 1.2);
+    ui.paragraph(title_rect, title, &TITLE, HAlign::Left, VAlign::Top, 1);
+    let line_rect = Rect::new(cards::LEFT, TOP + TITLE_HEIGHT + 6.0, WIDTH, FACTS_HEIGHT);
+    ui.paragraph(line_rect, line, &FACTS, HAlign::Left, VAlign::Center, 1);
+}
+
 impl GameHub {
     /// The hub for a game, on its Game hub page with focus on the main action: it remembers nothing from the last
     /// time one was up. The main action is what the game can do now, Queued or Installing for one in the Queue,
@@ -141,7 +156,7 @@ impl GameHub {
         if self.focus == Focus::Action(Action::Queue) && !self.queued {
             self.focus = Focus::Action(Action::Manage);
         }
-        let cards = cards::showing(game, self.view == View::Details);
+        let cards = cards::showing(game, self.view == View::Details, progress(game, around.library));
         if matches!(self.focus, Focus::Card(card) if !cards.contains(&card)) {
             self.focus = Focus::Action(Action::Main);
         }
@@ -241,7 +256,13 @@ impl Page for GameHub {
             (Button::A, Focus::Action(Action::Toggle)) => {
                 self.view = if self.view == View::Hub { View::Details } else { View::Hub };
             }
-            // A on a card does nothing; nor do X, Y, View, the bumpers and the triggers.
+            // Your game stats of a game with achievements: its Achievements page, in the hub's place, which B
+            // there comes back from, focus still on the card.
+            (Button::A, Focus::Card(Card::Stats)) if progress(game, around.library).is_some() => {
+                let entry = crate::achievements::Entry { game: game.key(), id: game.id, behind: self.serial };
+                return Some(PageAction::Open(pages::Open::Achievements(entry)));
+            }
+            // A on another card does nothing; nor do X, Y, View, the bumpers and the triggers.
             _ => {}
         }
         None
@@ -261,16 +282,12 @@ impl Page for GameHub {
         let behind = pages::behind(ui, self.serial);
         backdrop::draw(ui, game, behind);
 
-        // The header: the name, and the facts under it. Neither wraps.
-        let title = Rect::new(cards::LEFT, TOP, WIDTH, TITLE_HEIGHT * 1.2);
-        ui.paragraph(title, &game.name, &TITLE, HAlign::Left, VAlign::Top, 1);
-        let line = Rect::new(cards::LEFT, TOP + TITLE_HEIGHT + 6.0, WIDTH, FACTS_HEIGHT);
-        ui.paragraph(line, &facts(game), &FACTS, HAlign::Left, VAlign::Center, 1);
+        header(ui, &game.name, &facts(game));
 
         let source = crate::home::source(game).map(|source| source.name());
         let details = self.view == View::Details;
         self.toggle_width = actions::draw(ui, self.main, source, details, self.queued, on_action);
-        cards::draw(ui, game, &cards, on_card);
+        cards::draw(ui, game, &cards, on_card, progress(game, around.library));
         actions::name_chip(ui, on_action, self.toggle_width, self.queued);
     }
 
@@ -451,6 +468,24 @@ mod tests {
         hub.library.games[1].id = 7;
         hub.reopen(Entry::of(&hub.library.games[1]));
         assert_eq!(hub.press(Button::A), Some(PageAction::CloseWith(Effect::Install(7))));
+    }
+
+    #[test]
+    fn a_on_your_game_stats_opens_the_achievements_page_of_a_game_with_achievements() {
+        let mut hub = Hub::open(10);
+        assert_eq!(hub.go(&[Button::Right, Button::Up, Button::A]), "10 Hub Stats");
+        // With achievements, and so in a library database.
+        hub.library.games[0].id = 7;
+        let progress = model::achievement::GameProgress { game: 7, unlocked: 2, of: 6, score: 25 };
+        hub.library.achievements.games.push(progress);
+        hub.reopen(Entry::of(&hub.library.games[0]));
+        assert_eq!(hub.go(&[Button::Right, Button::Up]), "10 Hub Stats");
+        let entry = crate::achievements::Entry { game: hub.library.games[0].key(), id: 7, behind: hub.hub.serial };
+        assert_eq!(hub.press(Button::A), Some(PageAction::Open(pages::Open::Achievements(entry))));
+        // A game never played with achievements still has the card, for their row.
+        let game = &mut hub.library.games[0];
+        (game.playtime_minutes, game.last_played) = (0, 0);
+        assert_eq!(hub.go(&[Button::X]), "10 Hub Stats");
     }
 
     #[test]

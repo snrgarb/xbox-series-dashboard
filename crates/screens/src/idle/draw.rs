@@ -148,17 +148,53 @@ fn card_at(ui: &mut Ui, panel: Rect, card: &Card, library: &Library) {
             colour,
         );
     }
+    // An achievement's icon, large over the art's middle, the art darkened by half again under it, its corners
+    // rounded as a tile's, a soft shadow round it.
+    if let Some(icon) = &card.icon {
+        if hero.is_some() {
+            let art = Rect::new(panel.x, panel.bottom() - ART_HEIGHT, panel.w, ART_HEIGHT);
+            ui.fill(art, Color::argb(0x80000000), 0.0);
+        }
+        let side = PICTURE_HEIGHT;
+        let picture = Rect::new(panel.center().0 - side / 2.0, panel.y + PICTURE_TOP, side, side);
+        let key = ArtKey { path: icon.clone(), kind: Kind::Thumb((side * ui.px()).ceil() as u32) };
+        if matches!(ui.art.get(&key), Art::Ready { .. }) {
+            ui.shadow(picture, Color::argb(0x80000000), 4.0, 24.0);
+        }
+        ui.art(picture, &key, Crop::Center, 1.0, 4.0);
+    }
 
     // The text: the top line, the title, the label, the description.
     let left = panel.x + TEXT_LEFT;
     let width = panel.w - TEXT_LEFT - TEXT_RIGHT;
     let mut y = panel.y + TEXT_TOP;
-    if let Some(header) = &card.header {
+    let header_left = card.score.is_none();
+    if let Some(score) = card.score {
+        score_row(ui, left, y, score, card.rare, colour);
+    }
+    if let Some(progress) = card.progress {
+        let share = format!("{}%", (progress.clamp(0.0, 1.0) * 100.0).round());
         let room = Rect::new(left, y - 12.0, width, TOP_LINE + 18.0);
-        ui.paragraph(room, header, &HEADER, HAlign::Left, VAlign::Center, 1);
+        ui.paragraph(room, &share, &HEADER, HAlign::Right, VAlign::Center, 1);
+    }
+    let header = card.header.as_ref().filter(|_| !(card.score.is_some() && card.progress.is_some()));
+    if let Some(header) = header {
+        let room = Rect::new(left, y - 12.0, width, TOP_LINE + 18.0);
+        let align = if header_left { HAlign::Left } else { HAlign::Right };
+        ui.paragraph(room, header, &HEADER, align, VAlign::Center, 1);
+    }
+    if header.is_some() || card.score.is_some() || card.progress.is_some() {
         y += TOP_LINE;
     }
-    y += 29.0;
+    // The bar under the top line, 10 tall: the progress in teal on a grey track.
+    if let Some(progress) = card.progress {
+        let bar = Rect::new(left, y + 29.0, width, 10.0);
+        ui.fill(bar, Color::rgb(0x838383), 0.0);
+        ui.fill(Rect::new(bar.x, bar.y, bar.w * progress.clamp(0.0, 1.0), bar.h), Color::rgb(0x008080), 0.0);
+        y += 29.0 + 10.0 + 40.0;
+    } else {
+        y += 29.0;
+    }
     let (style, lines) = if tip { (TIP_TITLE, 10) } else { (TITLE, 3) };
     let title = Rect::new(left, y, width - TITLE_SHORT, 1000.0);
     y += ui.paragraph(title, &card.title, &style, HAlign::Left, VAlign::Top, lines).height;
@@ -182,6 +218,22 @@ fn card_at(ui: &mut Ui, panel: Rect, card: &Card, library: &Library) {
         ui.label_middle(icon.right() + 26.0, middle - 3.0, card.prompt, &PROMPT);
     });
 }
+
+/// The top line's Score from (`left`, `top`): for a Rare one the diamond first, 44 wide and 12 before the rest; the
+/// G knocked out of a white disc 46 across in the panel's colour; the Score, 46 bold, 13 after it.
+fn score_row(ui: &mut Ui, left: f32, top: f32, score: u32, rare: bool, panel: Color) {
+    let middle = top + TOP_LINE / 2.0;
+    let mut x = left;
+    if rare {
+        crate::achievement::rare_diamond(ui, x, middle);
+        x += 44.0 + 12.0;
+    }
+    crate::achievement::g_disc(ui, x + 23.0, middle, 46.0, panel);
+    ui.label_middle(x + 46.0 + 13.0, middle - 3.0, &score.to_string(), &SCORE);
+}
+
+/// The top line's Score: 46 bold, white.
+const SCORE: TextStyle = TextStyle::new(Font::Ui, 46.0, 700);
 
 /// A button as the console writes it in its text: its letter in a ring, the ring's line a sixteenth of its size.
 fn letter_ring(ui: &mut Ui, rect: Rect, letter: &str, colour: Color) {

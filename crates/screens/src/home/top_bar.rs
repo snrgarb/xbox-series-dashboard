@@ -3,7 +3,7 @@
 use ui::{Color, Ease, Rect, Ui};
 
 use crate::theme::{self, glyph, BODY, MARGIN};
-use crate::{guide, profile};
+use crate::{achievement, guide, profile};
 
 const MIDDLE: f32 = 114.0;
 const BUTTON: f32 = 60.0;
@@ -103,10 +103,18 @@ pub struct Status<'a> {
     pub pad_battery: Option<u8>,
     /// Settings' Show battery percentages: the figure beside the battery.
     pub show_percent: bool,
+    /// The Score total under the gamertag, as the console's; none while there are no achievement totals.
+    pub score: Option<u64>,
 }
 
+/// The Score line's G disc, and the gap after it (Main.xaml, XboxTopBarProfile).
+const G: f32 = 19.0;
+const G_GAP: f32 = 6.0;
+/// A line of Segoe UI 26: the gamertag's, and the Score's under it.
+const LINE: f32 = 34.58;
+
 pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
-    let Status { profile, clock, pad, pad_battery, show_percent } = *status;
+    let Status { profile, clock, pad, pad_battery, show_percent, score } = *status;
     let picture = TopButton::Profile.rect();
     profile::picture(ui, picture, &profile.picture);
     if focused == Some(TopButton::Profile) {
@@ -131,7 +139,19 @@ pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
         1.0
     };
     if share > 0.0 {
-        ui.with_alpha(share, |ui| ui.label_middle(name_at, MIDDLE - 2.0, &profile.gamertag, &BODY));
+        // With a Score the gamertag and the Score line under it stand together on the bar's middle, and fade
+        // together.
+        ui.with_alpha(share, |ui| match score {
+            Some(score) => {
+                ui.label_middle(name_at, MIDDLE - 2.0 - LINE / 2.0, &profile.gamertag, &BODY);
+                let line = MIDDLE - 2.0 + LINE / 2.0;
+                achievement::g_disc(ui, name_at + G / 2.0, line, G, Color::BLACK);
+                ui.label_middle(name_at + G + G_GAP, line, &achievement::thousands(score), &BODY);
+            }
+            None => {
+                ui.label_middle(name_at, MIDDLE - 2.0, &profile.gamertag, &BODY);
+            }
+        });
     }
     if share < 1.0 {
         ui.with_alpha(1.0 - share, |ui| ui.label_middle(name_at, MIDDLE - 2.0, &profile.real_name, &BODY));

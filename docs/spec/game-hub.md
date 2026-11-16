@@ -344,7 +344,7 @@ A flips the page: the hub page's cards (stats, About, Info) are replaced by the 
 
 The page is **not reset** when the hub closes or the game changes: no trigger or code sets the toggle back (NOT FOUND), and the hub is one element reused for every game, so by the source a hub opened after the details page was shown opens on the details page. **UNVERIFIED** on screen. The description's scroll position is put back to the top on every change of game (PN/.../Views/GameDetails.cs:52-56).
 
-### 6.6 Achievements page (M6: entry point only)
+### 6.6 Achievements page (M6: entry point only; the port's is [achievements-page.md](achievements-page.md))
 
 CONTEXT.md:54-56 defines it as the hub's view of one game's achievements, "opened from the hub and shown in its place". At `f11e4f9` it is **not built** (docs/playnite-achievements.md:14, issue #34): there is no action, card behaviour or binding that opens it (NOT FOUND; A on the stats card does nothing). `E/AchievementPages.cs` is unrelated: it pages the achievement Toast's text. For M3: nothing to draw; M6 decides its entry point (see Open questions).
 
@@ -702,7 +702,8 @@ What `crates/screens/src/game_hub/` does (ticket #51), where the sections above 
 - **Completion and Your score are dropped** (Q9): Playnite's notions, with no store behind them.
 - **Recent Play sessions are left out**, as the Bundle leaves them out (Q10).
 - **Install is the Tile menu's Install** (Q11). The action is drawn, with the store's name under it, and takes focus; A on it closes the hub and asks Steam for the game with `steam://install/<appid>` (`tile_menu::install`, which the menu's row answers with too). Steam's own window does the rest: there is no Queue until M4. A game in no library database asks nothing, and the hub closes all the same.
-- **The Achievements row (M6) is a place, and nothing is drawn in it** (Q12): the foot of Your game stats, under the rows that show. A on the stats card is left free for the Achievements page's way in.
+- **The Achievements row** (#141) is the Bundle's (section 5.2, row 5), from `Library::achievements` (the game's `GameProgress`): the last row of Your game stats, which shows for a game with achievements though never played. A game with none has no row, and nothing stands in for it.
+- **A on Your game stats opens the Achievements page** (Q12, #141) of a game that has achievements, in the hub's place; B there comes back to the card ([achievements-page.md](achievements-page.md)). For a game with none, A on the card does nothing, as in the Bundle.
 - **Up and Down go by the nearest middle, across** (Q14): Up from the main action is the cover card; from Manage or the toggle the card whose middle is nearest the action's; Down from a card the action whose middle is nearest the card's. No column is remembered.
 
 ### 16.2 Differs

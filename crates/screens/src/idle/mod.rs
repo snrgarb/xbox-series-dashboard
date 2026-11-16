@@ -218,7 +218,7 @@ pub enum Pressed {
     /// Part of the press that woke the screen (its repeat, its release): it does nothing more.
     Swallowed,
     /// It woke the screen, and does nothing more; the card that showed as it did, for Y's "See game".
-    Woke(Option<Card>),
+    Woke(Option<Box<Card>>),
 }
 
 /// Where the Guide button that woke the screen is in its press, whose tap or hold is swallowed.
@@ -472,7 +472,7 @@ impl Idle {
     pub fn press(&mut self, press: Press, now: Instant) -> Pressed {
         if self.stage != Stage::Awake {
             self.held = Some(press.button);
-            return Pressed::Woke(self.wake(Woken::Button(press.button), now));
+            return Pressed::Woke(self.wake(Woken::Button(press.button), now).map(Box::new));
         }
         if self.held == Some(press.button) {
             if press.repeat {

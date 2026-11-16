@@ -1,7 +1,7 @@
 # Achievements (#140): Steam's, from the fake Steam's own files (`appcache/stats`, written by `standin make-steam`:
 # crates/source-steam/src/fixture.rs, ACHIEVEMENTS), how rare each is from a stand-in of Steam's global percentages
 # (`standin serve-art`, `--store-art-service <url>/stores`: nothing here asks a real service), and a new unlock seen
-# while the game runs. No screen shows them yet (#141, #142): judged by the Dashboard's log alone.
+# while the game runs; then the screens that show them (#141): judged by the Dashboard's log, with pictures to look at.
 #
 # Ashfall Courier (9100010), the Recent row's first game, has six achievements, two unlocked: as the Dashboard starts
 # it says `achievements: 9100010 2 of 6, score 20` (no rarity yet: each 10), asks the stand-in, says
@@ -10,7 +10,20 @@
 # `achievements: watching 9100010 (Ashfall Courier)`. `standin unlock-achievement` then unlocks No Detours (7.4% of
 # players: Rare, Score 30) as Steam writes its stats file while a game runs, and within 5 s the Dashboard says
 # `achievements: 9100010 unlocked ACH_NO_DETOURS "No Detours": score 30, 7.4% of players, Rare` and
-# `achievements: 9100010 3 of 6, score 55`. Passes when every line comes in time and the Dashboard stays up.
+# `achievements: 9100010 3 of 6, score 55`.
+#
+# The screens (#141, docs/spec/achievements-page.md), once the game has ended and Home is back on its tile: A opens
+# the game's hub again, Right and Up put focus on Your game stats (`focus: GameHub: 9100010 Hub Stats`), whose
+# Achievements row shows; A opens the Achievements page in the hub's place, the Dashboard reads the game's list
+# (`achievements: the page lists 6 (3 unlocked, <i> with icons)`) and focus is on the newest unlock,
+# `focus: Achievements: 9100010 ACH_NO_DETOURS; 3 of 6 unlocked`. Right is Ash Runner; Down twice is the last row's
+# secret one, Perfect Ledger (`... ACH_PERFECT_LEDGER; ...`); A there does nothing. B is the hub on its card again,
+# B Home on the tile. Up is the profile and A on it the Guide on Profile & system: under Switch profile the totals and
+# the three last unlocks are entries of their own, named in the Guide's line newest first
+# (`guide: ProfileAndSystem Entry(2) Achievement "No Detours"`, then Ash Runner and First Delivery), and Down six
+# times reaches Power (`guide: ProfileAndSystem Entry(6) Power`); A on an unlock does nothing. The totals' line,
+# "55 G   3 achievements", is not in the log: the picture `07-guide-achievements` is for a person to read.
+# Passes when every line comes in time and the Dashboard stays up.
 # Safe mode: every fake under the payload's folder, nothing registered.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
@@ -81,7 +94,58 @@ try {
     if ($again -ne 1) { $failures += "the unlock was said $again times" }
 
     Stop-StandInGame
-    Wait-DashboardLog 'the game has ended, Home back' 20 | Out-Null
+    if (-not (Wait-DashboardLog 'the game has ended, Home back' 20)) { throw 'Home never came back after the game' }
+
+    # The screens: the hub's row, the Achievements page, the Guide's Profile & system; each step judged by the line
+    # its press brings, each picture for a person to look at.
+    function Step([string] $Button, [string] $Pattern, [string] $What, [string] $Picture = '') {
+        $mark = Get-DashboardLogLength
+        Push-Button $Button
+        $line = Expect $Pattern 10 $What $mark
+        if ($Picture) { Start-Sleep -Milliseconds 800; Save-Screen $Picture }
+        $line
+    }
+    Start-Sleep -Seconds 2
+    Push-Button A
+    if (-not (Wait-DashboardLog "^focus: GameHub: $appid Hub Play`$" 10)) { throw "A did not open $($game.name)'s Game hub again" }
+    Start-Sleep -Milliseconds 500
+    Step Right "^focus: GameHub: $appid Hub Manage`$" 'Manage' | Out-Null
+    Step Up "^focus: GameHub: $appid Hub Stats`$" 'Your game stats, with its Achievements row' '01-hub-stats' | Out-Null
+    $mark = Get-DashboardLogLength
+    Push-Button A
+    Expect '^achievements: the page lists 6 \(3 unlocked, \d+ with icons\)$' 10 'the list read' $mark | Out-Null
+    Expect "^focus: Achievements: $appid ACH_NO_DETOURS; 3 of 6 unlocked`$" 10 'the Achievements page' $mark | Out-Null
+    Start-Sleep -Milliseconds 800
+    Save-Screen '02-achievements-page'
+    Step Right "^focus: Achievements: $appid ACH_ASH_RUNNER; 3 of 6 unlocked`$" 'Right: Ash Runner' | Out-Null
+    Step Down "^focus: Achievements: $appid ACH_NIGHT_ROUTE; 3 of 6 unlocked`$" 'Down: Night Route' | Out-Null
+    Step Down "^focus: Achievements: $appid ACH_PERFECT_LEDGER; 3 of 6 unlocked`$" 'Down: the secret one' '03-achievements-secret' | Out-Null
+    $mark = Get-DashboardLogLength
+    Push-Button A
+    Start-Sleep -Seconds 1
+    $moved = @(Get-DashboardLog | Select-Object -Skip $mark | Where-Object { $_ -match '^focus: ' })
+    if ($moved.Count -gt 0) { $failures += "A on an achievement did something: $($moved -join '; ')" }
+    Step B "^focus: GameHub: $appid Hub Stats`$" 'B: the hub on its card' '04-hub-again' | Out-Null
+    Step B '^focus: Recent\(0\)$' 'B: Home on the tile' '05-home-score' | Out-Null
+    Step Up '^focus: TopBar\(Profile\)$' 'Up: the profile' | Out-Null
+    Step A '^guide: ProfileAndSystem Entry\(0\) Profile$' 'A: the Guide on Profile & system' '06-guide' | Out-Null
+    # The entries by name: the last unlocks, newest first, between Switch profile and Settings.
+    $names = @('SwitchProfile', 'Achievement "No Detours"', 'Achievement "Ash Runner"', 'Achievement "First Delivery"', 'Settings', 'Power')
+    for ($entry = 1; $entry -le 6; $entry++) {
+        $picture = if ($entry -eq 2) { '07-guide-achievements' } else { '' }
+        $name = [regex]::Escape($names[$entry - 1])
+        Step Down "^guide: ProfileAndSystem Entry\($entry\) $name`$" "Down: $($names[$entry - 1])" $picture | Out-Null
+    }
+    # A on an unlock does nothing: up to the newest, A, and the Guide stays on it.
+    for ($entry = 5; $entry -ge 2; $entry--) { Step Up "^guide: ProfileAndSystem Entry\($entry\) " "Up: entry $entry" | Out-Null }
+    $mark = Get-DashboardLogLength
+    Push-Button A
+    Start-Sleep -Seconds 1
+    $moved = @(Get-DashboardLog | Select-Object -Skip $mark | Where-Object { $_ -match '^(guide|focus): ' })
+    if ($moved.Count -gt 0) { $failures += "A on an unlock in the Guide did something: $($moved -join '; ')" }
+    Push-Button B
+    Wait-DashboardLog '^guide: closed$' 10 | Out-Null
+
     if ($script:dashboard.HasExited) { $failures += "the Dashboard exited with $($script:dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }
 } catch {

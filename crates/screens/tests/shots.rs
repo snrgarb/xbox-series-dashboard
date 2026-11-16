@@ -2568,3 +2568,182 @@ fn the_hubs_strips_show_home_as_it_was_when_the_hub_opened() {
     let next = stage.still();
     assert_ne!(colour(&next, 960, 60), colour(&first, 960, 60), "the next hub has a picture of its own");
 }
+
+// --- Achievements (docs/achievements.md, docs/spec/achievements-page.md): Home's Score, Profile & system's totals and
+// last unlocks, the hub's row and the Achievements page. Their order and focus are the page's own tests'. ---
+
+/// An achievement's icon, as Steam's are: square, split across in two colours of its own, with a light edge.
+fn achievement_icon(n: u32) -> PathBuf {
+    static ICONS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    ICONS.get_or_init(|| (0..12).map(draw_achievement_icon).collect())[n as usize].clone()
+}
+
+fn draw_achievement_icon(n: u32) -> PathBuf {
+    let path = art_dir().join(format!("icon-{n}.png"));
+    let hue = |shift: u32| (((n * 71 + shift * 97) % 200) + 40) as u8;
+    let image = image::RgbImage::from_fn(64, 64, |x, y| {
+        if x < 3 || y < 3 || x >= 61 || y >= 61 {
+            image::Rgb([240, 240, 240])
+        } else if x > y {
+            image::Rgb([hue(0), hue(1), hue(2)])
+        } else {
+            image::Rgb([hue(2) / 2, hue(0) / 2, hue(1) / 2])
+        }
+    });
+    shots::save_shared(&image, &path);
+    path
+}
+
+/// Halo Infinite's twelve made-up achievements, in its store's order, with how rare each is: four unlocked, seven
+/// locked, one of them a secret, and a secret unlocked.
+fn halo_achievements() -> Vec<(model::achievement::Achievement, f64)> {
+    let day = 86_400;
+    let at = 1_790_000_000 - 2 * day;
+    let a = |key: &str, name: &str, description: &str, hidden: bool, unlocked: Option<u64>| {
+        model::achievement::Achievement {
+            key: key.into(),
+            name: name.into(),
+            description: Some(description.into()),
+            hidden,
+            unlocked,
+            ..Default::default()
+        }
+    };
+    vec![
+        (a("FIRST_DROP", "First Drop", "Finish the first mission.", false, Some(at - 9 * day)), 88.4),
+        (a("SHARPSHOOTER", "Sharpshooter", "Land fifty headshots in a row on any mission.", false, None), 21.0),
+        (
+            a(
+                "WARTHOG_RUN",
+                "Warthog Run",
+                "Drive the length of the ring without leaving the road.",
+                false,
+                Some(at - 3 * day),
+            ),
+            46.5,
+        ),
+        (a("COLLECTOR", "Collector", "Find every skull hidden on the ring.", false, None), 6.3),
+        (a("SPARTAN", "Spartan", "Win a match without taking any damage.", false, Some(at)), 2.0),
+        (a("LEGEND", "Legend", "Finish the campaign on Legendary.", false, None), 8.2),
+        (a("THE_TRUTH", "The Truth", "Learn what became of the Pillar of Autumn.", true, Some(at - day)), 33.0),
+        (a("PACIFIST", "Pacifist", "Finish a mission without firing a shot.", false, None), 12.7),
+        (a("GRAPPLE", "Grapple Master", "Grapple across the whole of the second tower.", false, None), 54.1),
+        (a("IRON", "Iron Will", "Finish the campaign with every skull on.", false, None), 0.4),
+        (a("ENDGAME", "Endgame", "The last of it.", true, None), 0.9),
+        (a("MARATHON", "Marathon", "Play for a hundred hours.", false, None), 15.0),
+    ]
+}
+
+/// The hub's library with Halo Infinite's achievements and how rare each is, kept in the library database as the
+/// thread that follows achievements keeps them; its last unlocks' icons fetched.
+fn library_with_achievements() -> Library {
+    let mut library = from_database(library_for_the_hub(), |database| {
+        let games = database.snapshot().unwrap().games;
+        let (list, rarity): (Vec<_>, Vec<_>) = halo_achievements().into_iter().unzip();
+        database.put_achievements(games[0].id, &list).unwrap();
+        let rarity = list.iter().zip(rarity).map(|(a, r)| (a.key.clone(), r)).collect();
+        database.set_rarity(games[0].id, Some(&rarity), ADDED).unwrap();
+    });
+    for (n, unlock) in library.achievements.recent.iter_mut().enumerate() {
+        unlock.achievement.icon_file = Some(achievement_icon(n as u32));
+    }
+    library
+}
+
+/// Halo Infinite's whole list as the shell gives it to its Achievements page: its icons fetched but for two.
+fn halo_list(dashboard: &Dashboard) -> (i64, Vec<model::achievement::Achievement>) {
+    let game = &dashboard.library().games[0];
+    let mut list: Vec<_> = halo_achievements()
+        .into_iter()
+        .map(|(a, rarity)| model::achievement::Achievement { rarity: Some(rarity), ..a })
+        .collect();
+    for (n, a) in list.iter_mut().enumerate().filter(|(n, _)| ![1, 7].contains(n)) {
+        let file = Some(achievement_icon(n as u32));
+        if a.is_unlocked() {
+            a.icon_file = file;
+        } else {
+            a.icon_locked_file = file;
+        }
+    }
+    (game.id, list)
+}
+
+/// Home with achievements: the Score under the gamertag, as the console's, and on the Achievements tile.
+#[test]
+fn achievements_home() {
+    let mut stage = Stage::on_row(library_with_achievements(), HD);
+    let totals = stage.dashboard.library().achievements.totals.unwrap();
+    // 10 + 15 + 50 + 15 by the Bundle's table.
+    assert_eq!((totals.score, totals.unlocked, totals.of), (90, 4, 12));
+    stage.press(&[Button::Down, Button::Right, Button::Right]);
+    stage.check("achievements-home");
+}
+
+/// The Guide's Profile & system: under Switch profile the totals, "90 G   4 achievements", and the last three
+/// unlocks as entries, newest first, with their icons and their game's name; focus on the newest.
+#[test]
+fn achievements_guide() {
+    let mut stage = Stage::on_row(library_with_achievements(), HD);
+    stage.dashboard.open_guide_on(screens::guide::Tab::ProfileAndSystem);
+    stage.press(&[Button::Down, Button::Down]);
+    let entries: Vec<_> = stage.dashboard.guide().entries().iter().map(|e| e.title.clone()).collect();
+    assert_eq!(entries[2..5], ["Spartan", "The Truth", "Warthog Run"]);
+    // The line names the entry: its place moves with the unlocks above it.
+    assert_eq!(stage.dashboard.guide_line(), "ProfileAndSystem Entry(2) Achievement \"Spartan\"");
+    stage.check("achievements-guide");
+    // A does nothing on an unlock.
+    stage.press(&[Button::A]);
+    assert!(stage.dashboard.guide_open());
+    stage.press(&[Button::Down, Button::Down, Button::Down, Button::Down]);
+    assert_eq!(stage.dashboard.guide_line(), "ProfileAndSystem Entry(6) Power");
+}
+
+/// The hub of a game with achievements: their row at the foot of Your game stats, "4 / 12", 33% and the bar; focus
+/// on the card, where A opens the Achievements page.
+#[test]
+fn achievements_hub() {
+    let mut stage = Stage::hub_of(library_with_achievements(), 0);
+    stage.press(&[Button::Right, Button::Up]);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1000 Hub Stats");
+    stage.check("achievements-hub");
+}
+
+/// The Achievements page in the hub's place: the hub's band and header, the game's progress in the hub's first
+/// card's place, the achievements two to a row, unlocked first, newest first; a secret one locked keeps itself to
+/// itself, and an icon not fetched is the grey square with the trophy. B goes back to the hub, on the card.
+#[test]
+fn achievements_page() {
+    let mut stage = Stage::hub_of(library_with_achievements(), 0);
+    stage.press(&[Button::Right, Button::Up, Button::A]);
+    assert_eq!(stage.dashboard.page(), Some("Achievements"));
+    assert_eq!(stage.dashboard.focus_line(), "Achievements: 1000 none");
+    let (game, list) = halo_list(&stage.dashboard);
+    assert_eq!(stage.dashboard.achievements_wanted(), Some(game));
+    stage.dashboard.set_achievements(game, list);
+    assert_eq!(stage.dashboard.focus_line(), "Achievements: 1000 SPARTAN; 4 of 12 unlocked");
+    assert_eq!(stage.dashboard.hints(), screens::hint_bar::MORE_OPTIONS);
+    stage.check("achievements-page");
+
+    // Down past the fifth row: the rows go up by one, the secret one at the foot.
+    stage.press(&[Button::Down, Button::Down, Button::Down, Button::Down, Button::Down, Button::Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Achievements: 1000 ENDGAME; 4 of 12 unlocked");
+    stage.check("achievements-page-scrolled");
+
+    stage.press(&[Button::B]);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1000 Hub Stats");
+    assert_eq!(stage.dashboard.achievements_wanted(), None);
+}
+
+impl Stage {
+    /// As `hub`, on a library of the test's own.
+    fn hub_of(library: Library, tile: usize) -> Self {
+        let mut stage = Stage::on_row(library, HD);
+        stage.press(&vec![Button::Right; tile]);
+        stage.still();
+        a_alone(&mut stage.dashboard);
+        assert_eq!(stage.dashboard.page(), Some("GameHub"));
+        // The hub drawn, as it is before any press on it: its picture of Home is taken then.
+        stage.still();
+        stage
+    }
+}

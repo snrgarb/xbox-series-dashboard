@@ -356,6 +356,27 @@ impl Store {
         Some(update)
     }
 
+    /// One game's whole list of achievements, in its store's order, with the icons the cache has: what its
+    /// Achievements page shows. Empty with no database, or none for it.
+    pub fn achievements_of(&self, game: i64) -> Vec<model::achievement::Achievement> {
+        let Some(database) = &self.database else { return Vec::new() };
+        database.achievements(game).unwrap_or_else(|e| {
+            eprintln!("achievements: {e:#}");
+            Vec::new()
+        })
+    }
+
+    /// Every store's achievements read once into the database, as the thread that follows them reads them as it
+    /// starts, with no rarity and no icons: what `--screenshot` shows, having no thread. What a snapshot carries of
+    /// them after, or None with no database.
+    pub fn achievements_now(&mut self) -> Option<model::Achievements> {
+        let database = self.database.as_mut()?;
+        let log: library::achievements::Log = Arc::new(|_| {});
+        let mut follower = library::achievements::Follower::new(self.achievement_sources.clone(), None, false, log);
+        follower.read_all(database, library::now()).map_err(|e| eprintln!("achievements: {e:#}")).ok()?;
+        database.achievement_summary().map_err(|e| eprintln!("achievements: {e:#}")).ok()
+    }
+
     /// Asks the thread that follows achievements: a game is running, or a game's icons are wanted.
     pub fn ask_achievements(&self, ask: library::achievements::Ask) {
         if let Some(achievements) = &self.achievements {

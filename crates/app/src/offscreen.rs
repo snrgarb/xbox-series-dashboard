@@ -10,7 +10,13 @@ use ui::{Button, Host, Press};
 
 use crate::{fail, since_start, Args};
 
-pub fn run(args: &Args, library: Library, options: screens::Options) {
+/// `achievements_of` is one game's whole list of achievements, for an Achievements page a press opens.
+pub fn run(
+    args: &Args,
+    library: Library,
+    options: screens::Options,
+    achievements_of: impl Fn(i64) -> Vec<model::achievement::Achievement>,
+) {
     let out = args.screenshot.as_ref().unwrap();
     let size = args.size.unwrap_or((1920, 1080));
     let gpu = gpu::init(gpu::instance(None), None);
@@ -36,6 +42,10 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
         if let Some(wait) = dashboard.timer() {
             target.still(&gpu, host, |ui| dashboard.draw(ui));
             dashboard.advance(wait);
+        }
+        // An Achievements page the press opened is given its game's list, as the window gives it.
+        if let Some(game) = dashboard.achievements_wanted() {
+            dashboard.set_achievements(game, achievements_of(game));
         }
     };
     // Home starts with focus on the profile: a game to launch or a row to walk is on the Recent row.

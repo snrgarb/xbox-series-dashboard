@@ -9,7 +9,7 @@
 # as Home's top bar, the Guide and the greeting draw it, said with the first frame and whenever it changes;
 # `profiles: ...` is each change carried out on the database; --log-focus's `focus: Settings: Profiles: ...`,
 # `Profile: ...` and `Picture: ...` say where focus is, the Profile's page adding the Profile as it is now after a
-# `; `; `guide: ProfileAndSystem Entry(0)` is the Guide open on the profile entry.
+# `; `; `guide: ProfileAndSystem Entry(0) Profile` is the Guide open on the profile entry.
 #
 # The pictures are to look at beside the Bundle's Personalisation (docs/spec/pictures.md, 30); the Bundle has no
 # picture of its Profiles pages. Home's top bar and the Guide must show the new gamertag and picture.
@@ -184,7 +184,7 @@ try {
     Walk Left 'TopBar\(Profile\)' 6
     $mark = Get-DashboardLogLength
     Push-Button A
-    $guide = Wait-DashboardLog '^guide: ProfileAndSystem Entry\(0\)$' 8 $mark
+    $guide = Wait-DashboardLog '^guide: ProfileAndSystem Entry\(0\) Profile$' 8 $mark
     Start-Sleep -Milliseconds 3000
     Save-Screen '12-guide-profile'
     Say "A on the profile: $(if ($guide) { $guide } else { 'no Guide' })"

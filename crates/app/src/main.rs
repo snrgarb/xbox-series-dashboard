@@ -227,7 +227,11 @@ fn main() {
         if let Some(queue) = store.queue_now() {
             library.queue = queue;
         }
-        offscreen::run(&args, library, store.options());
+        // The stores' achievements as their files say, with no rarity: the thread that would fetch it is not run.
+        if let Some(achievements) = store.achievements_now() {
+            library.achievements = achievements;
+        }
+        offscreen::run(&args, library, store.options(), |game| store.achievements_of(game));
     } else if args.bench || args.size.is_some() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));
     } else {

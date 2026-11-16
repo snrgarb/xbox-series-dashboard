@@ -120,6 +120,8 @@ fn the_read_keeps_each_game_says_it_and_tells_of_nothing() {
     // Newest first.
     let recent: Vec<_> = summary.recent.iter().map(|u| (u.game, u.achievement.key.as_str())).collect();
     assert_eq!(recent, [(s.game, "ACH_ASH_RUNNER"), (s.game, "ACH_FIRST_DELIVERY")]);
+    // With no rarity known yet, the first locked in the store's order is nearest to hand.
+    assert_eq!(summary.next_of(s.game).map(|a| a.key.as_str()), Some("ACH_NIGHT_ROUTE"));
 }
 
 #[test]
@@ -145,6 +147,9 @@ fn rarity_is_asked_once_a_week_kept_with_its_date_and_scores_by_it() {
     assert_eq!(all.last().unwrap().rarity, None);
     assert_eq!(s.db.rarity_asked(s.game).unwrap(), Some(NOW));
     assert_eq!(s.db.snapshot().unwrap().achievements.totals.unwrap().score, 25);
+    // Nearest to hand is the locked one most players have, of those whose rarity is known; never the secret one.
+    let next = s.db.snapshot().unwrap().achievements.next_of(s.game).map(|a| a.key.clone());
+    assert_eq!(next.as_deref(), Some("ACH_NIGHT_ROUTE"));
 
     // A day on, the Dashboard started again: nothing asked, and the rarity read again stands.
     s.follower.read_all(&mut s.db, NOW + 86_400).unwrap();

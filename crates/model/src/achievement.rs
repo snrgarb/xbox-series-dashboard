@@ -19,8 +19,11 @@ pub const RARITY_AT_MOST: [f64; 5] = [1.0, 5.0, 10.0, 25.0, 50.0];
 pub const SCORE_AT_RARITY: [u32; 5] = [100, 50, 30, 20, 15];
 pub const COMMON_SCORE: u32 = 10;
 
-/// How many of the last unlocks a snapshot carries: the Guide's Profile & system lists three.
-pub const RECENT: usize = 3;
+/// How many of the last unlocks a snapshot carries: the Idle screen's cards tell of five.
+pub const RECENT: usize = 5;
+
+/// How many of them the Guide's Profile & system lists.
+pub const GUIDE_RECENT: usize = 3;
 
 /// One achievement of a game.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -128,6 +131,10 @@ pub struct Achievements {
     /// Every game that has achievements, by its id.
     #[serde(default)]
     pub games: Vec<GameProgress>,
+    /// For each game with some of its achievements unlocked and some not, the locked one nearest to hand
+    /// ([`nearest_locked`]), if it has one to name: the Idle screen's nearly-finished card.
+    #[serde(default)]
+    pub next: Vec<Unlock>,
 }
 
 impl Achievements {
@@ -135,6 +142,22 @@ impl Achievements {
     pub fn of(&self, game: i64) -> Option<&GameProgress> {
         self.games.iter().find(|progress| progress.game == game)
     }
+
+    /// The locked achievement of this game nearest to hand, if it is part done and has one to name.
+    pub fn next_of(&self, game: i64) -> Option<&Achievement> {
+        self.next.iter().find(|next| next.game == game).map(|next| &next.achievement)
+    }
+}
+
+/// Which of a game's locked achievements is nearest to hand, as the Bundle's nearly-finished card picks it: the one
+/// most players have, one of unknown rarity only when no other is known. Never a secret one, whose name is not to be
+/// told, nor one with no name. The first in the store's order among equals.
+pub fn nearest_locked<'a>(achievements: impl IntoIterator<Item = &'a Achievement>) -> Option<&'a Achievement> {
+    let named = achievements.into_iter().filter(|a| !a.is_unlocked() && !a.hidden && !a.name.trim().is_empty());
+    named.fold(None, |best: Option<&Achievement>, a| match best {
+        Some(best) if a.rarity.unwrap_or(f64::MIN) <= best.rarity.unwrap_or(f64::MIN) => Some(best),
+        _ => Some(a),
+    })
 }
 
 /// What the Dashboard asks of a store's achievements: the one interface every store's are behind, as `Source` is
@@ -188,6 +211,28 @@ mod tests {
         assert_eq!(a.score(), 0);
         let a = Achievement { rarity: Some(0.5), points: Some(25), ..Achievement::default() };
         assert_eq!(a.score(), 25);
+    }
+
+    #[test]
+    fn the_nearest_locked_is_the_one_most_players_have_and_never_a_secret() {
+        let a = |key: &str, rarity: Option<f64>, hidden: bool, unlocked: Option<u64>| Achievement {
+            key: key.into(),
+            name: key.into(),
+            rarity,
+            hidden,
+            unlocked,
+            ..Achievement::default()
+        };
+        let list = [
+            a("done", Some(90.0), false, Some(5)),
+            a("unknown", None, false, None),
+            a("common", Some(40.0), false, None),
+            a("secret", Some(60.0), true, None),
+            a("also common", Some(40.0), false, None),
+        ];
+        assert_eq!(nearest_locked(&list).map(|a| a.key.as_str()), Some("common"));
+        assert_eq!(nearest_locked(&list[..2]).map(|a| a.key.as_str()), Some("unknown"));
+        assert_eq!(nearest_locked(&list[3..4]), None);
     }
 
     #[test]
