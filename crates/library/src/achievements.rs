@@ -405,7 +405,12 @@ impl Fetch for Online {
         match response.status().as_u16() {
             200..=299 => {}
             400 | 403 | 404 | 410 => return Ok(None),
-            429 | 503 => return Err(Error::Busy(retry_after(&response))),
+            status @ (429 | 503) => {
+                return Err(Error::Failed(format!(
+                    "Steam's CDN answered {status}, retry-after {:?}",
+                    retry_after(&response)
+                )))
+            }
             status => return Err(Error::Failed(format!("Steam's CDN answered {status}"))),
         }
         let body = response.body_mut().with_config().limit(ICON_BYTES).read_to_vec();
@@ -810,7 +815,11 @@ impl Follower {
                 None
             }
             Err(e) => {
-                self.say(&format!("achievements: icons not fetched: {}", why(&e)));
+                self.say(&format!(
+                    "achievements: icons not fetched: {} (asking for {}'s {file})",
+                    why(&e),
+                    found.source_id
+                ));
                 self.icons_stopped = true;
                 self.icons.clear();
                 None

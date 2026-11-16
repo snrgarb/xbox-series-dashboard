@@ -315,7 +315,10 @@ fn a_busy_or_unreachable_server_stops_icons_for_the_run() {
         }
         s.work_all(NOW);
         let why = if busy { "the service asked to wait" } else { "a picture's server could not be reached" };
-        assert!(s.said().contains(&format!("achievements: icons not fetched: {why}")));
+        assert!(s
+            .said()
+            .iter()
+            .any(|l| l.starts_with(&format!("achievements: icons not fetched: {why} (asking for "))));
         // One asked, and none after it: not on request, nor for an unlock.
         fetch_icons(&mut s);
         s.follower.ask(&mut s.db, Ask::Playing { game: s.game, since: NOW }, NOW).unwrap();
