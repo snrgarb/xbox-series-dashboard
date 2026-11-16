@@ -124,7 +124,7 @@ function Expect-Asked([int] $After, [int] $Count, [string] $Focus, [string] $Wha
 }
 
 # A on Who's playing today? with focus on $Gamertag: Signing you in, then Home and the greeting for it.
-function Sign-In([string] $Gamertag, [string] $What, [string] $Name = '') {
+function Sign-In([string] $Gamertag, [string] $What, [string] $Name = '', [switch] $Same) {
     $tag = [regex]::Escape($Gamertag)
     $mark = Get-DashboardLogLength
     Press A "Startup: SigningIn `"$tag`""
@@ -139,7 +139,8 @@ function Sign-In([string] $Gamertag, [string] $What, [string] $Name = '') {
         Say "Signing you in showed for $took ms"
         if ($took -lt 2500) { $script:failures += "${What}: Signing you in should show about 3 s, and showed $took ms" }
     }
-    Expect-Log "^profile: `"$tag`", " "the Profile signed in $What" 10 $mark | Out-Null
+    # The `profile:` line is said only when the Profile changes.
+    if (-not $Same) { Expect-Log "^profile: `"$tag`", " "the Profile signed in $What" 10 $mark | Out-Null }
     $hi = Expect-Log '^toasts: shown "Hi .+!".*\(Greeting\)' "the greeting $What" 30 $mark
     Wait-DashboardLog '^toasts: gone' 20 $mark | Out-Null
     $hi
@@ -226,7 +227,7 @@ try {
     Expect-Log "^startup: woke from sleep at \d+ ms: Who's playing today\? asks$" 'the wake' 10 $mark | Out-Null
     if (Expect-Asked $mark 2 $me 'Who''s playing today? on waking' '07-woken') {
         Ensure-Front
-        Sign-In $me 'on waking' | Out-Null
+        Sign-In $me 'on waking' -Same | Out-Null
     }
 
     # --- 5. Settings: Sign in the last profile. Waking asks nothing; the next start signs the last one in by itself.
