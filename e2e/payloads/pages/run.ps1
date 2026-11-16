@@ -105,13 +105,14 @@ try {
     Press A 'Settings: Rail: Theme settings' '05-settings'
     Press B 'TopBar\(Settings\)'
 
-    # The wide tiles: Discord (Settings, there being no Discord tab), Settings, Downloads. Each gives focus back to
+    # The wide tiles: Discord (Settings' Discord page, there being no Discord tab), Settings, Downloads. Each gives focus back to
     # its tile; Settings opens on Theme settings' first box, so B is its rail first. Achievements opens the Guide and
     # is not pressed here.
     Press Down 'Recent\(\d+\)'
     Press Down 'Wide\(\d\)'
     Walk Left 'Wide\(0\)' 4
-    Press A 'Settings: Theme settings: Personalisation'
+    Press A 'Settings: Discord: Client ID Type; client id not set, secret not set, "Not connected"'
+    Press B 'Settings: Theme settings: Discord'
     Press B 'Settings: Rail: Theme settings'
     Press B 'Wide\(0\)'
     Walk Right 'Wide\(1\)' 2
