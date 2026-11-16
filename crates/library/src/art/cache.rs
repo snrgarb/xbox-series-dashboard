@@ -186,7 +186,7 @@ impl ArtDir {
 
 /// A store's key or id as a folder's name: letters, digits, `-` and `_` as they are, every other byte `%XX`, so any
 /// id is a name every file system takes and two ids are never one folder.
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' {

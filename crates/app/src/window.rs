@@ -1128,6 +1128,17 @@ impl ApplicationHandler for App {
         if !self.art_started && self.home_presented.is_some() && self.store.sources_read() {
             self.start_art();
         }
+        // Achievements, once the stores' games are in the database (docs/achievements.md): the totals in a new
+        // snapshot. `update.unlocked` is for the Achievement unlocked Toast (#142), which is still to come.
+        if self.store.sources_read() {
+            let proxy = self.proxy.clone();
+            self.store.follow_achievements(move || {
+                let _ = proxy.send_event(());
+            });
+        }
+        if let Some(update) = self.store.achievements_update() {
+            self.show(update.library);
+        }
         if self.take_art() {
             toasts_changed = true;
             self.overlay_stale = true;

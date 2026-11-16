@@ -289,6 +289,10 @@ pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
             _ => {}
         },
     }
+    if spec.games.iter().any(|game| game.appid == ACHIEVEMENTS_GAME) {
+        let unlocked: Vec<Option<u64>> = ACHIEVEMENTS.iter().map(|a| a.unlocked).collect();
+        write_achievements(&root, spec.user_id, &unlocked)?;
+    }
     for game in &spec.games {
         if game.installed {
             fs::write(steamapps.join(format!("appmanifest_{}.acf", game.appid)), manifest(game))?;
@@ -660,6 +664,152 @@ pub fn write_progress(root: &Path, appid: u32, progress: Progress) -> io::Result
     fs::rename(part, file)
 }
 
+// --------------------------------------------------------------- achievements
+
+/// The game of the fixture's that has achievements: Ashfall Courier, the first of the Recent row.
+pub const ACHIEVEMENTS_GAME: u32 = 9_100_010;
+
+/// One of its made-up achievements.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FixtureAchievement {
+    pub key: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub hidden: bool,
+    /// The share of players the stand-in of Steam's global percentages says have it.
+    pub rarity: f64,
+    /// When the user unlocked it, in Unix seconds; none for one still locked.
+    pub unlocked: Option<u64>,
+}
+
+/// Ashfall Courier's achievements: six, in one group, two of them unlocked an hour and half an hour before the
+/// game was last played. With the stand-in's rarity their Score is 10 and 15, 25 in all; No Detours (7.4%) and
+/// Perfect Ledger (0.8%, hidden) are Rare.
+pub const ACHIEVEMENTS: [FixtureAchievement; 6] = [
+    FixtureAchievement {
+        key: "ACH_FIRST_DELIVERY",
+        name: "First Delivery",
+        description: "Deliver your first parcel.",
+        hidden: false,
+        rarity: 82.5,
+        unlocked: Some(NEWEST_PLAY - 3600),
+    },
+    FixtureAchievement {
+        key: "ACH_ASH_RUNNER",
+        name: "Ash Runner",
+        description: "Cross the ash plains without stopping.",
+        hidden: false,
+        rarity: 31.0,
+        unlocked: Some(NEWEST_PLAY - 1800),
+    },
+    FixtureAchievement {
+        key: "ACH_NIGHT_ROUTE",
+        name: "Night Route",
+        description: "Finish a delivery after dark.",
+        hidden: false,
+        rarity: 18.2,
+        unlocked: None,
+    },
+    FixtureAchievement {
+        key: "ACH_NO_DETOURS",
+        name: "No Detours",
+        description: "Finish a chapter without leaving the road.",
+        hidden: false,
+        rarity: 7.4,
+        unlocked: None,
+    },
+    FixtureAchievement {
+        key: "ACH_PERFECT_LEDGER",
+        name: "Perfect Ledger",
+        description: "Finish the game with every parcel on time.",
+        hidden: true,
+        rarity: 0.8,
+        unlocked: None,
+    },
+    FixtureAchievement {
+        key: "ACH_LAST_PARCEL",
+        name: "The Last Parcel",
+        description: "Reach the end of the road.",
+        hidden: false,
+        rarity: 45.0,
+        unlocked: None,
+    },
+];
+
+/// The stat whose bits the fixture's achievements are.
+const ACHIEVEMENT_GROUP: &str = "1";
+
+/// Writes the schema of the fixture's game with achievements, and the user's stats for it with `unlocked` (each
+/// achievement's time by its place in [`ACHIEVEMENTS`]), as Steam keeps them in `appcache/stats`.
+fn write_achievements(root: &Path, account: u64, unlocked: &[Option<u64>]) -> io::Result<()> {
+    let dir = root.join("appcache").join("stats");
+    fs::create_dir_all(&dir)?;
+    let mut inline = |k: &str, out: &mut Vec<u8>| {
+        out.extend(k.as_bytes());
+        out.push(0);
+    };
+    let bits = ACHIEVEMENTS.iter().enumerate().map(|(bit, a)| {
+        let display = map([
+            ("name", map([("english", s(a.name)), ("token", s(format!("NEW_ACHIEVEMENT_1_{bit}_NAME")))])),
+            ("desc", map([("english", s(a.description))])),
+            ("hidden", s(u8::from(a.hidden))),
+            ("icon", s(format!("{}.jpg", icon_name(bit, false)))),
+            ("icon_gray", s(format!("{}.jpg", icon_name(bit, true)))),
+        ]);
+        (bit.to_string(), map([("name", s(a.key)), ("bit", s(bit)), ("display", display)]))
+    });
+    let group = map([("type", s(4)), ("id", s(ACHIEVEMENT_GROUP)), ("bits", Kv::Map(bits.collect()))]);
+    let schema = map([
+        ("gamename", s("Ashfall Courier")),
+        ("version", s(1)),
+        ("stats", Kv::Map(vec![(ACHIEVEMENT_GROUP.to_string(), group)])),
+    ]);
+    let mut file = Vec::new();
+    Kv::Map(vec![(ACHIEVEMENTS_GAME.to_string(), schema)]).binary(&mut file, &mut inline);
+    fs::write(dir.join(crate::achievements::schema_file(ACHIEVEMENTS_GAME)), file)?;
+
+    let data = unlocked.iter().enumerate().filter(|(_, at)| at.is_some()).fold(0u32, |bits, (bit, _)| bits | 1 << bit);
+    let times = unlocked.iter().enumerate().filter_map(|(bit, at)| Some((bit.to_string(), Kv::Int((*at)? as u32))));
+    let stats = map([
+        ("crc", Kv::Int(0x5EED)),
+        ("PendingChanges", Kv::Int(0)),
+        (ACHIEVEMENT_GROUP, map([("data", Kv::Int(data)), ("AchievementTimes", Kv::Map(times.collect()))])),
+    ]);
+    let mut file = Vec::new();
+    map([("cache", stats)]).binary(&mut file, &mut inline);
+    let name = crate::achievements::stats_file(account as u32, ACHIEVEMENTS_GAME);
+    // Written whole and then moved into place, as the Dashboard may be reading it at any moment.
+    let part = dir.join(format!("{name}.part"));
+    fs::write(&part, file)?;
+    fs::rename(part, dir.join(name))
+}
+
+/// A made-up icon file name, forty hex digits as Steam's are.
+fn icon_name(bit: usize, gray: bool) -> String {
+    let n = (ACHIEVEMENTS_GAME as u64 * 64 + bit as u64 * 2 + u64::from(gray)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    format!("{n:016x}{:016x}{:08x}", n.rotate_left(17), (n >> 9) as u32)
+}
+
+/// Unlocks the fixture's achievement `key` at `at` (Unix seconds) in the fake Steam at `root`, as Steam writes its
+/// stats file while the game runs: what `standin unlock-achievement` does. Those already unlocked stay as they
+/// were. Gives false when there is no such achievement, or no signed-in user.
+pub fn unlock_achievement(root: &Path, key: &str, at: u64) -> io::Result<bool> {
+    let Some(place) = ACHIEVEMENTS.iter().position(|a| a.key.eq_ignore_ascii_case(key)) else { return Ok(false) };
+    let Some(account) = crate::signed_in_account(root) else { return Ok(false) };
+    let file = root.join("appcache").join("stats").join(crate::achievements::stats_file(account, ACHIEVEMENTS_GAME));
+    let mut unlocked: Vec<Option<u64>> = match fs::read(&file) {
+        Ok(bytes) => {
+            let read = crate::achievements::parse_stats(&bytes).map_err(io::Error::other)?;
+            (0..ACHIEVEMENTS.len()).map(|bit| read.get(&(1, bit as u32)).copied()).collect()
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => vec![None; ACHIEVEMENTS.len()],
+        Err(e) => return Err(e),
+    };
+    unlocked[place] = unlocked[place].or(Some(at));
+    write_achievements(root, account.into(), &unlocked)?;
+    Ok(true)
+}
+
 // ------------------------------------------------------------------------ art
 
 #[derive(Clone, Copy)]
@@ -731,6 +881,36 @@ mod tests {
         let reader = image::ImageReader::open(path).unwrap().with_guessed_format().unwrap();
         let format = reader.format().unwrap();
         (format, reader.into_dimensions().unwrap())
+    }
+
+    #[test]
+    fn the_fixtures_achievements_read_back_and_one_can_be_unlocked() {
+        use model::achievement::AchievementSource;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        write(&root, &Fixture::standard()).unwrap();
+        let steam = crate::achievements::SteamAchievements::at(Some(root.clone()));
+        assert_eq!(steam.games(), Some(vec![ACHIEVEMENTS_GAME.to_string()]));
+        let read = steam.read(&ACHIEVEMENTS_GAME.to_string()).unwrap().unwrap();
+        let got: Vec<_> = read.iter().map(|a| (a.key.as_str(), a.name.as_str(), a.hidden, a.unlocked)).collect();
+        let want: Vec<_> = ACHIEVEMENTS.iter().map(|a| (a.key, a.name, a.hidden, a.unlocked)).collect();
+        assert_eq!(got, want);
+        assert!(read.iter().all(|a| a.icon.is_some() && a.icon_locked.is_some() && a.icon != a.icon_locked));
+
+        assert!(unlock_achievement(&root, "ach_no_detours", 1_800_000_000).unwrap());
+        assert!(!unlock_achievement(&root, "ACH_NOT_ONE", 1_800_000_000).unwrap());
+        // Unlocked again later: it keeps its first time.
+        assert!(unlock_achievement(&root, "ACH_FIRST_DELIVERY", 1_800_000_000).unwrap());
+        let read = steam.read(&ACHIEVEMENTS_GAME.to_string()).unwrap().unwrap();
+        let unlocked: Vec<_> = read.iter().filter_map(|a| Some((a.key.as_str(), a.unlocked?))).collect();
+        assert_eq!(
+            unlocked,
+            [
+                ("ACH_FIRST_DELIVERY", NEWEST_PLAY - 3600),
+                ("ACH_ASH_RUNNER", NEWEST_PLAY - 1800),
+                ("ACH_NO_DETOURS", 1_800_000_000)
+            ]
+        );
     }
 
     #[test]
