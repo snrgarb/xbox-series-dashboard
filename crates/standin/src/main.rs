@@ -50,6 +50,14 @@
 //!       The stand-in Battle.net, when this program is named `Battle.net.exe` in a fake Battle.net's folder: starts
 //!       the game with that product code from its install folder and waits for it; asked for a game's page, says so
 //!       in the log.
+//!   standin open-address <address>
+//!       What `dashboard --open-addresses-with standin.exe` gives every store's address to, on a test machine whose
+//!       registry is left alone (the TV PC): does what the handler registered for the address's scheme would,
+//!       `steam://` as steam-url, `com.epicgames.launcher://` as epic-url and `uplay://` as uplay-url, with each
+//!       fake's folder from `handlers.json` beside this program (`{"steam": "<dir>", "epic": "<dir>", "ubisoft":
+//!       "<dir>"}`, written by the tests' helpers) and never from the registry. A game the stand-in Steam starts this way has no `Running` value written:
+//!       the Dashboard follows it by its windows. Exits 2 for a scheme it has no stand-in for, 1 when the fake it
+//!       needs is not in `handlers.json`.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -72,7 +80,90 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
        standin make-ea | make-ubisoft | make-battlenet <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
+       standin open-address <address>
        standin toast <text>";
+
+/// The file beside this program that names the fakes `open-address` takes addresses for.
+const HANDLERS_FILE: &str = "handlers.json";
+
+/// The fakes `open-address` hands each store's addresses to: their folders, from `handlers.json`.
+#[derive(Debug, Default, PartialEq)]
+struct Handlers {
+    steam: Option<PathBuf>,
+    epic: Option<PathBuf>,
+    ubisoft: Option<PathBuf>,
+}
+
+impl Handlers {
+    /// `{"steam": "<dir>", "epic": "<dir>", "ubisoft": "<dir>"}`, any left out. PowerShell's UTF-8 can start with a
+    /// byte-order mark, which is passed over.
+    fn parse(text: &str) -> Result<Handlers, String> {
+        let value: serde_json::Value =
+            serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("{HANDLERS_FILE}: {e}"))?;
+        let dir =
+            |key: &str| value.get(key).and_then(|dir| dir.as_str()).filter(|dir| !dir.is_empty()).map(PathBuf::from);
+        Ok(Handlers { steam: dir("steam"), epic: dir("epic"), ubisoft: dir("ubisoft") })
+    }
+
+    /// The file beside this program; none there is no fakes.
+    fn beside_this_program() -> Result<Handlers, String> {
+        let exe = std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?;
+        let file = exe.with_file_name(HANDLERS_FILE);
+        match std::fs::read_to_string(&file) {
+            Ok(text) => Handlers::parse(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Handlers::default()),
+            Err(e) => Err(format!("{}: {e}", file.display())),
+        }
+    }
+}
+
+/// The stand-in for whatever is registered for the address's scheme, with the fakes `handlers` names.
+fn open_address(handlers: &Handlers, address: &str) -> i32 {
+    let address = address.trim();
+    let scheme = address.split_once("://").map(|(scheme, _)| scheme.to_ascii_lowercase()).unwrap_or_default();
+    let fake = |dir: &Option<PathBuf>, store: &str| {
+        let found = dir.clone();
+        if found.is_none() {
+            note(&format!("open-address: no fake {store} in {HANDLERS_FILE} for {address}"));
+        }
+        found
+    };
+    match scheme.as_str() {
+        "steam" => match fake(&handlers.steam, "Steam") {
+            Some(root) => steam_address(address, Some(&root)),
+            None => 1,
+        },
+        "com.epicgames.launcher" => match fake(&handlers.epic, "Epic") {
+            Some(root) => epic_url(&root, address),
+            None => 1,
+        },
+        "uplay" => match fake(&handlers.ubisoft, "Ubisoft Connect") {
+            Some(root) => uplay_url(&root, address),
+            None => 1,
+        },
+        _ => {
+            note(&format!("open-address: no stand-in for {address}"));
+            2
+        }
+    }
+}
+
+/// The stand-in Steam given a `steam://` address: its game started from the install at `root`, or with none from
+/// the one the registry names.
+fn steam_address(url: &str, root: Option<&Path>) -> i32 {
+    match (appid_of(url), asked_of(url)) {
+        (Some(appid), _) => steam_url(appid, root),
+        // The stand-in Steam installs and uninstalls nothing: that it was asked is what a test looks for.
+        (None, Some((verb, appid))) => {
+            note(&format!("steam-url: asked to {verb} {appid}: {}", url.trim()));
+            0
+        }
+        _ => {
+            note(&format!("steam-url: not an address the stand-in Steam knows: {url:?}"));
+            2
+        }
+    }
+}
 
 /// The arguments a `game.exe` run with none takes instead, one a line.
 const GAME_ARGS_FILE: &str = "game-args.txt";
@@ -407,7 +498,7 @@ fn game(_: &GameArgs) -> i32 {
 }
 
 #[cfg(not(windows))]
-fn steam_url(_: u32) -> i32 {
+fn steam_url(_: u32, _: Option<&Path>) -> i32 {
     note("steam-url: Windows only");
     2
 }
@@ -486,15 +577,23 @@ fn run(args: &[String]) -> i32 {
             }
         }
         Some("game") => parsed_game(&args[1..]),
-        Some("steam-url") => match args.get(1).map(|url| (appid_of(url), asked_of(url), url)) {
-            Some((Some(appid), _, _)) => steam_url(appid),
-            // The stand-in Steam installs and uninstalls nothing: that it was asked is what a test looks for.
-            Some((None, Some((verb, appid)), url)) => {
-                note(&format!("steam-url: asked to {verb} {appid}: {}", url.trim()));
-                0
+        Some("steam-url") => match args.get(1) {
+            Some(url) => steam_address(url, None),
+            None => {
+                note(USAGE);
+                2
             }
+        },
+        Some("open-address") => match &args[1..] {
+            [address] => match Handlers::beside_this_program() {
+                Ok(handlers) => open_address(&handlers, address),
+                Err(e) => {
+                    note(&format!("open-address: {e}"));
+                    1
+                }
+            },
             _ => {
-                note(&format!("steam-url: not an address the stand-in Steam knows: {:?}", args.get(1)));
+                note(USAGE);
                 2
             }
         },
@@ -700,6 +799,56 @@ mod tests {
         assert_eq!(uplay_url(&root, "uplay://launch/90410"), 1);
         assert_eq!(uplay_url(&root, "uplay://install/90410"), 0);
         assert_eq!(uplay_url(&root, "uplay://store/90410"), 2);
+    }
+
+    #[test]
+    fn handlers_json_names_each_fake_and_may_leave_any_out() {
+        let both = "\u{feff}{\"steam\": \"C:\\\\Users\\\\Test User\\\\fakes\\\\steam\", \"epic\": \"D:\\\\e\"}";
+        assert_eq!(
+            Handlers::parse(both).unwrap(),
+            Handlers {
+                steam: Some(PathBuf::from(r"C:\Users\Test User\fakes\steam")),
+                epic: Some(PathBuf::from(r"D:\e")),
+                ubisoft: None,
+            }
+        );
+        assert_eq!(Handlers::parse(r#"{"steam": ""}"#).unwrap(), Handlers::default());
+        assert_eq!(Handlers::parse("{}").unwrap(), Handlers::default());
+        assert!(Handlers::parse("steam=C:\\").is_err());
+    }
+
+    #[test]
+    fn open_address_hands_each_scheme_to_its_stand_in_with_the_fake_handlers_json_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let epic = dir.path().join("epic");
+        assert_eq!(run(&strings(&["make-epic", epic.to_str().unwrap()])), 0);
+        let ubisoft = dir.path().join("ubisoft");
+        assert_eq!(run(&strings(&["make-ubisoft", ubisoft.to_str().unwrap()])), 0);
+        let handlers =
+            Handlers { steam: Some(dir.path().join("steam")), epic: Some(epic.clone()), ubisoft: Some(ubisoft) };
+
+        // Steam's install and uninstall are said and done nothing more about, as steam-url does.
+        assert_eq!(open_address(&handlers, "steam://install/9100040"), 0);
+        assert_eq!(open_address(&handlers, " steam://uninstall/9100010/ "), 0);
+        assert_eq!(open_address(&handlers, "steam://store/9100010"), 2);
+        // Epic's, as epic-url does with the fake's folder: an install said, a game that isn't installed not started.
+        let wexford = "com.epicgames.launcher://apps/ns%3Aitem%3AWexford?action=launch&silent=true";
+        assert_eq!(open_address(&handlers, &wexford.replace("launch&silent=true", "install")), 0);
+        assert_eq!(open_address(&handlers, wexford), 1);
+        // Ubisoft Connect's, as uplay-url does.
+        assert_eq!(open_address(&handlers, "uplay://install/90410"), 0);
+        assert_eq!(open_address(&handlers, "uplay://launch/90410"), 1);
+
+        // No fake for the store: nothing done, and never the registry's.
+        let none = Handlers::default();
+        assert_eq!(open_address(&none, "steam://rungameid/9100030"), 1);
+        assert_eq!(open_address(&none, wexford), 1);
+        assert_eq!(open_address(&none, "uplay://install/90410"), 1);
+        // A scheme with no stand-in, or no address at all.
+        assert_eq!(open_address(&handlers, "origin2://game/launch?offerIds=1"), 2);
+        assert_eq!(open_address(&handlers, "C:\\Games\\game.exe"), 2);
+        assert_eq!(run(&strings(&["open-address"])), 2);
+        assert_eq!(run(&strings(&["steam-url"])), 2);
     }
 
     #[test]

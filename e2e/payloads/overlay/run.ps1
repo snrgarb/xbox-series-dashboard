@@ -26,6 +26,9 @@ function Run([string] $Name, [string[]] $Arguments, [int] $Seconds = 30) {
 }
 
 try {
+    # Windows 11's Notepad is started by a stub that hands its window to another process, which this test cannot
+    # tell from one of the user's own to close after.
+    Assert-VmOnly 'it opens Notepad behind the spike, and could not close only its own'
     Close-WindowsPrompts
     # Something light with a title to be the game behind the Overlay, in front as a game is.
     $behind = Start-Process notepad -WindowStyle Maximized -PassThru
@@ -49,6 +52,7 @@ try {
 } finally {
     $failures | ForEach-Object { Say "failed: $_" }
     Say "result: $result"
-    Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # Every Notepad, the one this test started among them: on the throwaway VM only, where none is anyone's.
+    if (-not (Test-SafeMode)) { Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
 }
 exit $(if ($result -eq 'PASS') { 0 } else { 1 })

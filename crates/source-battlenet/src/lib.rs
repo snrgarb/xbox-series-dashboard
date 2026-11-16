@@ -144,6 +144,10 @@ impl Source for BattleNet {
     }
 
     fn read(&self) -> Result<Option<Found>> {
+        // An empty folder named for the store is no store, and not the machine's: what a test gives.
+        if self.fake.as_deref().is_some_and(source_kit::empty_folder) {
+            return Ok(None);
+        }
         let registry = self.registry()?;
         let client = client(&registry);
         let agent = self.agent();
@@ -272,6 +276,9 @@ mod tests {
     fn no_battlenet_is_none_and_a_fake_that_is_not_there_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("no battle.net here");
+        // An empty folder is no store, and never the machine's own.
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(BattleNet::at(Some(empty.path().to_path_buf())).read().unwrap(), None);
         let error = BattleNet::at(Some(missing.clone())).read().unwrap_err();
         assert!(format!("{error:#}").starts_with(&missing.display().to_string()), "{error:#}");
         if cfg!(not(windows)) {

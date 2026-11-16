@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
 $failures = @()
-$data = Join-Path $env:TEMP 'dashboard-groups-test'
+$data = Get-TestFolder 'dashboard-groups-test'
 $added = 'Zed Group'
 
 function Focus-Lines { @(Get-DashboardLog | Where-Object { $_ -match '^focus: ' }) }
@@ -125,7 +125,7 @@ try {
     Connect-Pad
     Initialize-FakeSteam | Out-Null
     if (Test-Path $data) { Remove-Item $data -Recurse -Force }
-    $script:dashboard = Start-Dashboard @('--log-focus', '--data-dir', $data)
+    $script:dashboard = Start-Dashboard @('--log-focus', '--data-dir', "`"$data`"")
     $first = Wait-DashboardLog 'first frame presented' 60
     if (-not $first) { throw 'The Dashboard never presented a frame' }
     Say "started: $first"

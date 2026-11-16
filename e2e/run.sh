@@ -31,48 +31,20 @@ while (($#)); do
         *) echo "unknown option $1" >&2; echo "$usage" >&2; exit 2 ;;
     esac
 done
-payload_src="$here/payloads/$test"
-[[ -f "$payload_src/run.ps1" ]] || { echo "no test $test (no $payload_src/run.ps1)" >&2; exit 2; }
-for built_exe in "$exe" "$standin"; do
-    [[ -f "$built_exe" ]] && continue
-    echo "no $built_exe" >&2
-    echo "build it first: cargo build --release --target x86_64-pc-windows-gnullvm -j 6" >&2
-    exit 2
-done
-
 log() { echo "[$(date +%H:%M:%S)] $*" >&2; }
 
+# shellcheck source=e2e/stage.sh
+. "$here/stage.sh"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
-cp -r "$payload_src/." "$stage/"
-cp -r "$here/payloads/lib" "$stage/lib"
-# Whatever else was built goes too: the spikes' exes, for the payloads that run them.
-cp "$built"/*.exe "$stage/" 2>/dev/null || true
-cp "$exe" "$stage/dashboard.exe"
-cp "$standin" "$stage/standin.exe"
-
-# The ViGEm client the tests drive their virtual pad with: managed, netstandard2.0, loaded by PowerShell 5.1 on the VM.
-# Fetched once from NuGet, pinned by version and checksum, and kept under artifacts/e2e/.cache.
-vigem_version="1.21.256"
-vigem_sha256="4458301000b732d115521e99f9936f4edb70d6ceb3036ef158715e0e6b8902e0"
-vigem="$repo/artifacts/e2e/.cache/Nefarius.ViGEm.Client-$vigem_version.dll"
-if [[ ! -f "$vigem" ]] || ! echo "$vigem_sha256  $vigem" | sha256sum -c --quiet 2>/dev/null; then
-    mkdir -p "$(dirname "$vigem")"
-    nupkg="$(mktemp -d)"
-    curl -fsSL -o "$nupkg/p.nupkg" \
-        "https://api.nuget.org/v3-flatcontainer/nefarius.vigem.client/$vigem_version/nefarius.vigem.client.$vigem_version.nupkg"
-    python3 -I -c 'import zipfile,sys; open(sys.argv[2],"wb").write(zipfile.ZipFile(sys.argv[1]).read("lib/netstandard2.0/Nefarius.ViGEm.Client.dll"))' \
-        "$nupkg/p.nupkg" "$vigem"
-    rm -rf "$nupkg"
-    echo "$vigem_sha256  $vigem" | sha256sum -c --quiet || { rm -f "$vigem"; echo "ViGEm client checksum mismatch" >&2; exit 1; }
-fi
-cp "$vigem" "$stage/lib/Nefarius.ViGEm.Client.dll"
+stage_payload "$test" "$exe" "$standin" "$stage"
 
 out="$repo/artifacts/e2e/$test-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out"
 log "testing $exe ($(sha256sum "$exe" | cut -c1-12), built $(date -r "$exe" '+%Y-%m-%d %H:%M'))"
 
 id="$("$vm" up | tail -1)"
+# shellcheck disable=SC2317  # run by the trap
 cleanup() {
     if ((keep)); then
         log "kept VM $id; destroy it with: e2e/proxmox/vm.sh down $id"

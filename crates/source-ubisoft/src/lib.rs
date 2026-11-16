@@ -137,6 +137,10 @@ impl Source for Ubisoft {
     }
 
     fn read(&self) -> Result<Option<Found>> {
+        // An empty folder named for the store is no store, and not the machine's: what a test gives.
+        if self.fake.as_deref().is_some_and(source_kit::empty_folder) {
+            return Ok(None);
+        }
         let registry = self.registry()?;
         let client = registry.value(LAUNCHER, "InstallDir").map(|dir| source_kit::native(dir.trim()));
         let installs = installs(&registry);
@@ -251,6 +255,9 @@ mod tests {
     fn no_client_is_none_and_a_fake_that_is_not_there_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("no ubisoft here");
+        // An empty folder is no store, and never the machine's own.
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(Ubisoft::at(Some(empty.path().to_path_buf())).read().unwrap(), None);
         let error = Ubisoft::at(Some(missing.clone())).read().unwrap_err();
         assert!(format!("{error:#}").starts_with(&missing.display().to_string()), "{error:#}");
         if cfg!(not(windows)) {

@@ -171,25 +171,30 @@ try {
         $volumeFound = Get-ReadVolume
         $wasMuted = (Get-LastLine 'audio') -match 'muted true'
         Say "found: volume $volumeFound, muted $wasMuted"
-        Move-ToItem 2
-        # Up by 2 and back, or down and back from the top of the scale.
-        $first, $second, $moved = if ($volumeFound -le 98) { 'Right', 'Left', ($volumeFound + 2) } else { 'Left', 'Right', ($volumeFound - 2) }
-        Step-Volume $first $moved
-        Start-Sleep -Milliseconds 3000
-        Save-Screen '04-volume-moved'
-        Step-Volume $second $volumeFound
+        # In safe mode the machine is someone's own: its volume and mute are not touched, even to be put back.
+        if (Test-SafeMode) {
+            Say 'note: safe mode: the volume and mute are left alone; only the Output list is opened and closed'
+        } else {
+            Move-ToItem 2
+            # Up by 2 and back, or down and back from the top of the scale.
+            $first, $second, $moved = if ($volumeFound -le 98) { 'Right', 'Left', ($volumeFound + 2) } else { 'Left', 'Right', ($volumeFound - 2) }
+            Step-Volume $first $moved
+            Start-Sleep -Milliseconds 3000
+            Save-Screen '04-volume-moved'
+            Step-Volume $second $volumeFound
 
-        Move-ToItem 3
-        $on = 'Landing Utility\(1\), flyout Audio Item\(3\), volume \d+, muted$'
-        $off = 'Landing Utility\(1\), flyout Audio Item\(3\), volume \d+$'
-        $mark = Get-DashboardLogLength
-        Step A $(if ($wasMuted) { $off } else { $on }) '05-mute-changed' | Out-Null
-        $read = Wait-DashboardLog "^audio: volume \d+, muted $(if ($wasMuted) { 'false' } else { 'true' })" 8 $mark
-        if (-not $read) { Fail "A on Mute did not change Windows' mute (last read: $(Get-LastLine 'audio'))" }
-        $mark = Get-DashboardLogLength
-        Step A $(if ($wasMuted) { $on } else { $off }) | Out-Null
-        $read = Wait-DashboardLog "^audio: volume \d+, muted $(if ($wasMuted) { 'true' } else { 'false' })" 8 $mark
-        if (-not $read) { Fail "A on Mute again did not put Windows' mute back (last read: $(Get-LastLine 'audio'))" }
+            Move-ToItem 3
+            $on = 'Landing Utility\(1\), flyout Audio Item\(3\), volume \d+, muted$'
+            $off = 'Landing Utility\(1\), flyout Audio Item\(3\), volume \d+$'
+            $mark = Get-DashboardLogLength
+            Step A $(if ($wasMuted) { $off } else { $on }) '05-mute-changed' | Out-Null
+            $read = Wait-DashboardLog "^audio: volume \d+, muted $(if ($wasMuted) { 'false' } else { 'true' })" 8 $mark
+            if (-not $read) { Fail "A on Mute did not change Windows' mute (last read: $(Get-LastLine 'audio'))" }
+            $mark = Get-DashboardLogLength
+            Step A $(if ($wasMuted) { $on } else { $off }) | Out-Null
+            $read = Wait-DashboardLog "^audio: volume \d+, muted $(if ($wasMuted) { 'true' } else { 'false' })" 8 $mark
+            if (-not $read) { Fail "A on Mute again did not put Windows' mute back (last read: $(Get-LastLine 'audio'))" }
+        }
 
         Move-ToItem 0
         Step A 'Landing Utility\(1\), flyout Audio Device\(Output, \d+\)' '06-output-list' | Out-Null

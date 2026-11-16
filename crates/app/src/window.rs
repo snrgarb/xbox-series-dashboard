@@ -13,7 +13,7 @@ use screens::toasts::Seen;
 use screens::{Dashboard, Effect, OverlayShows, Setting};
 use shell::audio::{self, AudioControl, SystemAudio};
 use shell::power::{DryPower, Power, SystemPower};
-use shell::store::{Addresses, Ask, SystemAddresses};
+use shell::store::{Addresses, Ask, ProgramAddresses, SystemAddresses};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step, ToastStrip};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
@@ -318,7 +318,14 @@ pub fn run(args: &Args, library: Library, store: Store) {
         log_focus: args.log_focus,
         // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
         power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
-        addresses: Box::new(SystemAddresses),
+        // A store's address goes to the program Windows has for it, or with --open-addresses-with to that program.
+        addresses: match &args.open_addresses_with {
+            Some(program) => {
+                eprintln!("store: every address is opened with {}", program.display());
+                Box::new(ProgramAddresses::new(program))
+            }
+            None => Box::new(SystemAddresses),
+        },
         audio: Box::new(SystemAudio),
         audio_read: None,
         leaving: Duration::ZERO,
@@ -475,7 +482,8 @@ impl App {
             return;
         };
         let home = window_handle(&state.window);
-        if let Some(launch) = Launch::start(found, source.clone(), dir, home, self.overlay.is_some()) {
+        let launch_screen = self.overlay.is_some();
+        if let Some(launch) = Launch::start(found, source.clone(), dir, home, launch_screen, &mut *self.addresses) {
             self.launch = Some(launch);
             self.dashboard.launch_started(game);
         }
@@ -792,6 +800,11 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Another program asked the Dashboard to close through a window of the shell's, as taskkill does.
+        if shell::close_asked() {
+            event_loop.exit();
+            return;
+        }
         if self.state.is_none() {
             return;
         }
@@ -1025,7 +1038,10 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let Some(state) = &mut self.state else { return };
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                eprintln!("window: asked to close (WM_CLOSE to Home's window) at {:.0} ms", since_start());
+                event_loop.exit();
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 let button = match event.logical_key {
                     Key::Named(NamedKey::ArrowLeft) => Button::Left,

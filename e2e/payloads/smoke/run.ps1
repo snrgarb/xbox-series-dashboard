@@ -222,6 +222,14 @@ try {
     if ((Get-Foreground).Title -ne $dashboardTitle) { $failures += "the Dashboard is not in front after the game: $(Front)" }
     if ($dashboard.HasExited) { $failures += "the Dashboard exited with $($dashboard.ExitCode)" }
 
+    # Asked to close as taskkill without /f asks, WM_CLOSE to each of its windows, the Dashboard goes, with 0.
+    $mark = Get-DashboardLogLength
+    $closed = Close-Dashboard 10
+    $asked = @(Get-DashboardLog | Select-Object -Skip $mark | Where-Object { $_ -match '^window: asked to close' })
+    Say "asked to close: $(if ($closed) { "exited with $($dashboard.ExitCode)" } else { 'still running 10 s after' }); $(if ($asked.Count) { $asked -join ' | ' } else { 'no window: line' })"
+    if (-not $closed) { $failures += 'the Dashboard did not close when asked to as taskkill asks (WM_CLOSE to its windows)' }
+    elseif ($dashboard.ExitCode -ne 0) { $failures += "asked to close, the Dashboard exited with $($dashboard.ExitCode)" }
+
     if ($failures.Count -eq 0) { $result = 'PASS' }
 } catch {
     $failures += "error: $_"

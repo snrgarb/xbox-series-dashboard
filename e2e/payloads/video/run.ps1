@@ -65,6 +65,6 @@ try {
 } finally {
     $failures | ForEach-Object { Say "failed: $_" }
     Say "result: $result"
-    Get-Process video-spike -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-OwnProcess video-spike | Stop-Process -Force -ErrorAction SilentlyContinue
 }
 exit $(if ($result -eq 'PASS') { 0 } else { 1 })

@@ -56,6 +56,11 @@ impl Source for Steam {
 
     fn read(&self) -> Result<Option<Found>> {
         let Some(root) = self.root() else { return Ok(None) };
+        // An empty folder named for the install is a machine with no Steam: what a test gives so that the
+        // machine's own is never read.
+        if self.root.is_some() && fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_none()) {
+            return Ok(None);
+        }
         let library = load(&root).with_context(|| root.display().to_string())?;
         Ok(Some(Found { library, from: root.display().to_string() }))
     }
@@ -548,6 +553,13 @@ mod tests {
         let missing = dir.path().join("no steam here");
         let error = Steam::at(Some(missing.clone())).read().unwrap_err();
         assert!(format!("{error:#}").starts_with(&missing.display().to_string()), "{error:#}");
+        // An empty folder is no Steam, and not the machine's: what a test names so that the machine's is never read.
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        assert_eq!(Steam::at(Some(empty.clone())).read().unwrap(), None);
+        // A folder with something in it but no install is still an error.
+        std::fs::write(empty.join("note.txt"), b"").unwrap();
+        assert!(Steam::at(Some(empty)).read().is_err());
         // Off Windows no registry names one.
         if cfg!(not(windows)) {
             assert_eq!(Steam::at(None).read().unwrap(), None);

@@ -1,6 +1,6 @@
 //! The stand-in game's window and the stand-in Steam, on Windows.
 use std::ffi::c_void;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
 
@@ -221,9 +221,12 @@ pub fn toast(text: &str) -> i32 {
     0
 }
 
-/// Starts `appid`'s game as Steam would and waits for it, Steam's `Running` value saying so meanwhile.
-pub fn steam_url(appid: u32) -> i32 {
-    let Some(root) = steam_path() else {
+/// Starts `appid`'s game as Steam would and waits for it. With no `root` the install is the one the registry names,
+/// and Steam's `Running` value says the game runs meanwhile; with one (`open-address`) the registry is neither read
+/// nor written.
+pub fn steam_url(appid: u32, root: Option<&Path>) -> i32 {
+    let registry = root.is_none();
+    let Some(root) = root.map(Path::to_path_buf).or_else(steam_path) else {
         note("steam-url: no HKCU\\Software\\Valve\\Steam\\SteamPath");
         return 1;
     };
@@ -239,10 +242,14 @@ pub fn steam_url(appid: u32) -> i32 {
             return 1;
         }
     };
-    set_running(appid, 1);
+    if registry {
+        set_running(appid, 1);
+    }
     note(&format!("steam-url: {appid} running, {} pid {}", exe.display(), game.id()));
     let status = game.wait();
-    set_running(appid, 0);
+    if registry {
+        set_running(appid, 0);
+    }
     note(&format!("steam-url: {appid} ended ({})", status.map_or_else(|e| e.to_string(), |s| s.to_string())));
     0
 }

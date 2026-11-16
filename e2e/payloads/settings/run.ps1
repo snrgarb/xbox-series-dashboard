@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
 $failures = @()
-$data = Join-Path $env:TEMP 'dashboard-settings-test'
+$data = Get-TestFolder 'dashboard-settings-test'
 
 function Focus-Lines { @(Get-DashboardLog | Where-Object { $_ -match '^focus: ' }) }
 function Focus-Now { Focus-Lines | Select-Object -Last 1 }
@@ -99,7 +99,7 @@ function Turn-Over([string] $Key, [string] $Value, [string] $Name = '') {
 
 # Starts the Dashboard on the test's data folder and waits for its first frame.
 function Start-OnData {
-    $script:dashboard = Start-Dashboard @('--log-focus', '--data-dir', $data)
+    $script:dashboard = Start-Dashboard @('--log-focus', '--data-dir', "`"$data`"")
     $first = Wait-DashboardLog 'first frame presented' 60
     if (-not $first) { throw 'The Dashboard never presented a frame' }
     Say "started: $first"
