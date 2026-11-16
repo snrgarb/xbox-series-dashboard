@@ -18,6 +18,12 @@ $gameBlue = @(16, 32, 80)
 $beside = @{ X = 200; Y = 880 }
 # Inside the launcher's 400x200 window in the middle of the screen, above its title.
 $inLauncher = @{ X = 780; Y = 460 }
+# The window is 400x200 real pixels whatever the screen: on a 1920x1080 screen that point, on a larger one the same
+# 180 left of and 80 above the screen's middle.
+function Get-LauncherPixel {
+    $b = Get-ScreenBounds
+    Get-ScreenPixel ([int] ($b.Width / 2) - 180) ([int] ($b.Height / 2) - 80)
+}
 
 function Front { $f = Get-Foreground; "$($f.Process) '$($f.Title)'" }
 function LaunchLog { (Get-DashboardLog | Where-Object { $_ -match '^launch:|^overlay: (shown|hidden)' }) -join ' | ' }
@@ -59,7 +65,7 @@ try {
     $front = Wait-Until { (Get-Foreground).Title -eq $launcherTitle } 30
     Say "the launcher in front: $([bool] $front); foreground $(Front)"
     if (-not $front) { $failures += "the game's launcher did not take the foreground: $(Front)" }
-    $hidden = Get-DesignPixel $inLauncher.X $inLauncher.Y
+    $hidden = Get-LauncherPixel
     $screen = Get-DesignPixel $beside.X $beside.Y
     Save-Screen 'launch-screen'
     Say "Launch screen: at ($($inLauncher.X), $($inLauncher.Y)) seen $(Format-Colour $hidden), the launcher is $(Format-Colour $gameBlue); at ($($beside.X), $($beside.Y)) seen $(Format-Colour $screen), Home was $(Format-Colour $home_)"
@@ -76,9 +82,9 @@ try {
     $gone = Wait-DashboardLog 'Launch screen gone' 20
     Say "Launch screen: $(if ($gone) { $gone } else { 'not gone in 20 s' })"
     if (-not $gone) { $failures += 'the Launch screen did not go after stepping aside' }
-    $shows = Wait-Until { Test-Colour (Get-DesignPixel $inLauncher.X $inLauncher.Y) $gameBlue 6 } 6
+    $shows = Wait-Until { Test-Colour (Get-LauncherPixel) $gameBlue 6 } 6
     Save-Screen 'launcher'
-    $seen = Get-DesignPixel $inLauncher.X $inLauncher.Y
+    $seen = Get-LauncherPixel
     $screen = Get-DesignPixel $beside.X $beside.Y
     Say "after it: at ($($inLauncher.X), $($inLauncher.Y)) seen $(Format-Colour $seen); at ($($beside.X), $($beside.Y)) seen $(Format-Colour $screen); foreground $(Front)"
     if (-not $shows) { $failures += "the launcher is not on screen after the Launch screen stepped aside: at ($($inLauncher.X), $($inLauncher.Y)) seen $(Format-Colour $seen), the launcher is $(Format-Colour $gameBlue)" }
