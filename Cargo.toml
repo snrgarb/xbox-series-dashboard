@@ -7,3 +7,14 @@ members = ["crates/model", "crates/library", "crates/source-steam", "crates/sour
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# CI's tests (`cargo nextest run --cargo-profile ci`): the dev profile, with the dependencies optimised and the
+# workspace's own code lightly, since a screenshot test spends its time decoding, shaping text and comparing
+# pictures in them. The development box keeps the plain dev profile, whose first build is quicker.
+[profile.ci]
+inherits = "dev"
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.ci.package."*"]
+opt-level = 3

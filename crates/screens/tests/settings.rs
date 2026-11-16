@@ -322,7 +322,7 @@ fn library_with_plain_art() -> Library {
     let mut library = screens::fake_library();
     for (game, colour) in [[200, 40, 40], [40, 40, 200]].into_iter().enumerate() {
         let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("settings-hero-{game}.png"));
-        image::RgbImage::from_pixel(96, 31, image::Rgb(colour)).save(&path).unwrap();
+        shots::save_shared(&image::RgbImage::from_pixel(96, 31, image::Rgb(colour)), &path);
         library.games[game].hero = Some(path);
     }
     let mut database = library::Database::in_memory().unwrap();
