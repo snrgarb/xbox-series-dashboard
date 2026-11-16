@@ -42,6 +42,16 @@ fn workspace_target() -> PathBuf {
     from_env.unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))
 }
 
+/// Writes a picture many tests share (the fake library's art) so that no test ever reads half of it: under
+/// cargo-nextest each test is a process of its own and they all write the same files at once. Written beside its
+/// place under this process's name, then moved there in one step.
+pub fn save_shared(image: &image::RgbImage, path: &Path) {
+    let name = path.file_name().expect("a file's path").to_string_lossy();
+    let mine = path.with_file_name(format!("{}-{name}", std::process::id()));
+    image.save(&mine).unwrap_or_else(|e| panic!("{}: {e}", mine.display()));
+    std::fs::rename(&mine, path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}
+
 /// Checks the image at `got` against `reference_dir/<name>.png`, or with `SHOTS=bless` set makes it the reference.
 /// Panics, naming the files to look at, when they differ by more than the tolerance or there is no reference.
 pub fn check(name: &str, got: &Path, reference_dir: &Path) {

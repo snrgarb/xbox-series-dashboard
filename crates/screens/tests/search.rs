@@ -35,7 +35,7 @@ fn art_dir() -> &'static Path {
                 };
                 image::Rgb([level(hue(0)), level(hue(1)), level(hue(2))])
             });
-            image.save(dir.join(format!("{game}.png"))).unwrap();
+            shots::save_shared(&image, &dir.join(format!("{game}.png")));
         }
         dir
     })

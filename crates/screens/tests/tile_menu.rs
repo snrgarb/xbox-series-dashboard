@@ -472,7 +472,7 @@ fn library_with_art() -> Library {
                     let dim = if (y * 8 / h) % 2 == 0 { 1 } else { 2 };
                     image::Rgb([hue(0) / dim, hue(1) / dim, hue(2) / dim])
                 });
-                image.save(dir.join(format!("{game}-{kind}.png"))).unwrap();
+                shots::save_shared(&image, &dir.join(format!("{game}-{kind}.png")));
             }
         }
         dir
