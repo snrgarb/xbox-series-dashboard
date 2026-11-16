@@ -24,10 +24,9 @@ pub fn start_app(library: &Library, app: i64, addresses: &mut dyn Addresses) {
         return;
     };
     let start = app.start();
-    if addresses.open(&start) {
-        eprintln!("apps: started {}: {start}", app.name);
-    } else {
-        eprintln!("apps: nothing took {start}: {} isn't started", app.name);
+    match addresses.open(&start) {
+        Ok(()) => eprintln!("apps: started {}: {start}", app.name),
+        Err(why) => eprintln!("apps: nothing took {start} ({why}): {} isn't started", app.name),
     }
 }
 
