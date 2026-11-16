@@ -4,6 +4,7 @@ pub mod audio;
 pub mod by_hand;
 pub mod discord;
 pub mod media;
+pub mod playnite;
 pub mod post;
 pub mod profile;
 pub mod queue;

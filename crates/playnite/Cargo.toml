@@ -1,0 +1,17 @@
+[package]
+name = "playnite"
+version = "0.0.0"
+edition = "2021"
+description = "Import from Playnite, once: a Playnite 10 library read from its LiteDB files, never written to (docs/import.md)."
+
+[dependencies]
+model = { path = "../model" }
+anyhow = "1"
+# Playnite's config.json, for where it keeps its library.
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+# tests/import.rs: the made-up library imported into the fake Steam's.
+library = { path = "../library" }
+source-steam = { path = "../source-steam" }

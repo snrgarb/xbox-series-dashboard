@@ -14,6 +14,11 @@
 //!       Moves the fake Steam's install of <appid> at <dir> along, by rewriting its app manifest as Steam's client
 //!       would (`fixture::write_progress`): waiting, so many bytes of so many downloaded, paused there, installed
 //!       (with this program as its `game.exe`), or dropped (the manifest gone).
+//!   standin make-playnite <dir> [--json <file>]
+//!       Writes a made-up Playnite library at <dir>, as Playnite's data folder (`%APPDATA%\Playnite`) keeps one:
+//!       `library\games.db` and `filterpresets.db`, LiteDB 4 files (`playnite::fixture`), whose Steam games are the
+//!       fake Steam's. Reads it back with the Dashboard's reader, and with --json writes what an import of it would
+//!       bring. The Dashboard reads it with `--playnite <dir>` (docs/import.md).
 //!   standin make-epic <dir> [--json <file>]
 //!   standin make-gog <dir> [--json <file>]
 //!       As make-steam, for a fake Epic Games Launcher (`source_epic::fixture`) or a fake GOG (`source_gog::fixture`):
@@ -137,6 +142,7 @@ use source_steam::fixture::{self, Fixture};
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
        standin make-epic <dir> [--json <file>]
        standin make-gog <dir> [--json <file>]
+       standin make-playnite <dir> [--json <file>]
        standin epic-url <dir> com.epicgames.launcher://apps/...
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
@@ -512,6 +518,42 @@ fn make_gog(dir: &Path, json: Option<&Path>) -> Result<(), String> {
     read_back("make-gog", &dir, library, spec.games.len(), json)
 }
 
+/// Writes the made-up Playnite library at `dir` and reads it back with the Dashboard's reader: with `json`, what an
+/// import of it would bring, for the test's output.
+fn make_playnite(dir: &Path, json: Option<&Path>) -> Result<(), String> {
+    let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let library = playnite::fixture::write(&dir).map_err(|e| format!("writing {}: {e:#}", dir.display()))?;
+    let found = playnite::find(Some(&dir)).ok_or(format!("no library found at {} once written", dir.display()))?;
+    let plan = playnite::look(&found).map_err(|e| format!("reading {} back: {e:#}", library.display()))?;
+    if let Some(json) = json {
+        let games: Vec<_> = plan
+            .games
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "source": m.source, "source_id": m.source_id, "name": m.name,
+                    "playtime_minutes": m.playtime_minutes, "last_played": m.last_played,
+                    "favourite": m.favourite, "hidden": m.hidden,
+                })
+            })
+            .collect();
+        let groups: Vec<_> = plan.groups.iter().map(|g| &g.name).collect();
+        let text = serde_json::to_string_pretty(&serde_json::json!({
+            "library": found, "games_read": plan.games_read, "games": games, "other_stores": plan.other_stores,
+            "groups": groups, "skipped": plan.skipped,
+        }))
+        .map_err(|e| e.to_string())?;
+        std::fs::write(json, text).map_err(|e| format!("{}: {e}", json.display()))?;
+    }
+    note(&format!(
+        "make-playnite: {} games and {} Groups at {}",
+        plan.games_read,
+        plan.groups.len(),
+        found.display()
+    ));
+    Ok(())
+}
+
 /// The stand-in Epic launcher: starts the installed game a launch link names, from the fake launcher's files at
 /// `dir`, and waits for it.
 fn epic_url(dir: &Path, url: &str) -> i32 {
@@ -712,6 +754,13 @@ fn run(args: &[String]) -> i32 {
             };
             let result = if what == "make-epic" { make_epic(dir, json) } else { make_gog(dir, json) };
             made(what, dir, result)
+        }
+        Some("make-playnite") => {
+            let Some((dir, json)) = dir_and_json(&args[1..]) else {
+                note(USAGE);
+                return 2;
+            };
+            made("make-playnite", dir, make_playnite(dir, json))
         }
         Some("epic-url") => match &args[1..] {
             [dir, url] => epic_url(Path::new(dir), url),

@@ -13,6 +13,8 @@ source-ubisoft = { path = "../source-ubisoft" }
 source-battlenet = { path = "../source-battlenet" }
 source-xbox = { path = "../source-xbox" }
 model = { path = "../model" }
+# make-playnite: a made-up Playnite library.
+playnite = { path = "../playnite" }
 # serve-art: the stand-in SteamGridDB, and the plain pictures it serves.
 library = { path = "../library" }
 image = { version = "0.25", default-features = false, features = ["png"] }

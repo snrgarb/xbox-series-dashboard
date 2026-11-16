@@ -24,6 +24,7 @@ pub mod art;
 pub mod by_hand;
 pub mod filters;
 pub mod history;
+pub mod import;
 pub mod profiles;
 pub mod queue;
 pub mod sources;

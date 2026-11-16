@@ -5,3 +5,5 @@ artifacts/
 !crates/*/tests/reference/*.png
 .claude/worktrees/
 !docs/reports/**/*.png
+tools/playnite-litedb/bin/
+tools/playnite-litedb/obj/

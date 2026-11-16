@@ -21,7 +21,7 @@ pub const RECENTLY_ADDED: &str = "recently-added";
 pub const HIDDEN: &str = "hidden";
 
 /// How far apart places are handed out.
-const STEP: i64 = 1000;
+pub(crate) const STEP: i64 = 1000;
 const DAY: i64 = 86_400;
 
 /// Migration 2: a store's collections, and the saved filters with the five built in.
@@ -76,7 +76,7 @@ fn kind_text(kind: FilterKind) -> &'static str {
     }
 }
 
-fn sort_text(sort: Sort) -> &'static str {
+pub(crate) fn sort_text(sort: Sort) -> &'static str {
     match sort {
         Sort::Name => "name",
         Sort::LastPlayed => "last_played",
