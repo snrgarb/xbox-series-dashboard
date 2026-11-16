@@ -101,6 +101,8 @@ pub struct Options {
     /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
     /// looks as it starts (`Dashboard::set_boot_videos`).
     pub boot_videos: Found,
+    /// Settings > Idle's two times (docs/spec/idle-screen.md): kept as the rows `idle::DIM_KEY` and `idle::SHOW_KEY`.
+    pub idle: crate::idle::Times,
 }
 
 impl Default for Options {
@@ -116,6 +118,7 @@ impl Default for Options {
             art_key: false,
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
+            idle: crate::idle::Times::default(),
         }
     }
 }
@@ -134,6 +137,7 @@ impl Options {
         if let Some(video) = stored(BOOT_VIDEO).as_deref().and_then(BootVideo::from_key) {
             options.boot_video = video;
         }
+        options.idle = crate::idle::Times::read(&stored);
         options
     }
 

@@ -241,7 +241,7 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
-The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. Until Idle and Discord come, the boxes close up: Personalisation and Guide on the first row, Games & apps under Personalisation, and Art (16.8) beside it.
+The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. Until Discord comes, its place beside Guide is empty: Personalisation and Idle on the first row, Guide under Personalisation, then Games & apps on a row of its own, and Art (16.8) beside it.
 
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
@@ -305,7 +305,7 @@ E/PersonalisationPane.xaml:300-351; E/PersonalisationPane.xaml.cs:139-153, 419-4
 
 E/PersonalisationPane.xaml:354-381; E/PersonalisationPane.xaml.cs:419-449. Gamerpic buttons (section 4.8) four wide from (520, 210), pitch 202, the Windows account picture first, then the Gamerpics folder's (C/ExtensionCore.Startup.cs:387-400); scrolls as Profiles does (set 24 up and left). The one worn carries the tick badge and has focus as the page opens. With at most one picture to choose from, a line shows above them, "Add images to the Gamerpics folder to choose from more." (MutedText, 26 under it, so the buttons start at y 270.58). A wears the picture and steps back to the Profile's page. With no pictures at all the Picture box opens no page: Playnite's message box says "Add images to the Gamerpics folder to choose from." (title "Picture").
 
-### 6.7 Theme settings > Idle - the Idle screen is **M5**; the two controls are specified here in full
+### 6.7 Theme settings > Idle - built (#128); the Idle screen itself is [idle-screen.md](idle-screen.md)
 
 E/SettingsControl.xaml:364-396; C/IdleState.cs:30-91; C/ExtensionCore.Idle.cs:214-248.
 
@@ -326,6 +326,7 @@ A 560-wide column at x 520, **from y 190** (this pane has no 20 top margin), two
   - Raising Dim after past Show things after **raises Show things after to the same step**, at once (both boxes follow). Lowering Dim after leaves Show things after as it was.
   - A choice the rule forbids changes nothing and saves nothing.
 - Both are shared by every Profile, saved at once, and count from the moment they are set (CT/IdleSettingsTests.cs:35-189).
+- **The port:** the rows `idle.dim_after` and `idle.show_things_after` in the settings table, in seconds or `never` (16.4), saved by `Effect::IdleTimes`. The focus log: `Idle: Dim after`, `Idle: Show things after`, and with a list open `Idle: Dim after, list on "2 min"`. A time that is not a step (`--idle-after`'s) shows as seconds, `3 s`, and its list opens on its first step.
 
 ### 6.8 Theme settings > Guide - the checkbox is **M3** (the Guide is M2); the Now Playing source is #129's
 
@@ -410,9 +411,9 @@ A box either opens its page (focus on its first box) or acts and stays.
 | ... > Personalisation > Reduce motion | checkbox box | on, **off** | Section 10.4; in force at once (C/ExtensionCore.Startup.cs:175-180) | `StartUp`.ReduceMotion, only once set | **Bundle's own: M3** (`ui`'s `slide` already honours it, docs/ui.md) |
 | ... > Personalisation > Show Play history | checkbox box | **on**, off | On: the Recent row is seven games and the Play history tile; off: eight games. The row is rebuilt at once | `StartUp`.ShowPlayHistory, only once set | **Bundle's own: M3** |
 | ... > Personalisation > Show battery percentages | checkbox box | **on**, off | Whether the percent is written beside the controller's and the PC's battery | `StartUp`.ShowBatteryPercent, only once set | **Bundle's own: M3** |
-| Theme settings > Idle | box, opens a page | - | The Idle screen's two times | - | page and controls specified here; feature **M5** |
-| ... > Idle > Dim after | dropdown | 1, **2**, 5, 10, 15, 30 min, 1, 2, 3, 4 h, Never | How long with no input before the screen dims | `Idle` as "00:02:00" or "Never" (C/ExtensionCore.Idle.cs:55, 255, 293) | **Bundle's own: M5** |
-| ... > Idle > Show things after | dropdown | the same steps not shorter than Dim after (**5 min**) | How long before the Idle screen shows things over the dim | `Idle` | **Bundle's own: M5** |
+| Theme settings > Idle | box, opens a page | - | The Idle screen's two times | - | **built (#128)** |
+| ... > Idle > Dim after | dropdown | 1, **2**, 5, 10, 15, 30 min, 1, 2, 3, 4 h, Never | How long with no input before the screen dims | `Idle` as "00:02:00" or "Never" (C/ExtensionCore.Idle.cs:55, 255, 293); the port's `idle.dim_after` | **Bundle's own: built (#128)** |
+| ... > Idle > Show things after | dropdown | the same steps not shorter than Dim after (**5 min**) | How long before the Idle screen shows things over the dim | `Idle`; the port's `idle.show_things_after` | **Bundle's own: built (#128)** |
 | Theme settings > Guide | box, opens a page | - | - | - | **M3** |
 | ... > Guide > Use the Guide | checkbox row | **on**, off | Section 6.8 | `Guide`.IsGuideOn, only once set (C/SettingsState.cs:19, 155-161) | **Bundle's own: M3** |
 | ... > Guide > Now Playing source | dropdown | Any, **Spotify**, other apps seen | Which app the Audio flyout's Now Playing follows | `Guide`.NowPlayingSource | **Bundle's own: built (#129)** |
@@ -738,8 +739,9 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 | Pane | Boxes |
 |---|---|
-| Theme settings | Personalisation (0, 0), Guide (1, 0). Idle (M5) and Discord (M6) come back to the Bundle's places with their features. |
+| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Art on the row under them. |
 | Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Groups** (0, 1) (filters.md 6.1), in Who's playing today?'s place until #127 brings it, when Groups takes the Bundle's empty slot, (1, 1); then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
+| Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
 | Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
 
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
@@ -775,6 +777,8 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Use the Guide | `guide.enabled` | on |
 | Download art online (16.8) | `art.online` | on |
 | Boot video (start-up.md 2) | `startup.boot_video` | `XboxSeriesX`; a name, not `true` or `false`, saved by `Effect::BootVideo` |
+| Idle > Dim after (6.7) | `idle.dim_after` | `120` (seconds, or `never`) |
+| Idle > Show things after (6.7) | `idle.show_things_after` | `300` |
 
 The same table keeps `profile.last`, the id of the Profile signed in last (profiles.md 1); the Profiles themselves are the `profiles` table's (profiles.md 2).
 
@@ -800,7 +804,7 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 
 ### 16.7 The controls, for the pages still to come
 
-`settings::controls` has every control of section 4 as a function that draws it in a rectangle, with or without focus: `settings_box` (a Box with an icon, or a checkbox box with its info text), `row`, `pane_button`, `checkbox_row`, `label` and `description`; `Dropdown` (the box, and its list while open, with the list's own presses and scrolling); `Grid` (a pane of boxes' places, its steps and its scrolling); and `focus_ring` and `glow`. A page is a struct that implements `settings::Pane` (its header, its focus line, `press`, `draw`) and is opened by a box (`boxes::Item::Opens`) of the pane it belongs to; `boxes::Boxes` is a whole pane of boxes made from a list of them. The Row, the pane button and the dropdown are on no page of M3: `crates/screens/tests/settings.rs` builds Idle's page and a list of Rows from them, for their pictures.
+`settings::controls` has every control of section 4 as a function that draws it in a rectangle, with or without focus: `settings_box` (a Box with an icon, or a checkbox box with its info text), `row`, `pane_button`, `checkbox_row`, `label` and `description`; `Dropdown` (the box, and its list while open, with the list's own presses and scrolling); `Grid` (a pane of boxes' places, its steps and its scrolling); and `focus_ring` and `glow`. A page is a struct that implements `settings::Pane` (its header, its focus line, `press`, `draw`) and is opened by a box (`boxes::Item::Opens`) of the pane it belongs to; `boxes::Boxes` is a whole pane of boxes made from a list of them. The dropdown is on Guide's and Idle's pages; the Row and the pane button are on no page yet: `crates/screens/tests/settings.rs` builds a list of Rows from them, for their pictures.
 
 ### 16.8 Art (the port's own; #80)
 

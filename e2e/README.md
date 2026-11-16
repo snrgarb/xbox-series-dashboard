@@ -197,8 +197,10 @@ Home, in Games a screenful at a time and in Full library, a Game hub of each sto
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
 each), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
 its first frame, its end and Home's first frame logged in that order, then Off set on Settings with the pad and the
-Dashboard straight to Home at the next start; it needs `video-spike.exe`, so build `-p video-spike` too), and
-`overlay` and `video` for the spikes.
+Dashboard straight to Home at the next start; it needs `video-spike.exe`, so build `-p video-spike` too), `idle` (the
+Idle screen with `--idle-after 3,6`: Dimmed then Showing things over Home and over the stand-in game, a picture of
+each, and a press that wakes it seen to move no focus and start nothing; a stage woken early by someone else's input
+on the TV PC is said in the steps and waited for again), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets

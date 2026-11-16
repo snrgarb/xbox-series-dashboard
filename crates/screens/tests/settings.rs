@@ -11,7 +11,7 @@ use render::offscreen::{read_back, wait, FORMAT};
 use screens::home::{Focus, TopButton};
 use screens::pages::{Around, Open, Page};
 use screens::settings::boxes::{Boxes, Item};
-use screens::settings::controls::{self, Dropdown, FIELD_HEIGHT, FIELD_WIDTH, LEFT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH};
+use screens::settings::controls::{self, FIELD_HEIGHT, LEFT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH};
 use screens::settings::{BootVideo, Change, Entry, Found, Options, Pane, Setting, Settings, Step, BOOT_VIDEO};
 use screens::{Dashboard, Effect};
 use ui::host::Offscreen;
@@ -48,6 +48,13 @@ fn save(dashboard: &mut Dashboard, database: &library::Database) -> Vec<Change> 
         .into_iter()
         .filter_map(|effect| match effect {
             Effect::Set(change) => Some(change),
+            // Settings > Idle's times are their own rows, saved as the executable saves them.
+            Effect::IdleTimes(times) => {
+                for (key, value) in times.saved() {
+                    database.set_setting(key, &value).unwrap();
+                }
+                None
+            }
             _ => None,
         })
         .collect();
@@ -98,22 +105,24 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let database = database();
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
-    // Theme settings: Personalisation, then Guide beside it, and Games & apps and Art under them. The row's end,
-    // the top and the foot stop.
+    // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord's place empty
+    // beside it, then Games & apps and Art. The row's end, the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
+    // Down from Idle is Guide, the row under it being one box long; Right there stops.
+    press(&mut dashboard, &[Down, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
-    // Down from Guide is Art, beside Games & apps.
-    press(&mut dashboard, &[Down, Down]);
+    press(&mut dashboard, &[Down, Right, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
-    press(&mut dashboard, &[Up, Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
+    press(&mut dashboard, &[Up, Up, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
     press(&mut dashboard, &[Down, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
-    press(&mut dashboard, &[Up]);
+    press(&mut dashboard, &[Up, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
     // Left from the first column is back a level, as B: the rail.
     press(&mut dashboard, &[Left]);
@@ -139,7 +148,7 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
 fn b_climbs_one_level_at_a_time_and_a_page_gives_focus_back_to_the_box_that_opened_it() {
     let database = database();
     let mut dashboard = settings(&database);
-    press(&mut dashboard, &[Right, Right, A]);
+    press(&mut dashboard, &[Right, Down, A]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Use the Guide");
     // The Guide page has two controls: Use the Guide, and the Now Playing source under it. Right does nothing.
     press(&mut dashboard, &[Up, Right]);
@@ -257,7 +266,7 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
 fn use_the_guide_off_leaves_the_guide_button_and_homes_profile_alone() {
     let database = database();
     let mut dashboard = settings(&database);
-    press(&mut dashboard, &[Right, Right, A, A]);
+    press(&mut dashboard, &[Right, Down, A, A]);
     assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::UseGuide, on: false }]);
     // At once, on the page itself: the Guide button opens nothing.
     press(&mut dashboard, &[Guide]);
@@ -268,7 +277,7 @@ fn use_the_guide_off_leaves_the_guide_button_and_homes_profile_alone() {
     assert!(!dashboard.guide_open());
 
     // On again: both do.
-    press(&mut dashboard, &[Right, Right, Right, A, Right, Right, A, A]);
+    press(&mut dashboard, &[Right, Right, Right, A, Right, Down, A, A]);
     assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::UseGuide, on: true }]);
     press(&mut dashboard, &[Guide]);
     assert!(dashboard.guide_open());
@@ -297,7 +306,7 @@ fn the_now_playing_source_lists_any_spotify_and_every_app_seen_and_a_choice_is_s
     let mut dashboard = settings(&database);
     now_playing_apps(&mut dashboard, &["chrome.exe", "Spotify.exe"]);
     now_playing_apps(&mut dashboard, &["vlc.exe"]);
-    press(&mut dashboard, &[Right, Right, A, Down]);
+    press(&mut dashboard, &[Right, Down, A, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Now Playing source");
     // The list opens on the source set now, Spotify until one is chosen.
     press(&mut dashboard, &[A]);
@@ -332,8 +341,11 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
 
     // Every checkbox on Personalisation turned over, and Use the Guide.
     dashboard.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut dashboard, &[Down, A, Down, A, Down, A, Down, A, B, Right, A, A]);
+    press(&mut dashboard, &[Down, A, Down, A, Down, A, Down, A, B, Down, A, A]);
+    // And Idle's Dim after, from 2 min to 10 min, which raises Show things after to 10 min with it.
+    press(&mut dashboard, &[B, Up, Right, A, A, Down, Down, A]);
     assert_eq!(save(&mut dashboard, &database).len(), 5);
+    let ten = Some(std::time::Duration::from_secs(600));
     let left = Options {
         background_delay: false,
         reduce_motion: true,
@@ -344,6 +356,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         art_key: false,
         boot_video: BootVideo::XboxSeriesX,
         boot_videos: Found::NONE,
+        idle: screens::idle::Times { dim_after: ten, show_after: ten },
     };
     assert_eq!(dashboard.options(), left);
 
@@ -633,7 +646,7 @@ fn a_choice_whose_video_is_gone_ticks_off_and_is_kept_until_another_is_made() {
 #[test]
 fn settings_guide() {
     let mut stage = settings_stage();
-    stage.press(&[Right, Right, A]);
+    stage.press(&[Right, Down, A]);
     stage.check("settings-guide");
 }
 
@@ -642,61 +655,11 @@ fn settings_guide() {
 fn settings_guide_now_playing_source_list() {
     let mut stage = settings_stage();
     now_playing_apps(&mut stage.dashboard, &["chrome.exe", "vlc.exe"]);
-    stage.press(&[Right, Right, A, Down, A]);
+    stage.press(&[Right, Down, A, Down, A]);
     stage.check("settings-guide-now-playing-source-list");
 }
 
-/// Idle's page as the Bundle's pictures 33 and 34 have it, built from the controls: a label over each of two
-/// dropdowns. The feature is M5's; the page is here for what the controls look like, and to show they are
-/// enough to build one.
-struct Idle {
-    focus: usize,
-    dim: Dropdown,
-}
-
-const STEPS: [&str; 11] =
-    ["1 min", "2 min", "5 min", "10 min", "15 min", "30 min", "1 h", "2 h", "3 h", "4 h", "Never"];
-
-impl Pane for Idle {
-    fn header(&self) -> String {
-        "Idle".into()
-    }
-
-    fn focus(&self) -> String {
-        match self.dim.focused() {
-            Some(choice) => format!("Idle: Dim after > {choice}"),
-            None => format!("Idle: {}", ["Dim after", "Show things after"][self.focus]),
-        }
-    }
-
-    fn press(&mut self, press: Press, _around: Around) -> Step {
-        if self.dim.is_open() {
-            self.dim.press(press.button);
-            return Step::Stay;
-        }
-        match press.button {
-            Up => self.focus = 0,
-            Down => self.focus = 1,
-            A if self.focus == 0 => self.dim.open(STEPS.map(String::from).to_vec(), 1),
-            B | Left => return Step::Back,
-            _ => {}
-        }
-        Step::Stay
-    }
-
-    fn draw(&mut self, ui: &mut Ui, _around: Around, focused: bool) {
-        let mut y = controls::TOP;
-        y += controls::label(ui, LEFT, y, "Dim after") + 14.0;
-        let dim = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
-        self.dim.draw(ui, dim, "2 min", focused && self.focus == 0);
-        y += FIELD_HEIGHT + 48.0;
-        y += controls::label(ui, LEFT, y, "Show things after") + 14.0;
-        let show = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
-        Dropdown::default().draw(ui, show, "5 min", focused && self.focus == 1);
-        // The open list last: it lies over Show things after and moves nothing.
-        self.dim.draw_list(ui, dim);
-    }
-}
+use screens::settings::idle::Idle;
 
 fn around(library: &Library) -> Around<'_> {
     Around {
@@ -712,20 +675,20 @@ fn around(library: &Library) -> Around<'_> {
 #[test]
 fn settings_dropdown_closed_and_open() {
     let mut stage = settings_stage();
-    stage.check_pane("settings-dropdown", Box::new(Idle { focus: 0, dim: Dropdown::default() }));
+    stage.check_pane("settings-dropdown", Box::new(Idle::new()));
 
     let library = Library::default();
-    let mut idle = Idle { focus: 0, dim: Dropdown::default() };
+    let mut idle = Idle::new();
     idle.press(Press { button: A, repeat: false }, around(&library));
-    assert_eq!(idle.focus(), "Idle: Dim after > 2 min", "the list opens on the choice that is set");
+    assert_eq!(idle.focus(), "Idle: Dim after, list on \"2 min\"", "the list opens on the choice that is set");
     stage.check_pane("settings-dropdown-open", Box::new(idle));
 
     // The list's foot: the choices have scrolled if they had to, and the last has focus.
-    let mut idle = Idle { focus: 0, dim: Dropdown::default() };
+    let mut idle = Idle::new();
     for button in [A, Down, Down, Down, Down, Down, Down, Down, Down, Down, Down] {
         idle.press(Press { button, repeat: false }, around(&library));
     }
-    assert_eq!(idle.focus(), "Idle: Dim after > Never");
+    assert_eq!(idle.focus(), "Idle: Dim after, list on \"Never\"");
     stage.check_pane("settings-dropdown-open-last", Box::new(idle));
 }
 
@@ -913,7 +876,7 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
 fn settings_art() {
     const KEY: &str = "f00dfeedcafe1234";
     let mut stage = settings_stage();
-    stage.press(&[Right, Down, Right]);
+    stage.press(&[Right, Down, Down, Right]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
     stage.check("settings-theme-settings-art-box");
     stage.press(&[A]);
