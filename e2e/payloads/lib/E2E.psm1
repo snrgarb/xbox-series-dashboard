@@ -21,7 +21,7 @@ $script:Safe = $env:E2E_SAFE -eq '1'
 $script:Fakes = @{}
 # Every store the Dashboard reads, by its flag: in safe mode each is given a fake or an empty folder. A store added to
 # the Dashboard is added here too, or a test in safe mode would read the machine's own.
-$script:StoreFlags = @('steam', 'epic', 'gog', 'ea', 'ubisoft', 'battlenet')
+$script:StoreFlags = @('steam', 'epic', 'gog', 'ea', 'ubisoft', 'battlenet', 'xbox')
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
@@ -223,10 +223,11 @@ function Get-DashboardDataDir {
 
 # Says that a fake store is at $Root, for the store's flag $Store (steam, epic, gog): in safe mode the Dashboard is
 # started on it, and the stand-in stores find it through handlers.json beside standin.exe ($Handler, when the store
-# takes addresses: steam, epic). Nothing is written anywhere else.
-function Register-Fake([string] $Store, [string] $Root, [string] $Handler = '') {
+# takes addresses: steam, epic). Nothing is written anywhere else. With -Always handlers.json is written on the VM too,
+# for a test that starts the Dashboard there with --open-addresses-with standin.exe.
+function Register-Fake([string] $Store, [string] $Root, [string] $Handler = '', [switch] $Always) {
     $script:Fakes[$Store] = [IO.Path]::GetFullPath($Root)
-    if (-not $Handler -or -not $script:Safe) { return }
+    if (-not $Handler -or -not ($script:Safe -or $Always)) { return }
     $file = Join-Path $script:Payload 'handlers.json'
     $handlers = @{}
     if (Test-Path $file) {
@@ -334,6 +335,9 @@ function Start-Dashboard([string[]] $Arguments = @()) {
     if ($script:Safe) {
         $Arguments = @($Arguments) + @(Get-SafeArguments $Arguments)
     }
+    # No test asks a store's real services for art (docs/sources.md, "Art"): where a test has no stand-in for them,
+    # an address that answers nothing.
+    if (@($Arguments) -notcontains '--store-art-service') { $Arguments = @($Arguments) + @('--store-art-service', 'http://127.0.0.1:9') }
     $start = @{ FilePath = $exe; WorkingDirectory = $script:Payload; RedirectStandardError = $script:DashboardLog
                 NoNewWindow = $true; PassThru = $true }
     if ($Arguments.Count) { $start.ArgumentList = $Arguments }  # Start-Process refuses an empty list
@@ -569,6 +573,23 @@ function Initialize-FakeBattleNet([string] $Root = (Get-FakeRoot 'battlenet')) {
     $library = New-FakeStore 'make-battlenet' $Root 'fake-battlenet.json'
     $games = @($library.games)
     Say "fake Battle.net at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard a drive of Xbox games to read, with none installed: a fake at $Root written by `standin
+# make-xbox` (a .GamingRoot and made-up packages, three games and an app, each game's game.exe a copy of standin.exe:
+# crates/source-xbox/src/fixture.rs), which the Dashboard reads when started with `--xbox $Root`. Nothing is
+# registered: Tidewater Trials' package is whole, and the stores-xbox test registers it itself where it may. With
+# -OpenAddresses (and always in safe mode) handlers.json names it, so that `standin open-address` takes a game's
+# `shell:AppsFolder\<AUMID>` and starts the fake's game, as Windows would a registered package's.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-xbox.json in the test's output): games by
+# name, each with source_id (its package family name), name, installed, install_dir (its package's root).
+function Initialize-FakeXbox([string] $Root = (Get-FakeRoot 'xbox'), [switch] $OpenAddresses) {
+    $library = New-FakeStore 'make-xbox' $Root 'fake-xbox.json'
+    Register-Fake 'xbox' $Root 'xbox' -Always:$OpenAddresses
+    $games = @($library.games)
+    Say "fake Xbox drive at ${Root}: $($games.Count) games"
     $library
 }
 

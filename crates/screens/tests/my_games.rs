@@ -44,7 +44,7 @@ fn art_dir() -> &'static Path {
                 };
                 image::Rgb([level(hue(0)), level(hue(1)), level(hue(2))])
             });
-            image.save(dir.join(format!("{game}.png"))).unwrap();
+            shots::save_shared(&image, &dir.join(format!("{game}.png")));
         }
         dir
     })
@@ -1039,6 +1039,31 @@ fn under_reduce_motion_a_pane_is_simply_there() {
     assert_eq!(stage.dashboard.focus_line(), "MyGames: Apps: Nav(Apps)");
     let (apps, games) = (header(&stage.frame_after(0.0)).expect("Apps' header"), games.expect("Games' header"));
     assert!(apps.0.abs_diff(games.0) <= 2, "at its rest in the first frame: {apps:?}, {games:?}");
+}
+
+/// Art downloaded while the Dashboard runs (docs/sources.md, "Art"): a game given a cover in a new snapshot shows it
+/// fading in over a quarter of a second, over its name; a cover it had from the first is simply there.
+#[test]
+fn a_cover_given_while_on_screen_fades_in_over_the_name() {
+    let differ = |a: &image::RgbaImage, b: &image::RgbaImage| {
+        a.pixels().zip(b.pixels()).filter(|(a, b)| a.0.iter().zip(b.0).any(|(&x, y)| x.abs_diff(y) > 8)).count()
+    };
+    let mut bare = source();
+    bare.games.iter_mut().for_each(|game| game.cover = None);
+    let mut stage = Stage::new(through(&[bare]), Entry::Games, HD);
+    let without = stage.frame_after(0.5);
+    stage.dashboard.set_library(library());
+    let given = stage.frame_after(0.0);
+    assert!(differ(&given, &without) < 500, "nothing yet in the frame it is given: {}", differ(&given, &without));
+    let mid = stage.frame_after(0.1);
+    let whole = stage.frame_after(0.3);
+    assert_eq!(differ(&whole, &stage.frame_after(0.3)), 0, "whole after a quarter of a second");
+    let (from_without, from_whole) = (differ(&mid, &without), differ(&mid, &whole));
+    assert!(from_without > 5000 && from_whole > 5000, "on its way: {from_without} from none, {from_whole} from whole");
+    // The covers a page opens with are there in its first frame (once decoded), with no fade.
+    drop(stage);
+    let mut fresh = Stage::new(library(), Entry::Games, HD);
+    assert_eq!(differ(&fresh.frame_after(0.0), &whole), 0, "a cover there from the first is whole at once");
 }
 
 /// docs/spec/my-games.md, 3.4: across the tabs only the grid moves, in from 50 on the side of the tab lit, over

@@ -52,6 +52,10 @@
 //!       `game.exe`, titled with its name), reads it back as the Dashboard does with `--ea <dir>` (and the others),
 //!       and with --json writes the Library it read there. Battle.net's client in the fake, `Battle.net.exe`, is a
 //!       copy of this program too.
+//!   standin make-xbox <dir> [--json <file>]
+//!       As make-ea, for a fake drive of Xbox games (`source_xbox::fixture`): a `.GamingRoot` and made-up packages,
+//!       each game's `game.exe` a copy of this program, read with `--xbox <dir>`. Tidewater Trials' package is whole,
+//!       as Windows registers a folder of loose files: the end-to-end test registers it on the VM.
 //!   standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
 //!       The stand-in Ubisoft Connect, registered as the `uplay://` handler for the fake at <dir>: starts the game's
 //!       `game.exe` from its install folder and waits for it; asked to install or uninstall, says so in the log and
@@ -63,11 +67,23 @@
 //!   standin open-address <address>
 //!       What `dashboard --open-addresses-with standin.exe` gives every store's address to, on a test machine whose
 //!       registry is left alone (the TV PC): does what the handler registered for the address's scheme would,
-//!       `steam://` as steam-url, `com.epicgames.launcher://` as epic-url and `uplay://` as uplay-url, with each
-//!       fake's folder from `handlers.json` beside this program (`{"steam": "<dir>", "epic": "<dir>", "ubisoft":
-//!       "<dir>"}`, written by the tests' helpers) and never from the registry. A game the stand-in Steam starts this way has no `Running` value written:
+//!       `steam://` as steam-url, `com.epicgames.launcher://` as epic-url and `uplay://` as uplay-url, and Windows
+//!       would with `shell:AppsFolder\<AUMID>`: the fake Xbox drive's game of that app user model ID started from its
+//!       package's folder (its Install and Uninstall, the Store's page and Settings, only said); with each fake's
+//!       folder from `handlers.json` beside this program (`{"steam": "<dir>", "epic": "<dir>", "ubisoft": "<dir>",
+//!       "xbox": "<dir>"}`, written by the tests' helpers) and never from the registry. A game the stand-in Steam starts this way has no `Running` value written:
 //!       the Dashboard follows it by its windows. Exits 2 for a scheme it has no stand-in for, 1 when the fake it
 //!       needs is not in `handlers.json`.
+//!
+//!   standin serve-art [--port <n>] [--key <key>]
+//!       The stand-in SteamGridDB (`library::art::fake`), on 127.0.0.1 at <n> (any free port without one), for
+//!       `dashboard --art-service http://127.0.0.1:<n>`: it takes only <key> ("e2e-key" without one), finds a game
+//!       of any name searched for, and gives every game a plain picture of each kind, an orange cover, a teal hero,
+//!       a violet header and a yellow square. Under `/stores` it is the stores' own art online too, for
+//!       `dashboard --store-art-service http://127.0.0.1:<n>/stores`: Steam's GetItems and CDN, the Microsoft
+//!       Store's catalogue and GOG's API, knowing every id, with a red cover, a blue hero, a green header and (the
+//!       Microsoft Store's alone) a magenta square (`STORE_ART_COLOURS`). Says `serve-art: listening on
+//!       http://127.0.0.1:<n>` and then a line a request (its path, and whether it had the key), until it is killed.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -88,9 +104,10 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
-       standin make-ea | make-ubisoft | make-battlenet <dir> [--json <file>]
+       standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin open-address <address>
+       standin serve-art [--port <n>] [--key <key>]
        standin toast <text>
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
        steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>";
@@ -104,17 +121,18 @@ struct Handlers {
     steam: Option<PathBuf>,
     epic: Option<PathBuf>,
     ubisoft: Option<PathBuf>,
+    xbox: Option<PathBuf>,
 }
 
 impl Handlers {
-    /// `{"steam": "<dir>", "epic": "<dir>", "ubisoft": "<dir>"}`, any left out. PowerShell's UTF-8 can start with a
+    /// `{"steam": "<dir>", "epic": "<dir>", "ubisoft": "<dir>", "xbox": "<dir>"}`, any left out. PowerShell's UTF-8 can start with a
     /// byte-order mark, which is passed over.
     fn parse(text: &str) -> Result<Handlers, String> {
         let value: serde_json::Value =
             serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("{HANDLERS_FILE}: {e}"))?;
         let dir =
             |key: &str| value.get(key).and_then(|dir| dir.as_str()).filter(|dir| !dir.is_empty()).map(PathBuf::from);
-        Ok(Handlers { steam: dir("steam"), epic: dir("epic"), ubisoft: dir("ubisoft") })
+        Ok(Handlers { steam: dir("steam"), epic: dir("epic"), ubisoft: dir("ubisoft"), xbox: dir("xbox") })
     }
 
     /// The file beside this program; none there is no fakes.
@@ -140,6 +158,18 @@ fn open_address(handlers: &Handlers, address: &str) -> i32 {
         }
         found
     };
+    // A packaged game's app user model ID, which Windows would activate: the fake drive's game of that ID.
+    if let Some(aumid) = source_xbox::aumid_of(address) {
+        return match fake(&handlers.xbox, "Xbox") {
+            Some(root) => run_game("xbox", source_xbox::fake_game(&root, aumid).as_ref(), aumid),
+            None => 1,
+        };
+    }
+    // What an Xbox game's Install and Uninstall open: the Store's page, Settings' installed apps.
+    if scheme == "ms-windows-store" || address.to_ascii_lowercase().starts_with("ms-settings:") {
+        note(&format!("open-address: asked to open {address}"));
+        return 0;
+    }
     match scheme.as_str() {
         "steam" => match fake(&handlers.steam, "Steam") {
             Some(root) => steam_address(address, Some(&root)),
@@ -332,7 +362,7 @@ fn steam_client(args: &[String]) -> i32 {
     }
 }
 
-/// Writes the fake `store` (ea, ubisoft or battlenet) at `dir`, with this program as every installed game's
+/// Writes the fake `store` (ea, ubisoft, battlenet or xbox) at `dir`, with this program as every installed game's
 /// `game.exe`, and reads it back as the Dashboard does.
 fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String> {
     let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -356,6 +386,12 @@ fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String
             let spec = source_battlenet::fixture::Fixture { game_exe: Some(exe), ..standard };
             source_battlenet::fixture::write(&dir, &spec).map_err(written)?;
             (Box::new(source_battlenet::BattleNet::at(Some(dir.clone()))), names(spec.expected()))
+        }
+        "xbox" => {
+            let spec =
+                source_xbox::fixture::Fixture { game_exe: Some(exe), ..source_xbox::fixture::Fixture::standard() };
+            source_xbox::fixture::write(&dir, &spec).map_err(written)?;
+            (Box::new(source_xbox::Xbox::at(Some(dir.clone()))), names(spec.expected()))
         }
         _ => return Err(format!("no fake store {store}")),
     };
@@ -632,7 +668,7 @@ fn run(args: &[String]) -> i32 {
                 2
             }
         },
-        Some(what @ ("make-ea" | "make-ubisoft" | "make-battlenet")) => {
+        Some(what @ ("make-ea" | "make-ubisoft" | "make-battlenet" | "make-xbox")) => {
             let Some((dir, json)) = dir_and_json(&args[1..]) else {
                 note(USAGE);
                 return 2;
@@ -663,6 +699,7 @@ fn run(args: &[String]) -> i32 {
                 }
             }
         }
+        Some("serve-art") => serve_art(&args[1..]),
         Some("game") => parsed_game(&args[1..]),
         Some("steam-url") => match args.get(1) {
             Some(url) => steam_address(url, None),
@@ -734,6 +771,91 @@ fn named(name: &str) -> bool {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     std::process::exit(run(&args));
+}
+
+/// The colour of the stand-in SteamGridDB's pictures, by kind: what a test looks for on screen.
+pub const ART_COLOURS: [(library::art::Kind, [u8; 3]); 4] = [
+    (library::art::Kind::Cover, [0xF0, 0x80, 0x10]),
+    (library::art::Kind::Hero, [0x10, 0xA0, 0xA0]),
+    (library::art::Kind::Header, [0x80, 0x30, 0xD0]),
+    (library::art::Kind::Square, [0xE0, 0xD0, 0x20]),
+];
+
+/// The colour of the stores' stand-ins' pictures (their own art online), by kind: unlike SteamGridDB's, so a test
+/// can tell whose a picture on screen is.
+pub const STORE_ART_COLOURS: [(library::art::Kind, [u8; 3]); 4] = [
+    (library::art::Kind::Cover, [0xE0, 0x30, 0x30]),
+    (library::art::Kind::Hero, [0x30, 0x60, 0xE0]),
+    (library::art::Kind::Header, [0x30, 0xC0, 0x40]),
+    (library::art::Kind::Square, [0xD0, 0x20, 0x90]),
+];
+
+/// A plain PNG of a kind's colour in `colours`, of its shape.
+fn art_picture(kind: library::art::Kind, colours: &[(library::art::Kind, [u8; 3])]) -> Vec<u8> {
+    use library::art::Kind;
+    let (width, height) = match kind {
+        Kind::Cover => (60, 90),
+        Kind::Hero => (192, 62),
+        Kind::Header => (92, 43),
+        Kind::Square => (64, 64),
+    };
+    let colour = colours.iter().find(|(k, _)| *k == kind).map_or([0; 3], |(_, colour)| *colour);
+    let image = image::RgbImage::from_pixel(width, height, image::Rgb(colour));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).expect("a PNG in memory");
+    png.into_inner()
+}
+
+fn serve_art(args: &[String]) -> i32 {
+    let (mut port, mut key) = (0u16, "e2e-key".to_string());
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match (arg.as_str(), it.next()) {
+            ("--port", Some(value)) => match value.parse() {
+                Ok(value) => port = value,
+                Err(_) => {
+                    note(&format!("serve-art: bad --port {value}"));
+                    return 2;
+                }
+            },
+            ("--key", Some(value)) => key = value.clone(),
+            _ => {
+                note(USAGE);
+                return 2;
+            }
+        }
+    }
+    use library::art::fake::{FakeService, Painter, Script, StorePainter, StoreScript};
+    let picture: Painter = std::sync::Arc::new(|_, kind| art_picture(kind, &ART_COLOURS));
+    let store_picture: StorePainter = std::sync::Arc::new(|_, _, kind| art_picture(kind, &STORE_ART_COLOURS));
+    let stores = StoreScript { any_id: true, ..StoreScript::new(store_picture) };
+    let script = Script { any_name: true, stores: Some(stores), ..Script::new(&key, picture) };
+    let service = match FakeService::start(port, script) {
+        Ok(service) => service,
+        Err(e) => {
+            note(&format!("serve-art: port {port}: {e}"));
+            return 1;
+        }
+    };
+    note(&format!("serve-art: listening on {}", service.url()));
+    note(&format!("serve-art: the stores' own art online at {}", service.stores_url()));
+    let mut said = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let requests = service.requests();
+        for request in &requests[said..] {
+            let keyed = request.authorization.as_deref() == Some(format!("Bearer {key}").as_str());
+            let with = if request.authorization.is_none() {
+                "no key"
+            } else if keyed {
+                "the key"
+            } else {
+                "another key"
+            };
+            note(&format!("serve-art: {} ({with})", request.path));
+        }
+        said = requests.len();
+    }
 }
 
 #[cfg(test)]
@@ -904,10 +1026,11 @@ mod tests {
     #[test]
     fn make_store_writes_each_fake_and_reads_it_back() {
         let dir = tempfile::tempdir().unwrap();
-        for store in ["ea", "ubisoft", "battlenet"] {
+        for store in ["ea", "ubisoft", "battlenet", "xbox"] {
             let (root, json) = (dir.path().join(store), dir.path().join(format!("{store}.json")));
             let args = strings(&[&format!("make-{store}"), root.to_str().unwrap(), "--json", json.to_str().unwrap()]);
-            assert_eq!(run(&args), 0, "make-{store}");
+            let why = || std::fs::read_to_string(dir.path().join("standin-error.txt")).unwrap_or_default();
+            assert_eq!(run(&args), 0, "make-{store}: {}", why());
             let library: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(json).unwrap()).unwrap();
             let games = library["games"].as_array().unwrap();
             assert!(games.len() >= 2, "{store}: {games:?}");
@@ -953,6 +1076,7 @@ mod tests {
                 steam: Some(PathBuf::from(r"C:\Users\Test User\fakes\steam")),
                 epic: Some(PathBuf::from(r"D:\e")),
                 ubisoft: None,
+                xbox: None,
             }
         );
         assert_eq!(Handlers::parse(r#"{"steam": ""}"#).unwrap(), Handlers::default());
@@ -967,8 +1091,14 @@ mod tests {
         assert_eq!(run(&strings(&["make-epic", epic.to_str().unwrap()])), 0);
         let ubisoft = dir.path().join("ubisoft");
         assert_eq!(run(&strings(&["make-ubisoft", ubisoft.to_str().unwrap()])), 0);
-        let handlers =
-            Handlers { steam: Some(dir.path().join("steam")), epic: Some(epic.clone()), ubisoft: Some(ubisoft) };
+        let xbox = dir.path().join("xbox");
+        assert_eq!(run(&strings(&["make-xbox", xbox.to_str().unwrap()])), 0);
+        let handlers = Handlers {
+            steam: Some(dir.path().join("steam")),
+            epic: Some(epic.clone()),
+            ubisoft: Some(ubisoft),
+            xbox: Some(xbox),
+        };
 
         // Steam's install and uninstall are said and done nothing more about, as steam-url does.
         assert_eq!(open_address(&handlers, "steam://install/9100040"), 0);
@@ -981,12 +1111,19 @@ mod tests {
         // Ubisoft Connect's, as uplay-url does.
         assert_eq!(open_address(&handlers, "uplay://install/90410"), 0);
         assert_eq!(open_address(&handlers, "uplay://launch/90410"), 1);
+        // An Xbox game's, as Windows would activate it: an app user model ID the fake drive has no game of starts
+        // nothing; the Store's page and Settings are said.
+        let unknown = r"shell:AppsFolder\MadeUpStudio.Unknown_0000000000000!Game";
+        assert_eq!(open_address(&handlers, unknown), 1);
+        assert_eq!(open_address(&handlers, "ms-windows-store://pdp/?ProductId=9ZZZMADEUP01"), 0);
+        assert_eq!(open_address(&handlers, "ms-settings:appsfeatures"), 0);
 
         // No fake for the store: nothing done, and never the registry's.
         let none = Handlers::default();
         assert_eq!(open_address(&none, "steam://rungameid/9100030"), 1);
         assert_eq!(open_address(&none, wexford), 1);
         assert_eq!(open_address(&none, "uplay://install/90410"), 1);
+        assert_eq!(open_address(&none, unknown), 1);
         // A scheme with no stand-in, or no address at all.
         assert_eq!(open_address(&handlers, "origin2://game/launch?offerIds=1"), 2);
         assert_eq!(open_address(&handlers, "C:\\Games\\game.exe"), 2);

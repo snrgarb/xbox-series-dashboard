@@ -1,5 +1,5 @@
-//! The new launcher's files, under `%LOCALAPPDATA%\com.epicgames.eglv2` (docs/research/stores.md: reported by one
-//! project only, and not yet seen on a real machine):
+//! The eglv2 launcher's files, under `%LOCALAPPDATA%\com.epicgames.eglv2` (docs/research/stores.md: reported by one
+//! project only; the one real machine looked at, launcher build EpicInstaller-20.3.3, had no such folder):
 //! - `cache\prod\account\<account>\library-cache.json`: the account's library, `{"items": [{"appId": {"namespaceId",
 //!   "itemId", "appName"}, "title", "owned"}]}`. The most recently written account's is read.
 //! - `cache\prod\catalog-cache.json`: `{"items": {"<itemId>": {"item": <a catalogue item>}}}`, which tells a game
@@ -122,13 +122,17 @@ fn library_items(
             let title = entry.get("title").and_then(Value::as_str).filter(|title| !title.is_empty());
             let title = title.map(str::to_string).or_else(|| Some(known?.as_ref()?.title.clone()))?;
             let install = installs.get(item_id).map(|install| (install.dir.clone(), install.exe.clone()));
+            let art = known.and_then(|item| Some(item.as_ref()?.art.clone())).unwrap_or_default();
+            let developer = known.and_then(|item| Some(item.as_ref()?.developer.clone())).unwrap_or_default();
             Some(Item {
                 app_name: app.to_string(),
                 namespace: namespace.to_string(),
                 item_id: item_id.to_string(),
                 title,
+                developer,
                 install,
                 size: 0,
+                art,
             })
         })
         .collect()

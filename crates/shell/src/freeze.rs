@@ -107,6 +107,26 @@ fn prefix(dir: &str) -> String {
     format!("{}\\", normal(dir).trim_end_matches('\\'))
 }
 
+/// The prefixes a program in the folder may have: the folder as it is given and as it is past junctions and `subst`
+/// drives (`real`), since a program's path may be either. An Xbox game is registered under `WindowsApps`, a link,
+/// while Windows says its program runs from `<drive>\XboxGames\<game>\Content` (seen 2026-11-16). Never a root
+/// that a junction comes to. Lower case, backslashes, a trailing one.
+pub(crate) fn prefixes(dir: &str, real: Option<String>) -> Vec<String> {
+    let mut prefixes = vec![prefix(dir)];
+    if let Some(real) = real.filter(|real| !is_root(real)).map(|real| prefix(&real)) {
+        if !prefixes.contains(&real) {
+            prefixes.push(real);
+        }
+    }
+    prefixes
+}
+
+/// The same for a folder on this machine.
+#[cfg(windows)]
+pub(crate) fn prefixes_here(dir: &str) -> Vec<String> {
+    prefixes(dir, std::fs::canonicalize(dir).ok().map(|real| real.to_string_lossy().into_owned()))
+}
+
 /// Whether a folder is a drive's root or a share's, under which every program on it would be.
 fn is_root(dir: &str) -> bool {
     let dir = normal(dir);
@@ -231,14 +251,7 @@ impl Freezer {
     /// The processes to freeze: those of programs under the folder and the window's owner, without this process,
     /// Windows' own and any whose program can't be told.
     fn candidates(&self, dir: &str, window_owner: Option<u32>) -> Vec<Process> {
-        // The folder as it is given and as it is past junctions and `subst` drives: a program's path may be either.
-        // Never a root that a junction comes to.
-        let mut prefixes = vec![prefix(dir)];
-        if let Some(real) = self.system.final_path(dir).filter(|real| !is_root(real)).map(|real| prefix(&real)) {
-            if !prefixes.contains(&real) {
-                prefixes.push(real);
-            }
-        }
+        let prefixes = prefixes(dir, self.system.final_path(dir));
         let windows = prefix(&self.system.windows_dir());
         let own = self.system.own_id();
         let mut found = Vec::new();

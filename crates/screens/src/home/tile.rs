@@ -8,12 +8,36 @@ use crate::theme::{self, BODY, ROW_SCALE as S};
 
 pub const RADIUS: f32 = 6.0;
 
-/// A game's cover for a tile: its portrait cover, else its header, else its wide art.
+/// A game's cover for a portrait tile: its portrait cover, else its square art (nearer the shape than the rest),
+/// else its header, else its wide art.
 pub fn cover_art(game: &Game, px: f32) -> Option<ArtKey> {
-    let path = game.cover.as_ref().or(game.header.as_ref()).or(game.hero.as_ref())?;
-    // Decoded 300 wide at 1080p, as the theme decodes it, and in proportion on a larger screen.
+    let path = game.cover.as_ref().or(game.square.as_ref()).or(game.header.as_ref()).or(game.hero.as_ref())?;
+    Some(thumb(path, px))
+}
+
+/// A game's face for a square tile (Home's Recent row, docs/spec/home.md 3.3): its square art, else what
+/// `cover_art` gives, cropped as before.
+pub fn square_art(game: &Game, px: f32) -> Option<ArtKey> {
+    match &game.square {
+        Some(path) => Some(thumb(path, px)),
+        None => cover_art(game, px),
+    }
+}
+
+/// A game's face for a tile of this shape: `square_art` for one as wide as it is tall (within a tenth), else
+/// `cover_art`.
+pub fn art_for(game: &Game, rect: Rect, px: f32) -> Option<ArtKey> {
+    if (rect.w - rect.h).abs() <= 0.1 * rect.w.max(rect.h) {
+        square_art(game, px)
+    } else {
+        cover_art(game, px)
+    }
+}
+
+/// A picture decoded 300 wide at 1080p, as the theme decodes a cover, and in proportion on a larger screen.
+fn thumb(path: &std::path::Path, px: f32) -> ArtKey {
     let width = if px > 1.25 { 600 } else { 300 };
-    Some(ArtKey { path: path.clone(), kind: Kind::Thumb(width) })
+    ArtKey { path: path.to_path_buf(), kind: Kind::Thumb(width) }
 }
 
 /// Where a game comes from: the store whose mark its tile carries. A source the library reads (docs/sources.md)
@@ -26,6 +50,7 @@ pub enum Source {
     Ea,
     Ubisoft,
     BattleNet,
+    Xbox,
 }
 
 impl Source {
@@ -38,6 +63,7 @@ impl Source {
             Source::Ea => "EA app",
             Source::Ubisoft => "Ubisoft Connect",
             Source::BattleNet => "Battle.net",
+            Source::Xbox => "Xbox",
         }
     }
 }
@@ -52,6 +78,7 @@ pub fn source(game: &Game) -> Option<Source> {
         "ea" => Some(Source::Ea),
         "ubisoft" => Some(Source::Ubisoft),
         "battlenet" => Some(Source::BattleNet),
+        "xbox" => Some(Source::Xbox),
         _ => None,
     }
 }
@@ -67,6 +94,7 @@ pub fn source_mark(ui: &mut Ui, mark: Rect, source: Source) {
         Source::Ea => ea_mark(ui, mark),
         Source::Ubisoft => ubisoft_mark(ui, mark),
         Source::BattleNet => battlenet_mark(ui, mark),
+        Source::Xbox => xbox_mark(ui, mark),
     }
 }
 
@@ -111,6 +139,15 @@ fn battlenet_mark(ui: &mut Ui, mark: Rect) {
     ui.fill(bar, Color::WHITE, mark.h * 0.25);
 }
 
+/// Xbox's stand-in: a white plus, two bars a third as thick as the mark is wide, crossed.
+fn xbox_mark(ui: &mut Ui, mark: Rect) {
+    let thick = mark.w * 0.34;
+    let across = Rect::new(mark.x, mark.y + (mark.h - thick) / 2.0, mark.w, thick);
+    let down = Rect::new(mark.x + (mark.w - thick) / 2.0, mark.y, thick, mark.h);
+    ui.fill(across, Color::WHITE, thick * 0.2);
+    ui.fill(down, Color::WHITE, thick * 0.2);
+}
+
 /// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow.
 pub fn source_badge(ui: &mut Ui, tile: Rect, source: Source) {
     source_badge_at(ui, tile, source, S);
@@ -126,17 +163,19 @@ pub fn source_badge_at(ui: &mut Ui, tile: Rect, source: Source, scale: f32) {
     source_mark(ui, mark, source);
 }
 
-/// A game's face: its cover filling the tile from the top, or for want of one its name on the dark tile, set
-/// `name_width` wide so that it doesn't reflow as a tile grows; and its source's badge, which a focused tile
-/// hides for its title.
+/// A game's face: its square art on a square tile (a Recent tile), else its cover filling the tile from the top, or
+/// for want of either its name on the dark tile, set `name_width` wide so that it doesn't reflow as a tile grows;
+/// and its source's badge, which a focused tile hides for its title.
 pub fn game(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: bool) {
     let radius = RADIUS * S;
     ui.fill(rect, theme::TILE, radius);
-    let has_cover = cover_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, radius));
-    if !has_cover {
+    // A cover downloaded while the Dashboard runs fades in over the name.
+    let key = art_for(game, rect, ui.px());
+    let cover = ui.art_arriving((&game.source, &game.source_id, &game.name), rect, key.as_ref(), Crop::Top, radius);
+    if cover < 1.0 {
         let width = name_width - 20.0 * S;
         let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * S, width, rect.h - 20.0 * S);
-        ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0);
+        ui.with_alpha(1.0 - cover, |ui| ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0));
     }
     if let Some(source) = source(game).filter(|_| !focused) {
         source_badge(ui, rect, source);
@@ -144,7 +183,8 @@ pub fn game(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: bool
 }
 
 /// The face of a tile that opens a list of games: up to four of their covers, two by two, each filled from the
-/// top; a game with no cover leaves its place dark. With no games at all, `glyph`.
+/// top (a square cell, the Play history tile's, has a game's square art); a game with no cover leaves its place
+/// dark. With no games at all, `glyph`.
 pub fn collage<'a>(ui: &mut Ui, rect: Rect, games: impl Iterator<Item = &'a Game>, glyph: char) {
     ui.fill(rect, theme::TILE, RADIUS * S);
     let (inset, margin) = (4.0 * S, 3.0 * S);
@@ -153,8 +193,9 @@ pub fn collage<'a>(ui: &mut Ui, rect: Rect, games: impl Iterator<Item = &'a Game
     for (i, game) in games.take(4).enumerate() {
         any = true;
         let cell = Rect::new(rect.x + inset + (i % 2) as f32 * w, rect.y + inset + (i / 2) as f32 * h, w, h);
-        if let Some(key) = cover_art(game, ui.px()) {
-            ui.art(cell.grow(-margin), &key, Crop::Top, 1.0, 0.0);
+        let cell = cell.grow(-margin);
+        if let Some(key) = art_for(game, cell, ui.px()) {
+            ui.art(cell, &key, Crop::Top, 1.0, 0.0);
         }
     }
     if !any {

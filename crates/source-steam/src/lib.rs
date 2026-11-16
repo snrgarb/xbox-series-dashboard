@@ -187,6 +187,10 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),
                     hero: find("library_hero", None, &["library_hero.jpg"]),
                     header: find("library_header", Some("header_image"), &["header.jpg", "library_header.jpg"]),
+                    // Steam keeps nothing square but a 32 px icon: the art lookup finds one (docs/sources.md, "Art").
+                    square: None,
+                    // Its appid is all Steam's own art online needs.
+                    online: Default::default(),
                     favourite: marked(favourites, appid),
                     hidden: marked(hidden, appid),
                     released: released(common),

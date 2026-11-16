@@ -96,6 +96,15 @@ the TV PC, not for here.
   `toasts: posted "<text>"`, then `toasts: shown "<text>" (Notification), <n> waiting`, `toasts: going` and
   `toasts: gone` as the Toast comes and goes, each with the time since it started and each once the frame that shows
   it has been presented.
+- **`standin serve-art --port <n> --key <key>`** is a stand-in SteamGridDB on `127.0.0.1:<n>` until it is killed, for
+  `dashboard --art-service http://127.0.0.1:<n>`: it takes only `<key>`, finds a game of any name, and gives each one
+  a plain orange cover (`F08010`), teal hero, violet header and yellow square (`E0D020`). Under `/stores` it is the
+  stores' own art online too (Steam's, the Microsoft Store's and GOG's), for `dashboard --store-art-service
+  http://127.0.0.1:<n>/stores`: a game of any id has a red cover, blue hero, green header and magenta square
+  (`D02090`). It says `serve-art: listening on <url>` and `serve-art: the stores' own art online at <url>/stores`,
+  then `serve-art: <path> (no key|the key|another key)` a request in `standin.log`. No test asks a real service:
+  `Start-Dashboard` gives every run `--store-art-service http://127.0.0.1:9`, which answers nothing, unless the test
+  gives its own.
 
 Every start shows the greeting's Toast, "Hi <user>!", for five seconds, low in the middle of the screen. A test that
 looks at Home or taps the Guide button waits it out first: `Wait-Greeting`.
@@ -118,6 +127,11 @@ Connect; the fake Battle.net's `Battle.net.exe` is a copy of `standin.exe` that 
 Each says what it started in `standin.log`. In safe mode the fakes are in the test's folder and `uplay://` is not
 registered: `standin open-address` takes it, as it does Steam's and Epic's.
 
+`Initialize-FakeXbox` writes a fake drive of Xbox games at `C:\e2e\xbox` with `standin make-xbox <root>`: a
+`.GamingRoot` naming `XboxGames`, and under it made-up packages (three games, an app with no `MicrosoftGame.config`, a
+game whose manifest is broken), each game's `game.exe` the stand-in game and its logos plain-colour pictures. The
+Dashboard reads it when started with `--xbox <root>`. Nothing is registered by it.
+
 ## Writing a test
 
 A test is a folder under `payloads/` with a `run.ps1` that imports `lib\E2E.psm1`, collects what is wrong in a list,
@@ -135,7 +149,7 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Initialize-FakeSteam`, `Initialize-FakeEpic`, `Initialize-FakeGog`, `Get-StandInGame`, `Stop-StandInGame` | the fakes and their games (only those started from the test's own folders) |
 | `Get-FakeRoot <store>`, `Get-TestFolder <name>`, `Get-DashboardDataDir` | where a fake, a folder of the test's own, and the Dashboard's data folder are, on the VM or in safe mode |
 | `Test-SafeMode`, `Assert-VmOnly <why>`, `Set-RegistryValue`, `Get-OwnProcess <name>` | safe mode (below); the one registry write, which throws in it; processes started from the test's folders |
-| `Initialize-FakeEa`, `Initialize-FakeUbisoft`, `Initialize-FakeBattleNet` | a fake EA app, Ubisoft Connect or Battle.net |
+| `Initialize-FakeEa`, `Initialize-FakeUbisoft`, `Initialize-FakeBattleNet`, `Initialize-FakeXbox` | a fake EA app, Ubisoft Connect, Battle.net or drive of Xbox games |
 | `Watch-Pulse <seconds>`, `Test-PulseColour`, `Test-Suspended <pid>` | the colours the stand-in game's pulse showed (two when it runs, one when it is frozen); whether a pixel is the pulse, dimmed or not; whether every thread of a process is suspended |
 
 The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again, and the Dashboard
@@ -150,10 +164,17 @@ the grid's edges and its scroll, Play history, Manage, and B and Y), `search` (Y
 keyboard with the pad, the symbols, the keyboard put away, A on a result opening its hub, and B back step by step),
 `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 the grid's edges and its scroll, Play history, Manage, and B and Y), `groups` (Settings' Groups: a Group hidden, two swapped and one added by
-name, Home's Groups seen to follow each, and all put back), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
+name, Home's Groups seen to follow each, and all put back), `apps` (Settings' Games & apps: a copy of the stand-in
+game added as a game and Notepad as an App by typing their paths, the App started from My games & apps' Apps, the game
+launched from its hub and first in the Recent row after, and both removed), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
 the Guide, the queue, the Guide button during a Toast), `stores-ea-ubisoft-battlenet` (a fake of each beside Steam's:
-each read, and one game of each found through Search and launched from its hub through its store), `queue` (Install
+each read, and one game of each found through Search and launched from its hub through its store), `stores-xbox`
+(the fake drive's Tidewater Trials registered for the user as a package of loose files, with developer mode on for the
+run; the machine read with no `--xbox`; the game found through Search, launched from its hub by
+`shell:AppsFolder\<AUMID>`, run from the package's folder, and Home back; the package removed after. Where it cannot
+be registered, or in safe mode, it says why and reads the fake drive with `--xbox` instead, and the launch is left for
+the TV PC), `queue` (Install
 from the hub and the Tile menu, the fake install moved along by `standin steam-install`: Queued and Installing...
 tiles, the hub's Queue action, Downloads' count, the ways into Manage Queue, an install started in the client, one
 dropped, one done, and Uninstall seen through), and `overlay` and `video` for the spikes.

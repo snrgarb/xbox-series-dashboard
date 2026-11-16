@@ -8,13 +8,14 @@
 //! | Item | Pane |
 //! |---|---|
 //! | Games | `games` (the grid is `grid`, its tile `tile`: both are Full library's too) |
-//! | Apps | [`Note`], until M4 |
+//! | Apps | `apps` (its tile is `crate::app_tile`) |
 //! | Play history | `history` |
 //! | Full library | `full_library`: the tabs, the Sort and Filter row, and the grid under them |
 //! | Manage | `manage` |
 //!
 //! **Hooks for other tickets**, each one function that does nothing yet: [`manage_queue`],
 //! `manage::open_manage_queue` and `nav::foot` (#79), [`progress`] (the library updating).
+mod apps;
 mod full_library;
 mod games;
 mod grid;
@@ -26,10 +27,12 @@ mod tile;
 
 use std::time::Instant;
 
-use model::{Game, Library};
+use model::Game;
 use ui::{Button, Ease, Press, Ui};
 
+use self::apps::Apps;
 use self::full_library::FullLibrary;
+pub(crate) use self::games::sort_key;
 use self::games::Games;
 use self::history::History;
 use self::look::{HEADER, PAGE, TEXT_DIM};
@@ -197,28 +200,6 @@ trait Pane {
     fn draw(&mut self, ui: &mut Ui, around: Around, look: Look);
 }
 
-/// A pane that is a line of dim text at the content row's top, and takes no focus: Apps until M4.
-struct Note {
-    text: &'static str,
-    count: fn(&Library) -> Option<usize>,
-}
-
-impl Pane for Note {
-    fn nav_count(&self, around: Around) -> Option<usize> {
-        (self.count)(around.library)
-    }
-
-    fn draw(&mut self, ui: &mut Ui, _around: Around, look: Look) {
-        ui.with_alpha(look.fade, |ui| ui.label(548.0, 190.0, self.text, &TEXT_DIM));
-    }
-}
-
-/// Apps until M4: the item is in the nav, counts none, and its pane says where Apps will come from. The Bundle's
-/// line names Playnite's software tools, which are not this Dashboard's.
-fn apps() -> Note {
-    Note { text: "Apps you add show up here.", count: |_| Some(0) }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
     /// On a nav item: the one showing, or one on its way to showing.
@@ -239,7 +220,7 @@ pub struct MyGames {
     /// far below its rest it set out (above, if negative).
     flight: Option<(u32, f32)>,
     games: Games,
-    apps: Note,
+    apps: Apps,
     history: History,
     full_library: FullLibrary,
     manage: Manage,
@@ -271,7 +252,7 @@ impl MyGames {
             settle: Settle::default(),
             flight: None,
             games: Games::new(),
-            apps: apps(),
+            apps: Apps::default(),
             history: History::default(),
             full_library: FullLibrary::open(filter),
             manage: Manage,

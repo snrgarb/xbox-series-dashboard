@@ -49,7 +49,7 @@ fn art_dir() -> &'static Path {
                     };
                     image::Rgb([level(hue(0)), level(hue(1)), level(hue(2))])
                 });
-                image.save(dir.join(format!("{game}-{kind}.png"))).unwrap();
+                shots::save_shared(&image, &dir.join(format!("{game}-{kind}.png")));
             }
         }
         dir
@@ -266,6 +266,43 @@ fn home_with_art() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right]);
     stage.check("home-art");
+}
+
+/// Square art (#110): a square picture for two games, a ring inside its edge on a ground of its own, so that a crop
+/// shows. Written once, shared by the tests that use it.
+fn square_art(game: usize) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("art").join(format!("{game}-square.png"));
+    static WRITTEN: OnceLock<()> = OnceLock::new();
+    WRITTEN.get_or_init(|| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        for game in 0..2u32 {
+            let side = 400;
+            let ground = [[0x20, 0x50, 0xC0], [0xC0, 0x40, 0x80]][game as usize];
+            let image = image::RgbImage::from_fn(side, side, |x, y| {
+                let (dx, dy) = (x as f32 - 199.5, y as f32 - 199.5);
+                let r = (dx * dx + dy * dy).sqrt();
+                if (150.0..180.0).contains(&r) {
+                    image::Rgb([0xF0, 0xF0, 0xF0])
+                } else {
+                    image::Rgb(ground)
+                }
+            });
+            let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("art");
+            shots::save_shared(&image, &dir.join(format!("{game}-square.png")));
+        }
+    });
+    path
+}
+
+/// The Recent row's tiles are square: the first two games have square art, shown whole, ring and all, the first
+/// grown with focus; the third has a cover alone, cropped from its top as before; the fifth a header alone.
+#[test]
+fn home_square_art_on_the_recent_row() {
+    let mut library = library_with_art();
+    for (i, game) in library.games.iter_mut().take(2).enumerate() {
+        game.square = Some(square_art(i));
+    }
+    Stage::on_row(library, HD).check("home-square-art");
 }
 
 #[test]

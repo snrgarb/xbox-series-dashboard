@@ -16,8 +16,10 @@
 //! version `n` to `n + 1`, and one is never edited once released. What is still to come has its place:
 //! - More sources: a game is keyed by `(source, source_id)`, both text, so each store keeps its own ids, and a game
 //!   owned in two stores is two games.
-//! - Games added by hand (#12): a source of their own, `manual`, with a table beside `games` for the program, its
-//!   arguments and working folder.
+//! - Games added by hand and Apps (`by_hand`): the games a source of their own, `manual`, each a row of `games`
+//!   keyed by its program's path; the Apps a table of their own, `apps`, as they are not games.
+pub mod art;
+pub mod by_hand;
 pub mod filters;
 pub mod history;
 pub mod queue;
@@ -67,7 +69,7 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE TABLE art (
         game INTEGER NOT NULL REFERENCES games (id) ON DELETE CASCADE,
-        -- cover, background, logo, icon or header.
+        -- cover, background, logo, icon, header or square; online:<part>, what the client says of its art online.
         kind TEXT NOT NULL,
         path TEXT NOT NULL,
         PRIMARY KEY (game, kind)
@@ -97,7 +99,9 @@ const MIGRATIONS: &[&str] = &[
     -- 0 to 100, or none.
     ALTER TABLE games ADD COLUMN critic_score INTEGER;
     ALTER TABLE games ADD COLUMN community_score INTEGER;",
-    // 4: the Queue, and the games it held that finished installing.
+    // 4: the Apps (docs/spec/apps.md).
+    by_hand::MIGRATION,
+    // 5: the Queue, and the games it held that finished installing.
     queue::MIGRATION,
 ];
 
@@ -113,6 +117,9 @@ pub struct Synced {
 
 pub struct Database {
     conn: Connection,
+    /// Our own art cache, which a snapshot fills in from what a source gave no picture for. A database in a data
+    /// folder has that folder's; one in memory has none unless it is given one.
+    art: Option<art::ArtDir>,
 }
 
 /// Where the database lives when nothing says otherwise: `%LOCALAPPDATA%\XboxSeriesDashboard` on Windows;
@@ -139,7 +146,19 @@ impl Database {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
         }
-        Self::set_up(Connection::open(path)?)
+        let mut database = Self::set_up(Connection::open(path)?)?;
+        database.art = path.parent().map(art::ArtDir::under);
+        Ok(database)
+    }
+
+    /// The art cache a snapshot fills missing pictures from; none for no cache.
+    pub fn set_art_dir(&mut self, art: Option<art::ArtDir>) {
+        self.art = art;
+    }
+
+    /// The art cache this database's snapshots fill missing pictures from.
+    pub fn art_dir(&self) -> Option<&art::ArtDir> {
+        self.art.as_ref()
     }
 
     /// A database that lives in memory and goes with the value: for tests.
@@ -161,7 +180,7 @@ impl Database {
             tx.pragma_update(None, "user_version", done as i64 + 1)?;
             tx.commit()?;
         }
-        Ok(Self { conn })
+        Ok(Self { conn, art: None })
     }
 
     /// The schema's version.
@@ -282,11 +301,19 @@ impl Database {
         };
         for game in &found.games {
             let source_id = game.source_id.clone();
-            let mut art: Vec<(String, String)> =
-                [("cover", &game.cover), ("background", &game.hero), ("header", &game.header)]
-                    .into_iter()
-                    .filter_map(|(kind, path)| Some((kind.to_string(), text(path.as_deref()?))))
-                    .collect();
+            let pictures = [
+                ("cover", &game.cover),
+                ("background", &game.hero),
+                ("header", &game.header),
+                ("square", &game.square),
+            ];
+            let online = game.online.parts().into_iter();
+            let mut art: Vec<(String, String)> = pictures
+                .into_iter()
+                .filter_map(|(kind, path)| Some((kind.to_string(), text(path.as_deref()?))))
+                // What the client says of the game's art online, as `online:<part>`.
+                .chain(online.filter_map(|(part, value)| Some((format!("online:{part}"), value.clone()?))))
+                .collect();
             art.sort();
             let mut state = State {
                 name: game.name.clone(),
@@ -418,6 +445,8 @@ impl Database {
             history: history::rows(&self.conn, now)?,
             collections: None,
             queue: self.queue()?,
+            apps: self.apps()?,
+            store_apps: None,
         })
     }
 
@@ -495,6 +524,8 @@ impl Database {
                 cover: None,
                 hero: None,
                 header: None,
+                square: None,
+                online: Default::default(),
             });
         }
         // With no limit here: art for games past it is read and dropped.
@@ -509,8 +540,33 @@ impl Database {
                 "cover" => game.cover = Some(path.into()),
                 "background" => game.hero = Some(path.into()),
                 "header" => game.header = Some(path.into()),
-                // A logo or an icon: no screen draws one yet.
-                _ => {}
+                "square" => game.square = Some(path.into()),
+                other => {
+                    // What the client says of its art online; a logo or an icon, which no screen draws yet, is not.
+                    if let Some(part) = other.strip_prefix("online:").and_then(|part| game.online.part_mut(part)) {
+                        *part = Some(path);
+                    }
+                }
+            }
+        }
+        // What the source gave no picture for, from our own cache (docs/sources.md, "Art"): the source's own wins.
+        if let Some(cached) = self.art.as_ref().map(art::ArtDir::index).filter(|index| !index.is_empty()) {
+            for game in &mut games {
+                let Some([cover, hero, header, square]) = cached.get(&(game.source.clone(), game.source_id.clone()))
+                else {
+                    continue;
+                };
+                let pictures = [
+                    (&mut game.cover, cover),
+                    (&mut game.hero, hero),
+                    (&mut game.header, header),
+                    (&mut game.square, square),
+                ];
+                for (mine, ours) in pictures {
+                    if mine.is_none() {
+                        mine.clone_from(ours);
+                    }
+                }
             }
         }
         Ok(games)
@@ -575,6 +631,12 @@ impl Database {
 
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0)).optional()?)
+    }
+
+    /// Forgets a setting: it is its default again.
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {

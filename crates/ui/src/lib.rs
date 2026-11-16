@@ -372,6 +372,23 @@ impl<'a> Ui<'a> {
         drawn
     }
 
+    /// A piece of art, all of it, as large as fits in `rect` and in its middle, as WPF's `Stretch="Uniform"` draws
+    /// an image; `light` of its own colour is left, as `art_darkened` leaves it (0: its shape in black, for a shadow).
+    /// Where it was drawn, once it is decoded; None until then, or if it can't be.
+    pub fn art_fitted(&mut self, rect: Rect, key: &ArtKey, alpha: f32, light: f32) -> Option<Rect> {
+        let Art::Ready { tex, width, height } = self.art.get(key) else { return None };
+        let (iw, ih) = (width.max(1) as f32, height.max(1) as f32);
+        let scale = (rect.w / iw).min(rect.h / ih);
+        let (w, h) = (iw * scale, ih * scale);
+        let fitted = Rect::new(rect.x + (rect.w - w) / 2.0, rect.y + (rect.h - h) / 2.0, w, h);
+        let mut quad = Quad::image(fitted, tex, [0.0, 0.0, 1.0, 1.0], alpha * self.alpha, 0.0);
+        for colour in [&mut quad.c0, &mut quad.c1] {
+            colour[..3].iter_mut().for_each(|channel| *channel *= light);
+        }
+        self.push(quad);
+        Some(fitted)
+    }
+
     /// A piece of art, all of it, stretched over `rect`, which is turned `turn` radians clockwise about its
     /// middle. False until it is decoded.
     pub fn art_turned(&mut self, rect: Rect, key: &ArtKey, alpha: f32, turn: f32) -> bool {
@@ -382,6 +399,20 @@ impl<'a> Ui<'a> {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// As `art`, for what may have no picture at first and be given one while it is on screen (art downloaded while
+    /// the Dashboard runs, docs/sources.md "Art"): `key` is None while there is none. Under `id`, a picture that
+    /// comes after the first frame fades in over [`ART_FADE_SECONDS`]; one there from the first is drawn at once,
+    /// as soon as it is decoded. Gives how much of it shows, 0 while there is none, so that what stands in for it (a
+    /// tile's name) can be drawn under it until it is whole.
+    pub fn art_arriving(&mut self, id: impl Hash, rect: Rect, key: Option<&ArtKey>, crop: Crop, radius: f32) -> f32 {
+        let target = if key.is_some() { 1.0 } else { 0.0 };
+        let shown = self.tween(("art arriving", id), target, ART_FADE_SECONDS, Ease::Linear);
+        match key {
+            Some(key) if shown > 0.0 && self.art(rect, key, crop, shown, radius) => shown,
+            _ => 0.0,
         }
     }
 
@@ -553,3 +584,6 @@ impl<'a> Ui<'a> {
 
 /// A solid white texture's id, for a quad with no image.
 pub const NO_TEXTURE: TexId = WHITE;
+
+/// How long a picture that comes late takes to fade in (`Ui::art_arriving`).
+pub const ART_FADE_SECONDS: f32 = 0.25;
