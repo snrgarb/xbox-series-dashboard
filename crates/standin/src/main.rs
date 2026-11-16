@@ -41,6 +41,15 @@
 //!       The stand-in Steam, registered as the `steam://` handler: starts the installed game's `game.exe`, and keeps
 //!       `HKCU\Software\Valve\Steam\Apps\<appid>\Running` at 1 while it runs, as Steam does. Exits 1, having done
 //!       nothing, when the game isn't installed.
+//!   standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
+//!                 [--no-previous] [--seconds <n>]
+//!       A media session of its own, as a music player has, which Windows lists among every app's under this
+//!       program's name (`standin.exe`) and the Dashboard's Now Playing card shows as "Standin" (`media.rs`): a
+//!       track <t> ("Stand-in Song") by <a> ("The Stand-ins") with <file>'s picture (a green square drawn without
+//!       one), <s> seconds into a track <s> long (65 of 200; a length of 0 is none), playing or --paused. Each button
+//!       Windows passes on is a line in the log (`media: pressed Play|Pause|Next|Previous`) and is answered as a
+//!       player would; Next puts " (2)" and so on after the title. With --no-previous, Previous is off. It ends after
+//!       <seconds> (600). Windows only.
 //!   standin toast <text>
 //!       Posts a notification to the running Dashboard, which shows its Toast (`model::post`). Exits 1 when no
 //!       Dashboard took it: none is running, or it has no Toast strip yet.
@@ -89,6 +98,7 @@
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod media;
 #[cfg(windows)]
 mod win;
 
@@ -109,6 +119,8 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>]
        standin toast <text>
+       standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
+                     [--no-previous] [--seconds <n>]
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
        steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>";
 
@@ -718,6 +730,13 @@ fn run(args: &[String]) -> i32 {
             },
             _ => {
                 note(USAGE);
+                2
+            }
+        },
+        Some("media") => match media::MediaArgs::parse(&args[1..]) {
+            Ok(media) => media::run(&media),
+            Err(e) => {
+                note(&format!("media: {e}\n{USAGE}"));
                 2
             }
         },

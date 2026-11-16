@@ -463,6 +463,16 @@ impl Store {
         }
     }
 
+    /// Saves a setting kept as text, as Settings > Guide's Now Playing source. With no database it lasts as long as
+    /// the Dashboard does.
+    pub fn set_text(&self, key: &str, value: &str) {
+        let Some(database) = &self.database else { return };
+        match database.set_setting(key, value) {
+            Ok(()) => eprintln!("settings: {key} = {value}"),
+            Err(e) => eprintln!("settings: {key} not saved: {e:#}"),
+        }
+    }
+
     /// Our art cache, where there is a database in a data folder to keep it beside.
     fn art_dir(&self) -> Option<ArtDir> {
         self.database.as_ref()?.art_dir().cloned()

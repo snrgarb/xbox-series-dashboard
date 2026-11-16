@@ -1,6 +1,7 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod audio;
 pub mod by_hand;
+pub mod media;
 pub mod post;
 pub mod profile;
 pub mod queue;
@@ -12,6 +13,7 @@ use std::path::PathBuf;
 
 pub use audio::{Audio, AudioDevice, Flow};
 pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
+pub use media::{Media, MediaCommand, MediaSession};
 pub use profile::{Picture, Profile, ProfileChange, Profiles};
 pub use queue::{Install, InstallState, Installed, Queue, Queued};
 pub use sound::Sound;

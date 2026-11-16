@@ -16,11 +16,11 @@ mod panel;
 mod status;
 mod utilities;
 
-use model::{Audio, Flow, Library, PowerCommand};
+use model::{Audio, Flow, Library, MediaCommand, PowerCommand};
 use ui::{Button, Color, Ease, Gradient, Press, Rect, TextStyle, Ui};
 
 pub use self::entries::{Entry, Kind};
-pub use self::flyout::{AudioItem, Flyout, FlyoutFocus};
+pub use self::flyout::{AudioItem, Flyout, FlyoutFocus, MediaControl};
 pub(crate) use self::status::pad_battery;
 pub use self::status::{PcBattery, Status};
 pub use self::utilities::Utility;
@@ -94,6 +94,8 @@ pub enum GuideAction {
     Mute(bool),
     /// A device chosen in one of Audio's dropdowns, by its place among its flow's: Windows' default from now.
     Device(Flow, usize),
+    /// One of the Now Playing card's controls: the app playing is asked, and nothing shows changed until it answers.
+    Media(MediaCommand),
     /// A Power option was chosen: close, then carry it out.
     Power(PowerChoice),
 }
@@ -159,6 +161,8 @@ pub struct Around<'a> {
     pub audio: &'a Audio,
     /// What has been posted, oldest first, which the Notifications Flyout lists.
     pub notifications: &'a [Notification],
+    /// The media the Audio Flyout's Now Playing card shows, if any plays.
+    pub now_playing: Option<crate::now_playing::Card<'a>>,
 }
 
 /// What the Guide shows that is not its own: the Profile signed in, the clock, the Status area's values.

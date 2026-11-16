@@ -273,6 +273,7 @@ mod tests {
                 discord: false,
                 audio: &model::Audio::default(),
                 notifications: &[],
+                now_playing: None,
             },
         );
         let placed = layout(Tab::Landing, &entries);
@@ -298,6 +299,7 @@ mod tests {
                 discord: false,
                 audio: &model::Audio::default(),
                 notifications: &[],
+                now_playing: None,
             },
         );
         let placed = layout(Tab::ProfileAndSystem, &entries);

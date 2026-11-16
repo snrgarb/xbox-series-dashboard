@@ -96,6 +96,14 @@ the TV PC, not for here.
   `toasts: posted "<text>"`, then `toasts: shown "<text>" (Notification), <n> waiting`, `toasts: going` and
   `toasts: gone` as the Toast comes and goes, each with the time since it started and each once the frame that shows
   it has been presented.
+- **`standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
+  [--no-previous] [--seconds <n>]`** is a media session of its own, as a music player's: a hidden window's System
+  Media Transport Controls, which Windows lists among every app's under the program's name (`standin.exe`, which the
+  Dashboard calls "Standin"), playing <t> by <a> with a picture (a green square drawn when none is given), 65 s into a
+  track 200 s long unless told otherwise. It says `media: session up for <n> s`, then `media: pressed Play|Pause|Next|Previous`
+  for each button Windows passes on, in `standin.log`, and answers as a player would (Next puts " (2)" after the
+  title). The `now-playing` test chooses it as Settings' Now Playing source before it presses anything, so that on the
+  TV PC nothing it presses reaches the user's own music; it ends only the stand-in it started.
 - **`standin serve-art --port <n> --key <key>`** is a stand-in SteamGridDB on `127.0.0.1:<n>` until it is killed, for
   `dashboard --art-service http://127.0.0.1:<n>`: it takes only `<key>`, finds a game of any name, and gives each one
   a plain orange cover (`F08010`), teal hero, violet header and yellow square (`E0D020`). Under `/stores` it is the
@@ -170,7 +178,9 @@ plain picture, the Windows user's removed so the new one signs in, Home's top ba
 `profile:` line, and the Dashboard started again with it still signed in), `apps` (Settings' Games & apps: a copy of the stand-in
 game added as a game and Notepad as an App by typing their paths, the App started from My games & apps' Apps, the game
 launched from its hub and first in the Recent row after, and both removed), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
-output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
+output device it moves the real volume and mute and puts them back), `now-playing` (`standin media`'s session chosen
+as Settings' Now Playing source, the Audio Flyout's card showing it, and Play/Pause and Next pressed on the card, each
+seen to reach the stand-in and the card to follow its session), `toast` (the greeting, Toasts over the game and
 the Guide, the queue, the Guide button during a Toast), `stores-ea-ubisoft-battlenet` (a fake of each beside Steam's:
 each read, and one game of each found through Search and launched from its hub through its store), `stores-xbox`
 (the fake drive's Tidewater Trials registered for the user as a package of loose files, with developer mode on for the
@@ -242,6 +252,8 @@ What safe mode never does:
 - **Only its own processes stopped**: a process is the test's when its program is under the test's folder; none is
   stopped by its name alone.
 - The volume and mute are not touched (`flyouts` opens the Audio Flyout and the Output list, and moves nothing).
+- **The user's own music is never pressed**: `now-playing` makes the stand-in's app the Now Playing source in a data
+  folder of its own, and presses a control only while the card's last `now playing:` line names the stand-in's track.
 
 What it does do: the Dashboard's sounds are heard (the tests that give it `--media` play `standin make-tones`' tones),
 and the Dashboard, the stand-in games and a virtual pad come and go on the TV's screen for the test's length.

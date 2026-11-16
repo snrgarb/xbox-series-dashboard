@@ -1,8 +1,10 @@
 //! The Guide's Flyouts (docs/spec/guide.md, section 5): Notifications and Audio, opened by A on their Utilities.
 //! What a press does, what it sounds like, and what is asked of the shell: the system's sound is the shell's, so
 //! here it is whatever the test says it is, and a change of it is an `Effect`.
-use model::{Audio, AudioDevice, Flow};
-use screens::guide::{Flyout, FlyoutFocus, Focus, Tab};
+use std::time::Duration;
+
+use model::{Audio, AudioDevice, Flow, Media, MediaCommand, MediaSession};
+use screens::guide::{Flyout, FlyoutFocus, Focus, MediaControl, Tab};
 use screens::{Dashboard, Effect, Sound};
 use ui::Button::{self, Down, Guide, Left, LeftBumper, Right, RightBumper, Up, A, B};
 use ui::Press;
@@ -17,7 +19,7 @@ const OUTPUT: usize = 0;
 const INPUT: usize = 1;
 const VOLUME: usize = 2;
 const MUTE: usize = 3;
-const NOTHING_PLAYING: usize = 4;
+const NOW_PLAYING: usize = 4;
 
 fn press(dashboard: &mut Dashboard, buttons: &[Button]) -> Vec<Effect> {
     for &button in buttons {
@@ -148,7 +150,7 @@ fn audio_has_five_entries_and_focus_stops_at_its_ends() {
     assert!(dashboard.audio_shown());
     assert_eq!(press(&mut dashboard, &[Up]), []);
     assert_eq!(press(&mut dashboard, &[Down, Down, Down, Down]), [MOVE, MOVE, MOVE, MOVE]);
-    assert_eq!(dashboard.flyout(), item(NOTHING_PLAYING));
+    assert_eq!(dashboard.flyout(), item(NOW_PLAYING));
     assert_eq!(press(&mut dashboard, &[Down]), []);
     assert_eq!(press(&mut dashboard, &[A, Left, Right]), [], "the line about music does nothing");
     assert_eq!(dashboard.guide_line(), "Landing Utility(1), flyout Audio Item(4), volume 67");
@@ -304,4 +306,103 @@ fn the_flyouts_open_over_a_running_game_too() {
     // The game ending leaves the Flyout open, as it leaves the Guide.
     dashboard.game_ended();
     assert_eq!(dashboard.flyout(), item(OUTPUT));
+}
+
+/// Now Playing (docs/spec/now-playing.md): one app's session, paused, its Previous off.
+fn song(playing: bool) -> Media {
+    let session = MediaSession {
+        app_id: "standin.exe".into(),
+        title: "Stand-in Song".into(),
+        artist: Some("The Stand-ins".into()),
+        playing,
+        can_play_pause: true,
+        can_previous: false,
+        can_next: true,
+        position: Duration::from_secs(65),
+        length: Duration::from_secs(200),
+        art: None,
+    };
+    Media { sessions: vec![session], current: Some(0) }
+}
+
+fn control(control: MediaControl) -> Option<(Flyout, FlyoutFocus)> {
+    Some((Flyout::Audio, FlyoutFocus::Control(control)))
+}
+
+#[test]
+fn with_nothing_playing_down_on_now_playing_stays_and_the_log_says_nothing() {
+    let mut dashboard = in_audio();
+    assert_eq!(dashboard.now_playing_line().as_deref(), Some("nothing"));
+    press(&mut dashboard, &[Down, Down, Down, Down]);
+    assert_eq!(press(&mut dashboard, &[Down, A]), []);
+    assert_eq!(dashboard.flyout(), item(NOW_PLAYING));
+}
+
+#[test]
+fn down_from_the_card_is_play_pause_and_the_row_steps_along_held_at_its_ends() {
+    let mut dashboard = in_audio();
+    dashboard.set_media(song(true));
+    press(&mut dashboard, &[Down, Down, Down, Down]);
+    assert_eq!(press(&mut dashboard, &[A]), [], "A on the card does nothing");
+    assert_eq!(press(&mut dashboard, &[Down]), [MOVE]);
+    assert_eq!(dashboard.flyout(), control(MediaControl::PlayPause));
+    assert_eq!(dashboard.guide_line(), "Landing Utility(1), flyout Audio Control(PlayPause), volume 67");
+    assert_eq!(press(&mut dashboard, &[Right]), [MOVE]);
+    assert_eq!(press(&mut dashboard, &[Right, Down]), [], "held at Next, and nothing under the row");
+    assert_eq!(dashboard.flyout(), control(MediaControl::Next));
+    assert_eq!(press(&mut dashboard, &[Left, Left]), [MOVE, MOVE]);
+    assert_eq!(press(&mut dashboard, &[Left]), []);
+    assert_eq!(dashboard.flyout(), control(MediaControl::Previous));
+    assert_eq!(press(&mut dashboard, &[Up]), [MOVE]);
+    assert_eq!(dashboard.flyout(), item(NOW_PLAYING));
+}
+
+#[test]
+fn a_control_asks_the_app_shown_and_nothing_changes_until_its_session_says_so() {
+    let mut dashboard = in_audio();
+    dashboard.set_media(song(true));
+    press(&mut dashboard, &[Down, Down, Down, Down, Down]);
+    let line = dashboard.now_playing_line();
+    assert_eq!(
+        line.as_deref(),
+        Some(
+            r#""Stand-in Song" by "The Stand-ins" in Standin, playing, 3:20, art none, previous off, play/pause on, next on"#
+        )
+    );
+    assert_eq!(press(&mut dashboard, &[A]), [SELECT, Effect::Media(MediaCommand::PlayPause, "standin.exe".into())]);
+    assert_eq!(dashboard.now_playing_line(), line, "still playing until the app says otherwise");
+    dashboard.set_media(song(false));
+    assert!(dashboard.now_playing_line().unwrap().contains("paused"));
+    assert_eq!(dashboard.flyout(), control(MediaControl::PlayPause), "focus stays");
+    // Previous is off: A on it does nothing.
+    press(&mut dashboard, &[Left]);
+    assert_eq!(press(&mut dashboard, &[A]), []);
+    press(&mut dashboard, &[Right, Right]);
+    assert_eq!(press(&mut dashboard, &[A]), [SELECT, Effect::Media(MediaCommand::Next, "standin.exe".into())]);
+}
+
+#[test]
+fn the_session_going_puts_focus_on_now_playing_and_b_on_the_row_closes_the_flyout() {
+    let mut dashboard = in_audio();
+    dashboard.set_media(song(true));
+    press(&mut dashboard, &[Down, Down, Down, Down, Down]);
+    dashboard.set_media(Media::default());
+    assert_eq!(dashboard.flyout(), item(NOW_PLAYING));
+    dashboard.set_media(song(true));
+    press(&mut dashboard, &[Down]);
+    press(&mut dashboard, &[B]);
+    assert_eq!(dashboard.flyout(), None);
+    assert_eq!(dashboard.now_playing_line(), None, "said only while the Flyout is open");
+}
+
+#[test]
+fn the_card_is_drawn_again_as_its_time_turns_a_second_while_it_plays() {
+    let mut dashboard = in_audio();
+    dashboard.set_media(song(true));
+    let left = dashboard.timer().expect("the next second");
+    assert!(left <= 1.0);
+    dashboard.advance(left + 0.01);
+    assert!(dashboard.take_timed());
+    dashboard.set_media(song(false));
+    assert_eq!(dashboard.timer(), None, "paused: nothing moves");
 }

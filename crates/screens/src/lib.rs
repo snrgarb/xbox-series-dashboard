@@ -16,6 +16,7 @@ pub mod launch;
 pub mod manage_queue;
 pub mod menu_panel;
 pub mod my_games;
+pub mod now_playing;
 pub mod pages;
 pub mod profile;
 pub mod search;
@@ -28,7 +29,7 @@ pub mod wide_dialog;
 
 use std::time::{Duration, Instant};
 
-use model::{Audio, Flow, Library, Profile};
+use model::{Audio, Flow, Library, Media, MediaCommand, Profile};
 pub use model::{FilterChange, PowerCommand, ProfileChange, Sound};
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
@@ -71,6 +72,12 @@ pub enum Effect {
     /// A device chosen in one of Audio's dropdowns, by its place among `audio()`'s of that flow: make it Windows'
     /// default.
     DefaultDevice(Flow, usize),
+    /// One of the Now Playing card's controls: ask the app with this id, Windows' own for it (`MediaSession::app_id`),
+    /// to do it. What it does shows only as the shell's next reading of its session (`set_media`) says.
+    Media(MediaCommand, String),
+    /// Settings > Guide's Now Playing source changed to this: the Dashboard follows it already, and it is for
+    /// whoever keeps the settings to save (`now_playing::SOURCE_KEY`).
+    NowPlayingSource(String),
     /// Settings changed an option. The Dashboard has taken the change already: this is for whoever keeps the
     /// settings to save it.
     Set(settings::Change),
@@ -206,6 +213,10 @@ pub struct Dashboard {
     held: Vec<Button>,
     /// The system's sound as the shell last read it, which the Audio Flyout shows.
     audio: Audio,
+    /// Windows' media sessions as the shell last read them, and Settings' Now Playing source.
+    now_playing: now_playing::NowPlaying,
+    /// The Now Playing card's time, in whole seconds, as last drawn: a turn of it is something to draw.
+    now_playing_second: Option<u64>,
     /// The Dashboard's clock: where the time it is told (`advance`, `toasts_presented`) has brought it. Nothing in
     /// the Dashboard reads the system's.
     now: Instant,
@@ -241,6 +252,8 @@ impl Dashboard {
             timed: false,
             held: Vec::new(),
             audio: Audio::default(),
+            now_playing: now_playing::NowPlaying::default(),
+            now_playing_second: None,
             now: Instant::now(),
             waiting: None,
             effects: Vec::new(),
@@ -283,8 +296,13 @@ impl Dashboard {
         // The Guide's lists name games by their place: made again, focus staying where it is in them.
         self.refresh_guide();
         // A page that keeps something of the library (Settings' Groups, the row focus is on) finds it again.
-        let around =
-            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+        };
         self.pages.library_changed(around);
     }
 
@@ -303,8 +321,13 @@ impl Dashboard {
             || order(&self.library.queue) != order(&queue)
             || self.library.queue.installed != queue.installed;
         self.library.queue = queue;
-        let around =
-            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+        };
         self.pages.library_changed(around);
         shown
     }
@@ -323,6 +346,7 @@ impl Dashboard {
                 discord: self.status.discord,
                 audio: &self.audio,
                 notifications: self.toasts.notifications(),
+                now_playing: self.now_playing.card(self.now),
             };
             self.guide.refresh(around);
         }
@@ -346,9 +370,42 @@ impl Dashboard {
     }
 
     /// Whether the Audio Flyout is open: the shell reads the system's sound as it opens and keeps reading while
-    /// it is, so that it follows what is changed elsewhere.
+    /// it is, so that it follows what is changed elsewhere. Its Now Playing card follows the media sessions then.
     pub fn audio_shown(&self) -> bool {
         self.flyout().is_some_and(|(which, _)| which == Flyout::Audio)
+    }
+
+    /// Windows' media sessions, as the shell has just read them (docs/spec/now-playing.md): an open Audio Flyout's
+    /// Now Playing card follows, and every app among them is a Now Playing source to choose from now on.
+    pub fn set_media(&mut self, media: Media) {
+        self.now_playing.set_media(media, self.now);
+        self.now_playing_second = self.now_playing_second();
+        self.refresh_guide();
+    }
+
+    /// Settings' Now Playing source as the settings table kept it, at start-up: none is Spotify.
+    pub fn set_now_playing_source(&mut self, saved: Option<&str>) {
+        let media = self.now_playing.media().clone();
+        self.now_playing = now_playing::NowPlaying::new(saved);
+        self.now_playing.set_media(media, self.now);
+        self.refresh_guide();
+    }
+
+    /// Now Playing: the sessions, the source and its choices.
+    pub fn now_playing(&self) -> &now_playing::NowPlaying {
+        &self.now_playing
+    }
+
+    /// What the Audio Flyout's Now Playing card shows, for `--log-focus` (`now playing: ...`): `nothing`, or the
+    /// track, the app, whether it plays and its controls. None while the Flyout is not open.
+    pub fn now_playing_line(&self) -> Option<String> {
+        self.audio_shown().then(|| self.now_playing.line())
+    }
+
+    /// The card's time in whole seconds now, while the Audio Flyout shows a card with a length.
+    fn now_playing_second(&self) -> Option<u64> {
+        let card = self.now_playing.card(self.now).filter(|_| self.audio_shown())?;
+        (!card.session.length.is_zero()).then_some(card.position.as_secs())
     }
 
     /// The Flyout open over the Guide's panel, and where focus is in it.
@@ -372,6 +429,7 @@ impl Dashboard {
             discord: self.status.discord,
             audio: &self.audio,
             notifications: self.toasts.notifications(),
+            now_playing: self.now_playing.card(self.now),
         }
     }
 
@@ -435,7 +493,13 @@ impl Dashboard {
     }
 
     fn around(&self) -> pages::Around<'_> {
-        pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now }
+        pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+        }
     }
 
     /// How a held direction repeats now, for whoever times the pad: in the Guide and in a dialog at their pace
@@ -462,8 +526,13 @@ impl Dashboard {
         if !self.page_has_pad() {
             return false;
         }
-        let around =
-            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+        };
         let taken = self.pages.typed(typed, around);
         self.take_asked();
         taken
@@ -539,6 +608,12 @@ impl Dashboard {
         // To the microsecond: steps a test adds up land where it says, not a hair short.
         self.now += Duration::from_micros((f64::from(seconds) * 1e6).round().max(0.0) as u64);
         self.timed |= self.wait_out();
+        // The Now Playing card's time turned a second: it is drawn again.
+        let second = self.now_playing_second();
+        if second != self.now_playing_second {
+            self.now_playing_second = second;
+            self.timed = true;
+        }
         let due = self.quit.as_mut().filter(|quit| !quit.asked).is_some_and(|quit| {
             quit.left -= seconds;
             quit.left <= 0.0
@@ -567,7 +642,10 @@ impl Dashboard {
     pub fn timer(&self) -> Option<f32> {
         let quit = self.quit.filter(|quit| !quit.asked).map(|quit| quit.left);
         let tap = self.waiting.map(|left| left.as_secs_f32());
-        [quit, self.close_in, tap].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+        // The Now Playing card's time, while the Audio Flyout shows a track playing.
+        let second = self.audio_shown().then(|| self.now_playing.next_second(self.now)).flatten();
+        let second = second.map(|left| left.as_secs_f32());
+        [quit, self.close_in, tap, second].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
     }
 
     /// The double tap's wait, at `now`: the Game hub of the game whose tile A chose on Home once its time has
@@ -581,8 +659,13 @@ impl Dashboard {
         if !self.pages.is_empty() {
             // A page over Home has the pad: a tile's A is forgotten.
             self.home.tap(now, false);
-            let around =
-                pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+            let around = pages::Around {
+                library: &self.library,
+                playing: self.playing,
+                options: self.options,
+                now: self.now,
+                now_playing: &self.now_playing,
+            };
             return match self.pages.tick(around) {
                 pages::Tick::Wait(left) if free => {
                     self.waiting = Some(left);
@@ -792,14 +875,26 @@ impl Dashboard {
 
     /// Does what the top page asked for.
     fn page_asks(&mut self, action: PageAction) {
-        let around =
-            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+        };
         match action {
             PageAction::Close => self.close_page(),
             PageAction::Open(open) => {
                 self.pages.open_over(open, around);
             }
             PageAction::Effect(Effect::Set(change)) => self.set(change),
+            // Settings > Guide's Now Playing source: followed at once, and saved; one that was set already, or is
+            // not among the choices, changes nothing.
+            PageAction::Effect(Effect::NowPlayingSource(source)) => {
+                if let Some(source) = self.now_playing.choose(&source) {
+                    self.effects.push(Effect::NowPlayingSource(source));
+                }
+            }
             // Whether there is a key is the Dashboard's to show; the key itself goes on to be kept.
             PageAction::Effect(Effect::ArtKey(key)) => {
                 self.options.art_key = key.is_some();
@@ -822,6 +917,7 @@ impl Dashboard {
                     playing: self.playing,
                     options: self.options,
                     now: self.now,
+                    now_playing: &self.now_playing,
                 };
                 if !self.pages.open_over(open, around) {
                     self.close_page();
@@ -856,6 +952,7 @@ impl Dashboard {
             discord: self.status.discord,
             audio: &self.audio,
             notifications: self.toasts.notifications(),
+            now_playing: self.now_playing.card(self.now),
         });
         self.effects.push(Effect::Sound(Sound::PromptOpen));
     }
@@ -869,6 +966,7 @@ impl Dashboard {
                 discord: self.status.discord,
                 audio: &self.audio,
                 notifications: self.toasts.notifications(),
+                now_playing: self.now_playing.card(self.now),
             };
             let action = self.guide.press(press, around);
             if let Some(action) = action {
@@ -910,8 +1008,13 @@ impl Dashboard {
             self.held.retain(|&held| held != press.button);
         }
         if !self.pages.is_empty() {
-            let around =
-                pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+            let around = pages::Around {
+                library: &self.library,
+                playing: self.playing,
+                options: self.options,
+                now: self.now,
+                now_playing: &self.now_playing,
+            };
             let action = self.pages.press(press, around);
             // What the page under text entry asks for as its text is kept: a Group's new name, to save.
             self.take_asked();
@@ -947,6 +1050,7 @@ impl Dashboard {
                         playing: self.playing,
                         options: self.options,
                         now: self.now,
+                        now_playing: &self.now_playing,
                     },
                 );
                 self.back_to_button = on_button && press.button == Button::A;
@@ -970,7 +1074,13 @@ impl Dashboard {
     pub fn open_page(&mut self, open: Open) {
         self.pages.open(
             open,
-            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now },
+            pages::Around {
+                library: &self.library,
+                playing: self.playing,
+                options: self.options,
+                now: self.now,
+                now_playing: &self.now_playing,
+            },
         );
         self.back_to_button = false;
     }
@@ -1124,6 +1234,12 @@ impl Dashboard {
                 }
                 self.effects.push(Effect::DefaultDevice(flow, device));
             }
+            // The app the card shows is asked; the card shows nothing changed until its session says so.
+            GuideAction::Media(command) => {
+                if let Some(card) = self.now_playing.card(self.now) {
+                    self.effects.push(Effect::Media(command, card.session.app_id.clone()));
+                }
+            }
             // The Guide closes first; then what was chosen is the shell's to do.
             GuideAction::Power(choice) => {
                 self.close_guide();
@@ -1162,6 +1278,7 @@ impl Dashboard {
             discord: self.status.discord,
             audio: &self.audio,
             notifications: self.toasts.notifications(),
+            now_playing: self.now_playing.card(self.now),
         };
         self.guide.open_on(tab, around);
         self.guide_overlaid = self.has_overlay;
@@ -1183,6 +1300,7 @@ impl Dashboard {
                     discord: self.status.discord,
                     audio: &self.audio,
                     notifications: self.toasts.notifications(),
+                    now_playing: self.now_playing.card(self.now),
                 };
                 self.guide.show_tab(guide::Tab::ProfileAndSystem, around);
             }
@@ -1450,6 +1568,7 @@ impl Dashboard {
             discord: self.status.discord,
             audio: &self.audio,
             notifications: self.toasts.notifications(),
+            now_playing: self.now_playing.card(self.now),
         };
         // The pad's own word on its charge, unless the shell has said otherwise. One on a cable shows its glyph.
         let charge = match self.pad.battery {
@@ -1503,8 +1622,13 @@ impl Dashboard {
         if !self.pages.hides_home() {
             self.home.draw(ui, &self.library, &status);
         }
-        let around =
-            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+        };
         let (home, library) = (&mut self.home, &self.library);
         self.pages.draw(ui, around, &mut |ui| home.draw(ui, library, &status));
         // The hint bar, once for whatever has the pad, over all of it.

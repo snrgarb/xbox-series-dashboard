@@ -14,6 +14,7 @@ use screens::keyboard::Typed;
 use screens::toasts::Seen;
 use screens::{Dashboard, Effect, OverlayShows, Setting};
 use shell::audio::{self, AudioControl, SystemAudio};
+use shell::media::{self, MediaSessions};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::store::{Addresses, Ask, ProgramAddresses, SystemAddresses};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step, ToastStrip};
@@ -151,6 +152,10 @@ struct App {
     /// When it was last read while the Audio Flyout is open: it is read as the Flyout opens and every `AUDIO_EVERY`
     /// after, so that the Flyout follows what is changed elsewhere.
     audio_read: Option<Instant>,
+    /// Windows' media sessions, which the Audio Flyout's Now Playing card shows, followed on a thread of their own.
+    media: Box<dyn MediaSessions>,
+    /// What --log-focus last said of the card (`now playing: ...`): said again only as it changes.
+    now_playing_said: Option<String>,
     /// How long the sound of leaving has still to play: Exit waits for it.
     leaving: Duration,
     /// The minute of the day Home's last frame showed on its clock.
@@ -273,6 +278,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
         eprintln!("guide: off ({}): the Guide button does nothing", Setting::UseGuide.key());
     }
     dashboard.set_options(options);
+    // Settings > Guide's Now Playing source, as it was left: Spotify until one is chosen.
+    dashboard.set_now_playing_source(store.setting(screens::now_playing::SOURCE_KEY).as_deref());
     for text in &args.notify {
         dashboard.record(text);
     }
@@ -343,6 +350,18 @@ pub fn run(args: &Args, library: Library, store: Store) {
         },
         audio: Box::new(SystemAudio),
         audio_read: None,
+        // Windows' media sessions, or with --fake-media one made up; their album art is kept in the data folder.
+        media: match args.fake_media() {
+            Some(fake) => Box::new(fake),
+            None => {
+                let proxy = event_loop.create_proxy();
+                let wake = std::sync::Mutex::new(proxy);
+                media::system(data_dir.as_ref().map(|dir| dir.join("now-playing")), move || {
+                    let _ = wake.lock().map(|proxy| proxy.send_event(()));
+                })
+            }
+        },
+        now_playing_said: None,
         leaving: Duration::ZERO,
         minute: minute(),
         frames: args.log_frames.then(|| ([0; 3], Instant::now())),
@@ -656,6 +675,21 @@ impl App {
         self.audio_read.map(|read| AUDIO_EVERY.saturating_sub(read.elapsed()))
     }
 
+    /// Gives the Dashboard Windows' media sessions as each new reading comes; with --log-focus says what the Audio
+    /// Flyout's Now Playing card shows as the Flyout opens and whenever that changes (`now playing: ...`).
+    fn follow_media(&mut self) {
+        if let Some(media) = self.media.take() {
+            self.dashboard.set_media(media);
+            self.stale = true;
+            self.overlay_stale = true;
+        }
+        let line = self.dashboard.now_playing_line();
+        if self.log_focus && line.is_some() && line != self.now_playing_said {
+            eprintln!("now playing: {}", line.as_deref().unwrap_or_default());
+        }
+        self.now_playing_said = line;
+    }
+
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
         for effect in self.dashboard.take_effects() {
             match effect {
@@ -706,6 +740,13 @@ impl App {
                         self.audio.set_default(flow, &id);
                     }
                     self.audio_read = None;
+                }
+                // The Now Playing card's controls: the app is asked, and its session's next reading shows the rest.
+                Effect::Media(command, app_id) => self.media.send(command, &app_id),
+                Effect::NowPlayingSource(source) => {
+                    self.store.set_text(screens::now_playing::SOURCE_KEY, &source);
+                    self.stale = true;
+                    self.overlay_stale = true;
                 }
                 // In force already: saved, so that it is still so the next time.
                 Effect::Set(change) => {
@@ -1055,6 +1096,7 @@ impl ApplicationHandler for App {
             eprintln!("focus: {}", self.dashboard.focus_line());
         }
         let audio_wants = self.follow_audio();
+        self.follow_media();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
         // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
         let mut release_wants = None;
