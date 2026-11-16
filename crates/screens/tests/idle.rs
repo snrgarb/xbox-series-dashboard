@@ -237,6 +237,41 @@ fn the_launch_screen_holds_it_off() {
     assert_eq!(dashboard.idle_stage(), IdleStage::Dimmed);
 }
 
+/// Who's playing today? and Signing you in hold it off however long they show, and it counts from zero as Home
+/// shows after (docs/spec/start-up.md).
+#[test]
+fn startup_holds_it_off_and_it_counts_from_zero_after() {
+    let mut dashboard = dashboard();
+    dashboard.start_up(false);
+    assert_eq!(dashboard.startup_phase(), Some(screens::Phase::WhosPlaying));
+    wait(&mut dashboard, SHOW * 3.0);
+    assert_eq!(dashboard.idle_stage(), IdleStage::Awake);
+    press(&mut dashboard, &[A]);
+    assert_eq!(dashboard.startup_phase(), Some(screens::Phase::SigningIn));
+    // Three seconds, and the tenth of a second the steps' sum falls short by.
+    wait(&mut dashboard, 3.1);
+    assert!(!dashboard.starting_up());
+    assert_eq!(dashboard.idle_stage(), IdleStage::Awake);
+    assert!(dashboard.take_idle_news().is_empty());
+    wait(&mut dashboard, DIM - 0.2);
+    assert_eq!(dashboard.idle_stage(), IdleStage::Awake);
+    wait(&mut dashboard, 0.3);
+    assert_eq!(dashboard.idle_stage(), IdleStage::Dimmed);
+}
+
+/// Waking from sleep with the Idle screen up: it goes at once, not drawn over Who's playing today?, and stays away
+/// while that asks.
+#[test]
+fn waking_from_sleep_takes_it_down_at_once_for_whos_playing_today() {
+    let mut dashboard = dashboard();
+    wait(&mut dashboard, SHOW + 0.1);
+    assert_eq!(dashboard.idle_stage(), IdleStage::ShowingThings);
+    assert!(dashboard.woke_from_sleep());
+    assert_eq!(dashboard.idle_stage(), IdleStage::Awake);
+    wait(&mut dashboard, SHOW * 2.0);
+    assert_eq!(dashboard.idle_stage(), IdleStage::Awake);
+}
+
 // --- Pictures ---
 
 /// Dimmed over Home: the whole screen under 70% black.

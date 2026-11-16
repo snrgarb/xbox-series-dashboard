@@ -40,8 +40,8 @@ use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::LaunchScreen;
 use crate::pages::{Open, PageAction};
 pub use crate::settings::{Options, Setting};
-pub use crate::startup::{BootVideo, Found};
-use crate::startup::{Phase, Startup};
+use crate::startup::Startup;
+pub use crate::startup::{BootVideo, Found, Phase};
 pub use crate::toasts::Notification;
 use crate::toasts::{Toast, ToastKind, Toasts};
 
@@ -239,6 +239,17 @@ pub struct Dashboard {
     idle: idle::Idle,
     /// What the Idle screen's cards count "Played yesterday" from, in place of the machine's date: a test's.
     date: Option<chrono::NaiveDate>,
+    /// Start-up just over: its swirl, lifting off Home, until it has gone.
+    leaving: Option<Startup>,
+    /// A Start-up has begun and its greeting has not been posted: Toasts wait for it, and it is posted once
+    /// Start-up is over and Toasts have somewhere to show.
+    greeting_owed: bool,
+    /// The greeting has been posted since the Dashboard started.
+    greeted: bool,
+    /// Toasts have somewhere to show (`toasts_ready`).
+    toasts_ready: bool,
+    /// Toasts that came while Start-up showed or its greeting was owed: they follow the greeting.
+    held_toasts: Vec<Toast>,
     effects: Vec<Effect>,
 }
 
@@ -277,6 +288,11 @@ impl Dashboard {
             startup: None,
             idle: idle::Idle::new(now),
             date: None,
+            leaving: None,
+            greeting_owed: false,
+            greeted: false,
+            toasts_ready: false,
+            held_toasts: Vec::new(),
             effects: Vec::new(),
         }
     }
@@ -659,8 +675,8 @@ impl Dashboard {
     fn pass(&mut self, seconds: f32) {
         // To the microsecond: steps a test adds up land where it says, not a hair short.
         self.now += Duration::from_micros((f64::from(seconds) * 1e6).round().max(0.0) as u64);
-        if let Some(startup) = &mut self.startup {
-            startup.advance(seconds);
+        if self.startup.as_mut().is_some_and(|startup| startup.advance(seconds)) {
+            self.end_startup();
         }
         self.timed |= self.wait_out();
         self.timed |= self.idle_tick();
@@ -701,7 +717,9 @@ impl Dashboard {
         // The Now Playing card's time, while the Audio Flyout shows a track playing.
         let second = self.audio_shown().then(|| self.now_playing.next_second(self.now)).flatten();
         let second = second.map(|left| left.as_secs_f32());
-        [quit, self.close_in, tap, second].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+        // Signing you in's three seconds.
+        let signing_in = self.startup.as_ref().and_then(Startup::timer);
+        [quit, self.close_in, tap, second, signing_in].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
     }
 
     /// How soon the Idle screen has something to do, in seconds: dim, show things, turn a card, end a wake's grace.
@@ -1282,6 +1300,7 @@ impl Dashboard {
                 self.close_guide();
                 self.show_dashboard();
             }
+            GuideAction::SwitchProfile => self.switch_profile(),
             GuideAction::MyGames => self.guide_opens(Open::MyGames(my_games::Entry::Games)),
             GuideAction::Settings => self.guide_opens(Open::Settings(settings::Entry::Rail)),
             GuideAction::Search => self.guide_opens(Open::Search),
@@ -1453,13 +1472,33 @@ impl Dashboard {
         self.toasts.notifications()
     }
 
-    /// Greets the Profile signed in, as the Dashboard starts: "Hi <first name>!" in a Toast with its picture and
-    /// no prompt. (Who's playing today?, #127, signs one in first and greets it so.)
+    /// Greets the Profile signed in: "Hi <first name>!" in a Toast with its picture and no prompt, ahead of any
+    /// Toast that waited for it.
     pub fn greet(&mut self) {
+        self.greeting_owed = false;
+        self.greeted = true;
         let profile = self.profile();
         let text = format!("Hi {}!", profile.first_name());
         let picture = Some(profile.picture);
         self.toast(Toast { picture, ..Toast::new(ToastKind::Greeting, text, false) });
+        for toast in std::mem::take(&mut self.held_toasts) {
+            self.toast(toast);
+        }
+    }
+
+    /// Toasts have somewhere to show from now on (the executable has made the Toast strip, or knows there is none):
+    /// the Profile signed in is greeted, if it has not been, once Start-up is over (docs/spec/start-up.md, 5).
+    pub fn toasts_ready(&mut self) {
+        self.toasts_ready = true;
+        self.greet_if_due();
+    }
+
+    /// The greeting, if it is due: Toasts have somewhere to show, Start-up is over, and since it began, or since
+    /// the Dashboard started with none, nobody has been greeted.
+    fn greet_if_due(&mut self) {
+        if self.toasts_ready && self.startup.is_none() && (self.greeting_owed || !self.greeted) {
+            self.greet();
+        }
     }
 
     /// The Profile signed in, which every place a Profile shows draws (docs/spec/profiles.md): the one the library
@@ -1476,8 +1515,8 @@ impl Dashboard {
     }
 
     /// Signs this Profile in: every place a Profile shows has it at once, and the library database is asked to
-    /// remember it as the one signed in last. The hook Who's playing today? and Switch profile sign in by (#127);
-    /// nothing calls it yet. A Profile the library has not got changes nothing.
+    /// remember it as the one signed in last: what Signing you in does. A Profile the library has not got changes
+    /// nothing.
     pub fn sign_in(&mut self, profile: i64) {
         if self.library.profiles.get(profile).is_none() {
             return;
@@ -1503,6 +1542,11 @@ impl Dashboard {
     }
 
     fn toast(&mut self, toast: Toast) {
+        // During Start-up, and until its greeting has shown, a Toast waits (the Bundle holds them back so).
+        if self.startup.is_some() || self.greeting_owed {
+            self.held_toasts.push(toast);
+            return;
+        }
         if self.toasts.post(toast) {
             self.effects.push(Effect::Sound(Sound::Notification));
         }
@@ -1725,6 +1769,7 @@ impl Dashboard {
             return;
         }
         self.draw_home(ui);
+        self.draw_leaving(ui);
         if !self.toast_strip {
             self.draw_toasts(ui);
         }
@@ -1797,6 +1842,7 @@ impl Dashboard {
             return;
         }
         self.draw_home(ui);
+        self.draw_leaving(ui);
         self.draw_overlay(ui);
         self.draw_toasts(ui);
     }
@@ -1804,9 +1850,11 @@ impl Dashboard {
     // --- Start-up (docs/spec/start-up.md) ---
 
     /// Start-up begins, as the Dashboard starts: with the Boot video if one is to play (`video`: it was chosen and
-    /// found, and the executable has it opening), else at once with what follows it. Over everything until it ends,
-    /// with the pad and the Guide button its own.
+    /// found, and the executable has it opening), else at once with what follows it, Who's playing today? or
+    /// Signing you in. Over everything until it ends, with the pad and the Guide button its own. The executable
+    /// does not call it with `--no-startup`, and the Dashboard then starts at Home.
     pub fn start_up(&mut self, video: bool) {
+        self.greeting_owed = true;
         if video {
             self.startup = Some(Startup::boot_video());
         } else {
@@ -1819,10 +1867,25 @@ impl Dashboard {
         self.startup.is_some()
     }
 
+    /// Where Start-up is, while it shows.
+    pub fn startup_phase(&self) -> Option<Phase> {
+        self.startup.as_ref().map(Startup::phase)
+    }
+
+    /// The Profile Start-up shows, while it shows one: the one focused on Who's playing today?, or signing in.
+    pub fn startup_profile(&self) -> Option<&Profile> {
+        self.startup.as_ref().and_then(Startup::profile)
+    }
+
+    /// How many Profiles Who's playing today? shows, while it shows.
+    pub fn startup_profiles(&self) -> usize {
+        self.startup.as_ref().map_or(0, |startup| startup.profiles().len())
+    }
+
     /// Whether the Boot video is what shows: the executable plays it while this says so, and stops it when it
     /// stops saying so (a press skipped it).
     pub fn boot_video_playing(&self) -> bool {
-        self.startup.as_ref().is_some_and(|startup| startup.phase() == Phase::BootVideo)
+        self.startup_phase() == Some(Phase::BootVideo)
     }
 
     /// The video's first frame is in this texture, `aspect` wide to high: it shows from the next frame on, and a
@@ -1840,28 +1903,112 @@ impl Dashboard {
         }
     }
 
-    /// What comes after the Boot video, or at once with it Off.
-    ///
-    /// **The hook for #127**: Who's playing today? and Signing you in go here, as `startup::Phase`s of their own
-    /// that end Start-up as Signing you in has shown, the Profile signed in (`sign_in`) and greeted. Until they come,
-    /// Start-up ends with the video: Home shows, and the executable greets the Profile signed in last
-    /// (`greet`) once Toasts have somewhere to show.
-    fn after_boot_video(&mut self) {
-        self.startup = None;
+    /// The Guide's Switch profile: the Guide goes at once and Who's playing today? asks, without the Boot video,
+    /// whatever Settings says of asking (the Bundle's `SwitchProfile`).
+    fn switch_profile(&mut self) {
+        self.ask_whos_playing();
     }
 
-    /// A press while Start-up shows. Any button skips the Boot video, once its picture has been up a moment; no
-    /// sound, as in the Bundle. Nothing else is told of it.
+    /// Windows woke from sleep: Who's playing today? asks again, without the Boot video, if Settings has it ask
+    /// (the Bundle's `OnResumedFromSleep`); over a running game the Dashboard comes in front of it first. Nothing
+    /// while Start-up already shows. Waking the Idle screen is not waking from sleep, and never asks. True when it
+    /// asked.
+    pub fn woke_from_sleep(&mut self) -> bool {
+        if !self.options.ask_whos_playing || self.startup.is_some() {
+            return false;
+        }
+        self.show_dashboard();
+        self.ask_whos_playing();
+        true
+    }
+
+    /// Who's playing today? over everything, asked afresh: the Guide goes at once, with a dialog page, and the
+    /// Toast on screen; Toasts wait until the greeting has shown (the Bundle's `CoverForStartup`).
+    fn ask_whos_playing(&mut self) {
+        self.pages.close_dialog();
+        if self.guide.is_open() {
+            self.effects.push(Effect::GuideClosed);
+        }
+        self.guide.close_at_once();
+        self.close_in = None;
+        self.toasts.drop_all();
+        self.leaving = None;
+        self.greeting_owed = true;
+        let (profiles, last) = self.whos_playing_profiles();
+        self.startup = Some(Startup::after_video(profiles, last, true));
+        // Woken from sleep, the Idle screen may be up: it goes at once, and waits until Start-up is over.
+        self.idle.wait(true, self.now);
+    }
+
+    /// What comes after the Boot video, or at once with it Off: Who's playing today?, or with Settings having it
+    /// not ask, Signing you in for the Profile signed in last.
+    fn after_boot_video(&mut self) {
+        let (profiles, last) = self.whos_playing_profiles();
+        let ask = self.options.ask_whos_playing;
+        match &mut self.startup {
+            Some(startup) => startup.go_on(profiles, last, ask),
+            None => self.startup = Some(Startup::after_video(profiles, last, ask)),
+        }
+        let signing_in = self.startup.as_ref().filter(|s| s.phase() == Phase::SigningIn).and_then(Startup::profile);
+        if let Some(id) = signing_in.map(|profile| profile.id) {
+            self.signing_in(id);
+        }
+    }
+
+    /// Who's playing today?'s Profiles, and which of them was signed in last: the library's, or where it has none
+    /// (a library from no database) the Profile shown, alone.
+    fn whos_playing_profiles(&self) -> (Vec<Profile>, usize) {
+        let profiles = &self.library.profiles;
+        if profiles.list.is_empty() {
+            return (vec![self.profile()], 0);
+        }
+        let last = profiles.signed_in.and_then(|id| profiles.list.iter().position(|p| p.id == id)).unwrap_or(0);
+        (profiles.list.clone(), last)
+    }
+
+    /// Signing you in shows this Profile: it is signed in at once, everywhere, and remembered, with the console's
+    /// sign-in sound (the Bundle's `StartupSequence.SignIn` and `OnStartupSignedIn`).
+    fn signing_in(&mut self, profile: i64) {
+        self.effects.push(Effect::Sound(Sound::Login));
+        self.sign_in(profile);
+    }
+
+    /// Signing you in has shown its time: Start-up is over. Home shows, the swirl lifting off it, and the Profile is
+    /// greeted, or will be as soon as Toasts have somewhere to show.
+    fn end_startup(&mut self) {
+        self.leaving = self.startup.take();
+        // The Idle screen counts from zero from here (unless a Launch screen still holds it off).
+        let now = self.now;
+        self.idle.wait(self.launch.up(), now);
+        self.timed = true;
+        self.greet_if_due();
+    }
+
+    /// A press while Start-up shows. Any button skips the Boot video, once its picture has been up a moment, in
+    /// silence, as in the Bundle. On Who's playing today? Left and Right move, with the Guide's move sound, and A
+    /// signs the focused Profile in, with the Guide's select sound, then the sign-in sound (the Bundle's
+    /// `Navigate`, `Enter` and `Login`). Nothing else is told of it.
     fn startup_press(&mut self, press: Press) {
-        let Some(startup) = &self.startup else { return };
-        if startup.phase() == Phase::BootVideo && startup.takes_presses() && !press.repeat {
-            self.after_boot_video();
+        let Some(startup) = &mut self.startup else { return };
+        if startup.phase() == Phase::BootVideo {
+            if startup.takes_presses() && !press.repeat {
+                self.after_boot_video();
+            }
+            return;
+        }
+        match startup.press(press) {
+            startup::Answer::Nothing => {}
+            startup::Answer::Moved => self.effects.push(Effect::Sound(Sound::GuideMove)),
+            startup::Answer::Chose(profile) => {
+                self.effects.push(Effect::Sound(Sound::GuideSelect));
+                self.signing_in(profile.id);
+            }
         }
     }
 
     /// The pad while Start-up shows: a button going down is a press, the Guide button's release or hold too. What
     /// is still to come of a Guide button press Start-up took (its tap, its release after a hold) does nothing
-    /// once Home shows: the Guide does not open behind the video.
+    /// once Home shows: the Guide does not open behind Start-up.
     fn startup_pad_event(&mut self, event: PadEvent) {
         let guide = Press { button: Button::Guide, repeat: false };
         match event {
@@ -1879,18 +2026,25 @@ impl Dashboard {
                 }
             }
             PadEvent::GuideTap => self.guide_button_spent = false,
-            PadEvent::GuideDown | PadEvent::Release(_) => {}
+            PadEvent::GuideDown => {}
+            // A on Switch profile closed the Guide: the foreground comes back as it is let go.
+            PadEvent::Release(button) => {
+                if self.release_awaited == Some(button) {
+                    self.release_awaited = None;
+                }
+            }
         }
     }
 
-    /// Start-up's picture, if it shows. Home is drawn under it once, unseen, as the picture first shows, so its
-    /// art is decoded behind the video.
+    /// Start-up's picture, if it shows. Home is drawn under it once, unseen, as the video's picture first shows,
+    /// so its art is decoded behind the video.
     fn draw_startup(&mut self, ui: &mut Ui) -> bool {
         let Some(warm) = self.startup.as_mut().map(Startup::warm_home) else { return false };
+        ui.store.reduce_motion = self.options.reduce_motion;
         if warm {
             ui.with_alpha(0.0, |ui| self.draw_home(ui));
         }
-        if let Some(startup) = &self.startup {
+        if let Some(startup) = &mut self.startup {
             startup.draw(ui);
         }
         true
@@ -1968,6 +2122,18 @@ impl Dashboard {
     fn draw_idle(&mut self, ui: &mut Ui) {
         let clock = self.clock();
         idle::draw(ui, &mut self.idle, &self.library, &clock);
+    }
+
+    /// The swirl lifting off Home as Start-up ends, over everything Home's window shows, until it has gone.
+    fn draw_leaving(&mut self, ui: &mut Ui) {
+        let Some(leaving) = &mut self.leaving else { return };
+        let alpha = ui.tween_from("startup leaving", 1.0, 0.0, startup::FADE_OUT, ui::Ease::Linear);
+        if alpha <= 0.0 {
+            self.leaving = None;
+            return;
+        }
+        ui.layer();
+        leaving.draw_leaving(ui, alpha);
     }
 }
 

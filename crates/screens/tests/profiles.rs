@@ -149,14 +149,16 @@ impl Shell {
 fn profiles_is_personalisations_second_box_and_lists_every_profile_then_add_profile() {
     let mut shell = Shell::new();
     shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    // Customise Home lands on Groups, under Boot video; Profiles is beside Boot video, in the Bundle's place.
+    // Customise Home lands on Groups, under Profiles; Profiles is beside Boot video, in the Bundle's place.
     assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
     shell.press(&[Up]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Boot video");
-    shell.press(&[Right]);
     assert_eq!(shell.focus(), "Settings: Personalisation: Profiles");
-    // Down from Profiles is the row below's one box.
+    shell.press(&[Left]);
+    assert_eq!(shell.focus(), "Settings: Personalisation: Boot video");
+    // Down from Boot video is Who's playing today?, Groups beside it.
     shell.press(&[Down]);
+    assert_eq!(shell.focus(), "Settings: Personalisation: Who's playing today?");
+    shell.press(&[Right]);
     assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
     shell.press(&[Down]);
     assert_eq!(shell.focus(), "Settings: Personalisation: Background delay");

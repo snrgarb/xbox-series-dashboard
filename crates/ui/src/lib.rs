@@ -344,6 +344,11 @@ impl<'a> Ui<'a> {
         self.push(Quad::arc(rect, color.quad(self.alpha), thickness, from.to_radians(), to.to_radians()));
     }
 
+    /// The same with its ends cut square, along the radius, as WPF's flat line caps cut them.
+    pub fn arc_square(&mut self, rect: Rect, from: f32, to: f32, thickness: f32, color: Color) {
+        self.push(Quad::arc_square(rect, color.quad(self.alpha), thickness, from.to_radians(), to.to_radians()));
+    }
+
     /// A texture filling `rect`, cropped to its shape.
     pub fn image(&mut self, rect: Rect, tex: TexId, size: (u32, u32), crop: Crop, alpha: f32, radius: f32) {
         let (iw, ih) = (size.0.max(1) as f32, size.1.max(1) as f32);

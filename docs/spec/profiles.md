@@ -1,6 +1,6 @@
 # Profiles specification
 
-Who plays here: the Bundle's Profiles (its `CONTEXT.md`: "Profile", "Gamertag", "Signed-in Profile"), as the port keeps and shows them. #125. Who's playing today? and Switch profile, which choose among them, are #127's (section 6).
+Who plays here: the Bundle's Profiles (its `CONTEXT.md`: "Profile", "Gamertag", "Signed-in Profile"), as the port keeps and shows them. #125. Who's playing today? and Switch profile, which choose among them, are #127's (start-up.md 5 to 8).
 
 The Bundle's sources are cited as in settings.md: C/ for `XboxSeries.Common`, E/ for the extension, T/ for the theme. Settings' pages for them are settings.md 6.5, 6.6 and 4.8; where the port differs it says so here, in section 7.
 
@@ -75,11 +75,10 @@ Always logged, with or without `--log-focus`:
 - `profiles: <n> of them, <id> "<gamertag>" signed in last`, as the database is opened.
 - `profiles: added <id> "<gamertag>"`, `profiles: <id> is now "<gamertag>"`, `profiles: <id>'s real name is "<real name>"`, `profiles: <id> wears shape N` / `wears <file>`, `profiles: removed <id> "<gamertag>"` (then `; <id> is signed in` if it was), `profiles: <id> "<gamertag>" signed in`; a refusal is `profiles: <why>`.
 
-## 6. Left for Who's playing today? (#127)
+## 6. Choosing who plays
 
-- `Dashboard::sign_in(id)` signs a Profile in: everything shows it at once, and it asks the database to remember it (`ProfileChange::SignIn`). Nothing calls it yet. Who's playing today? and the Guide's Switch profile will.
-- The Guide's Switch profile entry does nothing, as before.
-- Who's playing today?'s Personalisation box is not there yet.
+- `Dashboard::sign_in(id)` signs a Profile in: everything shows it at once, and it asks the database to remember it (`ProfileChange::SignIn`). Signing you in calls it (start-up.md 6): after Who's playing today? at the start, from the Guide's Switch profile, and on waking from sleep.
+- Who's playing today? shows the Profiles in the database's order, focus on the one signed in last; its Personalisation box (0, 1) chooses whether it asks at the start (start-up.md 9).
 
 ## 7. Differences from the Bundle
 

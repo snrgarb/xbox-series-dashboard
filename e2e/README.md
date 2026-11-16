@@ -197,7 +197,11 @@ Home, in Games a screenful at a time and in Full library, a Game hub of each sto
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
 each), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
 its first frame, its end and Home's first frame logged in that order, then Off set on Settings with the pad and the
-Dashboard straight to Home at the next start; it needs `video-spike.exe`, so build `-p video-spike` too), `idle` (the
+Dashboard straight to Who's playing today? at the next start; it needs `video-spike.exe`, so build `-p video-spike` too),
+`whos-playing` (Start-up with the Boot video Off in folders of the test's own: a second Profile added, Who's playing
+today? at the next start and the other Profile picked, Signing you in, Home and its greeting; the Guide's Switch profile
+back to the first; a wake from sleep pretended by `standin wake`; then Sign in the last profile set, a wake asking
+nothing, and the next start straight to Signing you in), `idle` (the
 Idle screen with `--idle-after 3,6`: Dimmed then Showing things over Home and over the stand-in game, a picture of
 each, and a press that wakes it seen to move no focus and start nothing; a stage woken early by someone else's input
 on the TV PC is said in the steps and waited for again), and `overlay` and `video` for the spikes.

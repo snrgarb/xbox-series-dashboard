@@ -1,14 +1,17 @@
 # The Boot video (docs/spec/start-up.md, #126), with a clip of the test's own: `video-spike.exe --make-clip` writes a
 # 4 s H.264 + AAC test pattern as XboxSeriesX.mp4 into a media folder of the test's own, and the Dashboard is started
 # on it (`--media`) and on a data folder of the test's own, with Start-up (`Start-Dashboard -Startup`). With no choice
-# made, Xbox Series X plays: its first frame and its end are logged with their times, and Home's first frame after.
+# made, Xbox Series X plays: its first frame and its end are logged with their times; Who's playing today? follows
+# (A signs its one Profile in: the whos-playing payload is that screen's own test), and Home's first frame after.
 # Then Settings > Personalisation > Boot video, walked with the pad, sets Off; the Dashboard is started again, and goes
-# straight to Home with no video.
+# straight to Who's playing today? with no video.
 #
 # Judged by the Dashboard's log, times in ms since the process started:
 #   startup: boot video XboxSeriesX from <file>
 #   startup: first video frame at <N> ms
 #   startup: video ended at <N> ms (<n> frames shown, <n> dropped)
+#   startup: who's playing shown at <N> ms, <n> profiles, focus on "<gamertag>"
+#   startup: signed in at <N> ms
 #   startup: Home's first frame at <N> ms
 #   settings: startup.boot_video = Off            (A on Off)
 #   settings: startup.boot_video is Off           (the next start)
@@ -80,6 +83,15 @@ function Time-Of([string] $Line) {
     if ($Line -match ' at (\d+) ms') { [double] $Matches[1] } else { $null }
 }
 
+# Who's playing today? is up, after the first $After lines: A signs its Profile in, and Signing you in ends.
+function Sign-In([int] $After, [string] $What) {
+    $asked = Expect-Log "^startup: who's playing shown at \d+ ms, \d+ profiles, focus on " "Who's playing today? $What" 60 $After
+    if (-not $asked) { return }
+    Start-Sleep -Milliseconds 1500
+    Push-Button A
+    Expect-Log '^startup: signed in at \d+ ms$' "signed in $What" 30 $After | Out-Null
+}
+
 # The Dashboard on the test's data and media folders, with Start-up.
 function Start-Here {
     $script:dashboard = Start-Dashboard -Startup @('--log-focus', '--data-dir', "`"$data`"", '--media', "`"$media`"")
@@ -113,6 +125,7 @@ try {
     }
     $end = Expect-Log '^startup: video (ended|skipped|failed|stopped) ' 'its end' ($clipSeconds + 30)
     if ($end -and $end -notmatch '^startup: video ended at \d+ ms') { $failures += "the video should have played to its end: $end" }
+    Sign-In 0 'after the video'
     $homeLine = Expect-Log "^startup: Home's first frame at \d+ ms$" "Home's first frame" 30
     Get-DashboardLog | Where-Object { $_ -match '^video: ' } | ForEach-Object { Say "  $_" }
     $times = @((Time-Of $first), (Time-Of $end), (Time-Of $homeLine))
@@ -144,6 +157,7 @@ try {
     Start-Here
     Expect-Log '^settings: startup\.boot_video is Off$' 'the choice at the next start' 30 | Out-Null
     Expect-Log '^startup: boot video Off$' 'Start-up with it Off' 30 | Out-Null
+    Sign-In 0 'with it Off'
     Expect-Log "^startup: Home's first frame at \d+ ms$" "Home's first frame with it Off" 60 | Out-Null
     $played = @(Get-DashboardLog | Where-Object { $_ -match '^startup: (first video frame|video )' })
     if ($played.Count) { $failures += "with it Off no video should play: $($played -join '; ')" }

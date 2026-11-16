@@ -7,6 +7,10 @@
 pub const WINDOW_CLASS: &str = "XboxSeriesDashboardToasts";
 /// `COPYDATASTRUCT::dwData` of a post: "TOST". Anything else is ignored.
 pub const COPYDATA_ID: usize = 0x5453_4F54;
+/// `COPYDATASTRUCT::dwData` of a pretended wake from sleep: "WAKE". Its data is not read. Taken where a
+/// notification is, and only there: `standin wake` sends it, so a test can have Who's playing today? asked as on
+/// waking without sleeping the machine (docs/spec/start-up.md, section 8).
+pub const WAKE_ID: usize = 0x454B_4157;
 /// The longest text taken, in characters. A longer one is cut: a Toast's line is one line.
 pub const MAX_CHARS: usize = 200;
 

@@ -113,6 +113,8 @@ pub struct Quad {
     /// The part of a ring that is drawn, its ends round: the angle of its middle and half its length, in radians
     /// clockwise from the top. None draws the whole shape.
     pub arc: Option<(f32, f32)>,
+    /// An arc's ends are cut square, along the radius, rather than round.
+    pub square_ends: bool,
     /// How far the rectangle is turned about its middle, in radians clockwise.
     pub turn: f32,
 }
@@ -131,6 +133,7 @@ impl Quad {
             uv: [0.0, 0.0, 1.0, 1.0],
             clip: None,
             arc: None,
+            square_ends: false,
             turn: 0.0,
         }
     }
@@ -148,6 +151,10 @@ impl Quad {
     pub fn arc(rect: Rect, color: Rgba, thickness: f32, from: f32, to: f32) -> Self {
         let half = ((to - from) / 2.0).clamp(0.0, std::f32::consts::PI);
         Self { arc: Some(((from + to) / 2.0, half)), ..Self::ring(rect, color, 0.0, thickness) }
+    }
+    /// The same with its ends cut square, along the radius: the Spinner round a Profile's picture.
+    pub fn arc_square(rect: Rect, color: Rgba, thickness: f32, from: f32, to: f32) -> Self {
+        Self { square_ends: true, ..Self::arc(rect, color, thickness, from, to) }
     }
 }
 
@@ -789,7 +796,7 @@ impl Renderer {
                 c1: q.c1,
                 // An arc is a kind of its own, its angles where a texture's corners would be: it has no texture.
                 params: [q.radius, q.ring, if q.arc.is_some() { ARC } else { q.gradient as u32 as f32 }, q.feather],
-                uv: q.arc.map_or(q.uv, |(middle, half)| [middle, half, 0.0, 0.0]),
+                uv: q.arc.map_or(q.uv, |(middle, half)| [middle, half, if q.square_ends { 1.0 } else { 0.0 }, 0.0]),
                 clip: q.clip.map_or(everything, |c| [c.x, c.y, c.right(), c.bottom()]),
                 turn: [q.turn.cos(), q.turn.sin(), 0.0, 0.0],
             })

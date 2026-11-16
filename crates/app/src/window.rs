@@ -12,12 +12,13 @@ use model::{Library, Sound};
 use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
 use screens::toasts::Seen;
-use screens::{Dashboard, Effect, Options, OverlayShows, Setting};
+use screens::{Dashboard, Effect, Options, OverlayShows, Phase, Setting};
 use shell::audio::{self, AudioControl, SystemAudio};
 use shell::idle::LastInput;
 use shell::media::{self, MediaSessions};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::store::{Addresses, Ask, ProgramAddresses, SystemAddresses};
+use shell::wake::{SystemWakes, Wakes};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step, ToastStrip};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
@@ -130,6 +131,11 @@ struct App {
     home_presented: Option<Instant>,
     /// The Boot video, while it plays (docs/spec/start-up.md).
     boot_video: Option<Playing>,
+    /// Where Start-up was as the log last said it (`startup: who's playing shown ...`, `signing in`, `signed in`),
+    /// by the frames presented.
+    startup_said: Option<Phase>,
+    /// What says the machine has woken from sleep: Who's playing today? asks again (docs/spec/start-up.md, 8).
+    wakes: Box<dyn Wakes>,
     launch: Option<Launch>,
     /// Holds the running game still while the Guide is open over it, and lets it go as the Guide hands the
     /// foreground back (docs/spec/guide.md, 7.2). After `launch` here, so it outlives it.
@@ -316,8 +322,11 @@ pub fn run(args: &Args, library: Library, store: Store) {
     }
     // Where --focus put focus is where the Dashboard starts: nothing is heard of getting there.
     dashboard.take_effects();
-    // Start-up, over all of that until it is done: the Boot video, if one plays.
-    dashboard.start_up(boot_video.is_some());
+    // Start-up, over all of that until it is done: the Boot video, if one plays, then Who's playing today? and
+    // Signing you in. With --no-startup, Home at once, the Profile signed in last signed in.
+    if !args.no_startup {
+        dashboard.start_up(boot_video.is_some());
+    }
     let mut app = App {
         windowed: args.windowed,
         dashboard,
@@ -353,6 +362,14 @@ pub fn run(args: &Args, library: Library, store: Store) {
         presented: None,
         home_presented: None,
         boot_video,
+        startup_said: None,
+        wakes: Box::new(SystemWakes::new({
+            let proxy = event_loop.create_proxy();
+            let wake = std::sync::Mutex::new(proxy);
+            move || {
+                let _ = wake.lock().map(|proxy| proxy.send_event(()));
+            }
+        })),
         launch: None,
         freezer,
         release_wait: None,
@@ -403,7 +420,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
 impl App {
     /// Makes the Overlay and the Toast strip, the first time it is called. Where there can't be an Overlay the
     /// Dashboard is told, and shows nothing that would need it; with no strip it draws Toasts in Home's window.
-    /// Toasts have somewhere to show from here on: the greeting is asked for, and `--toast`'s notifications posted.
+    /// Toasts have somewhere to show from here on: the greeting is asked for (once Start-up is over), and `--toast`'s
+    /// notifications posted.
     fn make_overlay(&mut self) {
         let Some(state) = &self.state else { return };
         if self.overlay_tried {
@@ -427,7 +445,7 @@ impl App {
         if self.toast_strip.is_none() && cfg!(windows) {
             eprintln!("toasts: no strip: Toasts show in Home's window, and not over a game");
         }
-        self.dashboard.greet();
+        self.dashboard.toasts_ready();
         for text in self.toasts_to_post.take().unwrap_or_default() {
             self.dashboard.notify(&text);
         }
@@ -916,6 +934,27 @@ impl App {
         }
     }
 
+    /// Says in the log where Start-up has got to, by the frame just presented: Who's playing today? shown, a
+    /// Profile signing in, signed in and Home shown. The `whos-playing` e2e payload judges by these.
+    fn say_startup(dashboard: &Dashboard, startup_said: &mut Option<Phase>) {
+        let phase = dashboard.startup_phase();
+        let said = std::mem::replace(startup_said, phase);
+        if phase == said {
+            return;
+        }
+        let at = since_start();
+        let gamertag = dashboard.startup_profile().map(|profile| profile.gamertag.clone()).unwrap_or_default();
+        match phase {
+            Some(Phase::WhosPlaying) => {
+                let profiles = dashboard.startup_profiles();
+                eprintln!("startup: who's playing shown at {at:.0} ms, {profiles} profiles, focus on {gamertag:?}");
+            }
+            Some(Phase::SigningIn) => eprintln!("startup: signing in {gamertag:?} at {at:.0} ms"),
+            None if said == Some(Phase::SigningIn) => eprintln!("startup: signed in at {at:.0} ms"),
+            _ => {}
+        }
+    }
+
     /// The Profile signed in, as Home's top bar, the Guide and the greeting show it
     /// (`profile: "Alpha", real name "", shape 0`). Said with the first frame and again whenever it changes.
     fn log_profile(&mut self) {
@@ -999,6 +1038,9 @@ impl ApplicationHandler for App {
         });
         let ready = [self.library_ready, window_ready, gpu_ready, since_start()];
         self.state = Some(State { host, config, surface, gpu, ready, window });
+        // The Dashboard's clock starts with the window: the time the window and the GPU took to be made is not
+        // Signing you in's.
+        self.told_time = Instant::now();
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
@@ -1136,6 +1178,14 @@ impl ApplicationHandler for App {
             }
         }
 
+        // Woken from sleep: Who's playing today? asks again, if it asks on waking.
+        if self.wakes.woke() {
+            let asked = self.dashboard.woke_from_sleep();
+            let what = if asked { "Who's playing today? asks" } else { "nothing asked" };
+            eprintln!("startup: woke from sleep at {:.0} ms: {what}", since_start());
+            self.stale = true;
+            self.overlay_stale = true;
+        }
         let pressed = typed || !presses.is_empty() || !events.is_empty();
         for event in events {
             self.dashboard.pad_event(event);
@@ -1392,6 +1442,7 @@ impl ApplicationHandler for App {
                 if let Some(playing) = &mut self.boot_video {
                     playing.after_present();
                 }
+                Self::say_startup(&self.dashboard, &mut self.startup_said);
                 if self.home_presented.is_none() && !self.dashboard.starting_up() {
                     self.home_presented = Some(Instant::now());
                     eprintln!("startup: Home's first frame at {:.0} ms", since_start());

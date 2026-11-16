@@ -142,10 +142,10 @@ try {
     Press B 'Settings: Theme settings: Guide'
     Press Up 'Settings: Theme settings: Personalisation'
 
-    # Personalisation: Boot video and Profiles, Groups, then a checkbox box a row, the focused one's info beside it.
-    # Background delay off, Reduce motion on.
+    # Personalisation: Boot video and Profiles, Who's playing today? and Groups, then a checkbox box a row, the
+    # focused one's info beside it. Background delay off, Reduce motion on.
     Press A 'Settings: Personalisation: Boot video'
-    Press Down 'Settings: Personalisation: Groups'
+    Press Down "Settings: Personalisation: Who's playing today\?"
     Press Down 'Settings: Personalisation: Background delay' '31-settings-personalisation-checkbox'
     Turn-Over 'home.background_delay' 'false' '31-background-delay-off'
     Press Down 'Settings: Personalisation: Reduce motion'
@@ -177,7 +177,7 @@ try {
     Open-Settings
     Press Right 'Settings: Theme settings: Personalisation'
     Press A 'Settings: Personalisation: Boot video'
-    Press Down 'Settings: Personalisation: Groups'
+    Press Down "Settings: Personalisation: Who's playing today\?"
     Press Down 'Settings: Personalisation: Background delay' '31-after-restart'
     Turn-Over 'home.background_delay' 'true'
     Press Down 'Settings: Personalisation: Reduce motion'

@@ -330,7 +330,7 @@ function Disconnect-Pad { if ($script:Pad) { try { $script:Pad.Disconnect() } ca
 # store's flag (the fake made, or an empty folder: the machine's own library is never read), --open-addresses-with
 # standin.exe, --dry-power, and --data-dir <payload>\data.
 # Every test starts at Home, with no Start-up (`--no-startup`): a machine with the Bundle has its boot videos, and the
-# default one would play. -Startup is for the test of Start-up itself (boot-video).
+# default one would play. -Startup is for the tests of Start-up itself (boot-video, whos-playing).
 function Start-Dashboard([string[]] $Arguments = @(), [switch] $Startup) {
     $exe = Join-Path $script:Payload 'dashboard.exe'
     if (-not (Test-Path $exe)) { throw "No dashboard.exe in $script:Payload" }

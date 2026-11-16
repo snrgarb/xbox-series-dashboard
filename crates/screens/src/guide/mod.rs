@@ -80,6 +80,8 @@ pub enum GuideAction {
     /// A game played before was chosen, by its place in the library: launched, or with another game running asked
     /// about first (`Guide::ask_quit_and_start`).
     Launch(usize),
+    /// Switch profile was chosen: the Guide goes at once, and Who's playing today? asks.
+    SwitchProfile,
     /// Quit the running game.
     QuitGame,
     /// "Quit and start": quit the running game, and start this one when it has stopped.
@@ -263,6 +265,12 @@ impl Guide {
         self.open = false;
         self.dialog = None;
         self.flyout = None;
+    }
+
+    /// Closes at once, with no slide away: Start-up is coming over everything (the Bundle's `DismissAtOnce`).
+    pub fn close_at_once(&mut self) {
+        self.close();
+        self.shown = false;
     }
 
     /// Opens a Utility's Flyout over the panel, focus on its first entry: A on the Utility, or the Guide opened
@@ -674,9 +682,9 @@ impl Guide {
     }
 }
 
-/// What A does on an entry, if anything. Entries whose dialogs are yet to come are drawn and do nothing: Switch
-/// profile (M5), the Profile entry (which never does). Over a running game Home and the pages bring the Dashboard
-/// in front of it, and a recent game is asked about first: both are the Dashboard's to do.
+/// What A does on an entry, if anything: the Profile entry never does anything, nor does Switch profile while it is
+/// greyed out, over a running game. Over a running game Home and the pages bring the Dashboard in front of it, and a
+/// recent game is asked about first: both are the Dashboard's to do.
 fn select(entry: &Entry) -> Option<GuideAction> {
     match entry.kind {
         Kind::Home => Some(GuideAction::Home),
@@ -685,8 +693,8 @@ fn select(entry: &Entry) -> Option<GuideAction> {
         Kind::Power => Some(GuideAction::Asked),
         Kind::MyGames => Some(GuideAction::MyGames),
         Kind::Settings => Some(GuideAction::Settings),
-        // Switch profile closes the Guide and asks Who's playing today? (#127), which signs the Profile chosen in
-        // with `Dashboard::sign_in`. Until then it does nothing, as the Profile entry never does.
+        // Switch profile closes the Guide and asks Who's playing today? (docs/spec/start-up.md, 7).
+        Kind::SwitchProfile if entry.enabled => Some(GuideAction::SwitchProfile),
         Kind::Profile | Kind::SwitchProfile => None,
     }
 }

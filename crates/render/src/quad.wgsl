@@ -64,7 +64,7 @@ fn shade(in: VOut, texel: vec4<f32>) -> vec4<f32> {
         a = a * a * (3.0 - 2.0 * a);
     }
     if (in.params.z == 4.0) {
-        // An arc with round ends: the ring's centre line from uv.x - uv.y to uv.x + uv.y radians clockwise from the
+        // An arc with round ends, or square ones where uv.z is 1: the ring's centre line from uv.x - uv.y to uv.x + uv.y radians clockwise from the
         // top. In a frame whose y axis runs through the arc's middle it is symmetric, so one half is worked out.
         let stroke = in.params.y * 0.5;
         let line = min(in.half.x, in.half.y) - stroke;
@@ -72,10 +72,17 @@ fn shade(in: VOut, texel: vec4<f32>) -> vec4<f32> {
         let p = vec2<f32>(abs(in.local.x * middle.y - in.local.y * middle.x), dot(in.local, middle));
         let end = vec2<f32>(sin(in.uv.y), cos(in.uv.y));
         var along = abs(length(p) - line);
-        if (end.y * p.x > end.x * p.y) {
-            along = length(p - end * line);
+        // How far past the end's radius the point is: positive beyond it.
+        let past = end.y * p.x - end.x * p.y;
+        if (in.uv.z > 0.5) {
+            // Square ends (uv.z 1): the stroke stops along the radius through each end.
+            a = clamp(0.5 - (along - stroke) / feather, 0.0, 1.0) * clamp(0.5 - past / feather, 0.0, 1.0);
+        } else {
+            if (past > 0.0) {
+                along = length(p - end * line);
+            }
+            a = clamp(0.5 - (along - stroke) / feather, 0.0, 1.0);
         }
-        a = clamp(0.5 - (along - stroke) / feather, 0.0, 1.0);
     }
     let at = in.pos.xy + g.origin;
     let cut = min(at - in.clip.xy, in.clip.zw - at);
