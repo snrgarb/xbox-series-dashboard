@@ -491,7 +491,8 @@ impl App {
         if now.0 != count {
             if let Some(toast) = toasts.on_screen() {
                 let waiting = toasts.waiting();
-                eprintln!("toasts: shown {:?} ({:?}), {waiting} waiting at {at:.0} ms", toast.text, toast.kind);
+                let (text, kind, told) = (&toast.text, toast.kind, toast.told_line());
+                eprintln!("toasts: shown {text:?} ({kind:?}){told}, {waiting} waiting at {at:.0} ms");
             }
         }
     }
@@ -1193,7 +1194,7 @@ impl ApplicationHandler for App {
             self.start_art();
         }
         // Achievements, once the stores' games are in the database (docs/achievements.md): the totals in a new
-        // snapshot. `update.unlocked` is for the Achievement unlocked Toast (#142), which is still to come.
+        // snapshot, and what was unlocked in the Achievement unlocked Toast (docs/spec/achievement-toast.md).
         if self.store.sources_read() {
             let proxy = self.proxy.clone();
             self.store.follow_achievements(move || {
@@ -1204,6 +1205,7 @@ impl ApplicationHandler for App {
             let listed = self.achievements_listed.0;
             self.achievements_listed.1 |= update.library.is_some() || listed.is_some_and(|g| update.icons.contains(&g));
             self.show(update.library);
+            self.dashboard.unlocked(update.unlocked);
         }
         if self.take_art() {
             toasts_changed = true;

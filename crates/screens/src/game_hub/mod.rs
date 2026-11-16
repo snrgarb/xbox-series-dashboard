@@ -93,6 +93,13 @@ pub struct GameHub {
     serial: u64,
 }
 
+/// A number no other page's picture of the screen behind it has (`Page::behind`): a hub's, or an Achievements
+/// page's opened without one under it.
+pub fn serial() -> u64 {
+    static SERIAL: AtomicU64 = AtomicU64::new(0);
+    SERIAL.fetch_add(1, Ordering::Relaxed)
+}
+
 /// The facts under the title: who published the game, the year it came out, what it takes on disk while it is
 /// installed, and the store it is from. The Bundle's platform, features and age rating are not in Steam's files.
 fn facts(game: &Game) -> String {
@@ -125,7 +132,6 @@ impl GameHub {
     /// time one was up. The main action is what the game can do now, Queued or Installing for one in the Queue,
     /// from the moment it opens.
     pub fn open(entry: Entry, around: Around) -> Self {
-        static SERIAL: AtomicU64 = AtomicU64::new(0);
         let mut hub = Self {
             main: if entry.installed { Main::Play } else { Main::Install },
             queued: false,
@@ -133,7 +139,7 @@ impl GameHub {
             view: View::Hub,
             focus: Focus::Action(Action::Main),
             toggle_width: 269.0,
-            serial: SERIAL.fetch_add(1, Ordering::Relaxed),
+            serial: serial(),
         };
         if let Some((game, place)) = hub.entry.find(around.library) {
             hub.follow(game, place, around);

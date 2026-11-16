@@ -269,6 +269,12 @@ impl State {
                 }
             }
             (Button::A, Some(AudioItem::Mute)) => return Outcome::Chose(GuideAction::Mute(!around.audio.muted)),
+            // An Achievement unlocked notification opens its game's Achievements page; any other does nothing.
+            (Button::A, None) => {
+                if let Some(game) = around.notifications.iter().rev().nth(self.item).and_then(|n| n.game) {
+                    return Outcome::Chose(GuideAction::Achievements(game));
+                }
+            }
             // A dropdown opens its list on the default device. With no devices it says "None" and does nothing.
             (Button::A, Some(item)) => {
                 if let Some(flow) = item.flow() {
@@ -340,7 +346,9 @@ impl State {
                 for at in unfocused.chain([focused]) {
                     let (rect, notification) = placed[at];
                     ui.fill(rect, if at == focused { FOCUSED } else { CARD }, 4.0);
-                    ui.icon(rect.x + 36.0, rect.y + 24.0 + 13.0, glyph::NOTIFICATIONS, 26.0, Color::WHITE);
+                    // An achievement's has the trophy in the bell's place.
+                    let icon = if notification.game.is_some() { glyph::TROPHY } else { glyph::NOTIFICATIONS };
+                    ui.icon(rect.x + 36.0, rect.y + 24.0 + 13.0, icon, 26.0, Color::WHITE);
                     if at == focused {
                         focus_ring(ui, rect);
                     }

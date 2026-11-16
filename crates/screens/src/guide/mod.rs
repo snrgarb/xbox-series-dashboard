@@ -83,6 +83,9 @@ pub enum GuideAction {
     /// A game played before was chosen, by its place in the library: launched, or with another game running asked
     /// about first (`Guide::ask_quit_and_start`).
     Launch(usize),
+    /// An Achievement unlocked notification was chosen: close, onto that game's Achievements page (its row in the
+    /// library database).
+    Achievements(i64),
     /// Switch profile was chosen: the Guide goes at once, and Who's playing today? asks.
     SwitchProfile,
     /// Quit the running game.
