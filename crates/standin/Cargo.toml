@@ -6,6 +6,8 @@ description = "Test support: a fake Steam install, a stand-in Steam and a stand-
 
 [dependencies]
 source-steam = { path = "../source-steam" }
+source-epic = { path = "../source-epic" }
+source-gog = { path = "../source-gog" }
 model = { path = "../model" }
 audio = { path = "../audio" }
 serde_json = "1"
