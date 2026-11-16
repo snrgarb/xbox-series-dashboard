@@ -6,6 +6,8 @@ description = "Test support: fake stores (Steam, EA, Ubisoft, Battle.net), stand
 
 [dependencies]
 source-steam = { path = "../source-steam" }
+source-epic = { path = "../source-epic" }
+source-gog = { path = "../source-gog" }
 source-ea = { path = "../source-ea" }
 source-ubisoft = { path = "../source-ubisoft" }
 source-battlenet = { path = "../source-battlenet" }

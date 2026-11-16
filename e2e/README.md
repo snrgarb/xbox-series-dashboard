@@ -96,7 +96,8 @@ looks at Home or taps the Guide button waits it out first: `Wait-Greeting`.
 `steam://` handler under `HKCU\Software\Classes\steam`. The Dashboard then finds Steam and launches through it exactly
 as on a real machine.
 
-`Initialize-FakeStore <store> <root>` writes a fake of another store (`ea`, `ubisoft`, `battlenet`) with
+`Initialize-FakeEa`, `Initialize-FakeUbisoft` and `Initialize-FakeBattleNet` (each on `New-FakeStore`, as Epic's and
+GOG's are) write a fake of that store at `C:\e2e\ea`, `C:\e2e\ubisoft` or `C:\e2e\battlenet` with
 `standin make-<store> <root>`: made-up games, each installed one's `game.exe` the stand-in game, and the store's
 registry as `registry.json` in `<root>`. The Dashboard reads it when started with `--<store> <root>`. An EA game starts
 by its own `game.exe`; `standin.exe uplay-url <root> "%1"` is registered as the `uplay://` handler for the fake Ubisoft
@@ -117,7 +118,7 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Start-Dashboard [-Arguments ...]`, `Stop-Dashboard` | the Dashboard, its stderr to `dashboard.log` |
 | `Get-DashboardLog`, `Get-DashboardLogLength`, `Wait-DashboardLog <pattern> <seconds> [-After <lines>]` | what it logged |
 | `Initialize-FakeSteam`, `Get-StandInGame`, `Stop-StandInGame` | the fake Steam and its games |
-| `Initialize-FakeStore <store> <root>` | a fake EA app, Ubisoft Connect or Battle.net |
+| `Initialize-FakeEa`, `Initialize-FakeUbisoft`, `Initialize-FakeBattleNet` | a fake EA app, Ubisoft Connect or Battle.net |
 | `Watch-Pulse <seconds>`, `Test-PulseColour`, `Test-Suspended <pid>` | the colours the stand-in game's pulse showed (two when it runs, one when it is frozen); whether a pixel is the pulse, dimmed or not; whether every thread of a process is suspended |
 
 The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again), `home` (Home

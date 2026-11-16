@@ -4,6 +4,16 @@
 //!       Writes a fake Steam install at <dir> (`source_steam::fixture`), with a copy of this program as `game.exe` in
 //!       every installed game's folder, reads it back, and with --json writes the Library it read there. With
 //!       --full-shelf it is `Fixture::full_shelf`, twenty installed games, where it is otherwise `Fixture::standard`.
+//!   standin make-epic <dir> [--json <file>]
+//!   standin make-gog <dir> [--json <file>]
+//!       As make-steam, for a fake Epic Games Launcher (`source_epic::fixture`) or a fake GOG (`source_gog::fixture`):
+//!       the Dashboard reads them with `--epic <dir>` and `--gog <dir>`. A GOG game is started as its own program;
+//!       an Epic one through the launcher's link, which the stand-in launcher, epic-url, takes on a test machine.
+//!   standin epic-url <dir> com.epicgames.launcher://apps/...?action=launch
+//!       The stand-in Epic launcher, registered as the `com.epicgames.launcher://` handler with the fake's <dir>:
+//!       starts the installed game the link names, as the launcher does, and waits for it. Exits 1, having done
+//!       nothing, when the game isn't installed. A link with another action (`install`) is said in the log, and
+//!       nothing more is done.
 //!   standin make-tones <dir>
 //!       Writes a short tone into <dir> under each of the names the Dashboard's sounds have in the Bundle, for
 //!       `dashboard --media <dir>`: the console's own sounds are in no repository and on no test machine.
@@ -54,6 +64,9 @@ use std::path::{Path, PathBuf};
 use source_steam::fixture::{self, Fixture};
 
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
+       standin make-epic <dir> [--json <file>]
+       standin make-gog <dir> [--json <file>]
+       standin epic-url <dir> com.epicgames.launcher://apps/...
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
@@ -175,12 +188,121 @@ fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String
     if read != expected {
         return Err(format!("wrote {expected:?}, read {read:?} back"));
     }
+    read_back(&format!("make-{store}"), &dir, library, expected.len(), json)
+}
+
+/// Writes `--title <name>` as the arguments of the stand-in game `exe`, so its window is titled with the game's
+/// name and a test can tell which one is in front.
+fn title_game(exe: &Path, name: &str) -> Result<(), String> {
+    let args = exe.with_file_name(GAME_ARGS_FILE);
+    std::fs::write(&args, format!("--title\n{name}\n")).map_err(|e| format!("{}: {e}", args.display()))
+}
+
+/// Says what was read back from a fake store at `dir` (and with `json`, writes it there), if it is the `wanted`
+/// number of games.
+fn read_back(
+    what: &str,
+    dir: &Path,
+    library: model::Library,
+    wanted: usize,
+    json: Option<&Path>,
+) -> Result<(), String> {
+    if library.games.len() != wanted {
+        return Err(format!("wrote {wanted} games, read {} back", library.games.len()));
+    }
     if let Some(json) = json {
         let text = serde_json::to_string_pretty(&library).map_err(|e| e.to_string())?;
         std::fs::write(json, text).map_err(|e| format!("{}: {e}", json.display()))?;
     }
-    note(&format!("make-{store}: {} games at {}", library.games.len(), dir.display()));
+    note(&format!("{what}: {} games at {}", library.games.len(), dir.display()));
     Ok(())
+}
+
+/// Writes Epic's standard fixture at `dir` with this program as every installed game's, and reads it back with the
+/// Dashboard's reader.
+fn make_epic(dir: &Path, json: Option<&Path>) -> Result<(), String> {
+    use source_epic::fixture::{self, Fixture, Kind};
+    let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut spec = Fixture::standard();
+    spec.game_exe = Some(std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?);
+    fixture::write(&dir, &spec).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    let games: Vec<_> = spec.games.iter().filter(|game| game.kind == Kind::Game).collect();
+    for game in games.iter().filter(|game| game.installed) {
+        title_game(&game.exe(&dir), &game.name)?;
+    }
+    let library = source_epic::load(&source_epic::Places::under(&dir))
+        .map_err(|e| format!("reading {} back: {e:#}", dir.display()))?;
+    read_back("make-epic", &dir, library, games.len(), json)
+}
+
+/// Writes GOG's standard fixture at `dir` with this program as every installed game's, and reads it back with the
+/// Dashboard's reader.
+fn make_gog(dir: &Path, json: Option<&Path>) -> Result<(), String> {
+    use source_gog::fixture::{self, Fixture, EXE};
+    let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut spec = Fixture::standard();
+    spec.game_exe = Some(std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?);
+    fixture::write(&dir, &spec).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    for game in spec.games.iter().filter(|game| game.installed) {
+        title_game(&game.install_dir(&dir).join(EXE), &game.name)?;
+    }
+    let places = source_gog::Places::under(&dir);
+    let library = source_gog::load(&places, places.records().unwrap_or_default())
+        .map_err(|e| format!("reading {} back: {e:#}", dir.display()))?;
+    read_back("make-gog", &dir, library, spec.games.len(), json)
+}
+
+/// The stand-in Epic launcher: starts the installed game a launch link names, from the fake launcher's files at
+/// `dir`, and waits for it.
+fn epic_url(dir: &Path, url: &str) -> i32 {
+    let Some((action, app)) = source_epic::parse_link(url) else {
+        note(&format!("epic-url: not a link the stand-in launcher knows: {url}"));
+        return 2;
+    };
+    if action != "launch" {
+        // The stand-in launcher installs nothing: that it was asked is what a test looks for.
+        note(&format!("epic-url: asked to {action} {app}: {}", url.trim()));
+        return 0;
+    }
+    let Some(exe) = source_epic::executable(&source_epic::Places::under(dir), &app) else {
+        note(&format!("epic-url: {app} isn't installed in {}", dir.display()));
+        return 1;
+    };
+    let mut command = std::process::Command::new(&exe);
+    if let Some(folder) = exe.parent() {
+        command.current_dir(folder);
+    }
+    let mut game = match command.spawn() {
+        Ok(game) => game,
+        Err(e) => {
+            note(&format!("epic-url: could not start {}: {e}", exe.display()));
+            return 1;
+        }
+    };
+    note(&format!("epic-url: {app} running, {} pid {}", exe.display(), game.id()));
+    let status = game.wait();
+    note(&format!("epic-url: {app} ended ({})", status.map_or_else(|e| e.to_string(), |s| s.to_string())));
+    0
+}
+
+/// `<dir> [--json <file>]`, as the make- commands take it.
+fn dir_and_json(args: &[String]) -> Option<(&Path, Option<&Path>)> {
+    match args {
+        [dir] => Some((Path::new(dir), None)),
+        [dir, flag, json] if flag == "--json" => Some((Path::new(dir), Some(Path::new(json)))),
+        _ => None,
+    }
+}
+
+/// A make- command's exit code: its failure said in the log, and in `standin-error.txt` beside `dir`.
+fn made(what: &str, dir: &Path, result: Result<(), String>) -> i32 {
+    let Err(e) = result else { return 0 };
+    note(&format!("{what}: {e}"));
+    let beside = std::path::absolute(dir).ok().and_then(|d| Some(d.parent()?.join("standin-error.txt")));
+    if let Some(file) = beside {
+        let _ = std::fs::write(file, format!("{e}\n"));
+    }
+    1
 }
 
 /// What a `uplay://` address asks: launch, install or uninstall, and of which game.
@@ -311,48 +433,33 @@ fn run(args: &[String]) -> i32 {
         Some("make-steam") => {
             let full_shelf = args.last().is_some_and(|last| last == "--full-shelf");
             let spec = if full_shelf { Fixture::full_shelf() } else { Fixture::standard() };
-            let (dir, json) = match &args[1..args.len() - usize::from(full_shelf)] {
-                [dir] => (Path::new(dir), None),
-                [dir, flag, json] if flag == "--json" => (Path::new(dir), Some(Path::new(json))),
-                _ => {
-                    note(USAGE);
-                    return 2;
-                }
+            let Some((dir, json)) = dir_and_json(&args[1..args.len() - usize::from(full_shelf)]) else {
+                note(USAGE);
+                return 2;
             };
-            match make_steam(dir, json, spec) {
-                Ok(()) => 0,
-                Err(e) => {
-                    note(&format!("make-steam: {e}"));
-                    let beside =
-                        std::path::absolute(dir).ok().and_then(|d| Some(d.parent()?.join("standin-error.txt")));
-                    if let Some(file) = beside {
-                        let _ = std::fs::write(file, format!("{e}\n"));
-                    }
-                    1
-                }
-            }
+            made("make-steam", dir, make_steam(dir, json, spec))
         }
-        Some(command @ ("make-ea" | "make-ubisoft" | "make-battlenet")) => {
-            let (dir, json) = match &args[1..] {
-                [dir] => (Path::new(dir), None),
-                [dir, flag, json] if flag == "--json" => (Path::new(dir), Some(Path::new(json))),
-                _ => {
-                    note(USAGE);
-                    return 2;
-                }
+        Some(what @ ("make-epic" | "make-gog")) => {
+            let Some((dir, json)) = dir_and_json(&args[1..]) else {
+                note(USAGE);
+                return 2;
             };
-            match make_store(&command["make-".len()..], dir, json) {
-                Ok(()) => 0,
-                Err(e) => {
-                    note(&format!("{command}: {e}"));
-                    let beside =
-                        std::path::absolute(dir).ok().and_then(|d| Some(d.parent()?.join("standin-error.txt")));
-                    if let Some(file) = beside {
-                        let _ = std::fs::write(file, format!("{e}\n"));
-                    }
-                    1
-                }
+            let result = if what == "make-epic" { make_epic(dir, json) } else { make_gog(dir, json) };
+            made(what, dir, result)
+        }
+        Some("epic-url") => match &args[1..] {
+            [dir, url] => epic_url(Path::new(dir), url),
+            _ => {
+                note(USAGE);
+                2
             }
+        },
+        Some(what @ ("make-ea" | "make-ubisoft" | "make-battlenet")) => {
+            let Some((dir, json)) = dir_and_json(&args[1..]) else {
+                note(USAGE);
+                return 2;
+            };
+            made(what, dir, make_store(&what["make-".len()..], dir, json))
         }
         Some("uplay-url") => match &args[1..] {
             [dir, url] => uplay_url(Path::new(dir), url),
@@ -506,6 +613,50 @@ mod tests {
         assert_eq!(library["games"].as_array().unwrap().len(), 4);
         assert_eq!(library["games"][2]["name"], "Brass Meridian");
         assert_eq!(library["games"][2]["installed"], true);
+    }
+
+    #[test]
+    fn make_epic_and_make_gog_write_fakes_whose_games_are_this_program_titled_with_their_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let this = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        let title = |exe: &Path| {
+            let args: Vec<String> = std::fs::read_to_string(exe.with_file_name(GAME_ARGS_FILE))
+                .unwrap()
+                .lines()
+                .map(str::to_string)
+                .collect();
+            GameArgs::parse(&args).unwrap().title
+        };
+
+        let (epic, json) = (dir.path().join("epic"), dir.path().join("epic.json"));
+        let epic_arg = epic.to_str().unwrap();
+        assert_eq!(run(&strings(&["make-epic", epic_arg, "--json", json.to_str().unwrap()])), 0);
+        let library: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+        let games = library["games"].as_array().unwrap();
+        assert_eq!(games.len(), 3);
+        let kite = &games[0];
+        assert_eq!((kite["name"].as_str(), kite["installed"].as_bool()), (Some("Kiteborne"), Some(true)));
+        let app = kite["source_id"].as_str().unwrap();
+        let exe = source_epic::executable(&source_epic::Places::under(&epic), app).unwrap();
+        assert_eq!(std::fs::read(&exe).unwrap(), this);
+        assert_eq!(title(&exe), "Kiteborne");
+
+        // The stand-in launcher: a link it doesn't know, one for a game that isn't installed, and an install, which
+        // it only says.
+        assert_eq!(run(&strings(&["epic-url", epic_arg, "steam://rungameid/440"])), 2);
+        let wexford = games[2]["source_id"].as_str().unwrap();
+        let launch = format!("com.epicgames.launcher://apps/{wexford}?action=launch&silent=true");
+        assert_eq!(run(&strings(&["epic-url", epic_arg, &launch])), 1);
+        assert_eq!(run(&strings(&["epic-url", epic_arg, &launch.replace("launch&silent=true", "install")])), 0);
+        assert_eq!(run(&strings(&["epic-url", epic_arg])), 2);
+
+        let gog = dir.path().join("gog");
+        assert_eq!(run(&strings(&["make-gog", gog.to_str().unwrap()])), 0);
+        let juniper = gog.join("Games").join("Juniper Signal").join(source_gog::fixture::EXE);
+        assert_eq!(std::fs::read(&juniper).unwrap(), this);
+        assert_eq!(title(&juniper), "Juniper Signal");
+        assert_eq!(run(&strings(&["make-gog"])), 2);
+        assert_eq!(run(&strings(&["make-epic", "a", "--yaml", "b"])), 2);
     }
 
     #[test]

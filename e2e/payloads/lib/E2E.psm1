@@ -292,6 +292,106 @@ function Initialize-FakeSteam([string] $Root = 'C:\e2e\steam', [switch] $FullShe
     $library
 }
 
+# Writes a fake store at $Root with `standin <Command> $Root` (make-epic, make-gog, make-ea, make-ubisoft,
+# make-battlenet) and returns the Library as the Dashboard's own reader read it back, which is also $Json in the
+# test's output.
+function New-FakeStore([string] $Command, [string] $Root, [string] $Json) {
+    $standin = Join-Path $script:Payload 'standin.exe'
+    if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
+    $json = Join-Path $script:Out $Json
+    $made = Start-Process $standin -ArgumentList @($Command, "`"$Root`"", '--json', "`"$json`"") -Wait -PassThru
+    if ($made.ExitCode -ne 0) {
+        $why = Get-Content (Join-Path (Split-Path $Root -Parent) 'standin-error.txt') -Raw -ErrorAction SilentlyContinue
+        throw "standin $Command exited with $($made.ExitCode): $why"
+    }
+    Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+# Gives the Dashboard an Epic Games Launcher to read, with none installed: a fake at $Root written by `standin
+# make-epic` (three made-up games, two installed and one owned only: crates/source-epic/src/fixture.rs), which the
+# Dashboard reads when started with `--epic $Root`; and standin.exe registered as this user's com.epicgames.launcher://
+# handler with $Root, the stand-in launcher, so a game the Dashboard asks the launcher for is started by it: the game's
+# Binaries\Win64\game.exe, a copy of standin.exe showing a window titled with the game's name.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-epic.json in the test's output): games by
+# name, each with source_id (its AppName), name, installed, install_dir.
+function Initialize-FakeEpic([string] $Root = 'C:\e2e\epic') {
+    $library = New-FakeStore 'make-epic' $Root 'fake-epic.json'
+    $standin = Join-Path $script:Payload 'standin.exe'
+    $class = 'HKCU:\Software\Classes\com.epicgames.launcher'
+    New-Item "$class\shell\open\command" -Force | Out-Null
+    Set-ItemProperty $class '(default)' 'URL:com.epicgames.launcher protocol'
+    Set-ItemProperty $class 'URL Protocol' ''
+    Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" epic-url `"$Root`" `"%1`""
+    $games = @($library.games)
+    Say "fake Epic at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard a GOG to read, with none installed: a fake at $Root written by `standin make-gog` (three made-up
+# games, two installed and one owned in a made-up Galaxy database, with generated WebP art in its picture cache:
+# crates/source-gog/src/fixture.rs), which the Dashboard reads when started with `--gog $Root`. A GOG game starts as
+# its own program, here its folder's game.exe, a copy of standin.exe: nothing is registered.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-gog.json in the test's output): games most
+# recently played first, each with source_id (its product id), name, installed, install_dir.
+function Initialize-FakeGog([string] $Root = 'C:\e2e\gog') {
+    $library = New-FakeStore 'make-gog' $Root 'fake-gog.json'
+    $games = @($library.games)
+    Say "fake GOG at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard an EA app to read, with none installed: a fake at $Root written by `standin make-ea` (made-up
+# games in a registry.json of Uninstall keys, each installed one's folder with its installerdata.xml:
+# crates/source-ea/src/fixture.rs), which the Dashboard reads when started with `--ea $Root`. An EA game starts as its
+# own program, its folder's game.exe, a copy of standin.exe: nothing is registered.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-ea.json in the test's output): games by
+# name, each with source_id (its content id), name, installed, install_dir.
+function Initialize-FakeEa([string] $Root = 'C:\e2e\ea') {
+    $library = New-FakeStore 'make-ea' $Root 'fake-ea.json'
+    $games = @($library.games)
+    Say "fake EA app at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard a Ubisoft Connect to read, with none installed: a fake at $Root written by `standin make-ubisoft`
+# (made-up games in a registry.json of Installs keys and the client's cache, installed and owned:
+# crates/source-ubisoft/src/fixture.rs), which the Dashboard reads when started with `--ubisoft $Root`; and standin.exe
+# registered as this user's uplay:// handler with $Root, the stand-in client, which starts the game a launch link
+# names: its folder's game.exe, a copy of standin.exe.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-ubisoft.json in the test's output): games
+# by name, each with source_id (its uplay_id), name, installed, install_dir.
+function Initialize-FakeUbisoft([string] $Root = 'C:\e2e\ubisoft') {
+    $library = New-FakeStore 'make-ubisoft' $Root 'fake-ubisoft.json'
+    $standin = Join-Path $script:Payload 'standin.exe'
+    $class = 'HKCU:\Software\Classes\uplay'
+    New-Item "$class\shell\open\command" -Force | Out-Null
+    Set-ItemProperty $class '(default)' 'URL:uplay protocol'
+    Set-ItemProperty $class 'URL Protocol' ''
+    Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" uplay-url `"$Root`" `"%1`""
+    $games = @($library.games)
+    Say "fake Ubisoft Connect at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard a Battle.net to read, with none installed: a fake at $Root written by `standin make-battlenet`
+# (made-up games in the agent's product.db and aggregate.json, and a registry.json of Uninstall keys:
+# crates/source-battlenet/src/fixture.rs), which the Dashboard reads when started with `--battlenet $Root`. Its client,
+# $Root\Battle.net.exe, is a copy of standin.exe, the stand-in Battle.net, which starts the game `--exec="launch <code>"`
+# names: its folder's game.exe. Nothing is registered.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-battlenet.json in the test's output):
+# games by name, each with source_id (its product code), name, installed, install_dir.
+function Initialize-FakeBattleNet([string] $Root = 'C:\e2e\battlenet') {
+    $library = New-FakeStore 'make-battlenet' $Root 'fake-battlenet.json'
+    $games = @($library.games)
+    Say "fake Battle.net at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
 # The stand-in games running now: the game.exe processes, each with its Path.
 function Get-StandInGame {
     @(Get-Process game -ErrorAction SilentlyContinue)
@@ -345,39 +445,6 @@ function Test-Suspended([int] $Id) {
     $threads = @($process.Threads)
     if (-not $threads.Count) { return $false }
     -not @($threads | Where-Object { $_.ThreadState -ne 'Wait' -or $_.WaitReason -ne 'Suspended' }).Count
-}
-
-# ------------------------------------------------------------------------------------- EA, Ubisoft and Battle.net
-
-# Gives the Dashboard a fake of another store to read, beside the fake Steam: `standin make-<Store> <Root>`, $Store being
-# ea, ubisoft or battlenet (crates/source-<store>/src/fixture.rs: made-up games, each installed one's game.exe a copy of
-# standin.exe titled with its name). The Dashboard reads it when started with `--<Store> <Root>`, in place of this
-# machine's (which has none). The fake Ubisoft's games start through uplay://, so standin.exe is registered as this
-# user's uplay:// handler for it; the fake Battle.net's client, Battle.net.exe in <Root>, is a copy of standin.exe; an
-# EA game is started by its own game.exe.
-#
-# Returns the Library the Dashboard's own reader read back (also fake-<Store>.json in the test's output): games, each
-# with source_id, name, installed, install_dir.
-function Initialize-FakeStore([string] $Store, [string] $Root) {
-    $standin = Join-Path $script:Payload 'standin.exe'
-    if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
-    $json = Join-Path $script:Out "fake-$Store.json"
-    $made = Start-Process $standin -ArgumentList @("make-$Store", "`"$Root`"", '--json', "`"$json`"") -Wait -PassThru
-    if ($made.ExitCode -ne 0) {
-        $why = Get-Content (Join-Path (Split-Path $Root -Parent) 'standin-error.txt') -Raw -ErrorAction SilentlyContinue
-        throw "standin make-$Store exited with $($made.ExitCode): $why"
-    }
-    if ($Store -eq 'ubisoft') {
-        $class = 'HKCU:\Software\Classes\uplay'
-        New-Item "$class\shell\open\command" -Force | Out-Null
-        Set-ItemProperty $class '(default)' 'URL:uplay protocol'
-        Set-ItemProperty $class 'URL Protocol' ''
-        Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" uplay-url `"$Root`" `"%1`""
-    }
-    $library = Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json
-    $games = @($library.games)
-    Say "fake $Store at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed: $(@($games | ForEach-Object name) -join ', ')"
-    $library
 }
 
 Export-ModuleMember -Function * -Variable Out, Payload, DashboardLog

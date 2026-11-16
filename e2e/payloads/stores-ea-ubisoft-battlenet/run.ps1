@@ -18,9 +18,9 @@ $failures = @()
 # The game of each store to launch, its name's first letter (a key no other is walked to through) and the key that
 # starts that letter's row on the keyboard: Q, A or Z, all three down its first column.
 $stores = @(
-    @{ Store = 'ea'; Name = 'EA app'; Root = 'C:\e2e\ea'; Game = 'Vantage Reef'; Letter = 'V'; Row = 'Z' },
-    @{ Store = 'ubisoft'; Name = 'Ubisoft Connect'; Root = 'C:\e2e\ubisoft'; Game = 'Oxbow Frontier'; Letter = 'X'; Row = 'Z' },
-    @{ Store = 'battlenet'; Name = 'Battle.net'; Root = 'C:\e2e\battlenet'; Game = 'Juniper Vault'; Letter = 'J'; Row = 'A' }
+    @{ Store = 'ea'; Make = 'Initialize-FakeEa'; Name = 'EA app'; Root = 'C:\e2e\ea'; Game = 'Vantage Reef'; Letter = 'V'; Row = 'Z' },
+    @{ Store = 'ubisoft'; Make = 'Initialize-FakeUbisoft'; Name = 'Ubisoft Connect'; Root = 'C:\e2e\ubisoft'; Game = 'Oxbow Frontier'; Letter = 'X'; Row = 'Z' },
+    @{ Store = 'battlenet'; Make = 'Initialize-FakeBattleNet'; Name = 'Battle.net'; Root = 'C:\e2e\battlenet'; Game = 'Juniper Vault'; Letter = 'J'; Row = 'A' }
 )
 $dashboardTitle = 'Xbox Series Dashboard'
 
@@ -97,7 +97,7 @@ try {
     Initialize-FakeSteam | Out-Null
     $arguments = @('--log-focus')
     foreach ($store in $stores) {
-        $library = Initialize-FakeStore $store.Store $store.Root
+        $library = & $store.Make $store.Root
         $store.Games = @($library.games).Count
         $game = @($library.games | Where-Object { $_.name -eq $store.Game }) | Select-Object -First 1
         if (-not $game -or -not $game.installed) { throw "The fake $($store.Store) has no installed $($store.Game)" }
