@@ -11,7 +11,7 @@ use ui::Press;
 /// Recent row and the Play history tile. Focus starts on the profile.
 fn library() -> Library {
     let mut database = library::Database::in_memory().unwrap();
-    database.sync(library::STEAM, &screens::fake_library(), 1_780_000_000).unwrap();
+    database.sync("steam", &screens::fake_library(), 1_780_000_000).unwrap();
     for filter in database.filters().unwrap() {
         let shown = matches!(filter.key.as_deref(), Some("installed" | "most-played"));
         database.set_filter_shown(filter.id, shown).unwrap();

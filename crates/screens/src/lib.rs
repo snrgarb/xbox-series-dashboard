@@ -230,7 +230,7 @@ impl Dashboard {
     pub fn set_library(&mut self, library: Library) {
         let place = |at: usize| {
             let game = self.library.games.get(at)?;
-            library.games.iter().position(|g| (g.id, g.appid) == (game.id, game.appid))
+            library.games.iter().position(|g| g.is(&game.key()))
         };
         // Only a Recent tile follows its game: a Group's card keeps its place in the Group, whatever is there now.
         let on_row = matches!(self.home.focus(), home::Focus::Recent(_));
@@ -1456,7 +1456,7 @@ pub fn fake_library() -> Library {
     ];
     let games = games.iter().enumerate().map(|(i, &(name, playtime_minutes, installed))| model::Game {
         id: 0,
-        appid: 1000 + i as u32,
+        source_id: (1000 + i).to_string(),
         name: name.to_string(),
         last_played: if playtime_minutes > 0 { 1_790_000_000 - i as u64 * 86_400 } else { 0 },
         playtime_minutes,
@@ -1485,7 +1485,7 @@ mod tests {
         let mut dashboard = Dashboard::new(fake_library());
         press(&mut dashboard, &[Button::Down, Button::Right, Button::Right]);
         dashboard.launch_started(4);
-        let (focused, playing) = (dashboard.library().games[2].appid, dashboard.library().games[4].appid);
+        let (focused, playing) = (dashboard.library().games[2].key(), dashboard.library().games[4].key());
 
         // The focused game has been played since: it is the Recent row's first now.
         let mut next = fake_library();
@@ -1496,8 +1496,8 @@ mod tests {
         dashboard.set_library(next);
 
         assert_eq!(dashboard.home_focus(), Focus::Recent(0));
-        assert_eq!(dashboard.focused_game().map(|g| dashboard.library().games[g].appid), Some(focused));
-        assert_eq!(dashboard.playing().map(|g| dashboard.library().games[g].appid), Some(playing));
+        assert_eq!(dashboard.focused_game().map(|g| dashboard.library().games[g].key()), Some(focused));
+        assert_eq!(dashboard.playing().map(|g| dashboard.library().games[g].key()), Some(playing));
         assert_eq!(dashboard.user, "Someone Else");
     }
 

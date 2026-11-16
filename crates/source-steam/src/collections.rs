@@ -79,7 +79,8 @@ pub fn parse(text: &str) -> Result<Collections> {
                 let mut appids: Vec<u32> = appids().collect();
                 appids.sort_unstable();
                 appids.dedup();
-                out.collections.push(Collection { source_id: id.to_string(), name: name.to_string(), appids });
+                let games = appids.iter().map(u32::to_string).collect();
+                out.collections.push(Collection { source_id: id.to_string(), name: name.to_string(), games });
             }
         }
     }
@@ -122,8 +123,8 @@ mod tests {
         let read = parse(&file).unwrap();
         let names: Vec<_> = read.collections.iter().map(|c| (c.source_id.as_str(), c.name.as_str())).collect();
         assert_eq!(names, [("uc-Aa11", "couch co-op"), ("uc-Bb22", "Rainy days")]);
-        assert_eq!(read.collections[0].appids, [20]);
-        assert_eq!(read.collections[1].appids, [10, 30]);
+        assert_eq!(read.collections[0].games, ["20"]);
+        assert_eq!(read.collections[1].games, ["10", "30"]);
         assert_eq!(read.favourites, HashSet::from([10]));
         assert_eq!(read.hidden, HashSet::from([40]));
     }
@@ -143,7 +144,7 @@ mod tests {
         let read = parse(&file).unwrap();
         assert_eq!(
             read.collections,
-            [Collection { source_id: "uc-Bare".into(), name: "As an object".into(), appids: vec![5] }]
+            [Collection { source_id: "uc-Bare".into(), name: "As an object".into(), games: vec!["5".into()] }]
         );
     }
 

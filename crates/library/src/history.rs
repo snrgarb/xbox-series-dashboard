@@ -76,7 +76,8 @@ pub(crate) fn rows(conn: &Connection, now: u64) -> Result<Vec<HistoryRow>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Database, STEAM};
+    use crate::tests::STEAM;
+    use crate::Database;
     use model::{Game, Library};
 
     fn date(year: i32, month: u32, day: u32) -> NaiveDate {
@@ -119,7 +120,8 @@ mod tests {
     }
 
     fn game(appid: u32, name: &str, last_played: u64) -> Game {
-        Game { appid, name: name.into(), last_played, installed: appid.is_multiple_of(2), ..Game::default() }
+        let installed = appid.is_multiple_of(2);
+        Game { source_id: appid.to_string(), name: name.into(), last_played, installed, ..Game::default() }
     }
 
     #[test]

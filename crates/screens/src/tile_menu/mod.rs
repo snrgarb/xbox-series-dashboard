@@ -11,7 +11,7 @@
 //! has, the three levels and where B goes from each, the dim, and how the panels come and go.
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use model::{Game, Library};
+use model::{Game, GameKey, Library};
 use ui::{Ease, Press, Ui};
 
 use crate::menu_panel::{self, icon, Answer, MenuPanel, Row, DIM, FLY};
@@ -25,9 +25,6 @@ const FLYOUT_SECONDS: f32 = 0.12;
 /// The menu behind its flyout, as one picture.
 const BEHIND: f32 = 0.45;
 
-/// The source whose games the Dashboard can ask to be installed and uninstalled.
-const STEAM: &str = "steam";
-
 /// What the menu was opened from, which decides two of its rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Opener {
@@ -40,10 +37,10 @@ pub enum Opener {
 }
 
 /// How the menu is opened: for which game, and from where.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// The game's id in the library database and its id in its store: a made-up library's games all have id 0.
-    game: (i64, u32),
+    /// The game's id in the library database and its store and id there: a made-up library's games all have id 0.
+    game: GameKey,
     opener: Opener,
 }
 
@@ -55,7 +52,7 @@ pub fn open(game: &Game, opener: Opener) -> PageAction {
 
 /// The same for whoever opens pages itself: Home, through `HomeAction::Open`.
 pub fn entry(game: &Game, opener: Opener) -> Open {
-    Open::TileMenu(Entry { game: (game.id, game.appid), opener })
+    Open::TileMenu(Entry { game: game.key(), opener })
 }
 
 /// The Game hub of a game, which Manage game opens in the menu's place, over whatever the menu was over.
@@ -130,10 +127,10 @@ fn rows(game: &Game, running: bool, opener: Opener) -> Vec<Row<Choice>> {
     rows
 }
 
-/// Whether the game's store can be asked to uninstall it: Steam's can. A game from no store (one added by hand,
-/// when there are such) has no Uninstall row.
+/// Whether the game's store can be asked to uninstall it: any store's can, its source giving the address. A game
+/// from no store (a made-up one) has no Uninstall row.
 fn has_uninstaller(game: &Game) -> bool {
-    game.source == STEAM
+    !game.source.is_empty()
 }
 
 /// The flyout's rows (section 4): what is left of the Bundle's once Playnite's own are gone (section 13).
@@ -146,22 +143,22 @@ fn more_rows(game: &Game) -> Vec<Row<More>> {
 }
 
 /// The game with this key, hidden or not, and whether it is among the hidden.
-fn find(library: &Library, key: (i64, u32)) -> Option<Game> {
-    let is = |game: &&Game| (game.id, game.appid) == key;
+fn find(library: &Library, key: &GameKey) -> Option<Game> {
+    let is = |game: &&Game| game.is(key);
     let hidden = library.hidden.iter().find(is).map(|game| Game { hidden: true, ..game.clone() });
     library.games.iter().find(is).cloned().or(hidden)
 }
 
 /// The game's place among the library's games, which is how a launch names it. A hidden game has none.
-fn place(library: &Library, key: (i64, u32)) -> Option<usize> {
-    library.games.iter().position(|game| (game.id, game.appid) == key)
+fn place(library: &Library, key: &GameKey) -> Option<usize> {
+    library.games.iter().position(|game| game.is(key))
 }
 
 /// Each menu has animated values of its own, so one opened as another flies out starts from its own start.
 static MENUS: AtomicU32 = AtomicU32::new(0);
 
 pub struct TileMenu {
-    game: (i64, u32),
+    game: GameKey,
     name: String,
     menu: MenuPanel<Choice>,
     /// More options, over the menu.
@@ -178,8 +175,8 @@ pub struct TileMenu {
 impl TileMenu {
     /// The menu for the game as the library has it now. None for a game that is not in it.
     pub fn open(entry: Entry, around: Around) -> Option<Self> {
-        let game = find(around.library, entry.game)?;
-        let running = around.playing.is_some() && around.playing == place(around.library, entry.game);
+        let game = find(around.library, &entry.game)?;
+        let running = around.playing.is_some() && around.playing == place(around.library, &entry.game);
         Some(Self {
             game: entry.game,
             menu: MenuPanel::menu(&game.name, rows(&game, running, entry.opener)),
@@ -194,8 +191,8 @@ impl TileMenu {
 
     /// A on a row of the menu.
     fn chose(&mut self, choice: Choice, around: Around) -> Option<PageAction> {
-        let game = find(around.library, self.game);
-        let place = place(around.library, self.game);
+        let game = find(around.library, &self.game);
+        let place = place(around.library, &self.game);
         // Every row but Uninstall and More options closes the menu first and then acts. What a row would do is
         // looked at again as it is chosen: one that no longer applies does nothing, and the menu closes all the
         // same (section 3.3).
@@ -205,7 +202,7 @@ impl TileMenu {
             Choice::Play => then(place.filter(|_| around.playing.is_none()).map(Effect::Launch)),
             Choice::Quit => then((around.playing.is_some() && around.playing == place).then_some(Effect::QuitGame)),
             Choice::Install => Some(game.as_ref().map_or(PageAction::Close, install)),
-            Choice::Favourite(on) => then(Some(Effect::Favourite { game: self.game.0, on })),
+            Choice::Favourite(on) => then(Some(Effect::Favourite { game: self.game.id, on })),
             Choice::Manage => Some(game.as_ref().and_then(game_hub).map_or(PageAction::Close, PageAction::Replace)),
             Choice::Uninstall => {
                 let answers = vec![
@@ -290,7 +287,7 @@ impl Page for TileMenu {
         if let Some(flyout) = &mut self.flyout {
             return match flyout.press(press) {
                 // The whole menu closes, then the game is hidden or shown again.
-                Answer::Chose(More::Hide(on)) => Some(PageAction::CloseWith(Effect::Hidden { game: self.game.0, on })),
+                Answer::Chose(More::Hide(on)) => Some(PageAction::CloseWith(Effect::Hidden { game: self.game.id, on })),
                 Answer::Declined => {
                     self.flyout = None;
                     None
@@ -301,7 +298,7 @@ impl Page for TileMenu {
         if let Some(prompt) = &mut self.prompt {
             return match prompt.press(press) {
                 Answer::Chose(Confirm::Uninstall) => {
-                    let game = find(around.library, self.game).filter(|game| game.installed && game.id != 0);
+                    let game = find(around.library, &self.game).filter(|game| game.installed && game.id != 0);
                     Some(game.map_or(PageAction::Close, |game| PageAction::CloseWith(Effect::Uninstall(game.id))))
                 }
                 // Back to the menu, which flies up again as the question did.
@@ -365,8 +362,8 @@ mod tests {
     fn game() -> Game {
         Game {
             id: 7,
-            appid: 440,
-            source: STEAM.into(),
+            source: "steam".into(),
+            source_id: "440".into(),
             name: "Halo Infinite".into(),
             installed: true,
             ..Game::default()
@@ -436,14 +433,17 @@ mod tests {
 
     #[test]
     fn a_game_is_found_among_the_hidden_too_and_only_a_shown_one_has_a_place() {
-        let other = Game { id: 8, appid: 441, ..game() };
+        let other = Game { id: 8, source_id: "441".into(), ..game() };
         let library = Library { games: vec![other.clone()], hidden: vec![game()], ..Library::default() };
-        assert!(find(&library, (7, 440)).is_some_and(|game| game.hidden));
-        assert!(find(&library, (8, 441)).is_some_and(|game| !game.hidden));
-        assert_eq!((place(&library, (8, 441)), place(&library, (7, 440))), (Some(0), None));
-        assert!(find(&library, (9, 442)).is_none());
+        assert!(find(&library, &game().key()).is_some_and(|game| game.hidden));
+        assert!(find(&library, &other.key()).is_some_and(|game| !game.hidden));
+        assert_eq!((place(&library, &other.key()), place(&library, &game().key())), (Some(0), None));
+        let absent = Game { id: 9, source_id: "442".into(), ..game() }.key();
+        assert!(find(&library, &absent).is_none());
+        // The same store's id from another store is another game.
+        assert!(find(&library, &Game { source: "gog".into(), ..other.clone() }.key()).is_none());
         let around =
             Around { library: &library, playing: None, options: Default::default(), now: std::time::Instant::now() };
-        assert!(TileMenu::open(Entry { game: (9, 442), opener: Opener::Home }, around).is_none());
+        assert!(TileMenu::open(Entry { game: absent, opener: Opener::Home }, around).is_none());
     }
 }

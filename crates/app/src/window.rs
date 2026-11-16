@@ -140,7 +140,7 @@ struct App {
     log_focus: bool,
     /// What turns the machine off, restarts it and puts it to sleep: for real, or with --dry-power in the log only.
     power: Box<dyn Power>,
-    /// What opens a store's address for a game: Steam's, to install or uninstall it.
+    /// What opens a store's address for a game, to install or uninstall it.
     addresses: Box<dyn Addresses>,
     /// The system's sound, which the Guide's Audio Flyout shows and changes.
     audio: Box<dyn AudioControl>,
@@ -210,7 +210,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
     }
-    if let Some(page) = args.page {
+    if let Some(page) = args.page.clone() {
         dashboard.open_page(page);
     }
     // Where --focus put focus is where the Dashboard starts: nothing is heard of getting there.
@@ -398,7 +398,7 @@ impl App {
         self.toast_store.wake().map(Duration::from_secs_f32)
     }
 
-    /// Starts a game through Steam, the Dashboard showing its Launch screen.
+    /// Starts a game through its source, the Dashboard showing its Launch screen.
     fn launch(&mut self, game: usize) {
         if self.launch.is_some() {
             return;
@@ -410,8 +410,12 @@ impl App {
             eprintln!("launch: {} isn't installed", found.name);
             return;
         };
+        let Some(source) = crate::sources::of(self.store.sources(), found) else {
+            eprintln!("launch: {} is from no source the Dashboard has", found.name);
+            return;
+        };
         let home = window_handle(&state.window);
-        if let Some(launch) = Launch::start(found.appid, &found.name, dir, home, self.overlay.is_some()) {
+        if let Some(launch) = Launch::start(found, source.clone(), dir, home, self.overlay.is_some()) {
             self.launch = Some(launch);
             self.dashboard.launch_started(game);
         }
@@ -631,10 +635,12 @@ impl App {
                     self.show(changed);
                 }
                 Effect::Install(game) => {
-                    crate::games::ask_store(self.dashboard.library(), game, Ask::Install, &mut *self.addresses);
+                    let (library, sources) = (self.dashboard.library(), self.store.sources());
+                    crate::games::ask_store(library, sources, game, Ask::Install, &mut *self.addresses);
                 }
                 Effect::Uninstall(game) => {
-                    crate::games::ask_store(self.dashboard.library(), game, Ask::Uninstall, &mut *self.addresses);
+                    let (library, sources) = (self.dashboard.library(), self.store.sources());
+                    crate::games::ask_store(library, sources, game, Ask::Uninstall, &mut *self.addresses);
                 }
             }
         }
@@ -1029,7 +1035,7 @@ impl ApplicationHandler for App {
                     if self.log_focus {
                         self.log_groups();
                     }
-                    // Steam is read once the first frame is out, and wakes the window if it has news.
+                    // The sources are read once the first frame is out, and wake the window if they have news.
                     let proxy = self.proxy.clone();
                     self.store.sync_in_background(self.dashboard.library(), move || {
                         let _ = proxy.send_event(());

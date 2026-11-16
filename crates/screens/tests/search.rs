@@ -66,7 +66,7 @@ const HIDDEN: &str = "Harrow Moor";
 /// The games as the library database has them, all added at the same moment, the hidden one hidden.
 fn library() -> Library {
     let games = GAMES.iter().enumerate().map(|(i, &(name, played, cover))| Game {
-        appid: 3000 + i as u32,
+        source_id: (3000 + i).to_string(),
         name: name.into(),
         last_played: if played { 1_790_000_000 - i as u64 * 86_400 } else { 0 },
         playtime_minutes: if played { 60 } else { 0 },
@@ -76,7 +76,7 @@ fn library() -> Library {
     });
     let found = Library { user: Some("Player One".into()), games: games.collect(), ..Library::default() };
     let mut database = library::Database::in_memory().unwrap();
-    database.sync(library::STEAM, &found, 1_780_000_000).unwrap();
+    database.sync("steam", &found, 1_780_000_000).unwrap();
     let hidden = database.snapshot().unwrap().games.into_iter().find(|game| game.name == HIDDEN).unwrap();
     database.set_hidden(hidden.id, true).unwrap();
     database.snapshot().unwrap()

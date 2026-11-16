@@ -16,7 +16,7 @@ mod text;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use model::{Game, Library};
+use model::{Game, GameKey, Library};
 use ui::{Button, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
 use self::actions::{Action, Main};
@@ -37,28 +37,27 @@ const FACTS: TextStyle = TextStyle::new(Font::Ui, 20.0, 400).color(TEXT_DIM);
 /// The facts' line is 6 under the title's and 48 tall, whatever is in it.
 const FACTS_HEIGHT: f32 = 48.0;
 
-/// The game a hub is opened for: its row in the library database, and its number at its store. (A library that is
-/// in no database has no rows, and tells its games apart by the second.)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The game a hub is opened for: its row in the library database, and its store and its id there. (A library that
+/// is in no database has no rows, and tells its games apart by the second.)
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    pub id: i64,
-    pub appid: u32,
+    pub game: GameKey,
     /// Whether it was installed then: what the main action is until the page first hears of the library.
     pub installed: bool,
 }
 
 impl Entry {
     pub fn of(game: &Game) -> Self {
-        Self { id: game.id, appid: game.appid, installed: game.installed }
+        Self { game: game.key(), installed: game.installed }
     }
 
-    pub fn in_library(self, library: &Library) -> bool {
+    pub fn in_library(&self, library: &Library) -> bool {
         self.find(library).is_some()
     }
 
     /// The game, and its place in the library's games, which a hidden game has none in.
-    fn find(self, library: &Library) -> Option<(&Game, Option<usize>)> {
-        let is = |game: &Game| (game.id, game.appid) == (self.id, self.appid);
+    fn find<'a>(&self, library: &'a Library) -> Option<(&'a Game, Option<usize>)> {
+        let is = |game: &Game| game.is(&self.game);
         match library.games.iter().position(is) {
             Some(place) => Some((&library.games[place], Some(place))),
             None => library.hidden.iter().find(|game| is(game)).map(|game| (game, None)),
@@ -110,10 +109,10 @@ impl GameHub {
     pub fn open(entry: Entry) -> Self {
         static SERIAL: AtomicU64 = AtomicU64::new(0);
         Self {
+            main: if entry.installed { Main::Play } else { Main::Install },
             entry,
             view: View::Hub,
             focus: Focus::Action(Action::Main),
-            main: if entry.installed { Main::Play } else { Main::Install },
             toggle_width: 269.0,
             serial: SERIAL.fetch_add(1, Ordering::Relaxed),
         }
@@ -177,7 +176,7 @@ impl Page for GameHub {
         "GameHub"
     }
 
-    /// The game by its number at its store, the page, and what has focus, the main action by what it is now:
+    /// The game by its id at its store, the page, and what has focus, the main action by what it is now:
     /// `9100010 Hub Play`, `9100010 Details Toggle`, `9100050 Hub Install`, `9100010 Hub Cover`.
     fn focus(&self) -> String {
         let at = match self.focus {
@@ -185,7 +184,7 @@ impl Page for GameHub {
             Focus::Action(action) => format!("{action:?}"),
             Focus::Card(card) => format!("{card:?}"),
         };
-        format!("{} {:?} {at}", self.entry.appid, self.view)
+        format!("{} {:?} {at}", self.entry.game.source_id, self.view)
     }
 
     fn press(&mut self, press: Press, around: Around) -> Option<PageAction> {
@@ -264,7 +263,7 @@ mod tests {
 
     fn library() -> Library {
         let game = |appid: u32, installed: bool, playtime_minutes: u32| Game {
-            appid,
+            source_id: appid.to_string(),
             name: format!("Game {appid}"),
             installed,
             playtime_minutes,
@@ -287,7 +286,8 @@ mod tests {
     impl Hub {
         fn open(appid: u32) -> Self {
             let library = library();
-            let game = library.games.iter().chain(&library.hidden).find(|game| game.appid == appid).unwrap();
+            let game =
+                library.games.iter().chain(&library.hidden).find(|game| game.source_id == appid.to_string()).unwrap();
             Self { hub: GameHub::open(Entry::of(game)), library, playing: None }
         }
 

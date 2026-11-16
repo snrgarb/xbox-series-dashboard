@@ -20,7 +20,7 @@ use ui::{Host, PadEvent, Press};
 /// A library as the library database gives it once `seed` has had its say, its games Steam's.
 fn library_seeded(library: Library, seed: impl FnOnce(&mut library::Database, &[Game])) -> Library {
     let mut database = library::Database::in_memory().unwrap();
-    database.sync(library::STEAM, &library, 1_780_000_000).unwrap();
+    database.sync("steam", &library, 1_780_000_000).unwrap();
     let games = database.snapshot().unwrap().games;
     seed(&mut database, &games);
     database.snapshot().unwrap()
@@ -138,7 +138,8 @@ fn menu_opens_nothing_where_there_is_no_game() {
 #[test]
 fn the_menu_opens_with_one_call_for_any_game_and_not_for_one_that_has_left_the_library() {
     let library = library();
-    let (game, gone) = (library.games[11].clone(), Game { id: 999, appid: 999, ..library.games[0].clone() });
+    let (game, gone) =
+        (library.games[11].clone(), Game { id: 999, source_id: "999".into(), ..library.games[0].clone() });
     let mut home = on_tile(library, 0);
     // From the Game hub there is no Manage game row: the first row, then Favourites, then Customise.
     home.open_page(tile_menu::entry(&game, Opener::GameHub));

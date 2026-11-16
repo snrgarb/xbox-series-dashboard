@@ -24,7 +24,7 @@ const ADDED: u64 = 1_780_000_000;
 /// A library database in memory with the fake library in it: where the settings are kept.
 fn database() -> library::Database {
     let mut database = library::Database::in_memory().unwrap();
-    database.sync(library::STEAM, &screens::fake_library(), ADDED).unwrap();
+    database.sync("steam", &screens::fake_library(), ADDED).unwrap();
     database
 }
 
@@ -321,7 +321,7 @@ fn library_with_plain_art() -> Library {
         library.games[game].hero = Some(path);
     }
     let mut database = library::Database::in_memory().unwrap();
-    database.sync(library::STEAM, &library, ADDED).unwrap();
+    database.sync("steam", &library, ADDED).unwrap();
     database.snapshot().unwrap()
 }
 

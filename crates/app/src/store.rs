@@ -1,16 +1,19 @@
 //! Where the Library the Dashboard shows comes from, and where what happens to it goes: the library database, with
-//! Steam read into it.
+//! every source (`crate::sources`) read into it.
 //!
-//! When the database has games the first frame is drawn from it, and Steam is read on a thread of its own once that
-//! frame is out; if that changes anything the window is woken and takes a new snapshot. With an empty database (a
-//! first run) or no window to wake (`--screenshot`), Steam is read before anything is drawn.
-use std::path::{Path, PathBuf};
+//! When the database has games the first frame is drawn from it, and the sources are read on a thread of their own
+//! once that frame is out; if that changes anything the window is woken and takes a new snapshot. With an empty
+//! database (a first run) or no window to wake (`--screenshot`), they are read before anything is drawn.
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
+use library::sources::Read;
 use library::Database;
-use model::{FilterChange, Game, Library};
+use model::{FilterChange, Game, Library, Source};
 use screens::settings::{Change, Options, Setting};
 
 use crate::{fail, Args};
@@ -20,8 +23,10 @@ pub struct Store {
     database: Option<Database>,
     /// The database's file, which the thread that syncs opens for itself.
     path: PathBuf,
-    /// The Steam install still to be read, when the Library on screen came from the database.
-    steam: Option<PathBuf>,
+    /// Every source, in order.
+    sources: Vec<Arc<dyn Source>>,
+    /// The sources are still to be read, the Library on screen having come from the database.
+    pending: bool,
     /// Hears from the thread that syncs when it has changed the database.
     synced: Option<Receiver<()>>,
     /// A game is running, and `game_booted` has been told so.
@@ -30,24 +35,28 @@ pub struct Store {
     session: Option<i64>,
 }
 
-/// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from `--steam`'s
-/// install or the one the registry names; else, with no database and no Steam, the built-in fake one.
+/// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from every source
+/// (Steam's from `--steam`'s install or the one the registry names); else, with no database and no source
+/// installed, the built-in fake one. A source that can't be read is passed over; but with nothing else to show
+/// the Dashboard does not start, and says why.
 ///
-/// `--screenshot` uses a database only where `--data-dir` names one: drawing a picture leaves nothing behind.
+/// `--screenshot` uses a database only where `--data-dir` names one: drawing a picture leaves nothing behind, and
+/// what the sources say goes to a database in memory.
 ///
 /// A Library that came from no database has its filters, which are Home's Groups, worked out by one in memory.
 pub fn open(args: &Args) -> (Library, Store) {
+    let sources = crate::sources::all(args);
     if let Some(path) = &args.library {
         let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
         let library = serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
         let (library, database) = with_filters(library);
-        return (library, Store { database, ..Store::default() });
+        return (library, Store { database, sources, ..Store::default() });
     }
     let window = args.screenshot.is_none();
     let dir = args.data_dir.clone().or_else(|| if window { library::data_dir() } else { None });
     let path = dir.map(|dir| dir.join(library::FILE));
     let started = Instant::now();
-    // Without a database the Dashboard still runs, on what Steam says now.
+    // Without a database the Dashboard still runs, on what the sources say now.
     let mut database = path
         .as_ref()
         .and_then(|path| Database::open(path).map_err(|e| eprintln!("library: {}: {e:#}", path.display())).ok());
@@ -57,49 +66,78 @@ pub fn open(args: &Args) -> (Library, Store) {
         eprintln!("library: {} games from the database in {ms} ms", library.games.len());
     }
 
-    let steam = args.steam.clone().or_else(source_steam::find_steam_root);
-    let mut later = None;
-    let library = match (stored, steam) {
-        (Some(library), Some(root)) if window => {
-            later = Some(root);
+    let mut pending = false;
+    let library = match stored {
+        Some(library) if window => {
+            pending = true;
             library
         }
-        (stored, Some(root)) => match (read_steam(&root), stored) {
-            (Ok(found), _) => match database.as_mut().map(|db| sync(db, &found)) {
-                Some(Ok(library)) => library,
-                Some(Err(e)) => {
-                    eprintln!("library: {e:#}");
-                    found
+        stored => {
+            let read = library::sources::read(&sources);
+            match (read.found.is_empty(), stored, read.failed.first()) {
+                (true, Some(library), _) => library,
+                (true, None, Some((_, e))) => fail(&format!("{e:#}")),
+                (true, None, None) => screens::fake_library(),
+                (false, _, _) => {
+                    // With no file to keep it in, the library is kept in memory for as long as the Dashboard runs.
+                    if database.is_none() {
+                        database = Database::in_memory().map_err(|e| eprintln!("library: {e:#}")).ok();
+                    }
+                    match database.as_mut().map(|db| sync(db, &read)) {
+                        Some(Ok(library)) => library,
+                        Some(Err(e)) => {
+                            eprintln!("library: {e:#}");
+                            merged(read)
+                        }
+                        None => merged(read),
+                    }
                 }
-                None => found,
-            },
-            (Err(e), Some(library)) => {
-                eprintln!("steam: {}: {e:#}", root.display());
-                library
             }
-            (Err(e), None) => fail(&format!("{}: {e}", root.display())),
-        },
-        (Some(library), None) => library,
-        (None, None) => screens::fake_library(),
+        }
     };
     // The marks the user makes (a favourite, a hidden game) go to the database the Library on screen came from.
     let (library, memory) = with_filters(library);
     let database = memory.or(database);
-    (library, Store { database, path: path.unwrap_or_default(), steam: later, ..Store::default() })
+    (library, Store { database, path: path.unwrap_or_default(), sources, pending, ..Store::default() })
 }
 
-/// The Library with the saved filters and their games, if it has none: one read from a file, the fake one, or
-/// Steam's with no database to keep it in. A database in memory takes it in as Steam's and gives its snapshot, so
-/// the built-in filters and Steam's collections are there as they would be from the real one. Its games are given
-/// ids, which last as long as that database, which is given too: what the user marks while the Dashboard runs
-/// (a favourite, a hidden game) is kept there, and gone with it.
+/// What the sources read, put together with no database: every game of each in one Library.
+fn merged(read: Read) -> Library {
+    let mut library = Library::default();
+    for (_, found) in read.found {
+        library.user = library.user.or(found.user);
+        library.games.extend(found.games);
+    }
+    library
+}
+
+/// The Library with the saved filters and their games, if it has none: one read from a file, the fake one, or the
+/// sources' with no database to keep them in. A database in memory takes each game in as its source's and gives
+/// its snapshot, so the built-in filters and the stores' collections are there as they would be from the real one.
+/// A made-up game, of no source, is taken in as Steam's, whose mark the screens give it; the user and the
+/// collections go with the first source's games. Its games are given ids, which last as long as that database,
+/// which is given too: what the user marks while the Dashboard runs (a favourite, a hidden game) is kept there, and
+/// gone with it.
 fn with_filters(library: Library) -> (Library, Option<Database>) {
     if !library.filters.is_empty() {
         return (library, None);
     }
     let through = || -> Result<(Library, Option<Database>)> {
         let mut database = Database::in_memory()?;
-        database.sync(library::STEAM, &library, library::now())?;
+        let key =
+            |game: &Game| if game.source.is_empty() { source_steam::SOURCE.to_string() } else { game.source.clone() };
+        let first = library.games.first().map_or(source_steam::SOURCE.to_string(), key);
+        let mut by_source: BTreeMap<String, Library> = BTreeMap::new();
+        by_source.insert(
+            first,
+            Library { user: library.user.clone(), collections: library.collections.clone(), ..Library::default() },
+        );
+        for game in &library.games {
+            by_source.entry(key(game)).or_default().games.push(game.clone());
+        }
+        for (source, games) in &by_source {
+            database.sync(source, games, library::now())?;
+        }
         Ok((database.snapshot()?, Some(database)))
     };
     through().unwrap_or_else(|e| {
@@ -108,42 +146,44 @@ fn with_filters(library: Library) -> (Library, Option<Database>) {
     })
 }
 
-fn read_steam(root: &Path) -> Result<Library> {
+/// Merges what the sources were read as into the database; gives the snapshot after.
+fn sync(database: &mut Database, read: &Read) -> Result<Library> {
     let started = Instant::now();
-    let library = source_steam::load(root)?;
-    let ms = started.elapsed().as_millis();
-    eprintln!("steam: {} games from {} in {ms} ms", library.games.len(), root.display());
-    Ok(library)
-}
-
-/// Merges what Steam was read as into the database; gives the snapshot after.
-fn sync(database: &mut Database, found: &Library) -> Result<Library> {
-    let started = Instant::now();
-    let synced = database.sync(library::STEAM, found, library::now())?;
+    let synced = database.sync_all(read, library::now())?;
     let ms = started.elapsed().as_millis();
     eprintln!("library: {} added, {} updated, {} gone, in {ms} ms", synced.added, synced.updated, synced.gone);
     database.snapshot()
 }
 
 impl Store {
-    /// Reads Steam into the database on a thread of its own, if that is still to do. `shown` is the Library on
-    /// screen; `wake` is called if the database ends up saying something else.
+    /// Reads the sources into the database on a thread of its own, if that is still to do. `shown` is the Library
+    /// on screen; `wake` is called if the database ends up saying something else.
     pub fn sync_in_background(&mut self, shown: &Library, wake: impl FnOnce() + Send + 'static) {
-        let Some(root) = self.steam.take() else { return };
-        let (path, shown) = (self.path.clone(), shown.clone());
+        if !std::mem::take(&mut self.pending) {
+            return;
+        }
+        let (path, shown, sources) = (self.path.clone(), shown.clone(), self.sources.clone());
         let (changed, synced) = mpsc::channel();
         self.synced = Some(synced);
         std::thread::spawn(move || {
-            let synced = read_steam(&root).and_then(|found| sync(&mut Database::open(&path)?, &found));
-            match synced {
+            let read = library::sources::read(&sources);
+            if read.found.is_empty() {
+                return;
+            }
+            match Database::open(&path).and_then(|mut database| sync(&mut database, &read)) {
                 Ok(library) if library != shown => {
                     let _ = changed.send(());
                     wake();
                 }
                 Ok(_) => {}
-                Err(e) => eprintln!("library: {}: {e:#}", root.display()),
+                Err(e) => eprintln!("library: {}: {e:#}", path.display()),
             }
         });
+    }
+
+    /// Every source, in order: what a game is started and asked of its store through.
+    pub fn sources(&self) -> &[Arc<dyn Source>] {
+        &self.sources
     }
 
     /// The new snapshot, once, if the background sync changed the database.

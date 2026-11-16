@@ -138,7 +138,7 @@ try {
     # tap would play at once, but two presses 300 ms apart are not something a VM this slow can be trusted to make:
     # that is the game-hub test's to try.) Then A on Play: the Launch screen, then the game.
     Push-Button A
-    $hub = Wait-DashboardLog "^focus: GameHub: $($game.appid) Hub Play`$" 10
+    $hub = Wait-DashboardLog "^focus: GameHub: $($game.source_id) Hub Play`$" 10
     Say "after A: $(if ($hub) { $hub } else { "no hub: $((Get-DashboardLog | Where-Object { $_ -match '^focus: ' } | Select-Object -Last 1))" })"
     if (-not $hub) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     Start-Sleep -Milliseconds 1500
@@ -150,7 +150,7 @@ try {
     Say "select sound: $(if ($selected) { $selected } else { 'none' })"
     if (-not $selected) { $failures += 'A played no select sound' }
     if (-not $up) { throw "A did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
-    if ($up -notmatch [regex]::Escape("launch: $($game.name) ($($game.appid))")) { $failures += "launched something other than $($game.name): $up" }
+    if ($up -notmatch [regex]::Escape("launch: $($game.name) ($($game.source_id))")) { $failures += "launched something other than $($game.name): $up" }
     # On screen: at every point neither Home nor the game, within the time the launcher alone gives it.
     $covered = Wait-Until { -not @(Find-NoLaunchScreen).Count } ($splashMs / 1000)
     Start-Sleep -Milliseconds 700  # its fade in, the rest of the way

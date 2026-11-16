@@ -34,10 +34,10 @@ pub const FULL_LIBRARY_CUT: f32 = 326.0;
 const FULL_LIBRARY_PADDING: f32 = 24.0;
 
 /// What tells one game from another across snapshots of the library, with or without a database's ids.
-pub type Key = (i64, u32);
+pub type Key = model::GameKey;
 
 pub fn key(game: &Game) -> Key {
-    (game.id, game.appid)
+    game.key()
 }
 
 /// What a direction did.
@@ -102,8 +102,8 @@ impl Grid {
             self.forget();
             return false;
         }
-        if let Some(was) = self.key.filter(|&was| games.get(self.focus).map(|game| key(game)) != Some(was)) {
-            self.focus = games.iter().position(|game| key(game) == was).unwrap_or(0);
+        if let Some(was) = self.key.take().filter(|was| !games.get(self.focus).is_some_and(|game| game.is(was))) {
+            self.focus = games.iter().position(|game| game.is(&was)).unwrap_or(0);
         }
         self.focus = self.focus.min(games.len() - 1);
         self.key = Some(key(games[self.focus]));
@@ -181,7 +181,7 @@ impl Grid {
         let id = self.id;
         let face = |ui: &mut Ui, index: usize, focused: bool| {
             let game = games[index];
-            let tile = Tile { game, focused, running: running == Some(key(game)) };
+            let tile = Tile { game, focused, running: running.as_ref().is_some_and(|running| game.is(running)) };
             tile::draw(ui, self.rect(index, scroll), (id, key(game)), &tile);
         };
         // The rows that show any of themselves, the one going out at the top as the grid slides included.
@@ -204,7 +204,7 @@ mod tests {
     use super::*;
 
     fn games(count: usize) -> Vec<Game> {
-        (0..count).map(|i| Game { id: i as i64 + 1, appid: 100 + i as u32, ..Game::default() }).collect()
+        (0..count).map(|i| Game { id: i as i64 + 1, source_id: (100 + i).to_string(), ..Game::default() }).collect()
     }
 
     fn walk(grid: &mut Grid, games: &[&Game], buttons: &[Button]) -> Step {

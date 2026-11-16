@@ -140,7 +140,7 @@ mod tests {
 
     fn library_of(names: &[&str]) -> Library {
         let games = names.iter().enumerate().map(|(i, name)| Game {
-            appid: i as u32 + 1,
+            source_id: (i + 1).to_string(),
             name: name.to_string(),
             ..Game::default()
         });

@@ -81,7 +81,7 @@ const GAMES: [(&str, Option<u64>, bool); 22] = [
 /// Those games as a source reads them, every second of the first twelve with a cover.
 fn source() -> Library {
     let games = GAMES.iter().enumerate().map(|(i, &(name, played, installed))| Game {
-        appid: 2000 + i as u32,
+        source_id: (2000 + i).to_string(),
         name: name.into(),
         last_played: played.map_or(0, |days| now() - 3600 - days * DAY),
         playtime_minutes: if played.is_some() { 120 } else { 0 },
@@ -97,7 +97,7 @@ fn source() -> Library {
 fn through(readings: &[Library]) -> Library {
     let mut database = library::Database::in_memory().unwrap();
     for found in readings {
-        database.sync(library::STEAM, found, now() - 500 * DAY).unwrap();
+        database.sync("steam", found, now() - 500 * DAY).unwrap();
     }
     database.snapshot_at(now()).unwrap()
 }
@@ -394,7 +394,7 @@ fn one_a_on_a_play_history_row_opens_its_game_hub_when_the_double_taps_time_is_o
     let mut page = page(Entry::PlayHistory);
     press(&mut page, &[Down, Down]);
     let row = page.library().history[2];
-    let appid = page.library().games.iter().find(|game| game.id == row.game).unwrap().appid;
+    let appid = page.library().games.iter().find(|game| game.id == row.game).unwrap().source_id.clone();
     page.take_effects();
     // On the Dashboard's clock, which the test moves on: nothing waits.
     press(&mut page, &[A]);
@@ -503,8 +503,8 @@ fn tabbed() -> Library {
     let mut found = source();
     let favourites = ["Brass Meridian", "Kestrel Run", "Quiet Orbit"];
     found.games.iter_mut().for_each(|game| game.favourite = favourites.contains(&game.name.as_str()));
-    let picks = [3u32, 0, 7, 12, 2, 18].map(|i| 2000 + i).to_vec();
-    let collection = model::Collection { source_id: "uc-picks".into(), name: "My Picks".into(), appids: picks };
+    let picks = [3u32, 0, 7, 12, 2, 18].map(|i| (2000 + i).to_string()).to_vec();
+    let collection = model::Collection { source_id: "uc-picks".into(), name: "My Picks".into(), games: picks };
     found.collections = Some(vec![collection]);
     through(&[found])
 }

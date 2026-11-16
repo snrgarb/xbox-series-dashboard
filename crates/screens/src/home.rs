@@ -51,7 +51,7 @@ pub enum Focus {
 }
 
 /// What a press on Home asks the Dashboard to do.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HomeAction {
     /// A on a game's tile: nothing yet. Its Game hub opens when the double tap's time is up ([`Home::tap`]).
     Chosen,
@@ -66,7 +66,7 @@ pub enum HomeAction {
 }
 
 /// An A on a game's tile that may yet be the first of a double tap.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Chosen {
     at: Instant,
     tile: Focus,
@@ -74,7 +74,7 @@ struct Chosen {
 }
 
 /// What has become of the last A on a game's tile.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Tap {
     /// There is none to wait for.
     None,
@@ -223,7 +223,7 @@ impl Home {
     /// under the Guide, a page or a game no hub opens, and the A is forgotten. Moving focus does not forget it: as
     /// in the Bundle, the hub of the tile that was chosen opens all the same.
     pub fn tap(&mut self, now: Instant, has_pad: bool) -> Tap {
-        let Some(chosen) = self.chosen else { return Tap::None };
+        let Some(chosen) = self.chosen.clone() else { return Tap::None };
         let since = now.saturating_duration_since(chosen.at);
         if has_pad && since < DOUBLE_TAP {
             return Tap::Waiting(DOUBLE_TAP - since);
