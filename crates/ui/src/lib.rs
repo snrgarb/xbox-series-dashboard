@@ -324,6 +324,11 @@ impl<'a> Ui<'a> {
         self.push(Quad::fill(rect, color.quad(self.alpha), radius));
     }
 
+    /// `fill` with the rectangle turned `turn` radians clockwise about its middle: a slanted line, as WPF's `Line`.
+    pub fn fill_turned(&mut self, rect: Rect, color: Color, radius: f32, turn: f32) {
+        self.push(Quad { turn, ..Quad::fill(rect, color.quad(self.alpha), radius) });
+    }
+
     pub fn gradient(&mut self, rect: Rect, from: Color, to: Color, gradient: Gradient, radius: f32) {
         self.push(Quad::gradient(rect, from.quad(self.alpha), to.quad(self.alpha), gradient, radius));
     }

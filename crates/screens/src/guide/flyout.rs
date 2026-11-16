@@ -457,7 +457,7 @@ fn drop_box(ui: &mut Ui, rect: Rect, selection: &str, open: bool) {
 
 /// The mute switch: a pill edged in white with its knob at the left, filled in the accent with the knob at the
 /// right when on.
-fn switch(ui: &mut Ui, rect: Rect, on: bool) {
+pub(super) fn switch(ui: &mut Ui, rect: Rect, on: bool) {
     let (_, cy) = rect.center();
     if on {
         ui.fill(rect, ACCENT_LIGHT, 12.0);

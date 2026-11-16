@@ -211,7 +211,8 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[A]);
     assert!(!home.guide_open() && home.page().is_none());
     // Nor Discord's Guide: its tile opens Settings then, connected or not.
-    home.set_status(screens::guide::Status { discord: true, ..Default::default() });
+    let connected = model::discord::Discord { connected: true, has_tokens: true, ..Default::default() };
+    home.set_discord(&connected);
     press(&mut home, &[Left, Left]);
     settings_and_back(&mut home, DISCORD_PAGE, 3, Focus::Wide(0));
     home.set_guide_enabled(true);

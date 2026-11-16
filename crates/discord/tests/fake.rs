@@ -1,20 +1,18 @@
 //! The real connection (pipe, token endpoint, threads) against the fake Discord: connects, is lost as the fake goes
-//! away, tries again, and signs in by itself once it is back.
+//! away, tries again, and signs in by itself once it is back; follows a Call, its people's avatars fetched from the
+//! fake's stand-in CDN, and Mute and Leave shown only once the fake has carried them out.
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use discord::fake::FakeDiscord;
 use discord::{Connection, Place};
-use model::discord::{Ask, Discord, Field};
+use model::discord::{Ask, Call, CallAsk, Discord, Field, Person, Voice};
 
-/// A pipe of the test's own: a socket in its folder, or on Windows a named pipe no other run has.
+/// A pipe no other run has: on Windows a named pipe, elsewhere a socket of that name in the runtime folder (a
+/// socket's path has to be short, which a test's folder in a deep checkout is not).
 fn pipe_name(dir: &tempfile::TempDir, name: &str) -> String {
-    if cfg!(windows) {
-        let folder = dir.path().file_name().unwrap_or_default().to_string_lossy();
-        format!("{name}-{}-{folder}", std::process::id())
-    } else {
-        dir.path().join(name).to_string_lossy().into_owned()
-    }
+    let folder = dir.path().file_name().unwrap_or_default().to_string_lossy();
+    format!("{name}-{}-{folder}", std::process::id())
 }
 
 /// Pumps `connection` until `done` holds of what Settings shows, the clock running fast.
@@ -37,7 +35,7 @@ fn connects_to_the_fake_is_lost_as_it_goes_and_signs_in_again_as_it_comes_back()
     let dir = tempfile::tempdir().unwrap();
     let pipe = pipe_name(&dir, "e2e-discord");
     let fake = FakeDiscord::start(&pipe, 0, Arc::new(|line| eprintln!("{line}"))).unwrap();
-    let place = Place { pipe: Some(pipe.clone()), token_url: Some(fake.token_url()) };
+    let place = Place { pipe: Some(pipe.clone()), token_url: Some(fake.token_url()), cdn_url: None };
     let mut connection = Connection::new(&place, Some(dir.path()), || {});
     connection.start();
     let mut clock = SystemTime::now();
@@ -74,53 +72,117 @@ fn connects_to_the_fake_is_lost_as_it_goes_and_signs_in_again_as_it_comes_back()
     assert!(!connection.discord().can_disconnect());
 }
 
-#[test]
-fn the_fake_tells_the_call_to_whoever_subscribed() {
-    use discord::Event;
-    use serde_json::json;
-
-    let dir = tempfile::tempdir().unwrap();
-    let pipe = pipe_name(&dir, "e2e-discord");
-    let fake = FakeDiscord::start(&pipe, 0, Arc::new(|_| {})).unwrap();
-    let place = Place { pipe: Some(pipe.clone()), token_url: Some(fake.token_url()) };
-    let mut connection = Connection::new(&place, None, || {});
+/// Signed in to a fake of the test's own, avatars from its stand-in CDN into `dir`.
+fn signed_in(dir: &tempfile::TempDir) -> (FakeDiscord, Connection, SystemTime) {
+    let pipe = pipe_name(dir, "e2e-discord");
+    let fake = FakeDiscord::start(&pipe, 0, Arc::new(|line| eprintln!("{line}"))).unwrap();
+    let place = Place { pipe: Some(pipe.clone()), token_url: Some(fake.token_url()), cdn_url: Some(fake.cdn_url()) };
+    let mut connection = Connection::new(&place, Some(dir.path()), || {});
     let mut clock = SystemTime::now();
     connection.ask(Ask::ClientId("1".into()), || None);
     connection.ask(Ask::ClientSecret("s".into()), || None);
     connection.ask(Ask::Connect, || None);
     until(&mut connection, &mut clock, "sign-in", |d| d.connected);
     until(&mut connection, &mut clock, "subscriptions", |_| fake.subscriptions().len() == 3);
-    connection.client().take_events();
+    (fake, connection, clock)
+}
 
-    assert_eq!(fake.control("call General Ana Bo").unwrap(), "the user is in General with Ana, Bo");
-    let mut events = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while events.is_empty() && Instant::now() < deadline {
-        connection.pump(clock);
-        events.extend(connection.client().take_events());
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let channel = discord::fake::CHANNELS[0].0;
-    let selected = Event::Dispatch {
-        evt: "VOICE_CHANNEL_SELECT".into(),
-        data: json!({ "channel_id": channel, "guild_id": discord::fake::GUILD_ID }),
+fn call(discord: &Discord) -> Option<&Call> {
+    discord.voice.call.as_ref()
+}
+
+/// Who is in the Call as the view has them: each person's name, with `*` while speaking, `m` muted, `d` deafened.
+fn people(discord: &Discord) -> Vec<String> {
+    let Some(call) = call(discord) else { return Vec::new() };
+    let mark = |p: &Person| {
+        let marks: String = [(p.speaking, '*'), (p.muted, 'm'), (p.deafened, 'd')]
+            .iter()
+            .filter_map(|&(on, c)| on.then_some(c))
+            .collect();
+        format!("{}{}", p.name, marks)
     };
-    assert_eq!(events, [selected]);
+    call.people.iter().map(mark).collect()
+}
 
-    let nonce = connection.client().send("GET_CHANNEL", json!({ "channel_id": channel }), None).unwrap();
-    let mut reply = None;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while reply.is_none() && Instant::now() < deadline {
+#[test]
+fn the_call_follows_the_fake_and_mute_and_leave_show_only_once_it_confirms() {
+    let dir = tempfile::tempdir().unwrap();
+    let (fake, mut connection, mut clock) = signed_in(&dir);
+    assert!(call(connection.discord()).is_none());
+
+    // A Call arrives: the channel, the people in it with the user first, and each one's avatar fetched from the
+    // stand-in CDN into the cache.
+    fake.control("call General Ana Bo").unwrap();
+    until(&mut connection, &mut clock, "the call", |d| people(d) == ["E2E Tester", "Ana", "Bo"]);
+    assert_eq!(call(connection.discord()).unwrap().title, "General");
+    until(&mut connection, &mut clock, "the avatars", |d| call(d).unwrap().people.iter().all(|p| p.avatar.is_some()));
+    for person in &call(connection.discord()).unwrap().people {
+        let file = person.avatar.as_ref().unwrap();
+        assert!(file.starts_with(dir.path().join("art").join("discord")), "{file:?}");
+        assert!(image_size(file) == (64, 64));
+    }
+    // The user's own is Discord's default one, by their id.
+    let me = &call(connection.discord()).unwrap().people[0];
+    assert!(me.me && me.avatar.as_ref().unwrap().ends_with("embed/0.png"), "{:?}", me.avatar);
+
+    // Someone joins, speaks, stops; another is muted and deafened by the server.
+    fake.control("join Cy").unwrap();
+    until(&mut connection, &mut clock, "Cy", |d| people(d) == ["E2E Tester", "Ana", "Bo", "Cy"]);
+    fake.control("speak Ana").unwrap();
+    until(&mut connection, &mut clock, "Ana's ring", |d| people(d)[1] == "Ana*");
+    fake.control("hush Ana").unwrap();
+    fake.control("deafen Bo").unwrap();
+    until(&mut connection, &mut clock, "Bo deafened", |d| people(d)[1..3] == ["Ana", "Bod"]);
+    fake.control("leave Cy").unwrap();
+    until(&mut connection, &mut clock, "Cy gone", |d| people(d) == ["E2E Tester", "Ana", "Bod"]);
+
+    // Mute, held by the fake: nothing shows until it confirms.
+    fake.control("hold").unwrap();
+    connection.ask(Ask::Call(CallAsk::Mute), || None);
+    for _ in 0..20 {
         connection.pump(clock);
-        reply = connection.client().take_events().into_iter().find_map(|event| match event {
-            Event::Reply { nonce: n, data, .. } if n == nonce => Some(data),
-            _ => None,
-        });
         std::thread::sleep(Duration::from_millis(10));
     }
-    let reply = reply.expect("GET_CHANNEL answered");
-    let names: Vec<&str> =
-        reply["voice_states"].as_array().unwrap().iter().map(|s| s["nick"].as_str().unwrap()).collect();
-    assert_eq!(names, ["E2E Tester", "Ana", "Bo"]);
+    assert!(!connection.discord().voice.mute, "not muted until Discord says so");
+    fake.control("confirm").unwrap();
+    until(&mut connection, &mut clock, "muted", |d| d.voice.mute && people(d)[0] == "E2E Testerm");
+
+    // Mute again is unmute; refused, the connection stays up and nothing changes.
+    fake.control("hold").unwrap();
+    connection.ask(Ask::Call(CallAsk::Mute), || None);
+    std::thread::sleep(Duration::from_millis(50));
+    fake.control("refuse Nope").unwrap();
+    for _ in 0..30 {
+        connection.pump(clock);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(connection.discord().connected && connection.discord().voice.mute);
+
+    // Leave, held: the Call stays until the fake confirms.
+    fake.control("hold").unwrap();
+    connection.ask(Ask::Call(CallAsk::Leave), || None);
+    for _ in 0..20 {
+        connection.pump(clock);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(call(connection.discord()).is_some(), "still in the call until Discord says otherwise");
+    fake.control("confirm").unwrap();
+    until(&mut connection, &mut clock, "out of the call", |d| call(d).is_none());
+    // The channel's own events are no longer followed.
+    until(&mut connection, &mut clock, "unsubscribed", |_| fake.subscriptions().len() == 3);
+
+    // Discord going ends the Call it was in, and forgets the voice settings.
+    fake.control("call Late_night Ana").unwrap();
+    until(&mut connection, &mut clock, "a call again", |d| call(d).is_some_and(|c| c.title == "Late night"));
+    fake.control("go-away").unwrap();
+    until(&mut connection, &mut clock, "the loss", |d| !d.connected);
+    assert_eq!(connection.discord().voice, Voice::default());
     assert!(fake.control("call Nowhere").is_err());
+}
+
+fn image_size(file: &std::path::Path) -> (u32, u32) {
+    let bytes = std::fs::read(file).unwrap();
+    // A PNG's IHDR: its width and height, big-endian, from byte 16.
+    let be = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
+    (be(16), be(20))
 }

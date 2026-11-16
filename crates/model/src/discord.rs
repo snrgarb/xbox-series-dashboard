@@ -1,7 +1,9 @@
 //! Discord as the screens see it: the user's own application and the connection to the Discord running on this PC
 //! (docs/discord.md). The `discord` crate keeps it; Settings > Theme settings > Discord shows it and asks for
-//! changes with [`Ask`]; the Guide's Discord tab (#144) names why it can't show Discord with [`Discord::tab_line`].
+//! changes with [`Ask`]; the Guide's Discord tab names why it can't show Discord with [`Discord::tab_line`], and shows
+//! the [`Call`] the user is in ([`Voice`]), asking Mute, Deafen and Leave of Discord with [`CallAsk`].
 //! Nothing secret is ever in it: the Client Secret only as whether one is saved, the tokens not at all.
+use std::path::PathBuf;
 
 /// Discord's developer portal, where the user makes the application: the page names it and shows it as a QR code.
 pub const PORTAL_URL: &str = "https://discord.com/developers/applications";
@@ -25,6 +27,10 @@ pub const APPROVE: &str = "Approve the request in Discord";
 pub const RECONNECT_IN_SETTINGS: &str = "Reconnect Discord in settings";
 /// The Discord tab's line while a connect is under way; Settings' status line says [`CONNECTING`].
 pub const CONNECTING_TO_DISCORD: &str = "Connecting to Discord";
+/// The Discord tab's line under who is signed in, out of a Call.
+pub const NOT_IN_A_CALL: &str = "You're not in a voice channel";
+/// A DM's heading while nobody else has been seen in it.
+pub const CALL: &str = "Call";
 
 /// What Settings' Discord page shows, and whether the Guide has a Discord tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +54,59 @@ pub struct Discord {
     pub retrying: bool,
     /// Who is signed in, by display name, else username, while connected.
     pub user: Option<String>,
+    /// The Call the user is in and their own mute and deafen, as Discord last said: what the Discord tab shows.
+    pub voice: Voice,
+}
+
+/// The user's voice on Discord, as Discord last said (docs/discord.md, "The Call").
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Voice {
+    /// The Call the user is in, once its channel has arrived; None out of one.
+    pub call: Option<Call>,
+    /// The user's own Discord mute and deafen, as Discord's voice settings last said, in a Call or out of one.
+    pub mute: bool,
+    pub deaf: bool,
+}
+
+/// The voice channel, DM or group DM the user is in (the Bundle's Call): its heading and the people in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Call {
+    /// The channel's id.
+    pub id: String,
+    /// The channel's name; a DM's, which has none, the other people in it, comma-joined, else those last seen in it,
+    /// else "Call".
+    pub title: String,
+    /// The people in it, the user first, then the others in Discord's order.
+    pub people: Vec<Person>,
+}
+
+/// Someone in a Call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Person {
+    /// Their Discord user id, which the Call's events name them by.
+    pub id: String,
+    /// Their nickname on the server, else their display name, else their username.
+    pub name: String,
+    /// Their avatar, once fetched into the cache (a plain disc stands in until then).
+    pub avatar: Option<PathBuf>,
+    /// Speaking, as Discord last said.
+    pub speaking: bool,
+    /// Muted or deafened, by themselves or the server.
+    pub muted: bool,
+    pub deafened: bool,
+    /// Whether this is the user signed in.
+    pub me: bool,
+}
+
+/// What the Discord tab asks of Discord in a Call. Each is shown done only once Discord says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallAsk {
+    /// The user's Discord mute turned over, from what Discord last said.
+    Mute,
+    /// The user's Discord deafen turned over, likewise.
+    Deafen,
+    /// Leave the Call.
+    Leave,
 }
 
 impl Default for Discord {
@@ -62,6 +121,7 @@ impl Default for Discord {
             needs_reconnect: false,
             retrying: false,
             user: None,
+            voice: Voice::default(),
         }
     }
 }
@@ -126,6 +186,8 @@ pub enum Ask {
     Paste(Field),
     Connect,
     Disconnect,
+    /// The Discord tab's Mute, Deafen or Leave.
+    Call(CallAsk),
 }
 
 impl std::fmt::Debug for Ask {
@@ -136,6 +198,7 @@ impl std::fmt::Debug for Ask {
             Ask::Paste(field) => write!(f, "Paste({field:?})"),
             Ask::Connect => f.write_str("Connect"),
             Ask::Disconnect => f.write_str("Disconnect"),
+            Ask::Call(ask) => write!(f, "Call({ask:?})"),
         }
     }
 }

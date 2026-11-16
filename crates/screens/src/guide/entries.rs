@@ -1,10 +1,11 @@
 //! A tab's entries: which they are, where each is, and what each looks like (docs/spec/guide.md, sections 2.4 to
 //! 2.7).
+use model::discord::Discord;
 use model::Library;
 use ui::{Color, Crop, HAlign, Rect, Ui, VAlign};
 
 use super::panel::{PANEL, STRIP};
-use super::{focus_ring, marks, Around, Tab};
+use super::{discord, focus_ring, marks, Around, Tab};
 use crate::home::square_art;
 use crate::profile;
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
@@ -24,6 +25,8 @@ pub enum Kind {
     SwitchProfile,
     Settings,
     Power,
+    /// One of the Discord tab's.
+    Discord(discord::Item),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,11 +41,11 @@ pub struct Entry {
 }
 
 impl Entry {
-    fn new(kind: Kind, title: &str) -> Self {
+    pub(super) fn new(kind: Kind, title: &str) -> Self {
         Self { kind, title: title.into(), divider: false, enabled: true }
     }
 
-    fn under_a_divider(self) -> Self {
+    pub(super) fn under_a_divider(self) -> Self {
         Self { divider: true, ..self }
     }
 
@@ -58,16 +61,16 @@ impl Entry {
             Kind::Running(_) | Kind::Recent(_) => (96.0, 12.0),
             Kind::Profile => (96.0, 3.0),
             Kind::SwitchProfile | Kind::Settings | Kind::Power => (75.0, 3.0),
+            Kind::Discord(item) => discord::height(item),
         }
     }
 }
 
 /// The tab's entries, top to bottom.
-pub fn of(tab: Tab, around: Around) -> Vec<Entry> {
+pub fn of(tab: Tab, around: Around, discord: &Discord) -> Vec<Entry> {
     match tab {
         Tab::Landing => landing(around.library, around.playing),
-        // Discord's entries come with Discord (M6).
-        Tab::Discord => Vec::new(),
+        Tab::Discord => discord::entries(discord),
         Tab::ProfileAndSystem => vec![
             Entry::new(Kind::Profile, ""),
             // Switching profile would put Start-up in front of a running game.
@@ -171,6 +174,8 @@ pub struct Faces<'a> {
     pub library: &'a Library,
     /// The Profile signed in: the profile entry's picture and gamertag.
     pub profile: &'a model::Profile,
+    /// Discord as it last said: the Discord tab's entries' faces.
+    pub discord: &'a Discord,
 }
 
 /// Draws one entry at `placed`.
@@ -179,6 +184,10 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
         ui.fill(Rect::new(PANEL.x + 30.0, y, PANEL.w - 60.0, 1.0), Color::argb(0x33FFFFFF), 0.0);
     }
     let rect = placed.rect;
+    if let Kind::Discord(item) = entry.kind {
+        discord::draw(ui, item, entry, rect, focused, faces.discord);
+        return;
+    }
     let (_, cy) = rect.center();
     if focused {
         ui.fill(rect, Color::argb(0x26FFFFFF), 4.0);
@@ -214,6 +223,7 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
             ui.icon(rect.x + 36.0, cy, glyph, 26.0, Color::WHITE.fade(alpha));
             text_x = rect.x + 69.0;
         }
+        Kind::Discord(_) => {}
     }
     // The ring is the entry's last part but its text: its glow lies over the fill and the cover.
     if focused {
@@ -275,6 +285,7 @@ mod tests {
                 notifications: &[],
                 now_playing: None,
             },
+            &Discord::default(),
         );
         let placed = layout(Tab::Landing, &entries);
         let tops: Vec<(f32, f32)> = placed.iter().map(|p| (p.rect.y, p.rect.bottom())).collect();
@@ -301,6 +312,7 @@ mod tests {
                 notifications: &[],
                 now_playing: None,
             },
+            &Discord::default(),
         );
         let placed = layout(Tab::ProfileAndSystem, &entries);
         let near = |a: f32, b: f32| (a - b).abs() < 0.01;

@@ -750,15 +750,18 @@ impl App {
     /// Takes in what Discord said and the time, and has the Dashboard show how the connection is now. How soon it
     /// wants another turn: its next timer (a try again, a refresh), None with none.
     fn follow_discord(&mut self) -> Option<Duration> {
-        let focus = self.dashboard.focus_line();
+        let (focus, guide) = (self.dashboard.focus_line(), self.dashboard.guide_line());
         if self.discord.pump(SystemTime::now()) {
             self.dashboard.set_discord(self.discord.discord());
             self.stale = true;
+            // The Discord tab on the Overlay follows the Call too.
+            self.overlay_stale = true;
         }
-        // What the Discord tab will follow (#144); nothing does yet.
-        self.discord.client().take_events();
         if self.log_focus && self.dashboard.focus_line() != focus {
             eprintln!("focus: {}", self.dashboard.focus_line());
+        }
+        if self.log_focus && self.dashboard.guide_line() != guide {
+            eprintln!("guide: {}", self.dashboard.guide_line());
         }
         let next = self.discord.next_timer()?;
         Some(next.duration_since(SystemTime::now()).unwrap_or(Duration::ZERO))

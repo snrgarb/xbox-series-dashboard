@@ -86,8 +86,8 @@ pub struct Args {
     /// The Idle screen's two times in seconds, in place of Settings' and not saved: a test's, a few seconds long.
     idle_after: Option<screens::idle::Times>,
     /// Where Discord is (docs/discord.md): `--discord-pipe` names a test's pipe (`standin discord`) in place of
-    /// Discord's own, and `--discord-token-url` its token endpoint. With a pipe and no endpoint there is none: a
-    /// test never reaches the real Discord.
+    /// Discord's own, `--discord-token-url` its token endpoint and `--discord-cdn-url` where avatars come from. With
+    /// a pipe and no endpoint or CDN there is none: a test never reaches the real Discord.
     discord: discord::Place,
 }
 
@@ -117,7 +117,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--log-queue-sources]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
-                 [--discord-pipe <name> [--discord-token-url <url>]]
+                 [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
@@ -203,6 +203,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--idle-after" => args.idle_after = Some(screens::idle::Times::parse_seconds(&value()?)?),
             "--discord-pipe" => args.discord.pipe = Some(value()?),
             "--discord-token-url" => args.discord.token_url = Some(value()?),
+            "--discord-cdn-url" => args.discord.cdn_url = Some(value()?),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -282,8 +283,20 @@ mod tests {
 
     #[test]
     fn discord_pipe_and_token_url_point_the_dashboard_at_a_tests_discord() {
-        let args = parse(&["--discord-pipe", "e2e-discord", "--discord-token-url", "http://127.0.0.1:1/t"]).unwrap();
-        let place = discord::Place { pipe: Some("e2e-discord".into()), token_url: Some("http://127.0.0.1:1/t".into()) };
+        let args = parse(&[
+            "--discord-pipe",
+            "e2e-discord",
+            "--discord-token-url",
+            "http://127.0.0.1:1/t",
+            "--discord-cdn-url",
+            "http://127.0.0.1:1",
+        ])
+        .unwrap();
+        let place = discord::Place {
+            pipe: Some("e2e-discord".into()),
+            token_url: Some("http://127.0.0.1:1/t".into()),
+            cdn_url: Some("http://127.0.0.1:1".into()),
+        };
         assert_eq!(args.discord, place);
         assert_eq!(parse(&[]).unwrap().discord, discord::Place::default());
         assert!(parse(&["--discord-pipe"]).is_err());
