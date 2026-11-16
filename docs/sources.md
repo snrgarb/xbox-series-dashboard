@@ -72,3 +72,27 @@ For either, the library logs what was read as for every source: `epic: 3 games f
 **Battle.net** (`source-battlenet`, key `battlenet`). Installed games only: the products in `%PROGRAMDATA%\Battle.net\Agent\product.db` (protobuf) that its agent marks installed and whose folder is there, less the client's own (agent, beta, battle.net). A game is its product code (`source_id`). Names from `aggregate.json` beside it, else the game's Uninstall key (`--uid=<uid>` in its `UninstallString`), else the uid. No local file lists owned games. The client is the Uninstall key with `-uid=battle.net`, whose folder has `Battle.net.exe`. Start: `Battle.net.exe "--exec=launch <code>"`. Install: `Battle.net.exe --game=<uid>`, the game's page. Uninstall: the game's key's `UninstallString`.
 
 For these three too, `running` is left to the game's windows. `--ea`, `--ubisoft` and `--battlenet <dir>` read a fake at `<dir>` (its `registry.json` for the registry), written on the VM by `standin make-ea`, `make-ubisoft` and `make-battlenet`; `standin uplay-url <dir>` is registered for `uplay://` as the stand-in Ubisoft Connect, and the fake Battle.net's `Battle.net.exe` is the standin, the stand-in client.
+
+## Art
+
+Decided in #9, built in #80. One lookup in `library::art`, the same for every source's games, in this order:
+
+1. **What the source gave**: the pictures its client keeps on disk, as `read` found them (`Game::cover`, `hero`, `header`). It always wins.
+2. **Our own cache**, `art/<source>/<source_id>/{cover,hero,header}.{png,jpg,webp}` in the data folder (`ArtDir`; a key or id is its folder's name with every byte but letters, digits, `-` and `_` written `%XX`). `Database::snapshot` fills from it each picture a game's source did not give, so the screens never know where a picture came from.
+3. **SteamGridDB**, only when the user has entered their own API key (Settings > Art, docs/spec/settings.md 16.8): `Lookup`, on threads of its own once the sources have been read and the first frame is out, for the games of the snapshot that lack a picture, most recently played first.
+
+What the lookup asks, of `https://www.steamgriddb.com/api/v2` with `Authorization: Bearer <key>`:
+
+- The game: `/games/<platform>/<id>` where the service knows the store (`steam` for Steam's appid, `egs` for Epic's `AppName`, `gog` for GOG's product id); else, or when that is 404, `/search/autocomplete/<name>`, taking only a result whose name is the game's once case, marks (™ ® ©), punctuation and `&`/"and" are set aside, the first verified one of those. A near name is no match: no art is better than another game's.
+- Its pictures: `/grids/game/<id>?dimensions=600x900` (cover), `/heroes/game/<id>` (hero), `/grids/game/<id>?dimensions=920x430,460x215` (header), each with `types=static&nsfw=false&humor=false&epilepsy=false&mimes=image/png,image/jpeg,image/webp`; the first result that says none of those flags, downloaded from its own address with no key on it, kept if it is a PNG, JPEG or WebP by its bytes.
+- A picture not found is remembered as `<kind>.none` holding the time, and not asked for again for seven days. Nothing found for the game at all is the same for each kind it lacked.
+
+Checked against the real service on 2026-11-16 (Portal 2 as Steam 620, Fortnite as `egs/Fortnite` and `egs/fn`, The Witcher 3 and Cyberpunk 2077 as `gog/<id>`, a name search): the reply is `{"success":true,"data":...}`, a grid's fields `id, score, style, width, height, nsfw, humor, notes, mime, language, url, thumb, lock, epilepsy, upvotes, downvotes, author`; an unknown game, or an unknown platform name, is `404 {"success":false,"errors":["Game not found"]}`; a wrong key `401 {"success":false,"errors":["Invalid API key"]}`; it sent no rate-limit headers. EA's content ids, Ubisoft's `uplay_id`s and Battle.net's product codes were not found under `origin`, `uplay` or `bnet`, so those games are found by name.
+
+**Politeness.** Two games at a time, at least 250 ms between any two requests. 429 (or 503) makes every worker wait its `Retry-After`, or 30 s doubled each time in a row, ten minutes at most; a request asked to wait five times is given up for this run. 401 stops every lookup at once, says so once in a Toast, and is remembered (`art.steamgriddb_refused` in the settings table) until another key is entered.
+
+**Privacy.** Only a game's store id or name goes to the service. The key is the settings row `art.steamgriddb_key`; it is never logged, never in an error, and never shown (Settings shows dots). The log says counts and timings: `art: 12 looked up, 9 found, 3 none, in 2.1 s` (`, 1 failed` before the time when a request failed), `art: SteamGridDB asked to wait; waiting 30 s`, `art: SteamGridDB refused the key: no more lookups until it is changed`, `art: cleared 9 pictures`, and `settings: art.steamgriddb_key set` / `forgotten`.
+
+A tile whose cover arrives while it is on screen fades it in over a quarter of a second, over the game's name (`Ui::art_arriving`, docs/ui.md "Art").
+
+**Tests** never ask the real service: `library::art::fake::FakeService` answers on 127.0.0.1 from a script, and keeps what it was asked. On the VM `standin serve-art --port <n> --key <key>` is that stand-in, finding a game of any name with a plain picture of each kind, and the Dashboard is pointed at it with `--art-service http://127.0.0.1:<n>` (a flag for tests only). `--screenshot` with `--data-dir` looks the art up before it draws, where the data folder's database has a key; with `--library <file>` too, the file's games go into that database first.

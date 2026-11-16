@@ -10,6 +10,7 @@
 //! ([`boxes::Item::Opens`]). Nothing here changes.
 mod add;
 mod added;
+mod art;
 pub mod boxes;
 pub mod controls;
 mod group;
@@ -20,7 +21,7 @@ mod theme_settings;
 
 use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
-pub use self::options::{Change, Options, Setting};
+pub use self::options::{Change, Options, Setting, ART_KEY};
 use crate::hint_bar::{self, Hint};
 use crate::keyboard;
 use crate::pages::{Around, Dialog, Page, PageAction};

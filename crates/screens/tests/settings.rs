@@ -98,9 +98,16 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let database = database();
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
-    // Theme settings: Personalisation, then Guide beside it, and Games & apps under them. The row's end, the top
-    // and the foot stop.
+    // Theme settings: Personalisation, then Guide beside it, and Games & apps and Art under them. The row's end,
+    // the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
+    // Down from Guide is Art, beside Games & apps.
+    press(&mut dashboard, &[Down, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
+    press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
+    press(&mut dashboard, &[Up, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
@@ -280,6 +287,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         show_play_history: false,
         show_battery_percent: false,
         use_guide: false,
+        art_key: false,
     };
     assert_eq!(dashboard.options(), left);
 
@@ -705,4 +713,58 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
     let without = white(&stage.still());
     assert!(without > 100, "the battery's cell is still there: {without}");
     assert!(with > without + 60, "the figure went with the setting: {with} with it, {without} without");
+}
+
+/// Theme settings > Art (docs/spec/settings.md, 16.8): no key, a key typed and kept, and the question before the
+/// downloaded art goes. The key is never on screen, in the focus log or in an effect's `Debug`.
+#[test]
+fn settings_art() {
+    const KEY: &str = "f00dfeedcafe1234";
+    let mut stage = settings_stage();
+    stage.press(&[Right, Down, Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
+    stage.check("settings-theme-settings-art-box");
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Type");
+    stage.check("settings-art");
+
+    // Type opens the Console keyboard, the key shown as dots; Menu keeps it.
+    stage.press(&[A]);
+    assert!(stage.dashboard.typed(screens::keyboard::Typed::Text(KEY)));
+    assert!(!stage.dashboard.focus_line().contains(KEY), "{}", stage.dashboard.focus_line());
+    stage.press(&[Menu]);
+    let effects = stage.dashboard.take_effects();
+    let kept: Vec<_> = effects.iter().filter(|e| matches!(e, Effect::ArtKey(_))).collect();
+    assert_eq!(kept, [&Effect::ArtKey(Some(screens::Secret(KEY.into())))]);
+    assert!(!format!("{effects:?}").contains(KEY));
+    assert!(stage.dashboard.options().art_key);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Type");
+    stage.press(&[Right]);
+    stage.check("settings-art-key-set");
+
+    // Clear forgets it; with none, Clear does nothing.
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::ArtKey(None)]);
+    assert!(!stage.dashboard.options().art_key);
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty());
+
+    // Clear downloaded art asks first: Cancel, or B, does nothing; Clear clears.
+    stage.press(&[Down, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Prompt(Clear) of Clear downloaded art");
+    stage.check("settings-art-clear-prompt");
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Clear downloaded art");
+    stage.press(&[A, Down, A]);
+    assert!(!asked(&mut stage).contains(&Effect::ClearArt));
+    stage.press(&[A, A]);
+    assert!(asked(&mut stage).contains(&Effect::ClearArt));
+    // Left from the first column, as B, goes back to Theme settings' boxes on Art.
+    stage.press(&[Up, Left]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
+}
+
+/// What the Dashboard asked of the shell since last time, but its sounds.
+fn asked(stage: &mut Stage) -> Vec<Effect> {
+    stage.dashboard.take_effects().into_iter().filter(|e| !matches!(e, Effect::Sound(_))).collect()
 }

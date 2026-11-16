@@ -92,6 +92,22 @@ pub enum Effect {
     /// Settings' Games & apps pages added, renamed or removed a game added by hand or an App. A new snapshot
     /// follows, as for a favourite, and the pages over Home are told of it.
     ByHand(model::ByHand),
+    /// Settings > Art: the user's SteamGridDB key, to keep (none: forget it). The Dashboard takes note that there
+    /// is one, never what it is; whoever keeps the settings saves it and looks up art with it.
+    ArtKey(Option<Secret>),
+    /// Settings > Art: remove the art downloaded into the data folder (the user has said yes). A store's own art is
+    /// not touched.
+    ClearArt,
+}
+
+/// A secret the user typed: shown nowhere, in no log and no `Debug`.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(..)")
+    }
 }
 
 /// A held direction's pace in the Guide (docs/spec/guide.md, 3.1). Anywhere else it is `Repeat::default()`.
@@ -378,6 +394,16 @@ impl Dashboard {
         self.effects.push(Effect::Set(change));
     }
 
+    /// What the pages ask beyond a press's answer, for the shell: a Settings key kept is noted as there being one.
+    fn take_asked(&mut self) {
+        for effect in self.pages.asked() {
+            if let Effect::ArtKey(key) = &effect {
+                self.options.art_key = key.is_some();
+            }
+            self.effects.push(effect);
+        }
+    }
+
     fn around(&self) -> pages::Around<'_> {
         pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now }
     }
@@ -409,7 +435,7 @@ impl Dashboard {
         let around =
             pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
         let taken = self.pages.typed(typed, around);
-        self.effects.extend(self.pages.asked());
+        self.take_asked();
         taken
     }
 
@@ -744,6 +770,11 @@ impl Dashboard {
                 self.pages.open_over(open, around);
             }
             PageAction::Effect(Effect::Set(change)) => self.set(change),
+            // Whether there is a key is the Dashboard's to show; the key itself goes on to be kept.
+            PageAction::Effect(Effect::ArtKey(key)) => {
+                self.options.art_key = key.is_some();
+                self.effects.push(Effect::ArtKey(key));
+            }
             // A page's Play is Home's: with another game running it is asked about first.
             PageAction::Effect(Effect::Launch(game)) => self.play(game),
             // And a page's Quit is the Guide's, with its ten seconds and "Force quit?".
@@ -853,7 +884,7 @@ impl Dashboard {
                 pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
             let action = self.pages.press(press, around);
             // What the page under text entry asks for as its text is kept: a Group's new name, to save.
-            self.effects.extend(self.pages.asked());
+            self.take_asked();
             match action {
                 Some(action) => self.page_asks(action),
                 None => return false,

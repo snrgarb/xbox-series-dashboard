@@ -102,7 +102,7 @@ From the Bundle's glossary. Every item ends up ported or dropped on purpose.
 
 1. **Achievements without PlayniteAchievements.** Steam's can be read with a Web API key or from local files; Xbox's need sign-in. How much of this is worth building?
 2. **Groups and filters.** In the Bundle they are Playnite filter presets. What replaces them: saved filters of our own, Steam collections, or both?
-3. **Art and metadata for non-Steam games.** Which source, and under what terms (SteamGridDB, IGDB)?
+3. **Art and metadata for non-Steam games.** Which source, and under what terms (SteamGridDB, IGDB)? Art: SteamGridDB with the user's own key (#80, docs/sources.md "Art"). Metadata beyond what the stores' files hold is still open.
 4. **The console's sounds and boot videos.** The Bundle ships recordings that belong to Microsoft, under its NOTICE. Do they come over, and does that change if this repository goes public?
 5. **Licence and name.** PolyForm Noncommercial as the Bundle, or something else? Is "Xbox Series Dashboard" the name?
 6. **Games that need more than a store launch:** emulators, manually added games, launch options. Playnite handles these today.
