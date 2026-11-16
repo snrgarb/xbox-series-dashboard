@@ -230,6 +230,8 @@ try {
     Invoke-WebRequest -UseBasicParsing "\$base/payload.zip" -OutFile "\$root\\payload.zip"
     Expand-Archive "\$root\\payload.zip" "\$root\\payload" -Force
     \$env:E2E_OUT = \$out
+    # Where out.zip goes: a payload that restarts the VM (shell-mode) sends it from its last phase itself.
+    \$env:E2E_UPLOAD = "\$base/out.zip"
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "\$root\\payload\\run.ps1"
     \$code = \$LASTEXITCODE
 } catch {

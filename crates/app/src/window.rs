@@ -79,6 +79,8 @@ struct State {
 
 struct App {
     windowed: bool,
+    /// Shell mode, the Dashboard's side of it (docs/spec/shell-mode.md, 6).
+    as_shell: crate::as_shell::AsShell,
     dashboard: Dashboard,
     pad: Pad,
     /// Keys pressed since the pad was last looked at, as the buttons they stand for, or as the text they type.
@@ -291,7 +293,7 @@ const AUDIO_EVERY: Duration = Duration::from_millis(250);
 /// How often --log-frames says what was drawn.
 const FRAMES_EVERY: Duration = Duration::from_secs(5);
 
-pub fn run(args: &Args, library: Library, store: Store) {
+pub fn run(args: &Args, library: Library, store: Store, as_shell: crate::as_shell::AsShell) {
     shell::log_wgpu();
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
@@ -343,6 +345,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
     }
     let mut app = App {
         windowed: args.windowed,
+        as_shell,
         dashboard,
         pad: Pad::start({
             let proxy = event_loop.create_proxy();
@@ -430,6 +433,11 @@ pub fn run(args: &Args, library: Library, store: Store) {
         idle_after: args.idle_after,
         discord,
     };
+    // Where shell mode stands, for Settings > System: asked off the frame's thread, as schtasks is slow.
+    let proxy = event_loop.create_proxy();
+    app.as_shell.ask(None, move || {
+        let _ = proxy.send_event(());
+    });
     event_loop.run_app(&mut app).expect("event loop");
 }
 
@@ -878,6 +886,13 @@ impl App {
                     self.dashboard.set_discord(self.discord.discord());
                     self.stale = true;
                 }
+                // Settings > System: done off the frame's thread, and the page shows how it stands after.
+                Effect::ShellMode(on) => {
+                    let proxy = self.proxy.clone();
+                    self.as_shell.ask(Some(on), move || {
+                        let _ = proxy.send_event(());
+                    });
+                }
                 Effect::ClearArt => {
                     self.art = None;
                     let cleared = self.store.clear_art();
@@ -941,6 +956,7 @@ impl App {
         if playing.ended(self.dashboard.boot_video_playing()).is_some() {
             self.boot_video = None;
             self.dashboard.boot_video_ended();
+            self.as_shell.boot_video_ended();
         }
         self.stale = true;
         self.overlay_stale = true;
@@ -1105,7 +1121,13 @@ impl ApplicationHandler for App {
         if self.state.is_some() {
             return;
         }
-        let attributes = Window::default_attributes().with_title("Xbox Series Dashboard");
+        let attributes = Window::default_attributes().with_title(shell_mode::dashboard::WINDOW_TITLE);
+        // Started by shell mode, Start-up stays over the desktop explorer brings up behind it.
+        let attributes = if self.as_shell.topmost_start_up() && self.dashboard.starting_up() {
+            attributes.with_window_level(winit::window::WindowLevel::AlwaysOnTop)
+        } else {
+            attributes
+        };
         let attributes = if self.windowed {
             attributes.with_inner_size(PhysicalSize::new(1280, 720))
         } else {
@@ -1164,6 +1186,12 @@ impl ApplicationHandler for App {
         }
         if self.state.is_none() {
             return;
+        }
+        // Settings > System: where shell mode stands, as a thread found it.
+        if let Some(shell) = self.as_shell.answer() {
+            eprintln!("settings: shell mode is {}", screens::settings::system::state(shell));
+            self.dashboard.set_options(screens::Options { shell, ..self.dashboard.options() });
+            self.stale = true;
         }
         // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
         let focus = self.dashboard.focus_line();
@@ -1577,6 +1605,10 @@ impl ApplicationHandler for App {
                 if self.home_presented.is_none() && !self.dashboard.starting_up() {
                     self.home_presented = Some(Instant::now());
                     eprintln!("startup: Home's first frame at {:.0} ms", since_start());
+                    // Start-up is over: the Dashboard is a window among others again.
+                    if self.as_shell.topmost_start_up() {
+                        state.window.set_window_level(winit::window::WindowLevel::Normal);
+                    }
                 }
                 if self.frames.is_some() {
                     self.frame_times[0].frame(now, acquired, Instant::now(), self.moving);
@@ -1595,6 +1627,12 @@ impl ApplicationHandler for App {
                          at {renderer:.0} ms, first frame begun at {began:.0} ms"
                     );
                     eprintln!("first frame presented at {:.0} ms since process start", since_start());
+                    // Shell mode's --shell process takes its black down; with no Boot video playing, explorer may
+                    // start behind the Dashboard now.
+                    self.as_shell.first_frame();
+                    if self.boot_video.is_none() {
+                        self.as_shell.boot_video_ended();
+                    }
                     self.log_profile();
                     if self.log_focus {
                         self.log_groups();

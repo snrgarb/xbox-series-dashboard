@@ -743,7 +743,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 | Pane | Boxes |
 |---|---|
-| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art on a row of its own. |
+| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art on a row of its own, then System (16.9) alone on the row under Art. |
 | Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Who's playing today?** (0, 1) (start-up.md 9), at the Bundle's place, and **Groups** (1, 1) (filters.md 6.1), in the Bundle's empty slot; then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
 | Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
 | Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
@@ -840,3 +840,13 @@ The Bundle has no such page: Playnite's metadata sources fetched missing art (se
 - **A key SteamGridDB refuses** (401) is said once, as a Toast and in Notifications: "SteamGridDB didn't accept your key, so no art is being downloaded. Check it in Settings, Art." Nothing more is asked of it until another key is kept.
 - **Stored**: `art.steamgriddb_key` in the settings table, as the other options; the core is told only that there is one (`Options::art_key`), never what it is, and the key is in no log, focus line or `Debug`. `art.steamgriddb_refused` says the service refused the key in it.
 - **The focus log**: `Settings: Art: Type`, `Settings: Art: Clear`, `Settings: Art: Clear downloaded art`, `Settings: Art: Download art online`, and with the question up `Settings: Art: Prompt(Clear) of Clear downloaded art`. Turned over, Download art online says `settings: art.online = false` (or `true`). Text entry's line shows the key as stars (`TextEntry: Q; "****|" lower letters`).
+
+### 16.9 System (the port's own; #154)
+
+Theme settings' fifth row, one box at (0, 4): **System** (icon U+E770), the page that turns shell mode on and off,
+the Dashboard in place of the Windows desktop at sign-in. The Bundle set its Boot shell up from a terminal and has no
+such page; the words, the layout and what each state shows are in shell-mode.md, section 2. One control, the checkbox
+row **Start with Windows as the shell**: A asks before turning it on (Turn on, Cancel), turns it off at once, and does
+nothing while it is refused. The focus log: `Settings: System: Start with Windows as the shell`, and with the question
+up `Settings: System: Prompt(Turn on) of Start with Windows as the shell`; the executable's answer is
+`settings: shell mode is on` (`off`, `refused <why>`, `failed`, `unknown`).

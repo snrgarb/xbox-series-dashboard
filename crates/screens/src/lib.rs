@@ -132,6 +132,9 @@ pub enum Effect {
     /// Settings > Discord: a Client ID or Secret typed, a Paste, Connect or Disconnect (docs/discord.md). The
     /// connection answers with how it is now (`Dashboard::set_discord`). Its `Debug` never shows what was typed.
     Discord(model::discord::Ask),
+    /// Settings > System: turn shell mode on (the user has said yes) or off (docs/spec/shell-mode.md). The
+    /// executable answers with how it is then, in `Options::shell`.
+    ShellMode(bool),
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.

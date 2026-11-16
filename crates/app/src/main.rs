@@ -1,4 +1,6 @@
-//! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG.
+//! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG; or one of shell mode's
+//! jobs (`shell_mode::run_job`: --shell, --sentinel, --shell-on, --shell-off, --shell-probe).
+mod as_shell;
 mod games;
 mod media_folder;
 mod offscreen;
@@ -89,6 +91,12 @@ pub struct Args {
     /// Discord's own, `--discord-token-url` its token endpoint and `--discord-cdn-url` where avatars come from. With
     /// a pipe and no endpoint or CDN there is none: a test never reaches the real Discord.
     discord: discord::Place,
+    /// Started by shell mode's --shell process (docs/spec/shell-mode.md, 6): the log goes to the data folder, the
+    /// two events are set, and Start-up stays over everything.
+    from_shell: bool,
+    /// Settings > System says what it would write to turn shell mode on or off, and writes nothing: what every test
+    /// starts the Dashboard with.
+    dry_shell: bool,
 }
 
 impl Args {
@@ -118,6 +126,9 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
+                 [--from-shell] [--dry-shell]
+       dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
+       dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
@@ -204,6 +215,8 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--discord-pipe" => args.discord.pipe = Some(value()?),
             "--discord-token-url" => args.discord.token_url = Some(value()?),
             "--discord-cdn-url" => args.discord.cdn_url = Some(value()?),
+            "--from-shell" => args.from_shell = true,
+            "--dry-shell" => args.dry_shell = true,
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -217,7 +230,17 @@ fn fail(message: &str) -> ! {
 
 fn main() {
     since_start();
-    let args = parse_args(std::env::args().skip(1)).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    // Shell mode's jobs come before anything of the Dashboard's: the --shell process never touches the GPU.
+    let given: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = shell_mode::run_job(&given, library::data_dir()) {
+        std::process::exit(code);
+    }
+    let args = parse_args(given).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    // One Dashboard at a time, and under shell mode its log in the data folder from its first line.
+    let as_shell = args.screenshot.is_none().then(|| {
+        let data = args.data_dir.clone().or_else(library::data_dir);
+        as_shell::AsShell::start(args.from_shell, args.dry_shell, args.data_dir.clone(), data)
+    });
     let (library, mut store) = store::open(&args);
     if args.screenshot.is_some() {
         // Art for the games a store's files gave none for, before the picture is taken, where there is a data
@@ -238,7 +261,7 @@ fn main() {
         if args.log_queue_sources {
             log_queue_sources(&args);
         }
-        window::run(&args, library, store);
+        window::run(&args, library, store, as_shell.expect("made without --screenshot"));
     }
 }
 

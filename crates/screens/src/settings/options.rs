@@ -110,6 +110,9 @@ pub struct Options {
     pub boot_videos: Found,
     /// Settings > Idle's two times (docs/spec/idle-screen.md): kept as the rows `idle::DIM_KEY` and `idle::SHOW_KEY`.
     pub idle: crate::idle::Times,
+    /// Shell mode as the executable last found it (Settings > System, docs/spec/shell-mode.md): not an option kept
+    /// in the settings table, but the PC's own, which the executable reads and changes.
+    pub shell: model::shell_mode::ShellMode,
 }
 
 impl Default for Options {
@@ -127,6 +130,7 @@ impl Default for Options {
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),
+            shell: model::shell_mode::ShellMode::Unknown,
         }
     }
 }

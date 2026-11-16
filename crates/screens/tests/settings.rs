@@ -106,7 +106,7 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
     // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord beside it, then
-    // Games & apps and Launchers, then Art. The row's end, the top and the foot stop.
+    // Games & apps and Launchers, then Art, then System. The row's end, the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
     // Down from Idle is Discord; Right there stops, Left is Guide.
@@ -116,8 +116,13 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Down, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
-    // Down from Launchers is Art, the last row's one box; Up from it is Games & apps above it.
+    // Down from Launchers is Art, the fourth row's one box, and System is alone under it, where the foot stops.
+    press(&mut dashboard, &[Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Down, Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
+    // Up from it is Art, and Up from Art is Games & apps above it.
+    press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
@@ -370,6 +375,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         boot_video: BootVideo::XboxSeriesX,
         boot_videos: Found::NONE,
         idle: screens::idle::Times { dim_after: ten, show_after: ten },
+        shell: model::shell_mode::ShellMode::Unknown,
     };
     assert_eq!(dashboard.options(), left);
 
@@ -932,6 +938,51 @@ fn settings_art() {
     // Left from the first column, as B, goes back to Theme settings' boxes on Art.
     stage.press(&[Up, Left]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
+}
+
+/// Theme settings > System (docs/spec/shell-mode.md, 2): the question before turning shell mode on, none before
+/// turning it off, nothing while it is refused, and the page following where the executable says it stands.
+#[test]
+fn settings_system() {
+    use model::shell_mode::{Refusal, ShellMode};
+    let mut stage = settings_stage();
+    let shell = |stage: &mut Stage, shell| {
+        let options = stage.dashboard.options();
+        stage.dashboard.set_options(Options { shell, ..options });
+    };
+    shell(&mut stage, ShellMode::Off);
+    stage.press(&[Right, Down, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
+    stage.check("settings-system-off");
+
+    // On asks first: Cancel, or B, does nothing; Turn on asks the executable.
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: Prompt(Turn on) of Start with Windows as the shell");
+    stage.check("settings-system-prompt");
+    stage.press(&[B]);
+    assert!(asked(&mut stage).is_empty());
+    stage.press(&[A, Down, A]);
+    assert!(asked(&mut stage).is_empty());
+    stage.press(&[A, A]);
+    assert_eq!(asked(&mut stage), [Effect::ShellMode(true)]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
+
+    // On, A turns it off at once.
+    shell(&mut stage, ShellMode::On);
+    stage.check("settings-system-on");
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::ShellMode(false)]);
+
+    // Refused: the line says why, and A does nothing.
+    shell(&mut stage, ShellMode::Refused(Refusal::BundleBootShell));
+    stage.check("settings-system-refused");
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty());
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
 }
 
 /// Theme settings > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): the Bundle's picture 36, its
