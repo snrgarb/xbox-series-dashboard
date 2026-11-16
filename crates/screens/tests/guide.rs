@@ -319,9 +319,10 @@ fn with_discord_connected_its_tab_stands_between_the_two() {
     guide.set_discord(&signed_in);
     press(&mut guide, &[Guide]);
     assert_eq!(guide.guide().tabs(), [LANDING, Tab::Discord, PROFILE]);
-    // Out of a Call: who is signed in, and that they are in no voice channel; A on either does nothing.
-    assert_eq!(after(&mut guide, &[RightBumper]), (Tab::Discord, entry(0)));
-    press(&mut guide, &[Down, A]);
+    // Out of a Call with no Shortcuts: focus on Servers, under who is signed in and that they are in no voice
+    // channel; A on either of those does nothing.
+    assert_eq!(after(&mut guide, &[RightBumper]), (Tab::Discord, entry(2)));
+    press(&mut guide, &[Up, A]);
     assert_eq!(guide.guide().focus(), (Tab::Discord, entry(1)));
     assert!(asked(&mut guide).is_empty() && guide.guide_open());
     assert_eq!(after(&mut guide, &[RightBumper]), (PROFILE, entry(0)));

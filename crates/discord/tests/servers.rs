@@ -171,7 +171,12 @@ fn a_voice_channel_shows_the_avatars_of_who_is_in_it_or_none_when_empty() {
     test.reply_to(&fetches[1], voice_channel("501", "Raid", "9", &[]));
     test.reply_to(
         &fetches[0],
-        voice_channel("500", "Late night", "9", &[state_with(ANA, "ana", Some("a1")), state_with(BO, "bo", Some("b2"))]),
+        voice_channel(
+            "500",
+            "Late night",
+            "9",
+            &[state_with(ANA, "ana", Some("a1")), state_with(BO, "bo", Some("b2"))],
+        ),
     );
     assert_eq!(test.occupants(), [Some(vec![avatar_of(ANA, "a1"), avatar_of(BO, "b2")]), Some(vec![])]);
     assert!(!test.in_call(), "who is in a channel is not the Call");

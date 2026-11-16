@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use model::discord::{Ask, BrowseAsk, Browse, Shortcut, Voice, CALL};
+use model::discord::{Ask, Browse, BrowseAsk, Shortcut, Voice, CALL};
 use serde_json::json;
 
 use crate::client::Event;
@@ -95,8 +95,10 @@ impl Following {
                 self.servers.close();
             }
             Ask::RemoveShortcut(id) => {
+                let known = self.known.channels().iter().find(|c| c.id == *id).map(|c| c.name.clone());
+                let name = known.flatten().unwrap_or_else(|| CALL.to_string());
                 if self.known.forget(id) {
-                    self.say(format!("shortcut {id} removed"));
+                    self.say(format!("shortcut {name:?} removed"));
                 }
             }
             Ask::Browse(BrowseAsk::Servers) => self.servers.open_servers(&self.known, now, commands),

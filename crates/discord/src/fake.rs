@@ -48,13 +48,21 @@ pub const SERVERS: [FakeServer; 3] = [
         GUILD_ID,
         GUILD_NAME,
         true,
-        &[("500000000000000009", "chat", 0), ("500000000000000001", "General", 2), ("500000000000000002", "Late night", 2)],
+        &[
+            ("500000000000000009", "chat", 0),
+            ("500000000000000001", "General", 2),
+            ("500000000000000002", "Late night", 2),
+        ],
     ),
     (
         "900000000000000002",
         "Another Server",
         false,
-        &[("510000000000000001", "Lobby", 2), ("510000000000000009", "notes", 0), ("510000000000000002", "Town hall", 13)],
+        &[
+            ("510000000000000001", "Lobby", 2),
+            ("510000000000000009", "notes", 0),
+            ("510000000000000002", "Town hall", 13),
+        ],
     ),
     ("900000000000000003", "art club", true, &[("520000000000000009", "drawings", 0)]),
 ];
@@ -181,7 +189,8 @@ impl World {
     /// A server's voice or stage channel by its name (`_` for a space, any case).
     fn find(name: &str) -> Option<&'static str> {
         let name = name.replace('_', " ");
-        let mut voice = SERVERS.iter().flat_map(|(_, _, _, channels)| channels.iter()).filter(|(_, _, kind)| *kind != 0);
+        let mut voice =
+            SERVERS.iter().flat_map(|(_, _, _, channels)| channels.iter()).filter(|(_, _, kind)| *kind != 0);
         voice.find(|(_, known, _)| known.eq_ignore_ascii_case(&name)).map(|(id, _, _)| *id)
     }
 
@@ -482,7 +491,11 @@ impl Shared {
                     id
                 };
                 self.select(Some(id));
-                Ok(format!("the user is in a {} with {}", if *verb == "dm" { "DM" } else { "group DM" }, people.join(", ")))
+                Ok(format!(
+                    "the user is in a {} with {}",
+                    if *verb == "dm" { "DM" } else { "group DM" },
+                    people.join(", ")
+                ))
             }
             // Joining by command, as SELECT_VOICE_CHANNEL from another device: the voice channel by name.
             ["select", channel] => {

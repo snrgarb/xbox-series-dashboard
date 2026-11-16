@@ -1299,6 +1299,10 @@ impl Dashboard {
                 let muted = if self.audio.muted { ", muted" } else { "" };
                 format!(", flyout Audio {at:?}, volume {}{muted}", self.audio.volume)
             }
+            // What it shows: `, flyout Discord Item(0) "Servers" "Stand-in Server" of 3`.
+            Some((Flyout::Discord, at)) => {
+                format!(", flyout Discord {at:?} {}", self.guide.discord_flyout_line().unwrap_or_default())
+            }
             Some((which, at)) => format!(", flyout {which:?} {at:?}"),
             None => String::new(),
         };
@@ -1381,7 +1385,11 @@ impl Dashboard {
             GuideAction::Launch(game) => self.play(game),
             GuideAction::Asked => {}
             // Asked of Discord: the tab shows it done once Discord says so.
-            GuideAction::Discord(ask) => self.effects.push(Effect::Discord(model::discord::Ask::Call(ask))),
+            GuideAction::Discord(ask) => {
+                if let Some(ask) = ask.ask(&self.discord) {
+                    self.effects.push(Effect::Discord(ask));
+                }
+            }
             // The level shows at once; the shell's next reading says what the system made of it.
             GuideAction::Volume(level) => {
                 self.audio.volume = level;
@@ -1809,6 +1817,7 @@ impl Dashboard {
             pad_battery: self.status.pad_battery.or(charge),
             show_percent,
             notifications,
+            discord_call: self.discord.voice.mark(),
             ..self.status.clone()
         };
         let profile = self.profile();
@@ -1845,6 +1854,7 @@ impl Dashboard {
             pad_battery,
             show_percent: self.status.show_percent && self.options.show_battery_percent,
             score: self.library.achievements.totals.map(|totals| totals.score),
+            discord_call: self.discord.voice.mark(),
         };
         // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn, but for
         // the picture a page takes of the screen it was opened over. Under a page that leaves it showing (the Tile

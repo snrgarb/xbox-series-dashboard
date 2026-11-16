@@ -25,13 +25,13 @@ use std::time::SystemTime;
 
 use avatars::Avatars;
 pub use client::{Client, Event, Secrets, Tokens, Transport, User};
+use following::Following;
 pub use frame::Opcode;
 use ipc::{Incoming, Pipe};
 use model::discord::{Ask, Discord, Field};
 use secrets::{AnySecrets, FileSecrets, MemorySecrets};
-use tokens::HttpTokens;
-use following::Following;
 use shortcuts::{Known, RECENT_SERVERS_SECRET, SHORTCUTS_SECRET};
+use tokens::HttpTokens;
 
 /// Where the Dashboard's Discord is: the real one, or a test's.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

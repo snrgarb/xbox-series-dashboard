@@ -92,7 +92,9 @@ impl Avatar {
         match self {
             Avatar::Own { user, hash } => PathBuf::from("avatars").join(safe(user)).join(format!("{}.png", safe(hash))),
             Avatar::Default(n) => PathBuf::from("embed").join(format!("{n}.png")),
-            Avatar::Icon { guild, hash } => PathBuf::from("icons").join(safe(guild)).join(format!("{}.png", safe(hash))),
+            Avatar::Icon { guild, hash } => {
+                PathBuf::from("icons").join(safe(guild)).join(format!("{}.png", safe(hash)))
+            }
         }
     }
 }

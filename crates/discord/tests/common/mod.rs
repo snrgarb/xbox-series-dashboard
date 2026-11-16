@@ -185,7 +185,9 @@ impl Test {
         match self.browse_view() {
             Browse::Server { channels, .. } => channels
                 .into_iter()
-                .map(|c| c.occupants.map(|o| o.into_iter().map(|p| p.unwrap().to_string_lossy().into_owned()).collect()))
+                .map(|c| {
+                    c.occupants.map(|o| o.into_iter().map(|p| p.unwrap().to_string_lossy().into_owned()).collect())
+                })
                 .collect(),
             other => panic!("no server's Flyout: {other:?}"),
         }

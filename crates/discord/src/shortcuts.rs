@@ -204,9 +204,12 @@ mod tests {
     #[test]
     fn they_are_saved_as_the_bundle_saves_them_and_read_back() {
         let mut known = Known::default();
-        let joined = Joined { id: "500".into(), guild: Some("9".into()), name: Some("Late night".into()), other_avatar: None };
+        let joined =
+            Joined { id: "500".into(), guild: Some("9".into()), name: Some("Late night".into()), other_avatar: None };
         assert_eq!(known.learn(&joined), Some("9".into()));
-        known.on_guild(&json!({ "id": "9", "name": "The Lads", "icon_url": "https://cdn.discordapp.com/icons/9/abc.png" }));
+        known.on_guild(
+            &json!({ "id": "9", "name": "The Lads", "icon_url": "https://cdn.discordapp.com/icons/9/abc.png" }),
+        );
         let saved = known.take_unsaved();
         assert_eq!(
             saved,

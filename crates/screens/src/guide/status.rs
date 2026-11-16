@@ -1,8 +1,9 @@
 //! The Status area as the Guide has it, stacked at the screen's top right: the batteries on a line of their own
 //! over the clock, large (docs/spec/guide.md, section 2.3). Home's top bar has the same parts in a row.
+use model::discord::CallMark;
 use ui::{Color, Font, Rect, TextStyle, Ui};
 
-use crate::theme::{glyph, BODY};
+use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 
 /// What the Status area and the Notifications badge show, beyond the clock and whether a pad is connected. The
 /// Dashboard is told (`Dashboard::set_status`); where each value comes from is the shell's business.
@@ -19,11 +20,14 @@ pub struct Status {
     pub notifications: u32,
     /// Whether Discord is connected: its tab stands between the landing tab and Profile & system.
     pub discord: bool,
+    /// In a Discord Call, its mark, left of the batteries. The Dashboard sets it from what Discord says.
+    pub discord_call: Option<CallMark>,
 }
 
 impl Default for Status {
     fn default() -> Self {
-        Self { pad_battery: None, pc_battery: None, show_percent: true, notifications: 0, discord: false }
+        let (pad_battery, pc_battery, discord_call) = (None, None, None);
+        Self { pad_battery, pc_battery, show_percent: true, notifications: 0, discord: false, discord_call }
     }
 }
 
@@ -68,12 +72,45 @@ pub fn draw(ui: &mut Ui, status: &Status, clock: &str, pad: bool) {
         x -= 26.0;
         if let Some(percent) = battery.percent.filter(|_| status.show_percent) {
             // Segoe UI's ink sits 2 under its line's middle: raised onto the battery's.
-            ui.label_right(x - 4.0, middle - 2.0, &format!("{percent}%"), &BODY);
+            let text = ui.label_right(x - 4.0, middle - 2.0, &format!("{percent}%"), &BODY);
+            x -= 4.0 + text.width;
         }
+        x -= GAP;
+    }
+    // In a Discord Call its mark, 12 left of the batteries.
+    if let Some(mark) = status.discord_call {
+        call_mark(ui, x, middle, mark);
     }
     // The clock, 10 under the line.
     let width = ui.measure(&CLOCK, clock).width;
     ui.label(right - width, TOP + LINE + 10.0, clock, &CLOCK);
+}
+
+/// The Discord mark of a Call, 30 by 24, ending at `right` with its middle at `middle`: Discord's mark, 24 by 18, in
+/// grey, or in the accent while the user speaks; at its foot right a badge 14 across while muted or deafened (the
+/// microphone or the headset, struck through), deafened over muted. Returns where it starts.
+pub(crate) fn call_mark(ui: &mut Ui, right: f32, middle: f32, mark: CallMark) -> f32 {
+    let area = Rect::new(right - 30.0, middle - 12.0, 30.0, 24.0);
+    let colour = if mark.speaking { ACCENT_LIGHT } else { TEXT_DIM };
+    // The stand-in draws as high as three quarters of its width, in the middle: 18 high, 3 down.
+    super::marks::discord_mark(ui, Rect::new(area.x, area.y, 24.0, 24.0), colour);
+    let badge = match (mark.deafened, mark.muted) {
+        (true, _) => Some('\u{E7F6}'),
+        (false, true) => Some('\u{E720}'),
+        (false, false) => None,
+    };
+    if let Some(glyph) = badge {
+        let disc = Rect::new(area.right() - 14.0, area.bottom() - 14.0, 14.0, 14.0);
+        ui.fill(disc, Color::rgb(0x1A1A1A), 7.0);
+        ui.ring(disc, Color::WHITE, 7.0, 1.0);
+        let (cx, cy) = disc.center();
+        ui.icon(cx, cy, glyph, 8.0, Color::WHITE);
+        // The stroke from (3.5, 3.5) to (10.5, 10.5), 1.25 wide.
+        let length = 7.0 * std::f32::consts::SQRT_2;
+        let line = Rect::new(cx - length / 2.0, cy - 0.625, length, 1.25);
+        ui.fill_turned(line, Color::WHITE, 0.6, std::f32::consts::FRAC_PI_4);
+    }
+    area.x
 }
 
 /// The pad's battery ending at `right`: its charge as a cell on its side, or the pad's glyph for one whose charge

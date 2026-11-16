@@ -186,10 +186,7 @@ fn joining_a_shortcut_asks_discord_and_nothing_shows_until_discord_says_so() {
     test.join(voice_channel("501", "B", "9", &[]));
     test.leave();
     test.ask(Ask::Join("500".into()));
-    assert_eq!(
-        test.sent.last("SELECT_VOICE_CHANNEL").unwrap()["args"],
-        json!({ "channel_id": "500", "force": true })
-    );
+    assert_eq!(test.sent.last("SELECT_VOICE_CHANNEL").unwrap()["args"], json!({ "channel_id": "500", "force": true }));
     assert!(!test.in_call());
     test.join(voice_channel("500", "A", "9", &[state(ME, "gabe")]));
     assert!(test.in_call());

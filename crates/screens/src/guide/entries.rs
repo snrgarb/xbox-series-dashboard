@@ -53,9 +53,9 @@ impl Entry {
         Self { divider: true, ..self }
     }
 
-    /// Whether the Menu button opens a menu on it.
+    /// Whether the Menu button opens a menu on it: the running game's, and a Shortcut's (Remove shortcut).
     pub fn has_menu(&self) -> bool {
-        matches!(self.kind, Kind::Running(_))
+        matches!(self.kind, Kind::Running(_) | Kind::Discord(discord::Item::Shortcut(_)))
     }
 
     /// The box's height, and the room under it.
@@ -161,10 +161,24 @@ pub struct Placed {
     pub totals: Option<f32>,
 }
 
-/// Lays the entries out down the panel.
+/// Lays the entries out down the panel. The Discord tab's Shortcuts stand in rows of three, each tile 9 in from
+/// its column of 178.
 pub fn layout(tab: Tab, entries: &[Entry]) -> Vec<Placed> {
     let mut y = first_top(tab);
+    // The row of tiles being filled: its top (its divider's included) and its tiles' top.
+    let mut row = (0.0, 0.0);
     let place = |entry: &Entry| {
+        if let Kind::Discord(discord::Item::Shortcut(at)) = entry.kind {
+            let column = at % discord::PER_ROW;
+            let divider = entry.divider.then_some(y + 14.0);
+            if column == 0 {
+                row = (y, y + if entry.divider { 41.0 } else { 0.0 });
+                y = row.1 + discord::TILE + discord::TILE_BELOW;
+            }
+            let x = PANEL.x + column as f32 * discord::TILE_COLUMN + 9.0;
+            let rect = Rect::new(x, row.1, discord::TILE, discord::TILE);
+            return Placed { divider, extent: (row.0, y), rect, totals: None };
+        }
         let top = y;
         // A divider is 1 high, 14 under what is above it and 26 over the box.
         let divider = entry.divider.then_some(y + 14.0);

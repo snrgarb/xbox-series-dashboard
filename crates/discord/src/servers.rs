@@ -179,7 +179,8 @@ impl Browser {
     /// Shows `held` once the loading Flyout showing has had its spinner up a second, at once if it has or isn't
     /// loading.
     fn after_spinner<C: Commands>(&mut self, held: Held, now: SystemTime, commands: Option<&mut C>) {
-        let loading = matches!(self.showing, Showing::Servers { loading: true, .. } | Showing::Server { loading: true, .. });
+        let loading =
+            matches!(self.showing, Showing::Servers { loading: true, .. } | Showing::Server { loading: true, .. });
         let due = self.spinner_since.map_or(now, |since| since + SPINNER_SHOWN);
         if loading && due > now {
             self.held = Some((due, held));
@@ -251,8 +252,12 @@ impl Browser {
         let Some(id) = channel["id"].as_str() else { return };
         let Showing::Server { id: server, items, .. } = &mut self.showing else { return };
         let Some(shown) = items.iter_mut().find(|c| c.id == id) else { return };
-        let people: Vec<Participant> =
-            channel["voice_states"].as_array().into_iter().flatten().filter_map(Participant::from_voice_state).collect();
+        let people: Vec<Participant> = channel["voice_states"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Participant::from_voice_state)
+            .collect();
         let occupants: Vec<(Avatar, String)> = people.iter().map(|p| (p.avatar.clone(), p.name.clone())).collect();
         if shown.occupants.as_ref() != Some(&occupants) {
             let who: Vec<&str> = people.iter().map(|p| p.name.as_str()).collect();
