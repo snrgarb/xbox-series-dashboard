@@ -154,7 +154,7 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Start-Dashboard [-Arguments ...] [-Startup]`, `Stop-Dashboard` | the Dashboard, its stderr to `dashboard.log`; with `--no-startup` (straight to Home, no Boot video) unless `-Startup` |
 | `Get-DashboardLog`, `Get-DashboardLogLength`, `Wait-DashboardLog <pattern> <seconds> [-After <lines>]` | what it logged |
 | `Close-Dashboard [<seconds>]` | the Dashboard asked to close as `taskkill` without `/f` asks; whether it went |
-| `Initialize-FakeSteam`, `Initialize-FakeEpic`, `Initialize-FakeGog`, `Get-StandInGame`, `Stop-StandInGame` | the fakes and their games (only those started from the test's own folders) |
+| `Initialize-FakeSteam`, `Initialize-FakeEpic`, `Initialize-FakeGog`, `Initialize-FakePlaynite`, `Get-StandInGame`, `Stop-StandInGame` | the fakes and their games (only those started from the test's own folders) |
 | `Get-FakeRoot <store>`, `Get-TestFolder <name>`, `Get-DashboardDataDir` | where a fake, a folder of the test's own, and the Dashboard's data folder are, on the VM or in safe mode |
 | `Test-SafeMode`, `Assert-VmOnly <why>`, `Set-RegistryValue`, `Get-OwnProcess <name>` | safe mode (below); the one registry write, which throws in it; processes started from the test's folders |
 | `Initialize-FakeEa`, `Initialize-FakeUbisoft`, `Initialize-FakeBattleNet`, `Initialize-FakeXbox` | a fake EA app, Ubisoft Connect, Battle.net or drive of Xbox games |
@@ -172,7 +172,7 @@ the grid's edges and its scroll, Play history, Manage, and B and Y), `search` (Y
 keyboard with the pad, the symbols, the keyboard put away, A on a result opening its hub, and B back step by step),
 `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 the grid's edges and its scroll, Play history, Manage, and B and Y), `groups` (Settings' Groups: a Group hidden, two swapped and one added by
-name, Home's Groups seen to follow each, and all put back), `profiles` (Settings' Profiles in a data folder of the
+name, Home's Groups seen to follow each, and all put back), `playnite-import` (a made-up Playnite library offered in a Toast, previewed and imported from Settings, imported again with nothing new, and its files unchanged: docs/import.md), `profiles` (Settings' Profiles in a data folder of the
 test's own: the first Profile made from the Windows user, one added by its gamertag, renamed, given a real name and a
 plain picture, the Windows user's removed so the new one signs in, Home's top bar and the Guide seen to follow by the
 `profile:` line, and the Dashboard started again with it still signed in), `apps` (Settings' Games & apps: a copy of the stand-in

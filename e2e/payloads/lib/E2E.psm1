@@ -21,7 +21,7 @@ $script:Safe = $env:E2E_SAFE -eq '1'
 $script:Fakes = @{}
 # Every store the Dashboard reads, by its flag: in safe mode each is given a fake or an empty folder. A store added to
 # the Dashboard is added here too, or a test in safe mode would read the machine's own.
-$script:StoreFlags = @('steam', 'epic', 'gog', 'ea', 'ubisoft', 'battlenet', 'xbox')
+$script:StoreFlags = @('steam', 'epic', 'gog', 'ea', 'ubisoft', 'battlenet', 'xbox', 'playnite')
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
@@ -531,6 +531,20 @@ function Initialize-FakeGog([string] $Root = (Get-FakeRoot 'gog')) {
     $games = @($library.games)
     Say "fake GOG at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
     $library
+}
+
+# Gives the Dashboard a Playnite library to import from, with no Playnite installed: a made-up one at $Root written by
+# `standin make-playnite` (Playnite's data folder, its library's games.db and filterpresets.db as LiteDB 4 files:
+# crates/playnite/src/fixture.rs), whose Steam games are the fake Steam's, which the Dashboard reads when started
+# with `--playnite $Root`. Its files are only ever read.
+#
+# Returns what an import of it would bring, as the Dashboard's own reader read it back (also fake-playnite.json in the
+# test's output): library (its folder), games_read, games (each with source, source_id, name, playtime_minutes,
+# last_played, favourite, hidden), other_stores, groups (the Groups that can come over) and skipped.
+function Initialize-FakePlaynite([string] $Root = (Get-FakeRoot 'playnite')) {
+    $plan = New-FakeStore 'make-playnite' $Root 'fake-playnite.json'
+    Say "fake Playnite at ${Root}: $($plan.games_read) games, Groups $(@($plan.groups) -join ', ')"
+    $plan
 }
 
 # Gives the Dashboard an EA app to read, with none installed: a fake at $Root written by `standin make-ea` (made-up

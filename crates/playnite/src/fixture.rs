@@ -165,7 +165,8 @@ pub fn write(dir: &Path) -> Result<std::path::PathBuf> {
             settings(vec![("Category", ids(&[guid(COUCH)]))])
         }),
         preset(RELEASED_2019, "Released in 2019", true, None, {
-            let years = Value::Document(Doc::default().with("Values", Value::Array(vec![Value::String("2019".into())])));
+            let years =
+                Value::Document(Doc::default().with("Values", Value::Array(vec![Value::String("2019".into())])));
             settings(vec![("ReleaseYear", years)])
         }),
         preset(EVERYTHING_HIDDEN, "Everything hidden", false, None, settings(vec![("Hidden", Value::Bool(true))])),
@@ -209,11 +210,8 @@ mod tests {
             ("steam".into(), "9100100".into()),
             ("epic".into(), "ashfallcourier".into()),
         ]);
-        let installed = Picks::Rule(model::Rule {
-            installed: Some(true),
-            sources: vec!["steam".into()],
-            ..model::Rule::default()
-        });
+        let installed =
+            Picks::Rule(model::Rule { installed: Some(true), sources: vec!["steam".into()], ..model::Rule::default() });
         assert_eq!(
             groups,
             [("Couch picks", &couch, Sort::LastPlayed, true), ("Installed on Steam", &installed, Sort::Name, false)]

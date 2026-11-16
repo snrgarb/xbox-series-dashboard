@@ -123,7 +123,9 @@ impl Guid {
             *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
         }
         // The text is the fields in order, most significant first; on disk the first three are little-endian.
-        Some(Guid([b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]))
+        Some(Guid([
+            b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15],
+        ]))
     }
 
     /// The order LiteDB keeps an index of Guids in: .NET's `Guid.CompareTo`, field by field, unsigned.

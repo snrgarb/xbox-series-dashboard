@@ -26,6 +26,8 @@ shell = { path = "../shell" }
 audio = { path = "../audio" }
 media = { path = "../media" }
 discord = { path = "../discord" }
+# Settings > Import from Playnite (docs/import.md).
+playnite = { path = "../playnite" }
 wgpu = "30"
 winit = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -126,6 +126,9 @@ pub enum Effect {
     /// Settings > Discord: a Client ID or Secret typed, a Paste, Connect or Disconnect (docs/discord.md). The
     /// connection answers with how it is now (`Dashboard::set_discord`). Its `Debug` never shows what was typed.
     Discord(model::discord::Ask),
+    /// Settings > Import from Playnite: look for Playnite's library and say what an import would bring, or import
+    /// it (docs/import.md). The shell answers with how it is now (`Dashboard::set_playnite`).
+    Playnite(model::playnite::Ask),
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.
@@ -1272,6 +1275,12 @@ impl Dashboard {
     /// A game's whole list of achievements, in its store's order, for the pages that show it.
     pub fn set_achievements(&mut self, game: i64, list: Vec<model::achievement::Achievement>) {
         self.pages.set_achievements(game, list);
+    }
+
+    /// Import from Playnite as the shell has it now: what it found and what an import would bring, or did
+    /// (docs/import.md). Settings' Import from Playnite page asks for it as it opens (`Effect::Playnite`).
+    pub fn set_playnite(&mut self, import: &model::playnite::Import) {
+        self.pages.set_playnite(import);
     }
 
     /// What is on top of Home's window, the Guide aside, and where its focus is: Home's focus as it is written

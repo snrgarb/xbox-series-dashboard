@@ -241,7 +241,7 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
-The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, and Art (16.8) beside it.
+The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, and Art (16.8) beside it. Under Games & apps, on a row of its own, **Import from Playnite** (U+E8B5, x 520..957, y 657..788) opens the page of [../import.md](../import.md), section 7.
 
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
@@ -785,7 +785,7 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Idle > Show things after (6.7) | `idle.show_things_after` | `300` |
 | Who's playing today? (start-up.md 9) | `startup.ask_whos_playing` | on: Ask every time; off is Sign in the last profile |
 
-The same table keeps `profile.last`, the id of the Profile signed in last (profiles.md 1); the Profiles themselves are the `profiles` table's (profiles.md 2).
+The same table keeps `playnite.imported`, `playnite.offered` and `playnite.group.<preset id>` (import.md 6 and 7); and `profile.last`, the id of the Profile signed in last (profiles.md 1); the Profiles themselves are the `profiles` table's (profiles.md 2).
 
 Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too). **Saved only once set** is kept: an option has no row until it is changed, so a later change of default reaches those who never chose. Nothing here is secret and nothing is encrypted; Discord's secret and tokens are M6's, and do not go in this table as they are. Every option is shared by every Profile. The log says `settings: <key> is <value>` for each option that is set as the Dashboard starts, and `settings: <key> = <value>` as one is saved.
 

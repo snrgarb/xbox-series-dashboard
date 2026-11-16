@@ -37,6 +37,10 @@ use crate::{since_start, Args};
 const IDLE: Duration = Duration::from_millis(250);
 /// How soon the Overlay is tried again when it had no frame to draw on.
 const OVERLAY_RETRY: Duration = Duration::from_millis(16);
+/// The one Toast that offers to import a Playnite library found on the PC (docs/import.md): a Toast, not a prompt,
+/// so that nothing stands between the user and Home on a first start; it stays in Notifications.
+const OFFER: &str = "Playnite is on this PC. Bring over its play time, favourites and Groups in Settings > Import \
+                     from Playnite.";
 /// The Overlay is made once Home has come to rest after its first frame, or this long after it, whichever is first.
 const OVERLAY_AFTER: Duration = Duration::from_secs(2);
 /// A frame of the Overlay that took longer than this was drawn by a slow renderer: the processor, where there is no
@@ -183,6 +187,8 @@ struct App {
     art: Option<library::art::Lookup>,
     /// It has been started once the sources were read: a new key starts it again, nothing else does.
     art_started: bool,
+    /// Whether there was a Playnite library to offer to import has been asked, once the stores were read.
+    playnite_asked: bool,
     /// What it says as it goes, for the loop to take in.
     art_events: (Sender<ArtEvent>, Receiver<ArtEvent>),
     /// The game whose whole list of achievements an Achievements page was last given, and whether it should be
@@ -424,6 +430,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         frame_times: Default::default(),
         art: None,
         art_started: false,
+        playnite_asked: false,
         art_events: mpsc::channel(),
         achievements_listed: (None, false),
         input_clock: shell::idle::system(),
@@ -878,6 +885,19 @@ impl App {
                     self.dashboard.set_discord(self.discord.discord());
                     self.stale = true;
                 }
+                // Settings > Import from Playnite: Playnite's files read, never written; the page shows how it stands.
+                Effect::Playnite(ask) => {
+                    let stand = match ask {
+                        model::playnite::Ask::Look => self.store.playnite_look(),
+                        model::playnite::Ask::Import => {
+                            let (stand, library) = self.store.playnite_import();
+                            self.show(library);
+                            stand
+                        }
+                    };
+                    self.dashboard.set_playnite(&stand);
+                    self.stale = true;
+                }
                 Effect::ClearArt => {
                     self.art = None;
                     let cleared = self.store.clear_art();
@@ -1192,6 +1212,16 @@ impl ApplicationHandler for App {
         // Art for the games a store gave none for, once the stores have been read and the first frame is out.
         if !self.art_started && self.home_presented.is_some() && self.store.sources_read() {
             self.start_art();
+        }
+        // Once, with the stores read and Home up: a Playnite library never imported is offered in a Toast
+        // (docs/import.md). Said once ever; Settings > Import from Playnite does it.
+        if !self.playnite_asked && self.home_presented.is_some() && self.store.sources_read() {
+            self.playnite_asked = true;
+            if let Some(found) = self.store.playnite_offer() {
+                eprintln!("import: offered: Playnite's library is at {}", found.display());
+                self.dashboard.notify(OFFER);
+                toasts_changed = true;
+            }
         }
         // Achievements, once the stores' games are in the database (docs/achievements.md): the totals in a new
         // snapshot, and what was unlocked in the Achievement unlocked Toast (docs/spec/achievement-toast.md).

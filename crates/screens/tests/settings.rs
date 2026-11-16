@@ -106,7 +106,7 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
     // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord beside it, then
-    // Games & apps and Art. The row's end, the top and the foot stop.
+    // Games & apps and Art, then Import from Playnite alone. The row's end, the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
     // Down from Idle is Discord; Right there stops, Left is Guide.
@@ -114,7 +114,9 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Discord");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
-    press(&mut dashboard, &[Down, Right, Down]);
+    press(&mut dashboard, &[Down, Down, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Import from Playnite");
+    press(&mut dashboard, &[Up, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
@@ -1022,4 +1024,50 @@ fn settings_discord() {
 /// What the Dashboard asked of the shell since last time, but its sounds.
 fn asked(stage: &mut Stage) -> Vec<Effect> {
     stage.dashboard.take_effects().into_iter().filter(|e| !matches!(e, Effect::Sound(_))).collect()
+}
+
+/// Theme settings > Import from Playnite (docs/import.md): it asks the shell to look as it opens, shows what was
+/// found and what an import would bring before anything is done, and Import asks for it only while there is
+/// something to bring.
+#[test]
+fn settings_import_from_playnite() {
+    use model::playnite::{Ask, Import, Preview};
+    let mut stage = settings_stage();
+    stage.press(&[Right, Down, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Import from Playnite");
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::Playnite(Ask::Look)]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Import from Playnite: Import; looking");
+    // Nothing to bring yet: A does nothing.
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty());
+
+    let preview = Preview {
+        from: r"C:\Users\Player\AppData\Roaming\Playnite\library".into(),
+        games_read: 8,
+        matched: 5,
+        playtime: 1,
+        last_played: 1,
+        favourites: 1,
+        hidden: 1,
+        groups: vec!["Couch picks".into(), "Installed on Steam".into()],
+        not_here: 2,
+        other_stores: 1,
+        skipped: vec![("Released in 2019".into(), "it filters by release year".into())],
+    };
+    stage.dashboard.set_playnite(&Import::Ready(preview.clone()));
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Import from Playnite: Import; ready");
+    stage.check("settings-import-from-playnite");
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::Playnite(Ask::Import)]);
+    stage.dashboard.set_playnite(&Import::Done(preview));
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Import from Playnite: Import; done");
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty(), "done: nothing more to bring");
+
+    stage.dashboard.set_playnite(&Import::NotFound);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Import from Playnite: Import; not found");
+    stage.check("settings-import-from-playnite-not-found");
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Import from Playnite");
 }

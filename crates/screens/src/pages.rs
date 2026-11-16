@@ -245,6 +245,9 @@ pub trait Page {
 
     /// The game's whole list, in its store's order, as the library database has it now.
     fn set_achievements(&mut self, _game: i64, _list: Vec<model::achievement::Achievement>) {}
+
+    /// Import from Playnite as the shell has it now (docs/import.md): for Settings' page that shows it.
+    fn set_playnite(&mut self, _import: &model::playnite::Import) {}
 }
 
 fn behind_key(page: u64) -> (&'static str, u64) {
@@ -348,6 +351,13 @@ impl Stack {
     pub fn set_achievements(&mut self, game: i64, list: Vec<model::achievement::Achievement>) {
         for page in self.pages.iter_mut().filter(|page| page.achievements_wanted() == Some(game)) {
             page.set_achievements(game, list.clone());
+        }
+    }
+
+    /// Tells every page that is up how Import from Playnite is now.
+    pub fn set_playnite(&mut self, import: &model::playnite::Import) {
+        for page in &mut self.pages {
+            page.set_playnite(import);
         }
     }
 

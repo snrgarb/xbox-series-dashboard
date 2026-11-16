@@ -8,6 +8,7 @@ use super::discord::Discord;
 use super::groups::Groups;
 use super::guide::Guide;
 use super::idle::Idle;
+use super::import::{self, Import};
 use super::profiles::Profiles;
 use super::whos_playing::WhosPlayingPage;
 use super::Setting;
@@ -25,7 +26,12 @@ pub fn theme_settings() -> Boxes {
     let added = Item::Opens { icon: '\u{E71D}', name: added::TITLE, pane: |around| Box::new(Added::open(around)) };
     // The Bundle's four at its places (6.1), then the port's own row: Games & apps, and Art beside it (16.8).
     let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |_| Box::new(Art::default()) };
-    Boxes::new("Theme settings", vec![vec![personalisation, idle], vec![guide, discord], vec![added, art]])
+    // Import from Playnite under Games & apps (docs/import.md).
+    let import = Item::Opens { icon: '\u{E8B5}', name: import::TITLE, pane: |_| Box::new(Import::default()) };
+    Boxes::new(
+        "Theme settings",
+        vec![vec![personalisation, idle], vec![guide, discord], vec![added, art], vec![import]],
+    )
 }
 
 /// Personalisation's boxes: Boot video (docs/spec/start-up.md) and Profiles (docs/spec/profiles.md) on the first

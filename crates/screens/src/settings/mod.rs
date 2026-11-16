@@ -19,6 +19,7 @@ mod group;
 pub mod groups;
 mod guide;
 pub mod idle;
+mod import;
 pub mod options;
 mod profiles;
 mod theme_settings;
@@ -124,6 +125,9 @@ pub trait Pane {
     fn closes(&mut self) -> bool {
         false
     }
+
+    /// Import from Playnite as the shell has it now: for the page that shows it.
+    fn set_playnite(&mut self, _import: &model::playnite::Import) {}
 }
 
 /// The rail's width, and the line's between it and the content.
@@ -271,6 +275,12 @@ impl Page for Settings {
         }
         if let Some(pane) = opened.filter(|_| !self.on_rail) {
             self.panes.push(pane);
+        }
+    }
+
+    fn set_playnite(&mut self, import: &model::playnite::Import) {
+        for pane in &mut self.panes {
+            pane.set_playnite(import);
         }
     }
 

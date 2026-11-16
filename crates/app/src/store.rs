@@ -14,6 +14,7 @@ use anyhow::Result;
 use library::art::{self, ArtDir, Event, Hosts, Lookup, Pace, Service, Services, StoreArt};
 use library::sources::Read;
 use library::Database;
+use model::playnite::Import;
 use model::{ByHand, FilterChange, Game, Library, ProfileChange, Source, StoreApp};
 use screens::settings::{Change, Options, Setting};
 
@@ -55,6 +56,20 @@ pub struct Store {
     /// The thread that follows achievements (`library::achievements::spawn`), once the sources have been read. None
     /// with no database file for it to open.
     achievements: Option<library::achievements::Handle>,
+    /// Where Settings > Import from Playnite looks (docs/import.md).
+    playnite: PlayniteAt,
+}
+
+/// Where Playnite's library is looked for.
+#[derive(Debug, Clone, Default, PartialEq)]
+enum PlayniteAt {
+    /// Nowhere: a picture is being drawn, or a test's fake stores are read and it named no fake Playnite.
+    #[default]
+    Off,
+    /// Where Playnite keeps it on this PC.
+    Own,
+    /// A folder standing for Playnite's data folder (`--playnite`).
+    At(PathBuf),
 }
 
 /// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from every source
@@ -69,6 +84,15 @@ pub struct Store {
 pub fn open(args: &Args) -> (Library, Store) {
     let (library, mut store) = open_library(args);
     store.achievement_sources = crate::sources::achievements(args);
+    let fake_stores = [&args.library, &args.steam, &args.epic, &args.gog, &args.ea, &args.ubisoft, &args.battlenet]
+        .iter()
+        .chain([&&args.xbox])
+        .any(|flag| flag.is_some());
+    store.playnite = match &args.playnite {
+        Some(dir) => PlayniteAt::At(dir.clone()),
+        None if fake_stores || args.screenshot.is_some() => PlayniteAt::Off,
+        None => PlayniteAt::Own,
+    };
     (library, store)
 }
 
@@ -493,6 +517,101 @@ impl Store {
             }
         }
         self.snapshot()
+    }
+
+    /// Playnite's library folder, if there is one where the Dashboard may look.
+    fn playnite_library(&self) -> Option<PathBuf> {
+        match &self.playnite {
+            PlayniteAt::Off => None,
+            PlayniteAt::Own => playnite::find(None),
+            PlayniteAt::At(dir) => playnite::find(Some(dir)),
+        }
+    }
+
+    /// Reads Playnite's library, and what importing it would do: the plan, or how the import stands without one.
+    fn playnite_plan(&mut self) -> Result<(model::playnite::Plan, model::playnite::Preview), Import> {
+        let Some(found) = self.playnite_library() else {
+            eprintln!("import: no Playnite library found");
+            return Err(Import::NotFound);
+        };
+        let plan = playnite::look(&found).map_err(|e| {
+            eprintln!("import: {} could not be read: {e:#}", found.display());
+            Import::Unreadable(format!("{e:#}"))
+        })?;
+        let Some(database) = self.database.as_mut() else {
+            eprintln!("import: no library database to import into");
+            return Err(Import::Unreadable("There is no library database to import into.".into()));
+        };
+        let preview = database.import_preview(&plan).map_err(|e| {
+            eprintln!("import: {e:#}");
+            Import::Unreadable(format!("{e:#}"))
+        })?;
+        Ok((plan, preview))
+    }
+
+    /// Settings > Import from Playnite opened: looks for Playnite's library and says what an import would bring.
+    /// Playnite's files are only read.
+    pub fn playnite_look(&mut self) -> Import {
+        let (plan, preview) = match self.playnite_plan() {
+            Ok(planned) => planned,
+            Err(stand) => return stand,
+        };
+        eprintln!(
+            "import: found Playnite's library at {}: {} games, {} of them here, {} not here, {} of other stores",
+            plan.from.display(),
+            preview.games_read,
+            preview.matched,
+            preview.not_here,
+            preview.other_stores
+        );
+        eprintln!("import: would bring {}", preview.describe());
+        for (name, why) in &preview.skipped {
+            eprintln!("import: Group \"{name}\" cannot come over: {why}");
+        }
+        Import::Ready(preview)
+    }
+
+    /// Settings > Import from Playnite's Import: reads Playnite's library afresh and brings it into the database.
+    /// Gives how it stands after, and the snapshot to show when anything changed.
+    pub fn playnite_import(&mut self) -> (Import, Option<Library>) {
+        let (plan, _) = match self.playnite_plan() {
+            Ok(planned) => planned,
+            Err(stand) => return (stand, None),
+        };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let Some(database) = self.database.as_mut() else { return (Import::NotFound, None) };
+        match database.import(&plan, now) {
+            Ok(imported) => {
+                for line in &imported.lines {
+                    eprintln!("{line}");
+                }
+                if imported.preview.is_empty() {
+                    eprintln!("import: done: nothing new");
+                    (Import::Done(imported.preview), None)
+                } else {
+                    eprintln!("import: done: {}", imported.preview.describe());
+                    (Import::Done(imported.preview), self.snapshot())
+                }
+            }
+            Err(e) => {
+                eprintln!("import: not done: {e:#}");
+                (Import::Unreadable(format!("{e:#}")), None)
+            }
+        }
+    }
+
+    /// Whether to say, once, that there is a Playnite library to import (docs/import.md): there is one, it has
+    /// never been imported, and this has not been said before. Saying it is noted, so it is never said again.
+    pub fn playnite_offer(&self) -> Option<PathBuf> {
+        if self.database.is_none()
+            || self.setting(library::import::OFFERED).is_some()
+            || self.setting(library::import::IMPORTED).is_some()
+        {
+            return None;
+        }
+        let found = self.playnite_library()?;
+        self.set_text(library::import::OFFERED, "1");
+        Some(found)
     }
 
     /// Carries out a change Settings' Groups page asked for: a filter shown or not, moved, made, changed or

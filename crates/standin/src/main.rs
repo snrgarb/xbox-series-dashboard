@@ -545,12 +545,7 @@ fn make_playnite(dir: &Path, json: Option<&Path>) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
         std::fs::write(json, text).map_err(|e| format!("{}: {e}", json.display()))?;
     }
-    note(&format!(
-        "make-playnite: {} games and {} Groups at {}",
-        plan.games_read,
-        plan.groups.len(),
-        found.display()
-    ));
+    note(&format!("make-playnite: {} games and {} Groups at {}", plan.games_read, plan.groups.len(), found.display()));
     Ok(())
 }
 

@@ -244,7 +244,10 @@ fn bring(tx: &Transaction, group: &Group) -> Result<Brought> {
             }
             tx.execute("DELETE FROM collection_games WHERE collection = ?1", [collection])?;
             for game in &games {
-                tx.execute("INSERT INTO collection_games (collection, game) VALUES (?1, ?2)", params![collection, game])?;
+                tx.execute(
+                    "INSERT INTO collection_games (collection, game) VALUES (?1, ?2)",
+                    params![collection, game],
+                )?;
             }
             let (count, name) = (games.len(), &group.name);
             Ok(if made {
@@ -286,7 +289,15 @@ mod tests {
             steam_game("30", "Cedar", 0, 0),
         ];
         db.sync(STEAM, &Library { games, ..Library::default() }, NOW - 1000).unwrap();
-        db.sync("epic", &Library { games: vec![Game { source_id: "Elm".into(), name: "Elm".into(), ..Game::default() }], ..Library::default() }, NOW - 1000).unwrap();
+        db.sync(
+            "epic",
+            &Library {
+                games: vec![Game { source_id: "Elm".into(), name: "Elm".into(), ..Game::default() }],
+                ..Library::default()
+            },
+            NOW - 1000,
+        )
+        .unwrap();
         db
     }
 
@@ -340,7 +351,11 @@ mod tests {
     fn shown(db: &Database) -> Vec<(String, Vec<String>)> {
         let filters = db.filters_at(NOW).unwrap();
         let name = |id: i64| db.game(id).unwrap().unwrap().name;
-        filters.iter().filter(|f| f.shown).map(|f| (f.name.clone(), f.games.iter().map(|&g| name(g)).collect())).collect()
+        filters
+            .iter()
+            .filter(|f| f.shown)
+            .map(|f| (f.name.clone(), f.games.iter().map(|&g| name(g)).collect()))
+            .collect()
     }
 
     #[test]

@@ -98,7 +98,9 @@ impl std::fmt::Display for Refused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Refused::NotLiteDb => write!(f, "it is not a LiteDB file"),
-            Refused::Version(v) => write!(f, "it is LiteDB's format version {v}, and only version 7 (LiteDB 4) is read"),
+            Refused::Version(v) => {
+                write!(f, "it is LiteDB's format version {v}, and only version 7 (LiteDB 4) is read")
+            }
             Refused::Encrypted => write!(f, "it has a password"),
         }
     }
@@ -389,7 +391,8 @@ pub fn write(collections: &[(&str, Vec<Doc>)]) -> Result<Vec<u8>> {
             let id = doc.get("_id").with_context(|| format!("a document of {name} with no _id"))?.clone();
             let bytes = bson::write(doc);
             let inline = bytes.len() + 8 <= PAGE - HEADER;
-            let (extend, payload) = if inline { (NONE, &bytes[..]) } else { (extend_pages(&mut pages, &bytes), &[][..]) };
+            let (extend, payload) =
+                if inline { (NONE, &bytes[..]) } else { (extend_pages(&mut pages, &bytes), &[][..]) };
             let size = payload.len() + 8;
             let (page, used, index) = match data {
                 Some((page, used, index)) if used + size <= PAGE - HEADER => (page, used, index),
@@ -561,7 +564,8 @@ mod tests {
             games.push(doc(id, &format!("Game {n}")));
         }
         // Longer than a page, twice over.
-        let long = doc(guid_id("ffffffff-0000-4000-8000-000000000000"), "Long").with("Description", Value::String("x".repeat(9000)));
+        let long = doc(guid_id("ffffffff-0000-4000-8000-000000000000"), "Long")
+            .with("Description", Value::String("x".repeat(9000)));
         games.push(long.clone());
         let settings = vec![Doc::default().with("_id", Value::Int32(0)).with("SortingOrder", Value::Array(Vec::new()))];
         let bytes = write(&[("Game", games), ("Settings", settings.clone())]).unwrap();

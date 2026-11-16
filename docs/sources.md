@@ -41,6 +41,7 @@ A source holds no state that changes, but for what Steam's keeps between looks a
 - A game a source no longer lists (uninstalled, or no longer owned) is marked gone and not shown; it keeps its row, its Play sessions, favourite and hidden, and comes back as the same game if the source lists it again.
 - Play sessions, favourite and hidden are the user's: a refresh never touches them. A source's own word on favourites or hidden is taken once, as the game is first seen.
 - The snapshot's `user` is that of the source with the most games shown.
+- Playnite is not a source: an import from it, once (Settings > Import from Playnite, [import.md](import.md)), adds its play time, last played, favourites, hidden games and Groups to the games the stores gave, by the same `(source, source_id)`.
 
 ## Games added by hand
 

@@ -112,7 +112,11 @@ impl Preview {
             parts.push(format!("last played for {}", games(self.last_played)));
         }
         if self.favourites > 0 {
-            parts.push(if self.favourites == 1 { "1 favourite".into() } else { format!("{} favourites", self.favourites) });
+            parts.push(if self.favourites == 1 {
+                "1 favourite".into()
+            } else {
+                format!("{} favourites", self.favourites)
+            });
         }
         if self.hidden > 0 {
             parts.push(format!("{} hidden", games(self.hidden)));

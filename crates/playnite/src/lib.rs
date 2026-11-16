@@ -177,7 +177,9 @@ pub fn read(library: &Path) -> Result<Playnite> {
         // file is half way through a write that Playnite has still to undo.
         let journal = library.join(file.replace(".db", "-journal.db"));
         if journal.exists() {
-            bail!("Playnite stopped while it was writing its library. Start Playnite and close it again, then try again.");
+            bail!(
+                "Playnite stopped while it was writing its library. Start Playnite and close it again, then try again."
+            );
         }
     }
     let open = |name: &str| -> Result<litedb::File> {

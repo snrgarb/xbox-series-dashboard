@@ -29,6 +29,9 @@ pub struct Args {
     /// A folder standing for a drive of Xbox games (`source_xbox::fixture`), read in place of this machine's packages:
     /// an empty one has none.
     xbox: Option<PathBuf>,
+    /// A folder standing for Playnite's data folder (`playnite::find`), for Settings > Import from Playnite: the
+    /// user's own Playnite is never read while a test's fake stores are (docs/import.md).
+    playnite: Option<PathBuf>,
     /// The folder the library database is in, in place of the user's own.
     data_dir: Option<PathBuf>,
     launch_screen: bool,
@@ -111,7 +114,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
                  [--epic <dir>] [--gog <dir>] [--ea <dir>] [--ubisoft <dir>] [--battlenet <dir>]
-                 [--xbox <dir>]
+                 [--xbox <dir>] [--playnite <dir>]
                  [--media <dir>] [--no-startup] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--fake-media [--fake-media-art <picture>]]
                  [--log-queue-sources]
@@ -172,6 +175,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--ubisoft" => args.ubisoft = Some(value()?.into()),
             "--battlenet" => args.battlenet = Some(value()?.into()),
             "--xbox" => args.xbox = Some(value()?.into()),
+            "--playnite" => args.playnite = Some(value()?.into()),
             "--data-dir" => args.data_dir = Some(value()?.into()),
             "--screenshot" => args.screenshot = Some(value()?.into()),
             "--size" => {
