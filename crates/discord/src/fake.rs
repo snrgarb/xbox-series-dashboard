@@ -2,14 +2,19 @@
 //! naming, never Discord's own, and answers the handshake, AUTHORIZE (approved at once, as if the user had pressed
 //! Authorize), AUTHENTICATE, SUBSCRIBE and the voice commands; with its own OAuth2 token endpoint on 127.0.0.1, which
 //! grants what it gave codes and refresh tokens for. It can be told (`control`, or over the pipe `<name>-control`
-//! with `standin discord-say`) to put the user in a Call, change who is in it, who speaks and who is muted or
-//! deafened, hold the voice commands until told to carry them out or refuse them, close the connection, and go away
-//! and come back as Discord quitting and starting again does. Its HTTP server is also the CDN the avatars come from
+//! with `standin discord-say`) to put the user in a Call in a server's voice channel, a DM or a group DM, put people
+//! in a voice channel the user isn't in, change who is in the Call, who speaks and who is muted or deafened, hold the
+//! voice commands until told to carry them out or refuse them, close the connection, and go away and come back as
+//! Discord quitting and starting again does. It answers the servers (GET_GUILDS, GET_GUILD), their channels
+//! (GET_CHANNELS) and who is in each (GET_CHANNEL), and joins any voice channel or DM it knows on
+//! SELECT_VOICE_CHANNEL. Its HTTP server is also the CDN the avatars and server icons come from
 //! ([`FakeDiscord::cdn_url`]): a plain picture of one colour for each address asked.
 //!
-//! The made-up world: the user "E2E Tester" (`e2e-tester`, with no avatar of their own: Discord's default one), one
-//! server, "Stand-in Server", with two voice channels, General and Late night, and people met by name as they are
-//! first named, each with an avatar.
+//! The made-up world: the user "E2E Tester" (`e2e-tester`, with no avatar of their own: Discord's default one); three
+//! servers ([`SERVERS`]): "Stand-in Server", with a text channel and two voice channels, General and Late night;
+//! "Another Server", with no icon, a voice channel (Lobby), a text channel and a stage (Town hall); and "art club",
+//! with text only; DMs and group DMs made as the user is put in them; and people met by name as they are first
+//! named, each with an avatar.
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -30,8 +35,40 @@ pub const USERNAME: &str = "e2e-tester";
 pub const DISPLAY_NAME: &str = "E2E Tester";
 pub const GUILD_ID: &str = "900000000000000001";
 pub const GUILD_NAME: &str = "Stand-in Server";
-/// The voice channels: id and name.
+/// Stand-in Server's voice channels: id and name.
 pub const CHANNELS: [(&str, &str); 2] = [("500000000000000001", "General"), ("500000000000000002", "Late night")];
+
+/// A made-up server: its id, name, whether it has an icon, and its channels in Discord's order, each an id, a name
+/// and Discord's type (0 text, 2 voice, 13 stage).
+pub type FakeServer = (&'static str, &'static str, bool, &'static [(&'static str, &'static str, u64)]);
+
+/// The servers, in no order of the Bundle's.
+pub const SERVERS: [FakeServer; 3] = [
+    (
+        GUILD_ID,
+        GUILD_NAME,
+        true,
+        &[("500000000000000009", "chat", 0), ("500000000000000001", "General", 2), ("500000000000000002", "Late night", 2)],
+    ),
+    (
+        "900000000000000002",
+        "Another Server",
+        false,
+        &[("510000000000000001", "Lobby", 2), ("510000000000000009", "notes", 0), ("510000000000000002", "Town hall", 13)],
+    ),
+    ("900000000000000003", "art club", true, &[("520000000000000009", "drawings", 0)]),
+];
+
+/// A server's icon, on Discord's CDN: its hash made up from its id, as a person's avatar's is.
+fn icon_url(guild: &str) -> String {
+    format!("https://cdn.discordapp.com/icons/{guild}/{}.png", World::avatar(guild))
+}
+
+/// A server, as GET_GUILDS and GET_GUILD give it.
+fn guild(server: &FakeServer) -> Value {
+    let (id, name, icon, _) = server;
+    json!({ "id": id, "name": name, "icon_url": icon.then(|| icon_url(id)) })
+}
 
 /// The control pipe's name for the fake on `name`.
 pub fn control_name(name: &str) -> String {
@@ -42,8 +79,10 @@ pub fn control_name(name: &str) -> String {
 struct World {
     /// People by id: their names. The user is not among them.
     people: BTreeMap<String, String>,
-    /// Who is in each voice channel, by id.
+    /// Who is in each voice channel and DM, by id (the user only as they are in it: `selected`).
     members: BTreeMap<String, Vec<String>>,
+    /// The DMs and group DMs made: id, their people (the user aside), and whether a group.
+    dms: Vec<(String, Vec<String>, bool)>,
     /// The channel the user is in.
     selected: Option<String>,
     mute: bool,
@@ -114,14 +153,36 @@ impl World {
         })
     }
 
+    /// A server's voice or stage channel by id: its name, type and server.
+    fn server_channel(id: &str) -> Option<(&'static str, u64, &'static str)> {
+        SERVERS.iter().find_map(|(guild, _, _, channels)| {
+            let found = channels.iter().find(|(known, _, kind)| *known == id && *kind != 0);
+            found.map(|(_, name, kind)| (*name, *kind, *guild))
+        })
+    }
+
+    /// A voice channel or DM, as GET_CHANNEL answers: with everyone in it, the user first if they are.
     fn channel(&self, id: &str) -> Option<Value> {
-        let (_, name) = CHANNELS.iter().find(|(known, _)| *known == id)?;
+        let (name, kind, guild) = match Self::server_channel(id) {
+            Some((name, kind, guild)) => (name, kind, Some(guild)),
+            None => {
+                let (_, _, group) = self.dms.iter().find(|(known, _, _)| known == id)?;
+                ("", if *group { 3 } else { 1 }, None)
+            }
+        };
         let mut members = self.members.get(id).cloned().unwrap_or_default();
         if self.selected.as_deref() == Some(id) {
             members.insert(0, USER_ID.to_string());
         }
         let states: Vec<Value> = members.iter().map(|member| self.voice_state(member)).collect();
-        Some(json!({ "id": id, "name": name, "type": 2, "guild_id": GUILD_ID, "voice_states": states }))
+        Some(json!({ "id": id, "name": name, "type": kind, "guild_id": guild, "voice_states": states }))
+    }
+
+    /// A server's voice or stage channel by its name (`_` for a space, any case).
+    fn find(name: &str) -> Option<&'static str> {
+        let name = name.replace('_', " ");
+        let mut voice = SERVERS.iter().flat_map(|(_, _, _, channels)| channels.iter()).filter(|(_, _, kind)| *kind != 0);
+        voice.find(|(_, known, _)| known.eq_ignore_ascii_case(&name)).map(|(id, _, _)| *id)
     }
 
     fn voice_settings(&self) -> Value {
@@ -245,16 +306,28 @@ impl Shared {
             }
             "GET_GUILDS" => {
                 drop(world);
-                let guilds = json!({ "guilds": [{ "id": GUILD_ID, "name": GUILD_NAME, "icon_url": null }] });
-                self.reply(cmd, nonce, guilds, None);
+                let guilds: Vec<Value> = SERVERS.iter().map(guild).collect();
+                self.reply(cmd, nonce, json!({ "guilds": guilds }), None);
             }
-            "GET_CHANNELS" => {
-                let channels: Vec<Value> = CHANNELS
-                    .iter()
-                    .map(|(id, name)| json!({ "id": id, "name": name, "type": 2, "guild_id": GUILD_ID }))
-                    .collect();
+            "GET_GUILD" | "GET_CHANNELS" => {
                 drop(world);
-                self.reply(cmd, nonce, json!({ "channels": channels }), None);
+                let id = args["guild_id"].as_str().unwrap_or_default();
+                let Some(server) = SERVERS.iter().find(|(known, _, _, _)| *known == id) else {
+                    self.error(cmd, nonce, 4004, "Invalid guild");
+                    return;
+                };
+                let data = if cmd == "GET_GUILD" {
+                    let mut data = guild(server);
+                    data["members"] = json!([]);
+                    data
+                } else {
+                    let channels: Vec<Value> = (server.3)
+                        .iter()
+                        .map(|(channel, name, kind)| json!({ "id": channel, "name": name, "type": kind, "guild_id": id }))
+                        .collect();
+                    json!({ "channels": channels })
+                };
+                self.reply(cmd, nonce, data, None);
             }
             "GET_VOICE_SETTINGS" => {
                 let settings = world.voice_settings();
@@ -334,7 +407,7 @@ impl Shared {
         let found = channel.as_deref().and_then(|id| world.channel(id)).unwrap_or(Value::Null);
         drop(world);
         if tell {
-            let guild = channel.as_ref().map(|_| GUILD_ID);
+            let guild = channel.as_deref().and_then(World::server_channel).map(|(_, _, guild)| guild);
             self.dispatch("VOICE_CHANNEL_SELECT", json!({ "channel_id": channel, "guild_id": guild }));
         }
         found
@@ -374,18 +447,50 @@ impl Shared {
     fn control(&self, line: &str) -> Result<String, String> {
         let words: Vec<&str> = line.split_whitespace().collect();
         match words.as_slice() {
-            ["call", channel, people @ ..] => {
-                let channel = channel.replace('_', " ");
-                let Some((id, name)) = CHANNELS.iter().find(|(_, name)| name.eq_ignore_ascii_case(&channel)) else {
-                    return Err(format!("no voice channel {channel:?}"));
+            [verb @ ("call" | "in"), channel, people @ ..] => {
+                let Some(id) = World::find(channel) else {
+                    return Err(format!("no voice channel {:?}", channel.replace('_', " ")));
                 };
                 {
                     let mut world = self.world.lock().unwrap();
                     let ids: Vec<String> = people.iter().map(|person| world.person(person)).collect();
                     world.members.insert(id.to_string(), ids);
                 }
+                let (name, everyone) = (channel.replace('_', " "), people.join(", "));
+                if *verb == "in" {
+                    // People in a voice channel the user may not be in: who GET_CHANNEL says is there.
+                    let everyone = if people.is_empty() { "nobody".to_string() } else { everyone };
+                    return Ok(format!("in {name}: {everyone}"));
+                }
                 self.select(Some(id.to_string()));
-                Ok(format!("the user is in {name} with {}", people.join(", ")))
+                Ok(format!("the user is in {name} with {everyone}"))
+            }
+            // A DM with one person, a group DM with more (or named `group`): made if new, the user in its Call.
+            [verb @ ("dm" | "group"), people @ ..] if !people.is_empty() => {
+                let id = {
+                    let mut world = self.world.lock().unwrap();
+                    let ids: Vec<String> = people.iter().map(|person| world.person(person)).collect();
+                    let id = match world.dms.iter().find(|(_, known, _)| *known == ids) {
+                        Some((id, _, _)) => id.clone(),
+                        None => {
+                            let id = format!("{}", 600000000000000001u64 + world.dms.len() as u64);
+                            world.dms.push((id.clone(), ids.clone(), *verb == "group" || ids.len() > 1));
+                            id
+                        }
+                    };
+                    world.members.insert(id.clone(), ids);
+                    id
+                };
+                self.select(Some(id));
+                Ok(format!("the user is in a {} with {}", if *verb == "dm" { "DM" } else { "group DM" }, people.join(", ")))
+            }
+            // Joining by command, as SELECT_VOICE_CHANNEL from another device: the voice channel by name.
+            ["select", channel] => {
+                let Some(id) = World::find(channel) else {
+                    return Err(format!("no voice channel {:?}", channel.replace('_', " ")));
+                };
+                self.select(Some(id.to_string()));
+                Ok(format!("the user is in {}", channel.replace('_', " ")))
             }
             ["join", person] => self.member(person, true),
             ["leave", person] => self.member(person, false),
@@ -532,9 +637,9 @@ impl FakeDiscord {
         format!("http://127.0.0.1:{}", self.token_port)
     }
 
-    /// Does a control command (`call General Ana Bo`, `join Cy`, `leave Ana`, `speak Ana`, `hush Ana`, `mute me`,
-    /// `undeafen Bo`, `hold`, `confirm`, `refuse <message>`, `hang-up`, `go-away`, `come-back`, `close <message>`):
-    /// what it did, or why it didn't.
+    /// Does a control command (`call General Ana Bo`, `in Late_night Cy Di`, `select Lobby`, `dm Ana`,
+    /// `group Ana Bo`, `join Cy`, `leave Ana`, `speak Ana`, `hush Ana`, `mute me`, `undeafen Bo`, `hold`, `confirm`,
+    /// `refuse <message>`, `hang-up`, `go-away`, `come-back`, `close <message>`): what it did, or why it didn't.
     pub fn control(&self, line: &str) -> Result<String, String> {
         let done = self.shared.control(line);
         self.shared.say(&format!("{line}: {}", done.as_ref().unwrap_or_else(|e| e)));
@@ -774,7 +879,8 @@ fn token_request(shared: &Shared, stream: TcpStream) -> io::Result<()> {
     reader.read_exact(&mut body)?;
     // The stand-in CDN: an avatar, a plain picture of one colour for each address.
     let path = request_line.strip_prefix("GET ").and_then(|rest| rest.split_whitespace().next());
-    if let Some(path) = path.filter(|path| path.starts_with("/avatars/") || path.starts_with("/embed/avatars/")) {
+    let pictures = ["/avatars/", "/embed/avatars/", "/icons/"];
+    if let Some(path) = path.filter(|path| pictures.iter().any(|prefix| path.starts_with(prefix))) {
         let picture = avatar_picture(path);
         shared.say(&format!("cdn: {path} served"));
         let mut stream = stream;
