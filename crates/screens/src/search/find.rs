@@ -55,6 +55,25 @@ pub fn rows(library: &Library, text: &str) -> Vec<(Kind, Vec<usize>)> {
     }
 }
 
+/// **Search's Apps row: a hook** (docs/spec/apps.md, section 3). The Apps whose name holds `text`, by the same
+/// rule as the games, as their places in `library.apps`; none with nothing typed. Apps are in no list of games, so
+/// never in the Games row; nothing shows this yet.
+pub fn apps(library: &Library, text: &str) -> Vec<usize> {
+    let text = text.trim_matches(' ');
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let text = fold(text);
+    let mut found: Vec<(u8, String, usize)> = library
+        .apps
+        .iter()
+        .enumerate()
+        .filter_map(|(at, app)| Some((rank(&fold(&app.name), &text)?, sort_name(&app.name), at)))
+        .collect();
+    found.sort();
+    found.into_iter().map(|(_, _, at)| at).collect()
+}
+
 /// Those with a time they were added, the latest first, then those with none in the library's order: the first
 /// twelve. Games added at the same moment (a whole library read at once) go by their sorting name.
 fn recently_added<'a>(games: impl Iterator<Item = (usize, &'a Game)>) -> Vec<usize> {
@@ -137,6 +156,26 @@ fn unaccented(c: char) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apps_are_found_by_the_games_rule_and_never_as_games() {
+        let app = |id: i64, name: &str| model::App {
+            id,
+            name: name.into(),
+            kind: model::AppKind::Program,
+            target: String::new(),
+            icon: None,
+        };
+        let library = Library {
+            apps: vec![app(1, "Text Notes"), app(2, "Notepad"), app(3, "Calculator")],
+            ..library_of(&["Note Quest"])
+        };
+        assert_eq!(apps(&library, "note"), [1, 0]);
+        assert!(apps(&library, " ").is_empty());
+        // The Games row has the game, and no App.
+        assert_eq!(rows(&library, "note"), [(Kind::Games, vec![0])]);
+        assert!(rows(&library, "calc").is_empty());
+    }
 
     fn library_of(names: &[&str]) -> Library {
         let games = names.iter().enumerate().map(|(i, name)| Game {

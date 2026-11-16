@@ -1,6 +1,7 @@
 //! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). Only what
 //! M3 owns is here: the boxes of later milestones (Boot video, Profiles, Who's playing today?, Idle, Discord) come
 //! with their features, and those that are here close up in the grid meanwhile.
+use super::added::{self, Added};
 use super::boxes::{Boxes, Item};
 use super::groups::Groups;
 use super::guide::Guide;
@@ -11,7 +12,8 @@ pub fn theme_settings() -> Boxes {
     let personalisation =
         Item::Opens { icon: '\u{E771}', name: "Personalisation", pane: |_| Box::new(personalisation()) };
     let guide = Item::Opens { icon: '\u{E7FC}', name: "Guide", pane: |_| Box::new(Guide) };
-    Boxes::new("Theme settings", vec![vec![personalisation, guide]])
+    let added = Item::Opens { icon: '\u{E71D}', name: added::TITLE, pane: |around| Box::new(Added::open(around)) };
+    Boxes::new("Theme settings", vec![vec![personalisation, guide], vec![added]])
 }
 
 /// Personalisation's boxes: Groups (docs/spec/filters.md, 6.1), then a checkbox box a row, the second column's

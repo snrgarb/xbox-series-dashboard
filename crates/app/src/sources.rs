@@ -19,6 +19,8 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         Arc::new(source_ea::Ea::at(args.ea.clone())),
         Arc::new(source_ubisoft::Ubisoft::at(args.ubisoft.clone())),
         Arc::new(source_battlenet::BattleNet::at(args.battlenet.clone())),
+        // The games added by hand, which are the database's own (docs/spec/apps.md).
+        Arc::new(library::by_hand::Manual),
     ]
 }
 

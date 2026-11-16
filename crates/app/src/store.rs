@@ -13,7 +13,7 @@ use std::time::Instant;
 use anyhow::Result;
 use library::sources::Read;
 use library::Database;
-use model::{FilterChange, Game, Library, Source};
+use model::{ByHand, FilterChange, Game, Library, Source, StoreApp};
 use screens::settings::{Change, Options, Setting};
 
 use crate::{fail, Args};
@@ -33,6 +33,10 @@ pub struct Store {
     booted: bool,
     /// The running game's Play session.
     session: Option<i64>,
+    /// The Microsoft Store apps installed, once listed: every snapshot carries them (`Library::store_apps`).
+    store_apps: Option<Vec<StoreApp>>,
+    /// Hears from the thread that lists them.
+    listed: Option<Receiver<Option<Vec<StoreApp>>>>,
 }
 
 /// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from every source
@@ -162,7 +166,9 @@ impl Store {
         if !std::mem::take(&mut self.pending) {
             return;
         }
-        let (path, shown, sources) = (self.path.clone(), shown.clone(), self.sources.clone());
+        // What the database says is compared with what is shown, which has the Store apps from elsewhere.
+        let shown = Library { store_apps: None, ..shown.clone() };
+        let (path, sources) = (self.path.clone(), self.sources.clone());
         let (changed, synced) = mpsc::channel();
         self.synced = Some(synced);
         std::thread::spawn(move || {
@@ -186,11 +192,57 @@ impl Store {
         &self.sources
     }
 
-    /// The new snapshot, once, if the background sync changed the database.
+    /// Lists the Microsoft Store apps installed (`crate::store_apps`) on a thread of its own, for Add an app's
+    /// list; `wake` is called once they are.
+    pub fn list_store_apps(&mut self, wake: impl FnOnce() + Send + 'static) {
+        let (listed, hear) = mpsc::channel();
+        self.listed = Some(hear);
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let apps = crate::store_apps::list();
+            if let Some(apps) = &apps {
+                eprintln!("apps: {} Microsoft Store apps listed in {} ms", apps.len(), started.elapsed().as_millis());
+            }
+            let _ = listed.send(apps);
+            wake();
+        });
+    }
+
+    /// The new snapshot, once, if the background sync changed the database, or the Store apps have been listed.
     pub fn changed(&mut self) -> Option<Library> {
-        self.synced.as_ref()?.try_recv().ok()?;
-        self.synced = None;
-        self.snapshot()
+        let mut changed = false;
+        if let Some(apps) = self.listed.as_ref().and_then(|listed| listed.try_recv().ok()) {
+            (self.store_apps, self.listed, changed) = (apps, None, true);
+        }
+        if self.synced.as_ref().is_some_and(|synced| synced.try_recv().is_ok()) {
+            (self.synced, changed) = (None, true);
+        }
+        changed.then(|| self.snapshot()).flatten()
+    }
+
+    /// Carries out a change Settings' Games & apps pages asked for. A program that is not there is refused, with
+    /// why, for the user to be told; a picture that is not there is left out. Gives the snapshot after, or None
+    /// with no database.
+    pub fn by_hand(&mut self, change: ByHand) -> Result<Option<Library>, String> {
+        let change = match change {
+            ByHand::AddGame { path, .. } | ByHand::AddApp { path, .. } if !path.is_file() => {
+                let why = format!("There's no program at {}", path.display());
+                eprintln!("library: {why}: nothing added");
+                return Err(why);
+            }
+            ByHand::AddGame { path, name, art } => ByHand::AddGame { path, name, art: there(art) },
+            ByHand::AddApp { path, name, icon } => ByHand::AddApp { path, name, icon: there(icon) },
+            change => change,
+        };
+        let Some(database) = self.database.as_mut() else { return Ok(None) };
+        match database.by_hand(&change, library::now()) {
+            Ok(done) => eprintln!("library: {done}"),
+            Err(e) => {
+                eprintln!("library: {e:#}");
+                return Err(format!("{e:#}"));
+            }
+        }
+        Ok(self.snapshot())
     }
 
     /// The running game's window is up: its Play session starts. Asked every time the launch is looked at; only
@@ -287,7 +339,19 @@ impl Store {
     }
 
     fn snapshot(&self) -> Option<Library> {
-        self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()
+        let library = self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()?;
+        Some(Library { store_apps: self.store_apps.clone(), ..library })
+    }
+}
+
+/// A picture's path, if there is a file there; else it is said in the log and left out.
+fn there(picture: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let picture = picture?;
+    if picture.is_file() {
+        Some(picture)
+    } else {
+        eprintln!("library: no picture at {}: left out", picture.display());
+        None
     }
 }
 

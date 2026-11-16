@@ -1,5 +1,6 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod audio;
+pub mod by_hand;
 pub mod post;
 pub mod sound;
 pub mod source;
@@ -8,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub use audio::{Audio, AudioDevice, Flow};
+pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
 pub use sound::Sound;
 pub use source::{Ask, Found, Source, Start};
 
@@ -319,6 +321,15 @@ pub struct Library {
     /// could not be read, which leaves the database's as they are; and always in a snapshot.
     #[serde(default)]
     pub collections: Option<Vec<Collection>>,
+    /// The Apps (`by_hand`): not games, so in none of the lists above. In the order they were added. Only a
+    /// snapshot of the library database has any.
+    #[serde(default)]
+    pub apps: Vec<App>,
+    /// The Microsoft Store apps installed on this machine, for the user to tick as Apps: not the database's, but
+    /// listed by the executable as it starts. None until they have been listed, and where they can't be (anywhere
+    /// but Windows).
+    #[serde(default)]
+    pub store_apps: Option<Vec<StoreApp>>,
 }
 
 impl Library {
