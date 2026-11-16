@@ -44,10 +44,13 @@ $cardY = 330
 # The rows' scale and a focused Recent tile's place (crates/screens/src/home/recent.rs, theme.rs).
 $rowScale = 1700 / 1526
 $storeLog = Join-Path $env:E2E_OUT 'standin.log'
-$lookupLine = '^art: \d+ looked up, \d+ found, \d+ none(, \d+ failed)?, in [\d.]+ s; pictures: \d+ store files, \d+ cache, (\d+) store online, (\d+) SteamGridDB$'
+# Named, so that the optional failures are no group of their own to count past.
+$lookupLine = '^art: \d+ looked up, \d+ found, \d+ none(?:, (?<failed>\d+) failed)?, in [\d.]+ s; pictures: \d+ store files, \d+ cache, (?<store>\d+) store online, (?<grid>\d+) SteamGridDB$'
 
 function Focus-Lines { @(Get-DashboardLog | Where-Object { $_ -match '^focus: ' }) }
-function Focus-Now { Focus-Lines | Select-Object -Last 1 }
+# Always a string: before the first focus line (Home starts on the profile and says nothing) it is '', which
+# -match and -notmatch compare as a string; nothing at all would make them filter an empty list, and be false both.
+function Focus-Now { [string] (Focus-Lines | Select-Object -Last 1) }
 
 # Two taps closer than this can be seen as one held press on a VM whose frames take most of a second.
 $Gap = 150
@@ -228,8 +231,10 @@ try {
     $done = Wait-DashboardLog $lookupLine 120
     Say "lookup with no key: $(if ($done) { $done } else { 'no art: line in 120 s' })"
     if (-not $done) { $failures += 'the first lookup never ended' }
-    elseif ($done -match $lookupLine -and ([int] $Matches[2] -ne 0 -or [int] $Matches[1] -eq 0)) {
-        $failures += "with no key the pictures should be the stores' alone, and some: $done"
+    elseif ($done -notmatch $lookupLine) { $failures += "the lookup's line is not as expected: $done" }
+    elseif ([int] $Matches['grid'] -ne 0 -or [int] $Matches['store'] -eq 0 -or $Matches['failed']) {
+        # Every address the fakes name is the stand-in's: a request that fails is a fault, not a store with none.
+        $failures += "with no key the pictures should be the stores' alone, some, and none failed: $done"
     }
     Start-Sleep -Seconds 4
     Wait-Greeting | Out-Null
@@ -259,7 +264,8 @@ try {
     $done = Wait-DashboardLog $lookupLine 180 $mark
     Say "lookup with the key: $(if ($done) { $done } else { 'no art: line in 180 s' })"
     if (-not $done) { $failures += 'the lookup with the key never ended' }
-    elseif ($done -match $lookupLine -and [int] $Matches[2] -eq 0) { $failures += "SteamGridDB gave nothing: $done" }
+    elseif ($done -notmatch $lookupLine) { $failures += "the lookup's line is not as expected: $done" }
+    elseif ([int] $Matches['grid'] -eq 0 -or $Matches['failed']) { $failures += "SteamGridDB should have given pictures, none failing: $done" }
     Leave-Settings
 
     # --- The Recent row: the Store's square for Lumen Hollow still, and SteamGridDB's for an Epic game.
