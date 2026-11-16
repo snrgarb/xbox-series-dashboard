@@ -32,6 +32,8 @@ winit = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = "1"
 anyhow = "1"
+# Waits for the error scope round the surface's configuration (window.rs).
+pollster = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -230,7 +230,9 @@ Two payloads (docs/spec/shell-mode.md):
   `--shell-off --dry-shell`. They read the PC for real and write nothing. It passes when the lines say a dry run, the
   four writes in order (or each refusal, where the PC refuses, as the TV with the Bundle's Boot shell would), the
   `Shell` line exactly, no line says it wrote, and `reg query` and `schtasks /Query` read every place the same before
-  and after. `e2e/run.sh shell-dry`, or `e2e/htpc/run.sh shell-dry`.
+  and after. Then it starts `dashboard.exe --from-shell --dry-shell` (the window as the shell starts it, topmost for
+  Start-up, the shell's events left alone) and needs `first frame presented` in `<data>\shell\logs\dashboard-*.log`
+  with no `window: ERROR`: run it before `shell-mode`. `e2e/run.sh shell-dry`, or `e2e/htpc/run.sh shell-dry`.
 - **`shell-mode`**, the VM only: it turns shell mode on for real and restarts the VM five times. In safe mode it
   throws at once (`Assert-VmOnly`). It needs longer than the default wait:
 

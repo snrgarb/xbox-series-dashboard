@@ -10,7 +10,10 @@
 #   - off's dry run says off already, or what it would put back, and exits 0;
 #   - the four places shell mode writes, and the record, are exactly as they were before (read with reg.exe and
 #     schtasks.exe, which this test only reads with);
-#   - no line of either says it wrote anything (`shell: set `, `shell: register`, `shell: saved`, `shell: renamed`).
+#   - no line of either says it wrote anything (`shell: set `, `shell: register`, `shell: saved`, `shell: renamed`);
+#   - `--from-shell --dry-shell`, the window's path as the shell starts it with the shell's events left alone, logs to
+#     <data>\shell\logs\dashboard-<stamp>.log, says it is a dry run, and presents its first frame (`first frame
+#     presented`) with no `window: ERROR` and no panic: checked here, on any machine, before shell-mode restarts one.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
@@ -98,6 +101,40 @@ try {
         if ($line -match '^shell: (set |register|saved|renamed|put back)') { $failures += "a line says it wrote: $line" }
     }
 
+    # The window as the shell starts it, without being the shell: --from-shell --dry-shell makes the window plain,
+    # configures its swap chain, puts it topmost for Start-up, and presents, leaving the shell's events alone. Its
+    # lines go to <data>\shell\logs\dashboard-<stamp>.log, as under the shell.
+    $logs = Join-Path $data 'shell\logs'
+    $had = @(Get-ChildItem $logs -Filter 'dashboard-*.log' -ErrorAction SilentlyContinue | ForEach-Object FullName)
+    $dashboard = Start-Dashboard @('--from-shell', '--dry-shell', '--data-dir', "`"$data`"") -Startup
+    $fromShell = $null
+    $lines = @()
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ($watch.Elapsed.TotalSeconds -lt 60) {
+        if (-not $fromShell) {
+            $fromShell = Get-ChildItem $logs -Filter 'dashboard-*.log' -ErrorAction SilentlyContinue |
+                Where-Object { $had -notcontains $_.FullName } | Sort-Object LastWriteTime | Select-Object -Last 1
+        }
+        if ($fromShell) {
+            $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+            $file = [IO.File]::Open($fromShell.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+            try { $lines = @((New-Object IO.StreamReader $file).ReadToEnd() -split "\r?\n" | Where-Object { $_ }) }
+            finally { $file.Dispose() }
+            if ($lines -match '^first frame presented') { break }
+        }
+        if ($dashboard.HasExited) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if (-not $dashboard.HasExited) { Stop-Process -Id $dashboard.Id -Force; $dashboard.WaitForExit(10000) | Out-Null }
+    Say "from-shell (--from-shell --dry-shell): $(if ($fromShell) { $fromShell.Name } else { 'no log' }), exit $($dashboard.ExitCode)"
+    @(Get-DashboardLog) + $lines | ForEach-Object { Say "  $_" }
+    if ($fromShell) { Copy-Item $fromShell.FullName (Join-Path $Out 'from-shell.log') }
+    Expect ([bool] $fromShell) 'the --from-shell Dashboard logs to shell\logs'
+    Expect ([bool] ($lines -match '^shell: started by the shell; --dry-shell: the events are left alone')) '--from-shell --dry-shell says the events are left alone'
+    Expect ([bool] ($lines -match '^first frame presented')) 'the --from-shell window presents its first frame'
+    Expect (-not ($lines -match '^window: ERROR')) 'its swap chain was made the first time'
+    Expect (-not ($lines -match 'panicked')) 'it did not panic'
+
     $after = Get-ShellPlaces $data
     $after | Set-Content (Join-Path $Out 'places-after.txt') -Encoding UTF8
     $changed = @(Compare-Object $before $after)
@@ -109,6 +146,7 @@ try {
 } catch {
     $failures += "error: $_"
 } finally {
+    if ($dashboard -and -not $dashboard.HasExited) { Stop-Process -Id $dashboard.Id -Force -ErrorAction SilentlyContinue }
     $failures | ForEach-Object { Say "failed: $_" }
     Say "result: $result"
 }

@@ -128,10 +128,19 @@ function Wait-Line([scriptblock] $Get, [string] $Pattern, [double] $Seconds = 60
     $null
 }
 
-function Expect-Line([scriptblock] $Get, [string] $Pattern, [string] $What, [double] $Seconds = 60, [int] $After = 0) {
+function Expect-Line([scriptblock] $Get, [string] $Pattern, [string] $What, [double] $Seconds = 60, [int] $After = 0,
+                     [switch] $Require) {
     $line = Wait-Line $Get $Pattern $Seconds $After
-    Expect ([bool] $line) "${What}: $(if ($line) { $line } else { "no line '$Pattern' within $Seconds s" })"
+    $said = "${What}: $(if ($line) { $line } else { "no line '$Pattern' within $Seconds s" })"
+    if ($Require) { Require ([bool] $line) $said } else { Expect ([bool] $line) $said }
     $line
+}
+
+# A precondition: what follows depends on it, so a failure stops the phase here (the catch below goes to Finish, which
+# turns shell mode off and sends what there is) rather than running on against a Dashboard that isn't there.
+function Require([bool] $Ok, [string] $What) {
+    Expect $Ok $What
+    if (-not $Ok) { throw "stopped at a failed precondition: $What" }
 }
 
 $shellLog = { (Get-NewLog 'shell').FullName }
@@ -265,9 +274,13 @@ try {
         }
         2 {
             # P3: the sign-in.
-            Expect-Line $shellLog '--shell started' 'the --shell process started' | Out-Null
-            foreach ($p in 'black up', 'ShellDesktopSwitchEvent set', 'events made', 'started pid \d+: .* --from-shell',
-                           'signal: FirstFrame', 'black down', 'signal: BootVideoEnded', 'explorer started, pid (\d+)') {
+            Expect-Line $shellLog '--shell started' 'the --shell process started' -Require | Out-Null
+            foreach ($p in 'black up', 'ShellDesktopSwitchEvent set', 'events made', 'started pid \d+: .* --from-shell') {
+                Expect-Line $shellLog $p "shell log: $p" 120 | Out-Null
+            }
+            # Everything after needs a Dashboard on the screen: one that never presents stops the phase here.
+            Expect-Line $dashboardLog '^first frame presented' 'the Dashboard under --from-shell presented its first frame' 120 -Require | Out-Null
+            foreach ($p in 'signal: FirstFrame', 'black down', 'signal: BootVideoEnded', 'explorer started, pid (\d+)') {
                 Expect-Line $shellLog $p "shell log: $p" 120 | Out-Null
             }
             $explorerLine = Wait-Line $shellLog 'explorer started, pid (\d+)' 5
@@ -282,24 +295,26 @@ try {
 
             # P4: Exit to desktop from Power, the Guide button, View+Menu.
             Connect-Pad
-            Expect (Pass-Startup) 'Who''s playing today? passed to Home'
+            Require (Pass-Startup) 'Who''s playing today? passed to Home'
             Start-Sleep -Seconds 8
             $mark = Get-Length $shellLog
             Push-Button Guide 1000
             Start-Sleep -Seconds 3
             Push-Button Up; Start-Sleep -Seconds 2
             Push-Button A
-            Expect-Line $shellLog 'exited with code 0x0: Exit to desktop' 'Exit to desktop: exit 0, a quit' 30 $mark | Out-Null
+            Expect-Line $shellLog 'exited with code 0x0: Exit to desktop' 'Exit to desktop: exit 0, a quit' 30 $mark -Require | Out-Null
             Expect-Line $shellLog 'the Dashboard stays down' 'it stays down' 10 $mark | Out-Null
             Start-Sleep -Seconds 3
-            Expect ((Get-Dashboards | Where-Object { $_.Id -ne (Get-ShellProcess).ProcessId }).Count -eq 0) 'no Dashboard runs'
+            $shell = Get-ShellProcess
+            Require ([bool] $shell) 'the --shell process runs'
+            Expect ((Get-Dashboards | Where-Object { $_.Id -ne $shell.ProcessId }).Count -eq 0) 'no Dashboard runs'
             Expect ([E2EShell]::ShellPid() -ne 0) 'the desktop is up'
             Save-Screen 'p4-desktop'
             $mark = Get-Length $shellLog
             Push-Button Guide
             Expect-Line $shellLog 'Guide button with no Dashboard' 'Guide brings it back' 15 $mark | Out-Null
-            Expect-Line $shellLog 'started pid \d+' 'started again' 15 $mark | Out-Null
-            Expect (Pass-Startup) 'and it reaches Home'
+            Expect-Line $shellLog 'started pid \d+' 'started again' 15 $mark -Require | Out-Null
+            Require (Pass-Startup) 'and it reaches Home'
             Start-Sleep -Seconds 5
             $mark = Get-Length $shellLog
             Hold-ViewMenu 6500
@@ -321,10 +336,11 @@ try {
             $mark = Get-Length $shellLog
             Push-Button Guide
             Expect-Line $shellLog 'Guide button with no Dashboard \(fallen back\)' 'Guide brings it back after the fallback' 15 $mark | Out-Null
-            Expect (Pass-Startup) 'and it stays up'
+            Require (Pass-Startup) 'and it stays up'
 
             # P6b: --shell killed after explorer: nothing changes.
             $shell = Get-ShellProcess
+            Require ([bool] $shell) 'the --shell process runs before P6b'
             $explorer = [E2EShell]::ShellPid()
             Stop-Process -Id $shell.ProcessId -Force
             Say "killed --shell, pid $($shell.ProcessId)"
@@ -368,7 +384,7 @@ try {
         }
         5 {
             # P8: the copy is the shell now.
-            Expect-Line $shellLog '--shell started' 'the copy runs as --shell' | Out-Null
+            Expect-Line $shellLog '--shell started' 'the copy runs as --shell' -Require | Out-Null
             Expect-Line $shellLog 'signal: FirstFrame' 'and its Dashboard came up' 120 | Out-Null
             $old = Join-Path $installDir 'dashboard.0.old.exe'
             Remove-Item $old -ErrorAction SilentlyContinue

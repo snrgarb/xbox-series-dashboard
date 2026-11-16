@@ -78,6 +78,10 @@ mod elsewhere {
 
     pub fn detach_console() {}
 
+    pub fn describe_window(_: isize) -> String {
+        String::new()
+    }
+
     pub struct Signals;
 
     impl Signals {
@@ -228,6 +232,49 @@ mod win {
             if !file.is_null() && file as isize != -1 {
                 SetStdHandle(STD_ERROR_HANDLE, file);
             }
+        }
+    }
+
+    /// What a window is, for the log when its swap chain can't be made: its styles, its client size, whether it is
+    /// shown, minimised, owned or a child, and the desktop this thread is on (the things DXGI's flip model refuses or
+    /// a sign-in can change).
+    pub fn describe_window(hwnd: isize) -> String {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::System::StationsAndDesktops::{GetThreadDesktop, GetUserObjectInformationW, UOI_NAME};
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetClientRect, GetParent, GetWindow, GetWindowLongPtrW, IsIconic, IsWindowVisible, GWL_EXSTYLE, GWL_STYLE,
+            GW_OWNER,
+        };
+        let window = hwnd as *mut core::ffi::c_void;
+        unsafe {
+            let style = GetWindowLongPtrW(window, GWL_STYLE) as u32;
+            let ex = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
+            let mut rect: RECT = std::mem::zeroed();
+            GetClientRect(window, &mut rect);
+            let mut name = [0u16; 128];
+            let mut needed = 0;
+            let desktop = GetThreadDesktop(GetCurrentThreadId());
+            let named = GetUserObjectInformationW(
+                desktop,
+                UOI_NAME,
+                name.as_mut_ptr().cast(),
+                (name.len() * 2) as u32,
+                &mut needed,
+            ) != 0;
+            let end = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+            format!(
+                "window {hwnd:#x}: style {style:#010x}, extended {ex:#010x}{}, client {}x{}, visible {}, minimised {}, \
+                 owner {:?}, parent {:?}, desktop {}",
+                if ex & 0x0008_0000 != 0 { " (layered)" } else { "" },
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                IsWindowVisible(window) != 0,
+                IsIconic(window) != 0,
+                GetWindow(window, GW_OWNER),
+                GetParent(window),
+                if named { String::from_utf16_lossy(&name[..end]) } else { "unknown".into() }
+            )
         }
     }
 

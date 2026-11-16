@@ -95,6 +95,7 @@ dependencies = [
  "library",
  "media",
  "model",
+ "pollster",
  "render",
  "screens",
  "serde_json",

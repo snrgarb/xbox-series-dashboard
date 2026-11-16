@@ -179,10 +179,19 @@ What Winlogon starts. It never touches the GPU, the library or the stores (`crat
     none), BootVideoEnded as the video ends, is skipped or fails, or with the first frame when none plays
     (`--no-startup` included);
   - the window is topmost while Start-up shows, so explorer and the startup apps coming up behind it never draw over
-    Who's playing today?, and a window among others from Home's first frame;
+    Who's playing today?, and a window among others from Home's first frame. The window is made plain, as without
+    `--from-shell`, and is put topmost only once its swap chain is made: nothing of shell mode's is on it while DXGI
+    makes the swap chain;
   - the test's crash on purpose: `<data>\shell\test-crash-after-first-frame` holding a count. Each start under
     `--from-shell` that finds it counts it down and exits `0x58440DEA` right after its first frame. Nothing else writes
     it; without `--from-shell` it is never read.
+  - `--from-shell --dry-shell` is the window's path without being the shell, for a test: it logs as above and is put
+    topmost for Start-up, but leaves the events alone (`shell: started by the shell; --dry-shell: the events are left
+    alone ...`) and never reads the crash marker.
+- **A swap chain refused** (any start): never a panic. `window: ERROR: the swap chain couldn't be made: <wgpu's error>;
+  window <hwnd>: style, extended style, client size, visible, minimised, owner, parent, desktop`, then `window: trying
+  once more on a new plain window; dropped: <what>` and, if that works, `window: the plain window's swap chain was
+  made`. A second refusal logs `window: ERROR: again: ...` and exits 2, which the watchdog counts as a crash.
 - **Packaged games** (`shell:AppsFolder\<AUMID>`, the Xbox source's and Store apps) are activated with
   `IApplicationActivationManager::ActivateApplication`, which works with no shell window; `ShellExecuteW` if it fails.
 - Exit to desktop is unchanged: exit 0.
@@ -212,5 +221,7 @@ As research section 6. In short: Exit to desktop or View+Menu 5 s; with a keyboa
 
 - `cargo test -p shell-mode`: every write through `system::Fake`; nothing touches a real registry or task.
 - `e2e/payloads/shell-dry` (safe, TV and VM): `--shell-on --dry-shell --as-installed` and `--shell-off --dry-shell`,
-  judged by their lines, and that nothing changed.
+  judged by their lines, and that nothing changed; then `--from-shell --dry-shell`, which must log `first frame
+  presented` to `<data>\shell\logs\dashboard-<stamp>.log` with no `window: ERROR`: the window as the shell starts it,
+  checked on any machine before shell-mode restarts one.
 - `e2e/payloads/shell-mode` (VM only; refuses in safe mode): P1–P9 across restarts (e2e/README.md).

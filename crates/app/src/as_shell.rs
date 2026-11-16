@@ -35,12 +35,17 @@ impl AsShell {
                 std::process::exit(shell_mode::contract::NOT_A_DASHBOARD as i32);
             }
         };
-        let signals = if from_shell { Signals::open() } else { None };
-        let crash = if from_shell { shell_folder.as_deref().and_then(dashboard::crash_on_purpose) } else { None };
+        // With --dry-shell (a test's --from-shell, never the shell's own start) the events are left alone, whoever
+        // made them, and the crash marker isn't read: only the window's path is tried.
+        let real = from_shell && !dry;
+        let signals = if real { Signals::open() } else { None };
+        let crash = if real { shell_folder.as_deref().and_then(dashboard::crash_on_purpose) } else { None };
         if from_shell {
             eprintln!(
                 "shell: started by the shell; {}",
-                if signals.is_some() {
+                if dry {
+                    "--dry-shell: the events are left alone, and only the window's path is tried"
+                } else if signals.is_some() {
                     "telling it of the first frame and the Boot video's end"
                 } else {
                     "no --shell process to tell"
