@@ -50,6 +50,11 @@ pub struct Store {
     listed: Option<Receiver<Option<Vec<StoreApp>>>>,
     /// The Windows user's account picture, as it was when the Dashboard started: the first a Profile may wear.
     account_picture: Option<PathBuf>,
+    /// Every store's achievements (`crate::sources::achievements`).
+    achievement_sources: Vec<Arc<dyn model::AchievementSource>>,
+    /// The thread that follows achievements (`library::achievements::spawn`), once the sources have been read. None
+    /// with no database file for it to open.
+    achievements: Option<library::achievements::Handle>,
 }
 
 /// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from every source
@@ -62,6 +67,12 @@ pub struct Store {
 ///
 /// A Library that came from no database has its filters, which are Home's Groups, worked out by one in memory.
 pub fn open(args: &Args) -> (Library, Store) {
+    let (library, mut store) = open_library(args);
+    store.achievement_sources = crate::sources::achievements(args);
+    (library, store)
+}
+
+fn open_library(args: &Args) -> (Library, Store) {
     let sources = crate::sources::all(args);
     let art_service = args.art_service.clone().unwrap_or_else(|| art::SERVICE.to_string());
     let store_art_service = args.store_art_service.clone();
@@ -315,6 +326,43 @@ impl Store {
         Some(update)
     }
 
+    /// Starts following achievements on a thread of their own (docs/achievements.md), if that is still to do and
+    /// there is a database file: every game's read and said in the log, how rare each is asked for online, and the
+    /// running game's watched for new unlocks. Icons are fetched only with Settings' Download art online on; `wake`
+    /// is called when there is news (`achievements_update`).
+    pub fn follow_achievements(&mut self, wake: impl Fn() + Send + 'static) {
+        if self.achievements.is_some() || self.database.is_none() || self.path.as_os_str().is_empty() {
+            return;
+        }
+        let hosts = self
+            .store_art_service
+            .as_deref()
+            .map_or_else(library::achievements::Hosts::default, library::achievements::Hosts::all_at);
+        let fetch: Box<dyn library::achievements::Fetch> = Box::new(library::achievements::Online::new(hosts));
+        let icons = self.art_online();
+        let log: library::achievements::Log = Arc::new(|line| eprintln!("{line}"));
+        let (path, sources) = (self.path.clone(), self.achievement_sources.clone());
+        self.achievements = Some(library::achievements::spawn(path, sources, Some(fetch), icons, log, wake));
+    }
+
+    /// What the thread that follows achievements has said since this was last asked: unlocks to tell of, and a new
+    /// snapshot of the library when the totals changed.
+    pub fn achievements_update(&mut self) -> Option<library::achievements::Update> {
+        let mut update = self.achievements.as_ref()?.take()?;
+        if let Some(library) = &mut update.library {
+            library.store_apps = self.store_apps.clone();
+            library.profiles.pictures = self.pictures();
+        }
+        Some(update)
+    }
+
+    /// Asks the thread that follows achievements: a game is running, or a game's icons are wanted.
+    pub fn ask_achievements(&self, ask: library::achievements::Ask) {
+        if let Some(achievements) = &self.achievements {
+            achievements.ask(ask);
+        }
+    }
+
     /// Lists the Microsoft Store apps installed (`crate::store_apps`) on a thread of its own, for Add an app's
     /// list; `wake` is called once they are.
     pub fn list_store_apps(&mut self, wake: impl FnOnce() + Send + 'static) {
@@ -377,7 +425,10 @@ impl Store {
             return;
         }
         // A game with no id is in no database: a made-up one, or one the database could not take.
-        let (Some(database), Some(game)) = (&mut self.database, game.filter(|game| game.id != 0)) else { return };
+        let Some(game) = game.filter(|game| game.id != 0) else { return };
+        // Its achievements are watched from now on: a new unlock is known within a second or two.
+        self.ask_achievements(library::achievements::Ask::Playing { game: game.id, since: library::now() });
+        let Some(database) = &mut self.database else { return };
         match database.session_started(game.id, library::now()) {
             Ok(session) => {
                 self.session = Some(session);
@@ -487,6 +538,11 @@ impl Store {
         }
     }
 
+    /// Settings' Download art online: on unless turned off.
+    fn art_online(&self) -> bool {
+        self.setting(art::ONLINE_SETTING).is_none_or(|value| !matches!(value.trim(), "false" | "0" | "off" | "no"))
+    }
+
     /// Our art cache, where there is a database in a data folder to keep it beside.
     fn art_dir(&self) -> Option<ArtDir> {
         self.database.as_ref()?.art_dir().cloned()
@@ -503,9 +559,7 @@ impl Store {
     /// Where art is asked for online, and the cache it goes into: the stores' own art, unless Settings' Download
     /// art online is off; SteamGridDB too with the user's key. None with neither, or no art cache to download into.
     fn art_services(&self) -> Option<(ArtDir, Services)> {
-        let online =
-            self.setting(art::ONLINE_SETTING).is_none_or(|value| !matches!(value.trim(), "false" | "0" | "off" | "no"));
-        if !online {
+        if !self.art_online() {
             return None;
         }
         let hosts = self.store_art_service.as_deref().map_or_else(Hosts::default, Hosts::all_at);

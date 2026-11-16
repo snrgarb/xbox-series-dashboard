@@ -142,6 +142,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
                      [--no-previous] [--seconds <n>]
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
+       standin unlock-achievement <dir> <key>
        steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>";
 
 /// The file beside this program that names the fakes `open-address` takes addresses for.
@@ -808,6 +809,28 @@ fn run(args: &[String]) -> i32 {
                 }
             }
         }
+        // Unlocks one of the fake Steam's achievements now, as Steam writes its stats file while the game runs.
+        Some("unlock-achievement") => {
+            let [root, key] = &args[1..] else {
+                note(USAGE);
+                return 2;
+            };
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            match fixture::unlock_achievement(Path::new(root), key, now) {
+                Ok(true) => {
+                    note(&format!("unlock-achievement: {key} of {} at {now}", fixture::ACHIEVEMENTS_GAME));
+                    0
+                }
+                Ok(false) => {
+                    note(&format!("unlock-achievement: no achievement {key}, or no signed-in user, at {root}"));
+                    1
+                }
+                Err(e) => {
+                    note(&format!("unlock-achievement: {root}: {e}"));
+                    1
+                }
+            }
+        }
         // As a fake Battle.net's client.
         _ if named("Battle.net") => battlenet(args),
         // As a fake Steam's client.
@@ -928,7 +951,10 @@ fn serve_art(args: &[String]) -> i32 {
     use library::art::fake::{FakeService, Painter, Script, StorePainter, StoreScript};
     let picture: Painter = std::sync::Arc::new(|_, kind| art_picture(kind, &ART_COLOURS));
     let store_picture: StorePainter = std::sync::Arc::new(|_, _, kind| art_picture(kind, &STORE_ART_COLOURS));
-    let stores = StoreScript { any_id: true, ..StoreScript::new(store_picture) };
+    // How rare the fake Steam's achievements are, as Steam's global percentages would say.
+    let rarity = fixture::ACHIEVEMENTS.iter().map(|a| (a.key.to_string(), a.rarity)).collect();
+    let rarity = vec![(fixture::ACHIEVEMENTS_GAME.to_string(), rarity)];
+    let stores = StoreScript { any_id: true, rarity, ..StoreScript::new(store_picture) };
     let script = Script { any_name: true, stores: Some(stores), ..Script::new(&key, picture) };
     let service = match FakeService::start(port, script) {
         Ok(service) => service,
@@ -1047,6 +1073,25 @@ mod tests {
         assert_eq!(run(&strings(&["steam-install", path, appid, "--bytes", "half"])), 2);
         assert_eq!(run(&strings(&["steam-install", path, "nine", "--done"])), 2);
         assert_eq!(progress_of(&strings(&["--paused", "1/2"])), Some(fixture::Progress::Paused { done: 1, total: 2 }));
+    }
+
+    #[test]
+    fn unlock_achievement_unlocks_one_of_the_fake_steams_now() {
+        use model::achievement::AchievementSource;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let mut spec = Fixture::standard();
+        spec.games.truncate(1);
+        spec.games[0].art = fixture::Art::None;
+        fixture::write(&root, &spec).unwrap();
+        let path = root.to_str().unwrap();
+        assert_eq!(run(&strings(&["unlock-achievement", path, "ACH_NIGHT_ROUTE"])), 0);
+        assert_eq!(run(&strings(&["unlock-achievement", path, "ACH_NONE_SUCH"])), 1);
+        assert_eq!(run(&strings(&["unlock-achievement", path])), 2);
+        let steam = source_steam::achievements::SteamAchievements::at(Some(root));
+        let read = steam.read(&fixture::ACHIEVEMENTS_GAME.to_string()).unwrap().unwrap();
+        let night = read.iter().find(|a| a.key == "ACH_NIGHT_ROUTE").unwrap();
+        assert!(night.unlocked.is_some_and(|at| at > fixture::NEWEST_PLAY));
     }
 
     #[test]

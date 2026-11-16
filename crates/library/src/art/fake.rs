@@ -65,11 +65,13 @@ pub struct StoreScript {
     /// The first this many requests to a catalogue are answered 429, `Retry-After: 1`.
     pub busy: u32,
     pub picture: StorePainter,
+    /// Steam's global achievement percentages: each appid's, by API name.
+    pub rarity: Vec<(String, Vec<(String, f64)>)>,
 }
 
 impl StoreScript {
     pub fn new(picture: StorePainter) -> Self {
-        Self { games: Vec::new(), any_id: false, busy: 0, picture }
+        Self { games: Vec::new(), any_id: false, busy: 0, picture, rarity: Vec::new() }
     }
 
     /// The kinds the store has of the game, if it knows it.
@@ -321,6 +323,23 @@ fn store_route(shared: &Shared, stores: &StoreScript, parts: &[&str], query: &st
             };
             json("200 OK", serde_json::json!({"response": {"store_items": [item]}}))
         }
+        // How rare each of a Steam game's achievements is (`library::achievements::Online`): 403 `{}` for a game
+        // with no figures, as Steam answers.
+        ["steam-api", "ISteamUserStats", "GetGlobalAchievementPercentagesForApp", "v2", ..] => {
+            let id = param("gameid");
+            match stores.rarity.iter().find(|(game, _)| *game == id) {
+                Some((_, rarity)) => {
+                    let list: Vec<serde_json::Value> = rarity
+                        .iter()
+                        .map(|(name, percent)| serde_json::json!({"name": name, "percent": format!("{percent:.1}")}))
+                        .collect();
+                    json("200 OK", serde_json::json!({"achievementpercentages": {"achievements": list}}))
+                }
+                None => json("403 Forbidden", serde_json::json!({})),
+            }
+        }
+        // Any achievement icon, by its own address after `/icons/` (`library::achievements::Hosts::all_at`).
+        ["icons", ..] => png("steam", "icon", Kind::Square),
         ["steam-cdn", "steam", "apps", id, .., file] => {
             let kind = if file.starts_with("library_600x900") {
                 Kind::Cover

@@ -26,6 +26,11 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
     ]
 }
 
+/// Every store's achievements (docs/achievements.md): Steam's alone, from its own files.
+pub fn achievements(args: &Args) -> Vec<Arc<dyn model::AchievementSource>> {
+    vec![Arc::new(source_steam::achievements::SteamAchievements::at(args.steam.clone()))]
+}
+
 /// The source the game is from, if the Dashboard has it.
 pub fn of<'a>(sources: &'a [Arc<dyn Source>], game: &Game) -> Option<&'a Arc<dyn Source>> {
     sources.iter().find(|source| source.key() == game.source)

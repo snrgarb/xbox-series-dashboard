@@ -1,4 +1,5 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
+pub mod achievement;
 pub mod audio;
 pub mod by_hand;
 pub mod discord;
@@ -12,6 +13,7 @@ pub mod source;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub use achievement::{AchievementSource, Achievements};
 pub use audio::{Audio, AudioDevice, Flow};
 pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
 pub use media::{Media, MediaCommand, MediaSession};
@@ -397,6 +399,10 @@ pub struct Library {
     /// Who plays here (`profile`), and who is signed in. Only a snapshot of the library database has any.
     #[serde(default)]
     pub profiles: Profiles,
+    /// The Profile's achievement totals, the last unlocks and how far each game has got (`achievement`). Only a
+    /// snapshot of the library database has any.
+    #[serde(default)]
+    pub achievements: Achievements,
 }
 
 impl Library {

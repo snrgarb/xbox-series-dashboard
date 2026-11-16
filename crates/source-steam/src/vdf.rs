@@ -181,15 +181,24 @@ impl<'a> Reader<'a> {
 /// With `strings`, keys are u32 indexes into that table (appinfo v29+);
 /// without, keys are inline NUL-terminated strings.
 pub fn parse_binary(r: &mut Reader, strings: Option<&[String]>) -> Result<Value> {
-    binary_map(r, strings, 0)
+    binary_map(r, strings, 0, false)
 }
 
-fn binary_map(r: &mut Reader, strings: Option<&[String]>, depth: u32) -> Result<Value> {
+/// Parse a whole file of binary KeyValues with inline keys, as `appcache/stats/*.bin` are: its top level ends at
+/// its end marker or at the end of the file, whichever comes first, as some writers leave the last marker off.
+pub fn parse_binary_file(buf: &[u8]) -> Result<Value> {
+    binary_map(&mut Reader::new(buf), None, 0, true)
+}
+
+fn binary_map(r: &mut Reader, strings: Option<&[String]>, depth: u32, top: bool) -> Result<Value> {
     if depth > 64 {
         bail!("binary vdf: nesting too deep");
     }
     let mut out = Vec::new();
     loop {
+        if top && r.pos >= r.buf.len() {
+            return Ok(Value::Map(out));
+        }
         let ty = r.u8()?;
         if ty == 8 || ty == 11 {
             return Ok(Value::Map(out));
@@ -202,7 +211,7 @@ fn binary_map(r: &mut Reader, strings: Option<&[String]>, depth: u32) -> Result<
             None => r.cstr()?,
         };
         let val = match ty {
-            0 => binary_map(r, strings, depth + 1)?,
+            0 => binary_map(r, strings, depth + 1, false)?,
             1 => Value::Str(r.cstr()?),
             2 => Value::Str((r.u32()? as i32).to_string()),
             3 => Value::Str(f32::from_le_bytes(r.bytes(4)?.try_into().unwrap()).to_string()),
@@ -283,5 +292,16 @@ mod tests {
         assert_eq!(v.str_at(&["type"]), Some("Game"));
         assert!(parse_binary(&mut Reader::new(&b[..b.len() - 1]), Some(&table)).is_err());
         assert!(parse_binary(&mut Reader::new(&[1, 9, 0, 0, 0, b'x', 0, 8]), Some(&table)).is_err());
+    }
+
+    #[test]
+    fn a_binary_file_ends_at_its_marker_or_at_its_end() {
+        let with = b"\x00620\0\x01gamename\0Made Up\0\x08\x08";
+        let without = &with[..with.len() - 1];
+        for buf in [&with[..], without] {
+            assert_eq!(parse_binary_file(buf).unwrap().str_at(&["620", "gamename"]), Some("Made Up"));
+        }
+        // But a map left open inside it is not a file.
+        assert!(parse_binary_file(&with[..with.len() - 2]).is_err());
     }
 }

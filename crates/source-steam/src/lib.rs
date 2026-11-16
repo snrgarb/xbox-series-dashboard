@@ -17,6 +17,7 @@
 //! each has got from Steam's own download overview where the debugger is on ([`overview`]) and else counted live
 //! ([`live`]), none said done while Steam is still at it ([`follow`]). [`probe`] is `--log-queue-sources`' look at
 //! every candidate count.
+pub mod achievements;
 pub mod appcache;
 pub mod cef;
 pub mod collections;
@@ -278,17 +279,30 @@ struct LocalConfig {
 /// The most recently written `userdata/*/config/localconfig.vdf`, and the `config` folder it is in: the signed-in
 /// user's.
 fn load_localconfig(steam_root: &Path) -> (LocalConfig, Option<PathBuf>) {
-    let Some(userdata) = child(steam_root, "userdata") else { return (LocalConfig::default(), None) };
-    let newest = fs::read_dir(userdata)
+    let newest = newest_localconfig(steam_root);
+    let config = newest.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+    let parsed = newest.and_then(|p| fs::read(p).ok()).and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
+    (parsed.map_or_else(LocalConfig::default, |v| parse_localconfig(&v)), config)
+}
+
+/// The most recently written `userdata/<id>/config/localconfig.vdf`: the signed-in user's.
+fn newest_localconfig(steam_root: &Path) -> Option<PathBuf> {
+    let userdata = child(steam_root, "userdata")?;
+    fs::read_dir(userdata)
         .into_iter()
         .flatten()
         .flatten()
         .filter(|e| e.file_name().to_string_lossy().parse::<u64>().is_ok_and(|id| id != 0))
         .filter_map(|e| child(&child(&e.path(), "config")?, "localconfig.vdf"))
-        .max_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok());
-    let config = newest.as_deref().and_then(Path::parent).map(Path::to_path_buf);
-    let parsed = newest.and_then(|p| fs::read(p).ok()).and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
-    (parsed.map_or_else(LocalConfig::default, |v| parse_localconfig(&v)), config)
+        .max_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok())
+}
+
+/// The signed-in user's account id, their folder's name under `userdata` (the low 32 bits of their SteamID): that
+/// of the most recently written `localconfig.vdf`.
+pub fn signed_in_account(steam_root: &Path) -> Option<u32> {
+    let config = newest_localconfig(steam_root)?;
+    let user = config.parent()?.parent()?.file_name()?;
+    user.to_str()?.parse().ok()
 }
 
 fn parse_localconfig(v: &Value) -> LocalConfig {

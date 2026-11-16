@@ -19,6 +19,7 @@
 //! - Games added by hand and Apps (`by_hand`): the games a source of their own, `manual`, each a row of `games`
 //!   keyed by its program's path; the Apps a table of their own, `apps`, as they are not games.
 //! - Profiles (`profiles`): a table of their own, their pictures as files in the data folder.
+pub mod achievements;
 pub mod art;
 pub mod by_hand;
 pub mod filters;
@@ -107,6 +108,8 @@ const MIGRATIONS: &[&str] = &[
     queue::MIGRATION,
     // 6: the Profiles (docs/spec/profiles.md).
     profiles::MIGRATION,
+    // 7: the games' achievements (docs/achievements.md).
+    achievements::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -455,6 +458,7 @@ impl Database {
             apps: self.apps()?,
             store_apps: None,
             profiles: self.profiles()?,
+            achievements: self.achievement_summary()?,
         })
     }
 
