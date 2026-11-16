@@ -4,9 +4,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use discord::fake::FakeDiscord;
+use discord::fake::{FakeDiscord, CHANNELS, GUILD_ID, GUILD_NAME};
 use discord::{Connection, Place};
-use model::discord::{Ask, Call, CallAsk, Discord, Field, Person, Voice};
+use model::discord::{Ask, Browse, BrowseAsk, Call, CallAsk, Discord, Field, Person, Voice};
 
 /// A pipe no other run has: on Windows a named pipe, elsewhere a socket of that name in the runtime folder (a
 /// socket's path has to be short, which a test's folder in a deep checkout is not).
@@ -178,6 +178,80 @@ fn the_call_follows_the_fake_and_mute_and_leave_show_only_once_it_confirms() {
     until(&mut connection, &mut clock, "the loss", |d| !d.connected);
     assert_eq!(connection.discord().voice, Voice::default());
     assert!(fake.control("call Nowhere").is_err());
+}
+
+#[test]
+fn servers_list_from_the_fake_a_channel_joined_becomes_a_shortcut_kept_across_starts_and_rejoined_in_one_ask() {
+    let dir = tempfile::tempdir().unwrap();
+    let (fake, mut connection, mut clock) = signed_in(&dir);
+    let listed = |d: &Discord| (0..d.browse.len()).map(|at| d.browse.name(at).unwrap().to_string()).collect::<Vec<_>>();
+
+    // Servers: never joined, so by name ignoring case, each icon fetched from the stand-in CDN.
+    connection.ask(Ask::Browse(BrowseAsk::Servers), || None);
+    assert!(connection.discord().browse.loading());
+    until(&mut connection, &mut clock, "the servers", |d| !d.browse.loading());
+    assert_eq!(listed(connection.discord()), ["Another Server", "art club", "Stand-in Server"]);
+    until(&mut connection, &mut clock, "the icons", |d| match &d.browse {
+        Browse::Servers { servers, .. } => servers[1].icon.is_some() && servers[2].icon.is_some(),
+        _ => false,
+    });
+    let Browse::Servers { servers, .. } = &connection.discord().browse else { unreachable!() };
+    assert!(servers[0].icon.is_none(), "Another Server has none");
+
+    // A server: its voice and stage channels, with who is in each.
+    fake.control("in Late_night Ana Bo").unwrap();
+    connection.ask(Ask::Browse(BrowseAsk::Server { id: GUILD_ID.into(), name: GUILD_NAME.into() }), || None);
+    until(&mut connection, &mut clock, "the channels and who is in them", |d| match &d.browse {
+        Browse::Server { loading: false, channels, .. } => {
+            channels.len() == 2 && channels.iter().all(|c| c.occupants.is_some())
+        }
+        _ => false,
+    });
+    assert_eq!(listed(connection.discord()), ["General", "Late night"]);
+    let Browse::Server { channels, .. } = &connection.discord().browse else { unreachable!() };
+    assert_eq!(channels[0].occupants.as_ref().map(Vec::len), Some(0));
+    assert_eq!(channels[1].occupants.as_ref().map(Vec::len), Some(2));
+    assert!(call(connection.discord()).is_none(), "who is in a channel is not the Call");
+
+    // Joined: the Flyout closes, and the Call is the channel once Discord says so.
+    connection.ask(Ask::Join(CHANNELS[1].0.into()), || None);
+    assert_eq!(connection.discord().browse, Browse::Closed);
+    until(&mut connection, &mut clock, "the call", |d| call(d).is_some_and(|c| c.title == "Late night"));
+    fake.control("hang-up").unwrap();
+    until(&mut connection, &mut clock, "the shortcut", |d| {
+        call(d).is_none() && d.shortcuts.first().is_some_and(|s| s.server.as_deref() == Some(GUILD_NAME))
+    });
+    let shortcut = connection.discord().shortcuts[0].clone();
+    assert_eq!((shortcut.name.as_str(), shortcut.dm), ("Late night", false));
+    until(&mut connection, &mut clock, "its icon", |d| d.shortcuts[0].picture.is_some());
+
+    // A DM: its Shortcut named after who was in it.
+    fake.control("dm Cy").unwrap();
+    until(&mut connection, &mut clock, "the DM", |d| call(d).is_some());
+    fake.control("hang-up").unwrap();
+    until(&mut connection, &mut clock, "two shortcuts", |d| d.shortcuts.len() == 2 && call(d).is_none());
+    assert_eq!(connection.discord().shortcuts[0].name, "Cy");
+    assert!(connection.discord().shortcuts[0].dm);
+
+    // The Dashboard starting again: the Shortcuts are there before Discord answers anything.
+    drop(connection);
+    let place = Place {
+        pipe: Some(pipe_name(&dir, "e2e-discord")),
+        token_url: Some(fake.token_url()),
+        cdn_url: Some(fake.cdn_url()),
+    };
+    let mut connection = Connection::new(&place, Some(dir.path()), || {});
+    let names: Vec<String> = connection.discord().shortcuts.iter().map(|s| s.name.clone()).collect();
+    assert_eq!(names, ["Cy", "Late night"]);
+
+    // Rejoined in one ask, and removed.
+    connection.start();
+    until(&mut connection, &mut clock, "sign-in", |d| d.connected);
+    connection.ask(Ask::Join(CHANNELS[1].0.into()), || None);
+    until(&mut connection, &mut clock, "the call again", |d| call(d).is_some_and(|c| c.title == "Late night"));
+    connection.ask(Ask::RemoveShortcut(CHANNELS[1].0.into()), || None);
+    let names: Vec<String> = connection.discord().shortcuts.iter().map(|s| s.name.clone()).collect();
+    assert_eq!(names, ["Cy"]);
 }
 
 fn image_size(file: &std::path::Path) -> (u32, u32) {

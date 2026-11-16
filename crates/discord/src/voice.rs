@@ -4,7 +4,9 @@
 //! `ExtensionCore.DiscordCall.cs`; its tests are `DiscordCallTests` (here `tests/voice.rs`).
 //!
 //! Pure: it is told what the [`Client`] gave ([`Follower::on_event`]) and sends through [`Commands`]. Known channels,
-//! Shortcuts, Servers and incoming calls (#145) build on it: see the notes marked "#145".
+//! Known channels and Shortcuts ([`crate::shortcuts`]) learn from it ([`Follower::take_joined`]); Servers
+//! ([`crate::servers`]) shares its GET_CHANNEL replies ([`crate::following`]). Incoming calls (rings) are not built:
+//! the places they plug in are marked "Rings".
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -32,11 +34,13 @@ impl<T: Transport, O: Tokens, S: Secrets> Commands for Client<T, O, S> {
     }
 }
 
-/// A person's avatar on Discord's CDN: their own, or one of Discord's six default ones for a user with none.
+/// A picture on Discord's CDN: a person's avatar, their own or one of Discord's six default ones for a user with
+/// none, or a server's icon.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Avatar {
     Own { user: String, hash: String },
     Default(u64),
+    Icon { guild: String, hash: String },
 }
 
 impl Avatar {
@@ -49,22 +53,48 @@ impl Avatar {
         }
     }
 
-    /// Its address on the CDN at `cdn` (Discord's, [`CDN`], or a test's): 64 across, as the Bundle asks.
+    /// Its address on the CDN at `cdn` (Discord's, [`CDN`], or a test's): an avatar 64 across, as the Bundle asks.
     pub fn url(&self, cdn: &str) -> String {
         let cdn = cdn.trim_end_matches('/');
         match self {
             Avatar::Own { user, hash } => format!("{cdn}/avatars/{user}/{hash}.png?size=64"),
             Avatar::Default(n) => format!("{cdn}/embed/avatars/{n}.png"),
+            Avatar::Icon { guild, hash } => format!("{cdn}/icons/{guild}/{hash}.png"),
         }
     }
 
-    /// Where it is kept in the avatars' cache: `avatars/<user>/<hash>.png`, `embed/<n>.png`. An avatar's hash
-    /// changes with the picture, so a kept one is never stale. Anything but letters, digits, `-` and `_` in a part
-    /// is written `%XX`, so a part can never climb out of the folder.
+    /// The picture at an address on Discord's CDN, as Discord gives a server's `icon_url` and as a Known channel
+    /// keeps its picture: `.../avatars/<user>/<hash>.png`, `.../embed/avatars/<n>.png`, `.../icons/<guild>/<hash>.png`
+    /// (any size asked, any picture type). It is fetched from the CDN the Dashboard was given, never from the host
+    /// named: a test's Discord can't send the Dashboard anywhere.
+    pub fn from_url(url: &str) -> Option<Avatar> {
+        let path = url.split_once("://").map_or(url, |(_, rest)| rest.split_once('/').map_or("", |(_, path)| path));
+        let path = path.split(['?', '#']).next().unwrap_or_default();
+        let stem = |file: &str| file.rsplit_once('.').map_or(file, |(stem, _)| stem).to_string();
+        let parts: Vec<&str> = path.split('/').collect();
+        let named = |part: &str| !part.is_empty();
+        match parts.as_slice() {
+            ["avatars", user, file] if named(user) && named(file) => {
+                Some(Avatar::Own { user: user.to_string(), hash: stem(file) })
+            }
+            ["embed", "avatars", file] => stem(file).parse().ok().map(Avatar::Default),
+            ["icons", guild, file] if named(guild) && named(file) => {
+                Some(Avatar::Icon { guild: guild.to_string(), hash: stem(file) })
+            }
+            _ => None,
+        }
+    }
+
+    /// Where it is kept in the avatars' cache: `avatars/<user>/<hash>.png`, `embed/<n>.png`, `icons/<guild>/<hash>.png`.
+    /// A picture's hash changes with the picture, so a kept one is never stale. Anything but letters, digits, `-`
+    /// and `_` in a part is written `%XX`, so a part can never climb out of the folder.
     pub fn file(&self) -> PathBuf {
         match self {
             Avatar::Own { user, hash } => PathBuf::from("avatars").join(safe(user)).join(format!("{}.png", safe(hash))),
             Avatar::Default(n) => PathBuf::from("embed").join(format!("{n}.png")),
+            Avatar::Icon { guild, hash } => {
+                PathBuf::from("icons").join(safe(guild)).join(format!("{}.png", safe(hash)))
+            }
         }
     }
 }
@@ -83,10 +113,10 @@ fn safe(part: &str) -> String {
 
 /// One person in a Call, as their voice state has them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Participant {
-    id: String,
-    name: String,
-    avatar: Avatar,
+pub(crate) struct Participant {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) avatar: Avatar,
     muted: bool,
     deafened: bool,
 }
@@ -94,7 +124,7 @@ struct Participant {
 impl Participant {
     /// The person a voice state stands for; None without a user. Named by their nickname, else their display
     /// name, else their username; muted or deafened by themselves or the server.
-    fn from_voice_state(state: &Value) -> Option<Participant> {
+    pub(crate) fn from_voice_state(state: &Value) -> Option<Participant> {
         let user = &state["user"];
         let id = user["id"].as_str()?.to_string();
         let names = [&state["nick"], &user["global_name"], &user["username"]];
@@ -116,6 +146,8 @@ impl Participant {
 #[derive(Debug, Clone)]
 struct CallState {
     id: String,
+    /// The server a voice channel is on; None for a DM or group DM.
+    guild: Option<String>,
     /// The channel's name; None for a DM, which has none.
     name: Option<String>,
     /// The user signed in, who is told among the people by their id.
@@ -131,8 +163,16 @@ impl CallState {
     fn from_channel(channel: &Value, me: &str) -> Option<CallState> {
         let id = channel["id"].as_str()?.to_string();
         let name = channel["name"].as_str().filter(|name| !name.is_empty()).map(str::to_string);
-        let mut call =
-            CallState { id, name, me: me.to_string(), people: Vec::new(), speaking: HashSet::new(), people_name: None };
+        let guild = channel["guild_id"].as_str().filter(|guild| !guild.is_empty()).map(str::to_string);
+        let mut call = CallState {
+            id,
+            guild,
+            name,
+            me: me.to_string(),
+            people: Vec::new(),
+            speaking: HashSet::new(),
+            people_name: None,
+        };
         for state in channel["voice_states"].as_array().into_iter().flatten() {
             call.upsert(state);
         }
@@ -208,6 +248,28 @@ impl CallState {
     fn names(&self) -> String {
         self.user_first().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
     }
+
+    /// What a Known channel learns of it (the Bundle's `HasName`, `Title` and `OtherAvatar`).
+    fn joined(&self) -> Joined {
+        Joined {
+            id: self.id.clone(),
+            guild: self.guild.clone(),
+            name: self.name.clone().or_else(|| self.people_name.clone()),
+            other_avatar: self.people.iter().find(|p| p.id != self.me).map(|p| p.avatar.clone()),
+        }
+    }
+}
+
+/// The Call's channel as a Known channel learns it (docs/discord.md, "Known channels").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Joined {
+    pub id: String,
+    /// The server a voice channel is on; None for a DM or group DM.
+    pub guild: Option<String>,
+    /// Its heading, if it has a real one: the channel's name, or a DM's from the people seen in it.
+    pub name: Option<String>,
+    /// The first person in it who isn't the user: their avatar.
+    pub other_avatar: Option<Avatar>,
 }
 
 /// The Call and the user's voice settings, followed from Discord.
@@ -225,6 +287,8 @@ pub struct Follower {
     /// The user's own Discord mute and deafen, as Discord's voice settings last said.
     mute: bool,
     deaf: bool,
+    /// The channels a Call has begun in since last asked: each becomes a Known channel ([`crate::shortcuts`]).
+    joined: Vec<Joined>,
     log: Vec<String>,
 }
 
@@ -251,7 +315,11 @@ impl Follower {
         if self.call.is_some() {
             self.say("out of the call: Discord has gone".into());
         }
-        *self = Follower { log: std::mem::take(&mut self.log), ..Follower::default() };
+        *self = Follower {
+            log: std::mem::take(&mut self.log),
+            joined: std::mem::take(&mut self.joined),
+            ..Follower::default()
+        };
     }
 
     fn on_reply(&mut self, cmd: &str, data: &Value, commands: &mut impl Commands) {
@@ -262,8 +330,8 @@ impl Follower {
                 let call = self.call_of(data);
                 self.show(call, commands);
             }
-            // #145: a GET_CHANNEL sent for a server's flyout or a known DM's ring is told by its nonce first.
-            // Fetched for a channel the user has since left, it's stale.
+            // One sent for a server's Flyout never comes here: the `Following` tells it by its nonce first (Rings: a
+            // known DM's would be told the same way). Fetched for a channel the user has since left, it's stale.
             "GET_CHANNEL" if self.selected.is_some() && data["id"].as_str() == self.selected.as_deref() => {
                 let call = self.call_of(data);
                 self.show(call, commands);
@@ -298,7 +366,7 @@ impl Follower {
             }
             "VOICE_SETTINGS_UPDATE" => self.on_voice_settings(data),
             "VOICE_STATE_CREATE" | "VOICE_STATE_UPDATE" => {
-                // #145: someone coming into a channel followed for rings is asked about first.
+                // Rings: someone coming into a channel followed for rings would be asked about first.
                 let Some(call) = &mut self.call else { return };
                 if let Some(joined) = call.upsert(data) {
                     let line = format!("{} joined the call", joined.name);
@@ -340,7 +408,7 @@ impl Follower {
     fn show(&mut self, mut next: Option<CallState>, commands: &mut impl Commands) {
         let next_id = next.as_ref().map(|call| call.id.clone());
         if let Some(call) = self.call.as_ref().filter(|call| Some(&call.id) != next_id.as_ref()) {
-            // #145: a known DM's comings and goings stay followed for rings.
+            // Rings: a known DM's comings and goings would stay followed for rings.
             for evt in CALL_EVENTS {
                 commands.send("UNSUBSCRIBE", json!({ "channel_id": call.id }), Some(evt));
             }
@@ -348,7 +416,8 @@ impl Follower {
         match (&mut next, &self.call) {
             (Some(next), Some(call)) if call.id == next.id => next.keep_speaking_from(call),
             (Some(next), _) => {
-                // #145: the channel becomes a Known channel here.
+                // The channel becomes a Known channel, at the front.
+                self.joined.push(next.joined());
                 for evt in CALL_EVENTS {
                     commands.send("SUBSCRIBE", json!({ "channel_id": next.id }), Some(evt));
                 }
@@ -379,6 +448,34 @@ impl Follower {
         if commands.send(cmd, args, None).is_some() {
             self.say(format!("asking Discord to {what}"));
         }
+    }
+
+    /// A Shortcut or a server's voice channel: Discord asked to join it, unless it is the Call's already (the
+    /// Bundle's `JoinChannel`). `name` is what it is called, for the log.
+    pub fn join(&mut self, id: &str, name: &str, commands: &mut impl Commands) {
+        if self.call.as_ref().is_some_and(|call| call.id == id) {
+            self.say(format!("{name:?} is the call's already: nothing asked"));
+            return;
+        }
+        let args = json!({ "channel_id": id, "force": true });
+        if commands.send("SELECT_VOICE_CHANNEL", args, None).is_some() {
+            self.say(format!("asking Discord to join {name:?}"));
+        }
+    }
+
+    /// The channels a Call has begun in since this was last asked, oldest first.
+    pub fn take_joined(&mut self) -> Vec<Joined> {
+        std::mem::take(&mut self.joined)
+    }
+
+    /// The Call's channel as it is now, as a Known channel learns it; None out of a Call.
+    pub fn call_joined(&self) -> Option<Joined> {
+        self.call.as_ref().map(CallState::joined)
+    }
+
+    /// The Call's channel's id; None out of a Call.
+    pub fn call_id(&self) -> Option<&str> {
+        self.call.as_ref().map(|call| call.id.as_str())
     }
 
     /// The Call and the voice settings as the screens show them, each person's avatar as `avatar` has it: the

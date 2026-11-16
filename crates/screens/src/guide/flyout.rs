@@ -8,9 +8,11 @@
 //! (`GuideAction`), which asks the shell.
 use std::path::PathBuf;
 
+use model::discord::{CallAsk, Discord};
 use model::{Audio, Flow, MediaCommand};
 use ui::{ArtKey, Button, Color, Crop, Ease, HAlign, Kind, Press, Rect, Ui, VAlign};
 
+use super::discord::DiscordAsk;
 use super::panel::PANEL;
 use super::{entries, focus_ring, Around, GuideAction, HEADING};
 use crate::now_playing::Card;
@@ -19,7 +21,7 @@ use crate::Notification;
 
 /// The Flyout: x 155..691, from y 33 to the screen's foot. Drawn a corner's worth past the foot, so that only its
 /// top corners are round.
-const FLYOUT: Rect = Rect::new(155.0, 33.0, 536.0, 1047.0 + RADIUS);
+pub(super) const FLYOUT: Rect = Rect::new(155.0, 33.0, 536.0, 1047.0 + RADIUS);
 const RADIUS: f32 = 12.0;
 const BACK: Color = Color::rgb(0x1F1F1F);
 /// The dim over the Guide's own panel while a Flyout is over it.
@@ -29,15 +31,15 @@ const TRAVEL: f32 = -48.0;
 const OPEN_SECONDS: f32 = 0.12;
 /// The title's top, and the entries' under it: the title's line and 24.
 const TITLE_TOP: f32 = FLYOUT.y + 36.0;
-const FIRST_TOP: f32 = TITLE_TOP + 39.6 + 24.0;
+pub(super) const FIRST_TOP: f32 = TITLE_TOP + 39.6 + 24.0;
 /// The entries end 24 above the screen's foot.
-const FOOT: f32 = 1080.0 - 24.0;
+pub(super) const FOOT: f32 = 1080.0 - 24.0;
 /// An entry's box is 9 in from the Flyout's sides.
-const INSET: f32 = 9.0;
+pub(super) const INSET: f32 = 9.0;
 /// The volume moves by this much a press.
 const VOLUME_STEP: i32 = 2;
 
-const FOCUSED: Color = Color::argb(0x26FFFFFF);
+pub(super) const FOCUSED: Color = Color::argb(0x26FFFFFF);
 const CARD: Color = Color::argb(0x14FFFFFF);
 const DIVIDER: Color = Color::argb(0x33FFFFFF);
 
@@ -53,6 +55,7 @@ mod icon {
     pub const PLAY: char = '\u{E768}';
     pub const PAUSE: char = '\u{E769}';
     pub const NEXT: char = '\u{E893}';
+    pub const HEADSET: char = '\u{E7F6}';
 }
 
 /// Which Flyout.
@@ -60,6 +63,8 @@ mod icon {
 pub enum Flyout {
     Notifications,
     Audio,
+    /// The Discord tab's Servers, then a server's voice channels (`super::servers`).
+    Discord,
 }
 
 /// Where focus is in the open Flyout.
@@ -127,6 +132,9 @@ pub enum AudioItem {
     Input,
     Volume,
     Mute,
+    /// In a Discord Call, after Mute: the user's Mute and Deafen in Discord, as switches.
+    DiscordMute,
+    DiscordDeafen,
     /// Now Playing, under a divider: the card of the media the Now Playing source has playing, or with none "No
     /// music app is running". Either takes focus, and A on it does nothing; the card's controls are under it.
     NowPlaying,
@@ -135,6 +143,15 @@ pub enum AudioItem {
 impl AudioItem {
     pub const ALL: [AudioItem; 5] =
         [AudioItem::Output, AudioItem::Input, AudioItem::Volume, AudioItem::Mute, AudioItem::NowPlaying];
+
+    /// Audio's entries, top to bottom: in a Discord Call, Mute and Deafen in Discord after Mute.
+    pub fn of(discord: &Discord) -> Vec<AudioItem> {
+        let mut items = AudioItem::ALL.to_vec();
+        if discord.voice.call.is_some() {
+            items.splice(4..4, [AudioItem::DiscordMute, AudioItem::DiscordDeafen]);
+        }
+        items
+    }
 
     fn flow(self) -> Option<Flow> {
         match self {
@@ -151,7 +168,7 @@ impl AudioItem {
             AudioItem::Output | AudioItem::Input => (128.0, 3.0),
             AudioItem::Volume => (96.0, 3.0),
             AudioItem::NowPlaying if card => (CARD_HEIGHT + CONTROLS_HEIGHT, 3.0),
-            AudioItem::Mute | AudioItem::NowPlaying => (75.0, 3.0),
+            AudioItem::Mute | AudioItem::DiscordMute | AudioItem::DiscordDeafen | AudioItem::NowPlaying => (75.0, 3.0),
         }
     }
 }
@@ -163,13 +180,23 @@ pub(super) enum Outcome {
     Close,
     /// Something for the Dashboard to carry out, or to sound as a choice.
     Chose(GuideAction),
+    /// The Flyout closes, and the Dashboard carries something out: the Discord Flyout's B, or a channel joined.
+    CloseChose(GuideAction),
 }
 
 /// The open Flyout.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct State {
     pub which: Flyout,
-    item: usize,
+    pub(super) item: usize,
+    /// Audio's entries as they were last made: focus follows its entry as Mute and Deafen in Discord come and go.
+    audio: Vec<AudioItem>,
+    /// The Discord Flyout: whether Discord has had it open (it closes as Discord closes it), and the server B went
+    /// back from, which focus lands on in the servers, or the server A opened, whose first channel focus lands on.
+    /// Focus stays where it is until Discord shows the one or the other.
+    pub(super) seen: bool,
+    pub(super) back_to: Option<String>,
+    pub(super) into: Option<String>,
     /// The dropdown whose list is open, and the device focus is on in it.
     list: Option<(Flow, usize)>,
     /// The Now Playing card's control focus is on, under the card.
@@ -177,36 +204,51 @@ pub(super) struct State {
     /// The album art the card last drew: it stays up while the next track's is decoded, so a track change swaps it
     /// once.
     art: Option<PathBuf>,
-    scroll: f32,
+    pub(super) scroll: f32,
     /// Which opening this is, of all the Guide's: each comes in once.
-    opening: u32,
+    pub(super) opening: u32,
 }
 
 impl State {
     /// Opens with focus on the first entry.
-    pub fn new(which: Flyout, opening: u32) -> Self {
-        Self { which, item: 0, list: None, control: None, art: None, scroll: 0.0, opening }
+    pub fn new(which: Flyout, opening: u32, discord: &Discord) -> Self {
+        let audio = AudioItem::of(discord);
+        let (list, control, art, back_to, into) = (None, None, None, None, None);
+        Self { which, item: 0, audio, seen: false, back_to, into, list, control, art, scroll: 0.0, opening }
     }
 
-    fn count(&self, around: Around) -> usize {
+    pub(super) fn count(&self, around: Around, discord: &Discord) -> usize {
         match self.which {
             Flyout::Notifications => around.notifications.len(),
-            Flyout::Audio => AudioItem::ALL.len(),
+            Flyout::Audio => self.audio.len(),
+            Flyout::Discord if discord.browse.loading() => 0,
+            Flyout::Discord => discord.browse.len(),
         }
     }
 
-    pub fn focus(&self, around: Around) -> FlyoutFocus {
+    pub fn focus(&self, around: Around, discord: &Discord) -> FlyoutFocus {
         match self.list {
             Some((flow, at)) => FlyoutFocus::Device(flow, at),
-            None if self.count(around) == 0 => FlyoutFocus::Nothing,
+            None if self.count(around, discord) == 0 => FlyoutFocus::Nothing,
             None => self.control.map_or(FlyoutFocus::Item(self.item), FlyoutFocus::Control),
         }
     }
 
-    /// What it shows changed under it: focus stays at the same place, or the last there is now. An open list
-    /// follows its devices, and closes when there are none.
-    pub fn follow(&mut self, around: Around) {
-        self.item = self.item.min(self.count(around).saturating_sub(1));
+    /// What it shows changed under it: focus stays at the same place, or the last there is now; on Audio, on its
+    /// entry, Mute for Mute or Deafen in Discord gone with the Call. An open list follows its devices, and closes
+    /// when there are none. False when the Flyout is to close: the Discord Flyout, as Discord closes it or goes.
+    pub fn follow(&mut self, around: Around, discord: &Discord) -> bool {
+        if self.which == Flyout::Discord {
+            return super::servers::follow(self, discord);
+        }
+        let audio = AudioItem::of(discord);
+        if self.which == Flyout::Audio && audio != self.audio {
+            let focused = self.audio.get(self.item).copied().unwrap_or(AudioItem::Output);
+            let mute = audio.iter().position(|&item| item == AudioItem::Mute).unwrap_or(0);
+            self.item = audio.iter().position(|&item| item == focused).unwrap_or(mute);
+            self.audio = audio;
+        }
+        self.item = self.item.min(self.count(around, discord).saturating_sub(1));
         if let Some((flow, at)) = self.list {
             let devices = around.audio.devices(flow).0.len();
             self.list = (devices > 0).then(|| (flow, at.min(devices - 1)));
@@ -216,9 +258,13 @@ impl State {
         if around.now_playing.is_none() {
             self.control = None;
         }
+        true
     }
 
-    pub fn press(&mut self, press: Press, around: Around) -> Outcome {
+    pub fn press(&mut self, press: Press, around: Around, discord: &Discord) -> Outcome {
+        if self.which == Flyout::Discord {
+            return super::servers::press(self, press, around, discord);
+        }
         if let Some((flow, at)) = self.list {
             let last = around.audio.devices(flow).0.len().saturating_sub(1);
             match press.button {
@@ -248,9 +294,13 @@ impl State {
             }
             return Outcome::Nothing;
         }
-        let last = self.count(around).saturating_sub(1);
-        let audio = (self.which == Flyout::Audio).then(|| AudioItem::ALL[self.item]);
+        let last = self.count(around, discord).saturating_sub(1);
+        let audio = (self.which == Flyout::Audio).then(|| self.audio[self.item]);
+        let call = |ask| Outcome::Chose(GuideAction::Discord(DiscordAsk::Call(ask)));
         match (press.button, audio) {
+            // Asked of Discord, and shown done once Discord says so.
+            (Button::A, Some(AudioItem::DiscordMute)) => return call(CallAsk::Mute),
+            (Button::A, Some(AudioItem::DiscordDeafen)) => return call(CallAsk::Deafen),
             // Down from the card is Play/Pause, under it.
             (Button::Down, Some(AudioItem::NowPlaying)) if around.now_playing.is_some() => {
                 self.control = Some(MediaControl::PlayPause);
@@ -291,7 +341,7 @@ impl State {
     }
 
     /// Draws the Flyout over the Guide's panel, which is dimmed under it.
-    pub fn draw(&mut self, ui: &mut Ui, around: Around) {
+    pub fn draw(&mut self, ui: &mut Ui, around: Around, discord: &Discord) {
         // Over everything of the panel, its text too.
         ui.layer();
         ui.fill(PANEL, PANEL_DIM, RADIUS);
@@ -304,19 +354,21 @@ impl State {
                 let title = match self.which {
                     Flyout::Notifications => "Notifications",
                     Flyout::Audio => "Audio",
+                    Flyout::Discord => discord.browse.title(),
                 };
                 let line = Rect::new(FLYOUT.x + 28.0, TITLE_TOP, FLYOUT.w - 56.0, 44.0);
                 ui.paragraph(line, title, &HEADING, HAlign::Left, VAlign::Top, 1);
                 match self.which {
                     Flyout::Notifications => self.notifications(ui, around.notifications),
-                    Flyout::Audio => self.audio(ui, around.audio, around.now_playing),
+                    Flyout::Audio => self.audio(ui, around.audio, around.now_playing, discord),
+                    Flyout::Discord => super::servers::draw(self, ui, &discord.browse),
                 }
             });
         });
     }
 
     /// The part of the Flyout the entries show in, wide enough for a focused entry's glow.
-    fn viewport() -> Rect {
+    pub(super) fn viewport() -> Rect {
         Rect::new(FLYOUT.x - 24.0, FIRST_TOP - 24.0, FLYOUT.w + 48.0, FOOT - FIRST_TOP + 24.0)
     }
 
@@ -360,10 +412,10 @@ impl State {
     }
 
     /// Audio's entries, and over them the open dropdown's list.
-    fn audio(&mut self, ui: &mut Ui, audio: &Audio, card: Option<Card>) {
+    fn audio(&mut self, ui: &mut Ui, audio: &Audio, card: Option<Card>, discord: &Discord) {
         let mut y = FIRST_TOP;
-        let mut placed = Vec::with_capacity(AudioItem::ALL.len());
-        for item in AudioItem::ALL {
+        let mut placed = Vec::with_capacity(self.audio.len());
+        for &item in &self.audio {
             // A divider is 1 high, 14 under what is above it and 26 over the box.
             if item == AudioItem::NowPlaying {
                 ui.fill(Rect::new(FLYOUT.x + 30.0, y + 14.0, FLYOUT.w - 60.0, 1.0), DIVIDER, 0.0);
@@ -377,7 +429,7 @@ impl State {
         // The focused entry last, so its glow is over its neighbours.
         let unfocused = (0..placed.len()).filter(|&at| at != self.item);
         for at in unfocused.chain([self.item]) {
-            let (item, rect) = (AudioItem::ALL[at], placed[at]);
+            let (item, rect) = (self.audio[at], placed[at]);
             let expanded = item.flow().is_some() && item.flow() == open;
             let focused = at == self.item && open.is_none() && self.control.is_none();
             if focused || expanded {
@@ -391,7 +443,7 @@ impl State {
                     let focus = self.control.filter(|_| at == self.item);
                     self.art = now_playing(ui, rect, card, focus, self.art.take());
                 }
-                _ => audio_item(ui, item, rect, audio, expanded),
+                _ => audio_item(ui, item, rect, audio, expanded, discord),
             }
         }
         if let Some((flow, at)) = self.list {
@@ -404,7 +456,7 @@ impl State {
 }
 
 /// One of Audio's entries in its box.
-fn audio_item(ui: &mut Ui, item: AudioItem, rect: Rect, audio: &Audio, expanded: bool) {
+fn audio_item(ui: &mut Ui, item: AudioItem, rect: Rect, audio: &Audio, expanded: bool, discord: &Discord) {
     let (_, cy) = rect.center();
     let (icon_x, text_x) = (rect.x + 36.0, rect.x + 69.0);
     let line = ui.measure(&BODY, "Volume").height;
@@ -439,6 +491,16 @@ fn audio_item(ui: &mut Ui, item: AudioItem, rect: Rect, audio: &Audio, expanded:
             ui.icon(icon_x, cy, icon::MUTE, 26.0, Color::WHITE);
             ui.label_middle(text_x, cy, "Mute", &BODY);
             switch(ui, Rect::new(rect.right() - 24.0 - 48.0, cy - 12.0, 48.0, 24.0), audio.muted);
+        }
+        AudioItem::DiscordMute | AudioItem::DiscordDeafen => {
+            let (glyph, title, on) = if item == AudioItem::DiscordMute {
+                (icon::INPUT, "Mute in Discord", discord.voice.mute)
+            } else {
+                (icon::HEADSET, "Deafen in Discord", discord.voice.deaf)
+            };
+            ui.icon(icon_x, cy, glyph, 26.0, Color::WHITE);
+            ui.label_middle(text_x, cy, title, &BODY);
+            switch(ui, Rect::new(rect.right() - 24.0 - 48.0, cy - 12.0, 48.0, 24.0), on);
         }
         AudioItem::NowPlaying => {
             ui.icon(icon_x, cy, icon::MUSIC, 26.0, TEXT_DIM);

@@ -1,7 +1,8 @@
 //! Discord as the screens see it: the user's own application and the connection to the Discord running on this PC
 //! (docs/discord.md). The `discord` crate keeps it; Settings > Theme settings > Discord shows it and asks for
 //! changes with [`Ask`]; the Guide's Discord tab names why it can't show Discord with [`Discord::tab_line`], and shows
-//! the [`Call`] the user is in ([`Voice`]), asking Mute, Deafen and Leave of Discord with [`CallAsk`].
+//! the [`Call`] the user is in ([`Voice`]), asking Mute, Deafen and Leave of Discord with [`CallAsk`], the
+//! [`Shortcut`]s to the channels joined before, and the user's servers and their voice channels ([`Browse`]).
 //! Nothing secret is ever in it: the Client Secret only as whether one is saved, the tokens not at all.
 use std::path::PathBuf;
 
@@ -31,6 +32,15 @@ pub const CONNECTING_TO_DISCORD: &str = "Connecting to Discord";
 pub const NOT_IN_A_CALL: &str = "You're not in a voice channel";
 /// A DM's heading while nobody else has been seen in it.
 pub const CALL: &str = "Call";
+/// The Discord tab's last entry, and the Flyout it opens.
+pub const SERVERS: &str = "Servers";
+/// What the Servers Flyout says once Discord has answered with none, and a server's with no voice channel.
+pub const NO_SERVERS: &str = "No servers";
+pub const NO_VOICE_CHANNELS: &str = "No voice channels";
+/// A voice channel nobody is in.
+pub const EMPTY: &str = "Empty";
+/// A Shortcut's one menu option.
+pub const REMOVE_SHORTCUT: &str = "Remove shortcut";
 
 /// What Settings' Discord page shows, and whether the Guide has a Discord tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +66,143 @@ pub struct Discord {
     pub user: Option<String>,
     /// The Call the user is in and their own mute and deafen, as Discord last said: what the Discord tab shows.
     pub voice: Voice,
+    /// The six most recently joined Known channels, most recently first: the Discord tab's Shortcuts. Kept while
+    /// Discord is away, and across Disconnect.
+    pub shortcuts: Vec<Shortcut>,
+    /// The Servers Flyout, or a server's, as Discord last answered it.
+    pub browse: Browse,
+}
+
+/// A tile on the Discord tab for a Known channel: A rejoins it, Remove shortcut forgets it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shortcut {
+    /// The channel's id, which joining it names.
+    pub id: String,
+    /// The Call's heading when last joined: the channel's name, a DM's people, else "Call".
+    pub name: String,
+    /// A voice channel's server's name, once the server has said it; None for a DM.
+    pub server: Option<String>,
+    /// A DM's first other person's avatar, or a voice channel's server's icon, once fetched into the cache.
+    pub picture: Option<PathBuf>,
+    /// A DM or group DM: its picture is a disc, and Discord's mark stands in for none.
+    pub dm: bool,
+}
+
+/// One of the user's Discord servers, in the Servers Flyout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Server {
+    pub id: String,
+    pub name: String,
+    /// Its icon, once fetched into the cache; None for a server without one, or until it has come.
+    pub icon: Option<PathBuf>,
+}
+
+/// One of a server's voice (or stage) channels, in its Flyout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VoiceChannel {
+    pub id: String,
+    pub name: String,
+    /// The avatars of the people in it, each once fetched; empty for nobody (Empty); None until Discord has said.
+    pub occupants: Option<Vec<Option<PathBuf>>>,
+}
+
+/// The Flyout the Discord tab's Servers opens, as Discord last answered: the servers, then one server's voice
+/// channels. Loading while Discord is asked and its spinner has not yet shown a second.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Browse {
+    #[default]
+    Closed,
+    Servers {
+        loading: bool,
+        servers: Vec<Server>,
+    },
+    Server {
+        id: String,
+        name: String,
+        loading: bool,
+        channels: Vec<VoiceChannel>,
+    },
+}
+
+impl Browse {
+    pub fn is_open(&self) -> bool {
+        *self != Browse::Closed
+    }
+
+    pub fn loading(&self) -> bool {
+        matches!(self, Browse::Servers { loading: true, .. } | Browse::Server { loading: true, .. })
+    }
+
+    /// The Flyout's heading: "Servers", or the server's name.
+    pub fn title(&self) -> &str {
+        match self {
+            Browse::Closed => "",
+            Browse::Servers { .. } => SERVERS,
+            Browse::Server { name, .. } => name,
+        }
+    }
+
+    /// How many entries it lists.
+    pub fn len(&self) -> usize {
+        match self {
+            Browse::Closed => 0,
+            Browse::Servers { servers, .. } => servers.len(),
+            Browse::Server { channels, .. } => channels.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The id of the entry at `at`: a server's, or a channel's.
+    pub fn id(&self, at: usize) -> Option<&str> {
+        match self {
+            Browse::Closed => None,
+            Browse::Servers { servers, .. } => servers.get(at).map(|s| s.id.as_str()),
+            Browse::Server { channels, .. } => channels.get(at).map(|c| c.id.as_str()),
+        }
+    }
+
+    /// The name of the entry at `at`.
+    pub fn name(&self, at: usize) -> Option<&str> {
+        match self {
+            Browse::Closed => None,
+            Browse::Servers { servers, .. } => servers.get(at).map(|s| s.name.as_str()),
+            Browse::Server { channels, .. } => channels.get(at).map(|c| c.name.as_str()),
+        }
+    }
+}
+
+/// What the Discord tab's Servers asks of Discord.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowseAsk {
+    /// A on Servers: the servers, those answered before at once, asked afresh.
+    Servers,
+    /// A on a server: its voice channels, likewise, and who is in each.
+    Server { id: String, name: String },
+    /// B in a server's Flyout: back to the servers answered before, not asked again.
+    Back,
+    /// B in the Servers Flyout: closed.
+    Close,
+}
+
+/// The Status area's Discord mark, in a Call: lit while the user speaks, badged muted or deafened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallMark {
+    pub speaking: bool,
+    pub muted: bool,
+    /// Deafened, which wins over muted on the badge.
+    pub deafened: bool,
+}
+
+impl Voice {
+    /// The Status area's mark, in a Call; None out of one.
+    pub fn mark(&self) -> Option<CallMark> {
+        let call = self.call.as_ref()?;
+        let speaking = call.people.iter().any(|p| p.me && p.speaking);
+        Some(CallMark { speaking, muted: self.mute, deafened: self.deaf })
+    }
 }
 
 /// The user's voice on Discord, as Discord last said (docs/discord.md, "The Call").
@@ -122,6 +269,8 @@ impl Default for Discord {
             retrying: false,
             user: None,
             voice: Voice::default(),
+            shortcuts: Vec::new(),
+            browse: Browse::Closed,
         }
     }
 }
@@ -188,6 +337,12 @@ pub enum Ask {
     Disconnect,
     /// The Discord tab's Mute, Deafen or Leave.
     Call(CallAsk),
+    /// A on a Shortcut or a server's voice channel: join it, by its id (nothing if it is the Call's already).
+    Join(String),
+    /// Remove shortcut: the Known channel, by its id, forgotten.
+    RemoveShortcut(String),
+    /// The Servers Flyouts.
+    Browse(BrowseAsk),
 }
 
 impl std::fmt::Debug for Ask {
@@ -199,6 +354,9 @@ impl std::fmt::Debug for Ask {
             Ask::Connect => f.write_str("Connect"),
             Ask::Disconnect => f.write_str("Disconnect"),
             Ask::Call(ask) => write!(f, "Call({ask:?})"),
+            Ask::Join(id) => write!(f, "Join({id:?})"),
+            Ask::RemoveShortcut(id) => write!(f, "RemoveShortcut({id:?})"),
+            Ask::Browse(ask) => write!(f, "Browse({ask:?})"),
         }
     }
 }

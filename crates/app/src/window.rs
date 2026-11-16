@@ -1304,11 +1304,15 @@ impl ApplicationHandler for App {
             self.toasts_changed();
         }
         self.stale |= self.dashboard.focus_line() != focus;
-        let said = self.dashboard.focus_line();
+        let said = (self.dashboard.focus_line(), self.dashboard.guide_line());
         self.carry_out(event_loop);
-        // What was carried out may have changed what the page says (a Group shown or not, from the snapshot after).
-        if self.log_focus && self.dashboard.focus_line() != said {
+        // What was carried out may have changed what the page says (a Group shown or not, from the snapshot after),
+        // or the Guide (Discord asked: a Flyout loading, a Shortcut removed).
+        if self.log_focus && self.dashboard.focus_line() != said.0 {
             eprintln!("focus: {}", self.dashboard.focus_line());
+        }
+        if self.log_focus && self.dashboard.guide_line() != said.1 {
+            eprintln!("guide: {}", self.dashboard.guide_line());
         }
         // Settings > Idle's times, which an --idle-after run keeps in place of them.
         self.keep_idle_after();

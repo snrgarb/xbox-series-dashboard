@@ -14,17 +14,18 @@ mod flyout;
 mod hints;
 pub(crate) mod marks;
 mod panel;
+mod servers;
 mod status;
 mod utilities;
 
-use model::discord::{CallAsk, Discord};
+use model::discord::{Discord, REMOVE_SHORTCUT};
 use model::{Audio, Flow, Library, MediaCommand, PowerCommand};
 use ui::{Button, Color, Ease, Gradient, Press, Rect, TextStyle, Ui};
 
-pub use self::discord::Item as DiscordItem;
+pub use self::discord::{DiscordAsk, Item as DiscordItem};
 pub use self::entries::{Entry, Kind};
 pub use self::flyout::{AudioItem, Flyout, FlyoutFocus, MediaControl};
-pub(crate) use self::status::pad_battery;
+pub(crate) use self::status::{call_mark, pad_battery};
 pub use self::status::{PcBattery, Status};
 pub use self::utilities::Utility;
 use crate::menu_panel::{self, Answer, MenuPanel, Row};
@@ -106,8 +107,8 @@ pub enum GuideAction {
     Media(MediaCommand),
     /// A Power option was chosen: close, then carry it out.
     Power(PowerChoice),
-    /// Mute, Deafen or Leave on the Discord tab: asked of Discord, and shown done only once Discord says so.
-    Discord(CallAsk),
+    /// What the Discord tab or its Flyout asks of Discord: shown done only once Discord says so.
+    Discord(DiscordAsk),
 }
 
 /// Power's options.
@@ -128,6 +129,8 @@ enum MenuChoice {
     ForceQuit,
     /// A prompt's "Cancel": as B.
     Cancel,
+    /// A Shortcut's menu's one option: the Shortcut the menu is on (`Guide::shortcut_menu`) forgotten.
+    RemoveShortcut,
 }
 
 /// A dialog over the Guide. It takes every press but the Guide button's.
@@ -212,6 +215,8 @@ pub struct Guide {
     /// Discord as it last said, and as it was when the lists were last made: the Discord tab's entries.
     discord: Discord,
     listed_discord: Discord,
+    /// The channel of the Shortcut whose menu is up: the menu stays while that Shortcut does.
+    shortcut_menu: Option<String>,
 }
 
 impl Default for Guide {
@@ -234,6 +239,7 @@ impl Default for Guide {
             scroll: 0.0,
             discord: Discord::default(),
             listed_discord: Discord::default(),
+            shortcut_menu: None,
         }
     }
 }
@@ -292,17 +298,26 @@ impl Guide {
         let utility = match which {
             Flyout::Notifications => Utility::Notifications,
             Flyout::Audio => Utility::Audio,
+            // Not a Utility's: Servers opens it, on the Discord tab.
+            Flyout::Discord => return,
         };
         if let Some(at) = self.utilities.iter().position(|&u| u == utility) {
             self.focus = Focus::Utility(at);
             self.flyouts += 1;
-            self.flyout = Some(flyout::State::new(which, self.flyouts));
+            self.flyout = Some(flyout::State::new(which, self.flyouts, &self.discord));
         }
     }
 
     /// The Flyout open over the panel, and where focus is in it.
     pub fn flyout(&self, around: Around) -> Option<(Flyout, FlyoutFocus)> {
-        self.flyout.as_ref().map(|flyout| (flyout.which, flyout.focus(around)))
+        self.flyout.as_ref().map(|flyout| (flyout.which, flyout.focus(around, &self.discord)))
+    }
+
+    /// What `--log-focus`'s Guide line says of the Discord Flyout, when it is open: its title and what focus is on
+    /// (`"Stand-in Server" "Late night" of 2: Empty`).
+    pub fn discord_flyout_line(&self) -> Option<String> {
+        let flyout = self.flyout.as_ref().filter(|flyout| flyout.which == Flyout::Discord)?;
+        Some(servers::line(flyout, &self.discord.browse))
     }
 
     /// The dialog up over the Guide, if one is, and where its focus is.
@@ -353,6 +368,7 @@ impl Guide {
     /// Puts a menu or a prompt up, in place of whatever dialog was. A Flyout that was open closes under it.
     fn ask(&mut self, menu: MenuPanel<MenuChoice>) {
         self.flyout = None;
+        self.shortcut_menu = None;
         self.dialog = Some(Dialog::Menu(menu));
         self.asked += 1;
     }
@@ -461,14 +477,23 @@ impl Guide {
             });
         }
 
-        // A menu or a prompt is about the running game: when that has stopped it goes, in silence. Power is about
-        // the PC, and stays.
-        if matches!(self.dialog, Some(Dialog::Menu(_))) && around.playing.is_none() {
+        // A menu or a prompt is about the running game: when that has stopped it goes, in silence; a Shortcut's,
+        // when the Shortcut has. Power is about the PC, and stays.
+        let gone = match &self.shortcut_menu {
+            Some(id) => self.tab != Tab::Discord || !self.discord.shortcuts.iter().any(|s| s.id == *id),
+            None => around.playing.is_none(),
+        };
+        if matches!(self.dialog, Some(Dialog::Menu(_))) && gone {
             self.dialog = None;
+            self.shortcut_menu = None;
         }
-        // An open Flyout follows what it shows: the notifications, the devices.
+        // An open Flyout follows what it shows: the notifications, the devices, Discord's servers; the Discord
+        // Flyout closes as Discord closes it, or with its tab.
         if let Some(flyout) = &mut self.flyout {
-            flyout.follow(around);
+            let tab_gone = flyout.which == Flyout::Discord && self.tab != Tab::Discord;
+            if tab_gone || !flyout.follow(around, &self.discord) {
+                self.flyout = None;
+            }
         }
         self.scroll_to_focus();
     }
@@ -489,14 +514,26 @@ impl Guide {
             if press.button == Button::Guide {
                 return Some(GuideAction::Close);
             }
-            return match flyout.press(press, around) {
+            return match flyout.press(press, around, &self.discord) {
                 flyout::Outcome::Chose(action) => Some(action),
                 flyout::Outcome::Close => {
                     self.flyout = None;
                     None
                 }
+                flyout::Outcome::CloseChose(action) => {
+                    self.flyout = None;
+                    Some(action)
+                }
                 flyout::Outcome::Nothing => None,
             };
+        }
+        // On the Discord tab the Shortcuts' tiles stand in rows.
+        if let (Tab::Discord, Focus::Entry(at)) = (self.tab, self.focus) {
+            if let Some(to) = discord::grid_move(&self.entries, at, press.button) {
+                self.focus = Focus::Entry(to);
+                self.scroll_to_focus();
+                return None;
+            }
         }
         let last = self.entries.len().checked_sub(1);
         match (press.button, self.focus) {
@@ -521,6 +558,11 @@ impl Guide {
                 if action == Some(GuideAction::Asked) {
                     self.ask_power();
                 }
+                // Servers opens its Flyout at once, a spinner in it until Discord answers.
+                if action == Some(GuideAction::Discord(DiscordAsk::Servers)) {
+                    self.flyouts += 1;
+                    self.flyout = Some(flyout::State::new(Flyout::Discord, self.flyouts, &self.discord));
+                }
                 return action;
             }
             (Button::A, Focus::Utility(at)) => {
@@ -536,10 +578,17 @@ impl Guide {
                     }
                 };
             }
-            // The running game's menu: its name, and Quit.
+            // A Shortcut's menu: its name, and Remove shortcut.
             (Button::Menu, Focus::Entry(at)) if self.entries.get(at).is_some_and(Entry::has_menu) => {
-                let rows = vec![Row::new(menu_panel::icon::QUIT, "Quit", MenuChoice::QuitGame)];
-                self.ask(MenuPanel::menu(&self.entries[at].title, rows));
+                if let Kind::Discord(DiscordItem::Shortcut(shortcut)) = self.entries[at].kind {
+                    let rows = vec![Row::new(crate::theme::glyph::DELETE, REMOVE_SHORTCUT, MenuChoice::RemoveShortcut)];
+                    self.ask(MenuPanel::menu(&self.entries[at].title, rows));
+                    self.shortcut_menu = self.discord.shortcuts.get(shortcut).map(|s| s.id.clone());
+                } else {
+                    // The running game's menu: its name, and Quit.
+                    let rows = vec![Row::new(menu_panel::icon::QUIT, "Quit", MenuChoice::QuitGame)];
+                    self.ask(MenuPanel::menu(&self.entries[at].title, rows));
+                }
             }
             (Button::B | Button::Guide, _) => return Some(GuideAction::Close),
             _ => {}
@@ -562,11 +611,17 @@ impl Guide {
                 Answer::Chose(MenuChoice::QuitGame) => Some(GuideAction::QuitGame),
                 Answer::Chose(MenuChoice::QuitAndStart(game)) => Some(GuideAction::QuitAndStart(game)),
                 Answer::Chose(MenuChoice::ForceQuit) => Some(GuideAction::ForceQuit),
+                Answer::Chose(MenuChoice::RemoveShortcut) => {
+                    let id = self.shortcut_menu.as_deref();
+                    let at = self.discord.shortcuts.iter().position(|s| Some(s.id.as_str()) == id);
+                    at.map(|at| GuideAction::Discord(DiscordAsk::RemoveShortcut(at)))
+                }
                 Answer::Chose(MenuChoice::Cancel) | Answer::Declined => (!self.panel).then_some(GuideAction::Close),
                 Answer::Moved | Answer::Nothing => return None,
             },
         };
         self.dialog = None;
+        self.shortcut_menu = None;
         action
     }
 
@@ -648,7 +703,7 @@ impl Guide {
                 } else {
                     self.panel(ui, behind, around, face);
                     if let Some(flyout) = &mut self.flyout {
-                        flyout.draw(ui, around);
+                        flyout.draw(ui, around, &self.discord);
                     }
                 }
             });

@@ -105,6 +105,8 @@ pub struct Status<'a> {
     pub show_percent: bool,
     /// The Score total under the gamertag, as the console's; none while there are no achievement totals.
     pub score: Option<u64>,
+    /// In a Discord Call, its mark: 16 left of the pad, or of the clock without one.
+    pub discord_call: Option<model::discord::CallMark>,
 }
 
 /// The Score line's G disc, and the gap after it (Main.xaml, XboxTopBarProfile).
@@ -114,7 +116,7 @@ const G_GAP: f32 = 6.0;
 const LINE: f32 = 34.58;
 
 pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
-    let Status { profile, clock, pad, pad_battery, show_percent, score } = *status;
+    let Status { profile, clock, pad, pad_battery, show_percent, score, discord_call } = *status;
     let picture = TopButton::Profile.rect();
     profile::picture(ui, picture, &profile.picture);
     if focused == Some(TopButton::Profile) {
@@ -177,10 +179,14 @@ pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
     }
     // The status area ends 20 left of Notifications: the clock, and 16 left of it the pad.
     let clock = ui.label_right(1725.0, MIDDLE + 2.0, clock, &theme::CLOCK);
+    let mut x = 1725.0 - clock.width;
     if pad {
         // On a cable the pad's glyph; wireless its battery, with its charge beside it unless Settings says not.
         let battery = guide::Status { pad_battery, show_percent, ..guide::Status::default() };
-        guide::pad_battery(ui, 1725.0 - clock.width - 16.0, MIDDLE, &battery);
+        x = guide::pad_battery(ui, x - 16.0, MIDDLE, &battery);
+    }
+    if let Some(mark) = discord_call {
+        guide::call_mark(ui, x - 16.0, MIDDLE, mark);
     }
 }
 
