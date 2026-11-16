@@ -1,0 +1,12 @@
+[package]
+name = "source-ubisoft"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+model = { path = "../model" }
+source-kit = { path = "../source-kit" }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

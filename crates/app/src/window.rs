@@ -154,6 +154,65 @@ struct App {
     /// With --log-frames: the frames Home's window, the Overlay and the Toast strip drew since they were last
     /// said, and when.
     frames: Option<([u32; 3], Instant)>,
+    /// With --log-frames: how long Home's frames and the Overlay's took, since they were last said.
+    frame_times: [FrameTimes; 2],
+}
+
+/// How long a window's frames took, for --log-frames: the wait for the swap chain to give a frame to draw on, the
+/// drawing and the present, and the time from one frame's start to the next while something moved: a frame that
+/// follows one that left nothing moving comes after a rest, and is not late.
+#[derive(Default)]
+struct FrameTimes {
+    frames: u32,
+    acquire: Duration,
+    acquire_most: Duration,
+    draw: Duration,
+    draw_most: Duration,
+    /// The frames that followed one that left something moving, and the time they took in all.
+    moving: u32,
+    moving_time: Duration,
+    gap_most: Duration,
+    /// Of those, the frames that began more than 12 ms after the one before: short of 90 a second.
+    late: u32,
+    last: Option<Instant>,
+}
+
+impl FrameTimes {
+    fn frame(&mut self, began: Instant, acquired: Instant, done: Instant, was_moving: bool) {
+        self.frames += 1;
+        let (acquire, draw) = (acquired - began, done - acquired);
+        self.acquire += acquire;
+        self.acquire_most = self.acquire_most.max(acquire);
+        self.draw += draw;
+        self.draw_most = self.draw_most.max(draw);
+        if let Some(gap) = self.last.map(|last| began - last).filter(|_| was_moving) {
+            self.moving += 1;
+            self.moving_time += gap;
+            self.gap_most = self.gap_most.max(gap);
+            self.late += u32::from(gap > Duration::from_millis(12));
+        }
+        self.last = Some(began);
+    }
+
+    /// What they were, and forgets them.
+    fn said(&mut self) -> String {
+        let ms = |time: Duration| time.as_secs_f32() * 1000.0;
+        let each = self.frames.max(1);
+        let said = format!(
+            "wait {:.1} ms (most {:.1}), draw {:.1} ms (most {:.1}); moving: {} frames at {:.0} a second, longest gap \
+             {:.1} ms, {} late",
+            ms(self.acquire / each),
+            ms(self.acquire_most),
+            ms(self.draw / each),
+            ms(self.draw_most),
+            self.moving,
+            self.moving as f32 / self.moving_time.as_secs_f32().max(f32::EPSILON),
+            ms(self.gap_most),
+            self.late
+        );
+        *self = FrameTimes { last: self.last, ..FrameTimes::default() };
+        said
+    }
 }
 
 /// A key of the keyboard, as the Dashboard is given it.
@@ -265,6 +324,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         leaving: Duration::ZERO,
         minute: minute(),
         frames: args.log_frames.then(|| ([0; 3], Instant::now())),
+        frame_times: Default::default(),
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
@@ -486,6 +546,9 @@ impl App {
             host.draw(gpu, &view, size, dt, wgpu::Color::TRANSPARENT, |ui| dashboard.draw_overlay(ui))
         });
         overlay.present(gpu, frame);
+        if self.frames.is_some() {
+            self.frame_times[1].frame(began, now, Instant::now(), self.overlay_moving);
+        }
         self.overlay_next = overlay_due(began, began.elapsed());
         // At once if something is moving, or if that frame was the last of something: the Overlay is then hidden
         // without waiting out the loop's sleep.
@@ -702,6 +765,14 @@ impl ApplicationHandler for App {
         let formats = surface.get_capabilities(&gpu.adapter).formats;
         config.format = formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(config.format);
         config.present_mode = wgpu::PresentMode::AutoVsync;
+        if self.frames.is_some() {
+            let hertz = window.current_monitor().and_then(|monitor| monitor.refresh_rate_millihertz());
+            let hertz = hertz.map_or("unknown".to_string(), |rate| format!("{:.1} Hz", f64::from(rate) / 1000.0));
+            eprintln!(
+                "display: {}x{} at {hertz}, Home presents {:?}",
+                config.width, config.height, config.present_mode
+            );
+        }
         surface.configure(&gpu.device, &config);
 
         let gpu_ready = since_start();
@@ -902,6 +973,11 @@ impl ApplicationHandler for App {
                 let [home, overlay, toasts] = *frames;
                 let seconds = since.elapsed().as_secs_f32();
                 eprintln!("frames: home {home}, overlay {overlay}, toasts {toasts} in {seconds:.1} s");
+                for (name, times) in ["home", "overlay"].iter().zip(&mut self.frame_times) {
+                    if times.frames > 0 {
+                        eprintln!("frame times: {name}: {}", times.said());
+                    }
+                }
                 (*frames, *since) = ([0; 3], Instant::now());
             }
         }
@@ -1022,11 +1098,15 @@ impl ApplicationHandler for App {
                     }
                     wgpu::CurrentSurfaceTexture::Validation => panic!("surface validation error"),
                 };
+                let acquired = Instant::now();
                 let view = frame.texture.create_view(&Default::default());
                 let size = (state.config.width, state.config.height);
                 let dashboard = &mut self.dashboard;
                 state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
                 state.gpu.queue.present(frame);
+                if self.frames.is_some() {
+                    self.frame_times[0].frame(now, acquired, Instant::now(), self.moving);
+                }
                 (self.home_took, self.home_done) = (now.elapsed(), Instant::now());
                 // Without a strip the Toast was in that frame.
                 if self.toast_strip.is_none() {

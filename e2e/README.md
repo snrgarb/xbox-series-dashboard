@@ -96,6 +96,14 @@ looks at Home or taps the Guide button waits it out first: `Wait-Greeting`.
 `steam://` handler under `HKCU\Software\Classes\steam`. The Dashboard then finds Steam and launches through it exactly
 as on a real machine.
 
+`Initialize-FakeEa`, `Initialize-FakeUbisoft` and `Initialize-FakeBattleNet` (each on `New-FakeStore`, as Epic's and
+GOG's are) write a fake of that store at `C:\e2e\ea`, `C:\e2e\ubisoft` or `C:\e2e\battlenet` with
+`standin make-<store> <root>`: made-up games, each installed one's `game.exe` the stand-in game, and the store's
+registry as `registry.json` in `<root>`. The Dashboard reads it when started with `--<store> <root>`. An EA game starts
+by its own `game.exe`; `standin.exe uplay-url <root> "%1"` is registered as the `uplay://` handler for the fake Ubisoft
+Connect; the fake Battle.net's `Battle.net.exe` is a copy of `standin.exe` that starts the game it is asked to launch.
+Each says what it started in `standin.log`.
+
 ## Writing a test
 
 A test is a folder under `payloads/` with a `run.ps1` that imports `lib\E2E.psm1`, collects what is wrong in a list,
@@ -110,6 +118,7 @@ says `result: PASS` or `result: FAIL`, and exits 0 or 1; `payloads/smoke/run.ps1
 | `Start-Dashboard [-Arguments ...]`, `Stop-Dashboard` | the Dashboard, its stderr to `dashboard.log` |
 | `Get-DashboardLog`, `Get-DashboardLogLength`, `Wait-DashboardLog <pattern> <seconds> [-After <lines>]` | what it logged |
 | `Initialize-FakeSteam`, `Get-StandInGame`, `Stop-StandInGame` | the fake Steam and its games |
+| `Initialize-FakeEa`, `Initialize-FakeUbisoft`, `Initialize-FakeBattleNet` | a fake EA app, Ubisoft Connect or Battle.net |
 | `Watch-Pulse <seconds>`, `Test-PulseColour`, `Test-Suspended <pid>` | the colours the stand-in game's pulse showed (two when it runs, one when it is frozen); whether a pixel is the pulse, dimmed or not; whether every thread of a process is suspended |
 
 The tests: `smoke` (Home, a launch through the Launch screen, the Guide over the game, Home again), `home` (Home
@@ -127,7 +136,8 @@ name, Home's Groups seen to follow each, and all put back), `apps` (Settings' Ga
 game added as a game and Notepad as an App by typing their paths, the App started from My games & apps' Apps, the game
 launched from its hub and first in the Recent row after, and both removed), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
-the Guide, the queue, the Guide button during a Toast), and `overlay` and `video` for the spikes.
+the Guide, the queue, the Guide button during a Toast), `stores-ea-ubisoft-battlenet` (a fake of each beside Steam's:
+each read, and one game of each found through Search and launched from its hub through its store), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets

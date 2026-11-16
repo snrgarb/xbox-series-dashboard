@@ -21,6 +21,11 @@ pub fn cover_art(game: &Game, px: f32) -> Option<ArtKey> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Source {
     Steam,
+    Epic,
+    Gog,
+    Ea,
+    Ubisoft,
+    BattleNet,
 }
 
 impl Source {
@@ -28,6 +33,11 @@ impl Source {
     pub fn name(self) -> &'static str {
         match self {
             Source::Steam => "Steam",
+            Source::Epic => "Epic Games",
+            Source::Gog => "GOG",
+            Source::Ea => "EA app",
+            Source::Ubisoft => "Ubisoft Connect",
+            Source::BattleNet => "Battle.net",
         }
     }
 }
@@ -37,16 +47,68 @@ impl Source {
 pub fn source(game: &Game) -> Option<Source> {
     match game.source.as_str() {
         "steam" | "" => Some(Source::Steam),
+        "epic" => Some(Source::Epic),
+        "gog" => Some(Source::Gog),
+        "ea" => Some(Source::Ea),
+        "ubisoft" => Some(Source::Ubisoft),
+        "battlenet" => Some(Source::BattleNet),
         _ => None,
     }
 }
 
 /// A source's mark, filling `mark`. The marks are the stores' own logos, which are not this project's to ship:
-/// until they are loaded from somewhere they may be, a plain white disc stands in for the mark. This is the one
-/// place to draw the real thing.
+/// until they are loaded from somewhere they may be, a plain white shape stands in for each, one unlike the
+/// others'. This is the one place to draw the real thing: each store's own function below.
 pub fn source_mark(ui: &mut Ui, mark: Rect, source: Source) {
-    let Source::Steam = source;
+    match source {
+        Source::Steam => steam_mark(ui, mark),
+        Source::Epic => epic_mark(ui, mark),
+        Source::Gog => gog_mark(ui, mark),
+        Source::Ea => ea_mark(ui, mark),
+        Source::Ubisoft => ubisoft_mark(ui, mark),
+        Source::BattleNet => battlenet_mark(ui, mark),
+    }
+}
+
+/// Steam's stand-in: a white disc.
+fn steam_mark(ui: &mut Ui, mark: Rect) {
     ui.fill(mark, Color::WHITE, 999.0);
+}
+
+/// Epic's stand-in: a white square, its corners a little rounded, a little inside the disc's bounds so that it
+/// looks no bigger.
+fn epic_mark(ui: &mut Ui, mark: Rect) {
+    ui.fill(mark.grow(-mark.w * 0.08), Color::WHITE, mark.w * 0.12);
+}
+
+/// GOG's stand-in: a white ring.
+fn gog_mark(ui: &mut Ui, mark: Rect) {
+    ui.ring(mark, Color::WHITE, 999.0, mark.w * 0.2);
+}
+
+/// The EA app's stand-in: the top half of a white disc, its flat side down.
+fn ea_mark(ui: &mut Ui, mark: Rect) {
+    let top = Rect::new(mark.x, mark.y + mark.h * 0.15, mark.w, mark.h * 0.5);
+    let disc = Rect::new(mark.x, top.y, mark.w, mark.h);
+    ui.with_clip(top, |ui| ui.fill(disc, Color::WHITE, 999.0));
+}
+
+/// Ubisoft Connect's stand-in: four small white squares, two by two, apart.
+fn ubisoft_mark(ui: &mut Ui, mark: Rect) {
+    let side = mark.w * 0.36;
+    let gap = mark.w * 0.12;
+    let left = mark.x + (mark.w - 2.0 * side - gap) / 2.0;
+    let top = mark.y + (mark.h - 2.0 * side - gap) / 2.0;
+    for (column, row) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+        let cell = Rect::new(left + column * (side + gap), top + row * (side + gap), side, side);
+        ui.fill(cell, Color::WHITE, side * 0.2);
+    }
+}
+
+/// Battle.net's stand-in: a white bar across the middle, half as tall as it is wide.
+fn battlenet_mark(ui: &mut Ui, mark: Rect) {
+    let bar = Rect::new(mark.x, mark.y + mark.h * 0.25, mark.w, mark.h * 0.5);
+    ui.fill(bar, Color::WHITE, mark.h * 0.25);
 }
 
 /// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow.
