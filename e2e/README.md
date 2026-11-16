@@ -81,6 +81,15 @@ the TV PC, not for here.
   under the `SteamPath` in the registry, starts its `game.exe`, and keeps `HKCU\Software\Valve\Steam\Apps\<appid>\Running`
   at 1 until it exits, as Steam does. For a game that isn't installed it does nothing and exits 1.
 
+- **The stand-in Steam client.** `make-steam` also puts a copy of `standin.exe` in the fake's folder as `steam.exe`,
+  which the Dashboard asks to install and uninstall as it asks the real one (`steam.exe -silent +app_install <appid>`,
+  `-silent -console +app_uninstall <appid>`). It says `steam: asked to install <appid>: <arguments>` in `standin.log`,
+  and writes the game's app manifest as Steam does as it takes an install on (queued), or removes it (uninstalled). A
+  test then moves the install along as Steam's download would, by rewriting that manifest: **`standin steam-install
+  <root> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop`** (done copies the stand-in game in as
+  the game's `game.exe`). Nothing is ever downloaded, and nothing but the fake's own files is touched; it is the same on
+  the VM and in safe mode, no handler being involved.
+
 - **`standin toast <text>`** posts a notification to the running Dashboard, which lists it and shows its Toast: a
   `WM_COPYDATA` message to the Toast strip's window (`crates/model/src/post.rs`). The Dashboard takes it only when
   started with `--allow-toast-posts`; it exits 1 when no Dashboard took it. The Dashboard says
@@ -144,7 +153,10 @@ the grid's edges and its scroll, Play history, Manage, and B and Y), `groups` (S
 name, Home's Groups seen to follow each, and all put back), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
 the Guide, the queue, the Guide button during a Toast), `stores-ea-ubisoft-battlenet` (a fake of each beside Steam's:
-each read, and one game of each found through Search and launched from its hub through its store), and `overlay` and `video` for the spikes.
+each read, and one game of each found through Search and launched from its hub through its store), `queue` (Install
+from the hub and the Tile menu, the fake install moved along by `standin steam-install`: Queued and Installing...
+tiles, the hub's Queue action, Downloads' count, the ways into Manage Queue, an install started in the client, one
+dropped, one done, and Uninstall seen through), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets

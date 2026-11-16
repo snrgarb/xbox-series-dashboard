@@ -8,11 +8,20 @@ use model::{Library, Source};
 use shell::store::{self, Addresses, Ask};
 
 /// Asks the store of the game with this id, hidden or not, to install or uninstall it. A game that is in no
-/// database (id 0) or no longer in the library is said so and nothing is asked.
-pub fn ask_store(library: &Library, sources: &[Arc<dyn Source>], game: i64, ask: Ask, addresses: &mut dyn Addresses) {
+/// database (id 0) or no longer in the library is said so and nothing is asked. Whether the store was asked.
+pub fn ask_store(
+    library: &Library,
+    sources: &[Arc<dyn Source>],
+    game: i64,
+    ask: Ask,
+    addresses: &mut dyn Addresses,
+) -> bool {
     match library.game(game).filter(|_| game != 0) {
         Some(game) => store::ask(game, crate::sources::of(sources, game).map(|source| &**source), ask, addresses),
-        None => eprintln!("store: no game {game} in the library: nothing asked"),
+        None => {
+            eprintln!("store: no game {game} in the library: nothing asked");
+            false
+        }
     }
 }
 

@@ -283,7 +283,7 @@ All 1:1. This is **not** Home's tile face (home.md 3.3); differences are in bold
 | Darken | `#AA000000` over the cover, radius 6, when the game is not installed **and** Playnite's "darken uninstalled games" grid setting is on. The pictures (fresh Playnite) show it off. Games never has an uninstalled game. | :33, 76-82 |
 | Source badge | Bottom-left, `Margin="10"`: white 20 x 20 icon over its 36 x 36 shadow picture (home.md 3.3; same paths and pictures). Only for Source "Steam" or "Xbox". Opacity 0 at once while the tile is focused. Collapsed while installing. | :41-50, 83-96, 104 |
 | **State badge** | Top-left, `Margin="6"`, **24 x 24**, `#E62B2B2B`, radius 3. Holds either the play triangle `M0,0 L9,5.5 L0,11 Z`, white (the running game), or **glyph U+E896 (Download), icon font 14, white, on a game that is not installed**. No "CONTINUE" text when focused; no inner `#F0181818` box. Stays visible on focus. Collapsed while installing unless the game is running. | :65-73, 97-111 |
-| Installing band (**M4**), unfocused | Bottom, full width, radius 0,0,6,6: a **vertical gradient `#00000000` (top) to `#E6000000` (bottom)**; text "Installing..." Segoe UI 26 white, `Margin="12,28,12,10"`, one line, ellipsis. Opacity 0 while focused. This list reads "Installing..." for a queued game too (Playnite has one flag). | :53-63, 95, 102-106; :1-6 of the file |
+| Installing band (#78), unfocused | Bottom, full width, radius 0,0,6,6: a **vertical gradient `#00000000` (top) to `#E6000000` (bottom)**; text "Installing..." Segoe UI 26 white, `Margin="12,28,12,10"`, one line, ellipsis. Opacity 0 while focused. This list reads "Installing..." for a queued game too (Playnite has one flag). | :53-63, 95, 102-106; :1-6 of the file |
 | Title band, focused | Bottom, full width, radius 0,0,6,6: the same **gradient `#00000000` -> `#E6000000`, not Home's flat band**. Stack `Margin="12,36,12,10"`: the title (Playnite's display name), Segoe UI 26 white, wraps, `MaxHeight="72"` (two lines), character ellipsis; then (M4) "Installing..." on one line. One-line band is 36 + 34.6 + 10 = 80.6 tall; two-line 115.2. | T/DerivedStyles/ListGameItemStyle.xaml:76-99 |
 | Title band fade | To 1 over 150 ms after a 50 ms delay, linear; to 0 over 100 ms, linear. **Reduce motion: there and gone at once** (unlike Home's band, which still fades). | :41-61, 127-150 |
 | Focus ring | `BorderThickness="4" CornerRadius="14" Margin="-8"`, `#FF2CA243`, with `XboxFocusGlow`: exactly home.md 4.1 and 4.3 (rectangular variant), at 1:1. Shown and hidden at once. | :107-112, 118-121 |
@@ -372,7 +372,7 @@ Inside a row (:721-756):
 | Text block | `Margin="22,0,24,0"`: **x 719..1722**, vertically centred in the 168 |
 | Line 1 | Title: **Segoe UI Semibold** 26, white, one line, ellipsis |
 | Line 2 | 18 under line 1: the date last played in the user's short date format (`d`, current culture: "11/10/2026"), then "`  •  {platform}`" (two spaces, U+2022, two spaces, the game's first platform name; E/PlayniteLibrary.cs:93), both Segoe UI 26 `#FF8F8F8F`. In the pictures, whose games have no platform, the date is followed by the bullet alone ("11/10/2026  •"). |
-| Line 3 (**M4**) | 8 under line 2, only while the game is in the Queue: "Queued" or "Installing...", Segoe UI 26 white |
+| Line 3 (#78) | 8 under line 2, only while the game is in the Queue: "Queued" or "Installing...", Segoe UI 26 white |
 | No badges | No source badge, no state badge, no title band on the cover |
 
 With two lines the block is 34.6 + 18 + 34.6 = 87.2 tall, its top 40.4 under the back's top.
@@ -539,7 +539,7 @@ Box (style `Box`, :237-270; the same box as Settings'):
 | Fill | `#FF2D2D2D`, square corners; **focused `#FF4A4A4A`** |
 | Icon | Glyph U+E896 (Download), icon font **34**, white, centred in the box's first 100 (x 520..620), vertically centred |
 | Label | "Queue", Segoe UI 26 white, from x 620 (`Padding="100,0,30,0"`), vertically centred |
-| Count (**M4**) | The Queue's count, Segoe UI 26 white, right-aligned to x 927, only while something is queued |
+| Count (#78) | The Queue's count, Segoe UI 26 white, right-aligned to x 927, only while something is queued |
 | Focus ring | `Margin="-8" BorderThickness="4" CornerRadius="8"`, `#FF2CA243`, with `XboxFocusGlow`: stroke 4 to 8 outside the box (centre-line radius 8) |
 
 Buttons (E/MyGamesControl.xaml.cs:1736-1759): A opens Manage Queue (M4); Left to the Manage nav item; Right, Up, Down nothing; B Home. Right or A on the Manage nav item puts focus on the box. No hint bar.

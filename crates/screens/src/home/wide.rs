@@ -46,7 +46,7 @@ const TILES: [WideTile; 4] = [
         to: Color::rgb(0x0E5A1C),
         glyph: glyph::TROPHY,
     },
-    // Its subtitle counts the Queue, once there is one.
+    // Its subtitle counts the Queue: this one is for an empty Queue (`subtitle`).
     WideTile {
         title: "Downloads",
         subtitle: Some("Nothing queued"),
@@ -74,7 +74,17 @@ pub fn nearest(x: f32) -> usize {
     (0..COUNT).min_by(|a, b| distance(a).total_cmp(&distance(b))).unwrap_or(0)
 }
 
-pub fn draw(ui: &mut Ui, focused: Option<usize>) {
+/// A tile's subtitle, with `queued` games in the Queue: Downloads counts them, `{n} in queue` (the Bundle's
+/// PromoRow.xaml), or says "Nothing queued".
+fn subtitle(i: usize, queued: usize) -> Option<String> {
+    match i {
+        DOWNLOADS if queued > 0 => Some(format!("{queued} in queue")),
+        _ => TILES[i].subtitle.map(String::from),
+    }
+}
+
+/// The tiles, with focus on this one if on any, and `queued` games in the Queue.
+pub fn draw(ui: &mut Ui, focused: Option<usize>, queued: usize) {
     for (i, tile) in TILES.iter().enumerate() {
         let rect = rect(i);
         ui.gradient(rect, tile.from, tile.to, Gradient::Diagonal, tile::RADIUS * S);
@@ -83,8 +93,8 @@ pub fn draw(ui: &mut Ui, focused: Option<usize>) {
         // The caption stands on the tile's foot: the title, and under it the subtitle if there is one.
         let line = ui.measure(&BODY_SEMIBOLD, tile.title).height;
         let mut caption = Rect::new(rect.x + 18.0 * S, rect.bottom() - 14.0 * S - line, rect.w - 36.0 * S, line);
-        if let Some(subtitle) = tile.subtitle {
-            ui.paragraph(caption, subtitle, &BODY.color(theme::TEXT_DIM), HAlign::Left, VAlign::Top, 1);
+        if let Some(subtitle) = subtitle(i, queued) {
+            ui.paragraph(caption, &subtitle, &BODY.color(theme::TEXT_DIM), HAlign::Left, VAlign::Top, 1);
             caption.y -= line;
         }
         ui.paragraph(caption, tile.title, &BODY_SEMIBOLD, HAlign::Left, VAlign::Top, 1);

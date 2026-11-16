@@ -197,7 +197,7 @@ With the keyboard up (viewport to y 690) a Games row fits whole (ends 595 + ring
 | No cover, or one that will not decode | The game's title in the cover area: Segoe UI 26, white, wrapping, centred both ways, `Margin="12"`, no trimming | 173-185 |
 | Caption | 240 x 132, background `#FF3A3D44` (`CaptionBrush`); content `Margin="18,14,18,14"` (text width 204) | 24, 164, 167, 187 |
 | Title | Segoe UI 26, `#FFFFFFFF`, wraps, `MaxHeight="72"` = two lines (2 x 34.58 = 69.2), character ellipsis on the second | 188-189; comment 159-161; CT/ConsoleTypeSizesXamlTests.cs:80-125 |
-| Status (M4) | Under the title, Segoe UI 26, `#FFB4B7BD`, one line, character ellipsis: "Queued" or "Installing..." while the game is queued or installing, else empty (the line then takes no room). | 190-191; C/HomeState.cs:168-169; C/ExtensionCore.Queue.cs:15-16 |
+| Status (#78) | Under the title, Segoe UI 26, `#FFB4B7BD`, one line, character ellipsis: "Queued" or "Installing..." while the game is queued or installing, else empty (the line then takes no room). | 190-191; C/HomeState.cs:168-169; C/ExtensionCore.Queue.cs:15-16 |
 | Focus ring | `Border BorderThickness="4" CornerRadius="14" Margin="-8"`, `#FF2CA243`, with `XboxFocusGlow`: exactly the rectangular ring and glow of `home.md` 4.1 and 4.3, at scale 1 (stroke 4, gap 4, centre-line radius 14, outer 16). Hidden unless focused; toggled instantly. | 133-138, 141-143 |
 | Draw order | The focused tile is drawn over its neighbours (`Panel.ZIndex=1`), so they do not cover its glow | 148-152 |
 

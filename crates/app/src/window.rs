@@ -705,13 +705,18 @@ impl App {
                     let changed = self.store.change_filter(&change);
                     self.show(changed);
                 }
+                // The store is asked, and the Queue told: the game joins it, or its uninstall is followed.
                 Effect::Install(game) => {
                     let (library, sources) = (self.dashboard.library(), self.store.sources());
-                    crate::games::ask_store(library, sources, game, Ask::Install, &mut *self.addresses);
+                    if crate::games::ask_store(library, sources, game, Ask::Install, &mut *self.addresses) {
+                        self.store.tell_queue(::library::queue::Ask::Install(game));
+                    }
                 }
                 Effect::Uninstall(game) => {
                     let (library, sources) = (self.dashboard.library(), self.store.sources());
-                    crate::games::ask_store(library, sources, game, Ask::Uninstall, &mut *self.addresses);
+                    if crate::games::ask_store(library, sources, game, Ask::Uninstall, &mut *self.addresses) {
+                        self.store.tell_queue(::library::queue::Ask::Uninstall(game));
+                    }
                 }
             }
         }
@@ -839,6 +844,15 @@ impl ApplicationHandler for App {
         }
         if let Some(library) = self.store.changed() {
             self.show(Some(library));
+            // The sources have been read: an install started in a client meanwhile joins the Queue now.
+            self.store.tell_queue(library::queue::Ask::Look);
+        }
+        // The Queue moved on: a new snapshot when a source read again changed the library, else the Queue alone.
+        if let Some(update) = self.store.queue_update() {
+            self.show(update.library);
+            self.dashboard.set_queue(update.queue);
+            self.stale = true;
+            self.overlay_stale = true;
         }
         // The keyboard is the Overlay's while it is the Guide over a game.
         if let Some(overlay) = &mut self.overlay {
@@ -1134,6 +1148,11 @@ impl ApplicationHandler for App {
                     // The sources are read once the first frame is out, and wake the window if they have news.
                     let proxy = self.proxy.clone();
                     self.store.sync_in_background(self.dashboard.library(), move || {
+                        let _ = proxy.send_event(());
+                    });
+                    // And the Queue is followed from then on, waking the window as it changes.
+                    let proxy = self.proxy.clone();
+                    self.store.follow_queue(move || {
                         let _ = proxy.send_event(());
                     });
                 }

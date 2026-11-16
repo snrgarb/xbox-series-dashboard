@@ -61,11 +61,13 @@ fn game_hub(game: &Game) -> Option<Open> {
 }
 
 /// Install, as the menu's row and the Game hub's main action both answer it: what asked closes, and the game's
-/// store is asked for it. A game that is installed by now, or is in no library database, asks nothing, and what
-/// asked closes all the same.
-pub fn install(game: &Game) -> PageAction {
+/// store is asked for it (it then joins the Queue, `library::queue`). A game that is installed by now, already in
+/// the Queue, or in no library database asks nothing, and what asked closes all the same.
+pub fn install(game: &Game, library: &Library) -> PageAction {
     match game {
-        game if !game.installed && game.id != 0 => PageAction::CloseWith(Effect::Install(game.id)),
+        game if !game.installed && game.id != 0 && library.queue.get(game.id).is_none() => {
+            PageAction::CloseWith(Effect::Install(game.id))
+        }
         _ => PageAction::Close,
     }
 }
@@ -201,7 +203,7 @@ impl TileMenu {
             // With a game running nothing more is started. The Guide's "Quit X and start Y?" is #40's.
             Choice::Play => then(place.filter(|_| around.playing.is_none()).map(Effect::Launch)),
             Choice::Quit => then((around.playing.is_some() && around.playing == place).then_some(Effect::QuitGame)),
-            Choice::Install => Some(game.as_ref().map_or(PageAction::Close, install)),
+            Choice::Install => Some(game.as_ref().map_or(PageAction::Close, |game| install(game, around.library))),
             Choice::Favourite(on) => then(Some(Effect::Favourite { game: self.game.id, on })),
             Choice::Manage => Some(game.as_ref().and_then(game_hub).map_or(PageAction::Close, PageAction::Replace)),
             Choice::Uninstall => {

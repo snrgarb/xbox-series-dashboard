@@ -7,8 +7,8 @@
 //! modules beside it draw.
 //!
 //! Menu anywhere, and A on Manage, open the game's Tile menu (`tile_menu`, without its Manage game row); A on
-//! Install is the Tile menu's Install. **Hooks for the tickets to come:** the Queue action's place in [`actions`]
-//! (M4), and the Achievements row's in `cards::stats` (M6).
+//! Install is the Tile menu's Install; A on Queue opens Manage Queue over the hub (`my_games::manage_queue`, #79's
+//! hook). **Hook for the tickets to come:** the Achievements row's in `cards::stats` (M6).
 mod actions;
 mod backdrop;
 mod cards;
@@ -84,6 +84,8 @@ pub struct GameHub {
     focus: Focus,
     /// What the main action is, as the library and the shell last had the game.
     main: Main,
+    /// Whether the game is in the Queue, and so Queue shows.
+    queued: bool,
     /// The toggle's width as it was last drawn: Up and Down go by where things are.
     toggle_width: f32,
     /// What tells this hub's picture of the screen behind it from another's.
@@ -110,6 +112,7 @@ impl GameHub {
         static SERIAL: AtomicU64 = AtomicU64::new(0);
         Self {
             main: if entry.installed { Main::Play } else { Main::Install },
+            queued: false,
             entry,
             view: View::Hub,
             focus: Focus::Action(Action::Main),
@@ -118,13 +121,21 @@ impl GameHub {
         }
     }
 
-    /// Takes in the game as it is now: what the main action is, and focus off a card that no longer shows.
+    /// Takes in the game as it is now: what the main action is, whether Queue shows, and focus off a card or Queue
+    /// when it no longer shows (from Queue to Manage).
     fn follow(&mut self, game: &Game, place: Option<usize>, around: Around) -> Vec<Card> {
-        self.main = match game.installed {
+        let queued = around.library.queue.get(game.id).filter(|_| game.id != 0);
+        self.main = match (game.installed, queued) {
             _ if place.is_some() && around.playing == place => Main::Running,
-            true => Main::Play,
-            false => Main::Install,
+            (true, _) => Main::Play,
+            (false, Some(entry)) if entry.state.downloading() => Main::Installing,
+            (false, Some(_)) => Main::Queued,
+            (false, None) => Main::Install,
         };
+        self.queued = queued.is_some() && !game.installed;
+        if self.focus == Focus::Action(Action::Queue) && !self.queued {
+            self.focus = Focus::Action(Action::Manage);
+        }
         let cards = cards::showing(game, self.view == View::Details);
         if matches!(self.focus, Focus::Card(card) if !cards.contains(&card)) {
             self.focus = Focus::Action(Action::Main);
@@ -142,13 +153,13 @@ impl GameHub {
     /// cover from the main action; Down from a card to the action under it. Nearest is by the middles, across.
     fn step(&mut self, button: Button, cards: &[Card]) {
         let middle = |rect: &Rect| rect.center().0;
-        let action_rects = actions::rects(self.toggle_width);
+        let action_rects = actions::rects(self.toggle_width, self.queued);
+        let shown = actions::shown(self.queued);
         self.focus = match (self.focus, button) {
             (Focus::Action(action), Button::Left | Button::Right) => {
-                let at = actions::ALL.iter().position(|&a| a == action).unwrap_or(0);
-                let to =
-                    if button == Button::Left { at.saturating_sub(1) } else { (at + 1).min(actions::ALL.len() - 1) };
-                Focus::Action(actions::ALL[to])
+                let at = shown.iter().position(|&a| a == action).unwrap_or(0);
+                let to = if button == Button::Left { at.saturating_sub(1) } else { (at + 1).min(shown.len() - 1) };
+                Focus::Action(shown[to])
             }
             (Focus::Card(card), Button::Left | Button::Right) => {
                 let at = cards.iter().position(|&c| c == card).unwrap_or(0);
@@ -157,14 +168,14 @@ impl GameHub {
             }
             (Focus::Action(Action::Main), Button::Up) => Focus::Card(Card::Cover),
             (Focus::Action(action), Button::Up) => {
-                let at = actions::ALL.iter().position(|&a| a == action).unwrap_or(0);
+                let at = shown.iter().position(|&a| a == action).unwrap_or(0);
                 let card_rects = cards::rects(cards, None);
                 Focus::Card(cards[Self::nearest(middle(&action_rects[at]), card_rects.iter().map(middle))])
             }
             (Focus::Card(card), Button::Down) => {
                 let at = cards.iter().position(|&c| c == card).unwrap_or(0);
                 let from = middle(&cards::rects(cards, Some(card))[at]);
-                Focus::Action(actions::ALL[Self::nearest(from, action_rects.iter().map(middle))])
+                Focus::Action(shown[Self::nearest(from, action_rects.iter().map(middle))])
             }
             (focus, _) => focus,
         };
@@ -177,7 +188,8 @@ impl Page for GameHub {
     }
 
     /// The game by its id at its store, the page, and what has focus, the main action by what it is now:
-    /// `9100010 Hub Play`, `9100010 Details Toggle`, `9100050 Hub Install`, `9100010 Hub Cover`.
+    /// `9100010 Hub Play`, `9100010 Details Toggle`, `9100050 Hub Install`, `9100010 Hub Cover`; for a game in the
+    /// Queue `9100040 Hub Queued` or `9100040 Hub Installing`, and `9100040 Hub Queue` on its Queue action.
     fn focus(&self) -> String {
         let at = match self.focus {
             Focus::Action(Action::Main) => format!("{:?}", self.main),
@@ -205,9 +217,13 @@ impl Page for GameHub {
             (Button::A, Focus::Action(Action::Main)) => match self.main {
                 Main::Play => return place.map(|place| PageAction::Effect(Effect::Launch(place))),
                 // Its store is asked for the game, and the hub closes, as the Bundle's does.
-                Main::Install => return Some(tile_menu::install(game)),
-                Main::Running => {}
+                Main::Install => return Some(tile_menu::install(game, around.library)),
+                Main::Running | Main::Queued | Main::Installing => {}
             },
+            // Manage Queue over the hub, which B there comes back to, focus still on Queue.
+            (Button::A, Focus::Action(Action::Queue)) => {
+                return Some(PageAction::Open(crate::my_games::manage_queue(crate::my_games::QueueFrom::GameHub)));
+            }
             // The other page's cards; focus stays on the toggle, which now names the page it left.
             (Button::A, Focus::Action(Action::Toggle)) => {
                 self.view = if self.view == View::Hub { View::Details } else { View::Hub };
@@ -240,9 +256,9 @@ impl Page for GameHub {
 
         let source = crate::home::source(game).map(|source| source.name());
         let details = self.view == View::Details;
-        self.toggle_width = actions::draw(ui, self.main, source, details, on_action);
+        self.toggle_width = actions::draw(ui, self.main, source, details, self.queued, on_action);
         cards::draw(ui, game, &cards, on_card);
-        actions::name_chip(ui, on_action, self.toggle_width);
+        actions::name_chip(ui, on_action, self.toggle_width, self.queued);
     }
 
     /// More options wherever focus is, and never Search: Y does nothing in the hub.

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use model::{Ago, Day, Game, HistoryRow};
 use ui::{Button, Crop, HAlign, Press, Rect, Ui, VAlign};
 
-use super::look::{self, LINE, ROW, SECTION, TEXT_DIM, TEXT_SEMIBOLD};
+use super::look::{self, LINE, ROW, SECTION, TEXT, TEXT_DIM, TEXT_SEMIBOLD};
 use super::nav;
 use super::{open_game_hub, open_tile_menu, Look, Outcome, Pane};
 use crate::hint_bar::{self, Hint};
@@ -33,6 +33,8 @@ const END_PADDING: f32 = 80.0;
 const TEXT_LEFT: f32 = 22.0;
 const TEXT_RIGHT: f32 = 24.0;
 const LINES_APART: f32 = 18.0;
+/// The Queue's line is 8 under the second.
+const STATUS_APART: f32 = 8.0;
 /// A second A on the same row this soon after the first plays the game.
 const DOUBLE_TAP: Duration = Duration::from_millis(300);
 
@@ -219,7 +221,9 @@ impl Pane for History {
                     if let Some(key) = cover_art(game, ui.px()) {
                         ui.art(cover, &key, Crop::Top, 1.0, 0.0);
                     }
-                    let lines = 2.0 * LINE + LINES_APART;
+                    // A third line, 8 under the second, while the game is in the Queue: Queued or Installing...
+                    let status = around.library.queue.status(game.id);
+                    let lines = 2.0 * LINE + LINES_APART + status.map_or(0.0, |_| STATUS_APART + LINE);
                     let text = cover.right() + TEXT_LEFT;
                     let line = |y: f32| Rect::new(text, y, back.right() - TEXT_RIGHT - text, LINE);
                     let first = back.y + (back.h - lines) / 2.0;
@@ -227,6 +231,10 @@ impl Pane for History {
                     let when = format!("{}  \u{2022}  {}", short_date(row.day), platform(game).unwrap_or(""));
                     let second = line(first + LINE + LINES_APART);
                     ui.paragraph(second, when.trim_end(), &TEXT_DIM, HAlign::Left, VAlign::Top, 1);
+                    if let Some(status) = status {
+                        let third = line(second.bottom() + STATUS_APART);
+                        ui.paragraph(third, status, &TEXT, HAlign::Left, VAlign::Top, 1);
+                    }
                 }
                 // The ring stands 4 outside the focused row's item, over the row under it.
                 if look.focused {

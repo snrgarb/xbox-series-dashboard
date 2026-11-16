@@ -46,6 +46,8 @@ const CAPTION: f32 = 132.0;
 const RADIUS: f32 = 6.0;
 const COVER_GROUND: Color = Color::rgb(0x1A1A1A);
 const CAPTION_FILL: Color = Color::rgb(0x3A3D44);
+/// The status line under the title.
+const STATUS: Color = Color::rgb(0xB4B7BD);
 /// The caption's text is 18 in from the sides and 14 down; the title two lines at most.
 const CAPTION_SIDE: f32 = 18.0;
 const CAPTION_TOP: f32 = 14.0;
@@ -172,13 +174,15 @@ fn row(search: &Search, ui: &mut Ui, library: &Library, at: usize, top: f32) {
                 continue;
             }
             let Some(game) = library.games.get(row.games[i]) else { continue };
-            tile(ui, Rect::new(x, tiles_top, TILE, COVER + CAPTION), game, Some(i) == focused);
+            let status = library.queue.status(game.id);
+            tile(ui, Rect::new(x, tiles_top, TILE, COVER + CAPTION), game, status, Some(i) == focused);
         }
     });
 }
 
-/// A game's tile: its cover, square, over a grey caption with its name. It never grows, and has no badges.
-fn tile(ui: &mut Ui, rect: Rect, game: &Game, focused: bool) {
+/// A game's tile: its cover, square, over a grey caption with its name, and under that its `status` in the Queue
+/// (Queued or Installing...) if it is in it. It never grows, and has no badges.
+fn tile(ui: &mut Ui, rect: Rect, game: &Game, status: Option<&str>, focused: bool) {
     ui.fill(rect, CAPTION_FILL, RADIUS);
     let cover = Rect::new(rect.x, rect.y, rect.w, COVER);
     // Rounded at the tile's top corners only: drawn a radius taller, and cut at the caption.
@@ -193,6 +197,11 @@ fn tile(ui: &mut Ui, rect: Rect, game: &Game, focused: bool) {
     let title =
         Rect::new(rect.x + CAPTION_SIDE, cover.bottom() + CAPTION_TOP, rect.w - 2.0 * CAPTION_SIDE, TITLE_HEIGHT);
     ui.paragraph(title, &game.name, &BODY, HAlign::Left, VAlign::Top, 2);
+    if let Some(status) = status {
+        let under = title.y + ui.measure_wrapped(&BODY, &game.name, title.w, 2).height;
+        let line = Rect::new(title.x, under, title.w, ui.measure(&BODY, status).height);
+        ui.paragraph(line, status, &BODY.color(STATUS), HAlign::Left, VAlign::Top, 1);
+    }
     if focused {
         theme::focus_ring(ui, rect, 1.0);
     }

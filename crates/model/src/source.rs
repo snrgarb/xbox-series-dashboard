@@ -7,7 +7,7 @@
 //! of starting a game and following it is the shell's: a source only gives addresses and answers.
 use std::path::PathBuf;
 
-use crate::{Game, Library};
+use crate::{Game, Install, Library};
 
 /// What a store is asked to do with a game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +115,15 @@ pub trait Source: Send + Sync {
     /// store says nothing leaves this false: the game's windows tell.
     fn running(&self, _game: &Game) -> bool {
         false
+    }
+
+    /// The installs the store's client has under way, its own as well as those the Dashboard asked for, each with
+    /// how far it has got: what the Queue is made of. `None` from a store that keeps no word of them on this machine
+    /// (the default), whose games never join the Queue; `Some` of nothing from one that does, with nothing under way.
+    /// An installed game being updated is not among them. Asked off the UI thread, once a second while the Queue is
+    /// not empty, so keep it to small local files: no network, no `read`.
+    fn installs(&self) -> Option<Vec<Install>> {
+        None
     }
 }
 

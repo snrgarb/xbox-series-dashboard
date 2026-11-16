@@ -18,16 +18,18 @@ pub trait Addresses {
 
 /// Asks the game's store, by way of its source (none for a game of no source the Dashboard has) and `addresses`,
 /// and says in the log what was asked: `store: asked Steam to install <name>: steam://install/<appid>`. A game
-/// whose store can't be asked is said so and left alone.
-pub fn ask(game: &Game, source: Option<&dyn Source>, ask: Ask, addresses: &mut dyn Addresses) {
+/// whose store can't be asked is said so and left alone. Whether the store was asked.
+pub fn ask(game: &Game, source: Option<&dyn Source>, ask: Ask, addresses: &mut dyn Addresses) -> bool {
     let what = ask.verb();
     match source.and_then(|source| Some((source.name(), source.ask(game, ask)?))) {
         Some((store, address)) if addresses.open(&address).is_ok() => {
-            eprintln!("store: asked {store} to {what} {}: {address}", game.name)
+            eprintln!("store: asked {store} to {what} {}: {address}", game.name);
+            return true;
         }
         Some((_, address)) => eprintln!("store: nothing took {address}: {} is as it was", game.name),
         None => eprintln!("store: {} is from no store that can {what} it", game.name),
     }
+    false
 }
 
 /// Keeps what it was asked to open, as the log says it, and opens nothing.
@@ -50,6 +52,10 @@ pub struct SystemAddresses;
 impl Addresses for SystemAddresses {
     #[cfg(windows)]
     fn open(&mut self, start: &Start) -> Result<(), String> {
+        // Steam is asked without its windows coming forward (`crate::steam`).
+        if crate::steam::is_steam(start).is_some() {
+            return crate::steam::ask(start);
+        }
         // Home has the foreground, and with it the right to let the store's window take it.
         match crate::shell_open(start) {
             result if result > 32 => Ok(()),

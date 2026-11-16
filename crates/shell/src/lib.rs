@@ -9,6 +9,7 @@ pub mod freeze;
 mod launch;
 pub mod overlay;
 pub mod power;
+pub mod steam;
 pub mod store;
 pub mod toast_strip;
 

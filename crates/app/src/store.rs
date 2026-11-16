@@ -33,6 +33,9 @@ pub struct Store {
     booted: bool,
     /// The running game's Play session.
     session: Option<i64>,
+    /// The thread that follows the Queue (`library::queue`), once the window's first frame is out. None with no
+    /// database file for it to open.
+    queue: Option<library::queue::Handle>,
 }
 
 /// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from every source
@@ -184,6 +187,29 @@ impl Store {
     /// Every source, in order: what a game is started and asked of its store through.
     pub fn sources(&self) -> &[Arc<dyn Source>] {
         &self.sources
+    }
+
+    /// Starts following the Queue on a thread of its own (`library::queue::spawn`), if that is still to do and there
+    /// is a database file: a Library from a JSON file, or one kept in memory, has no Queue. `wake` is called when
+    /// it has news (`queue_update`).
+    pub fn follow_queue(&mut self, wake: impl Fn() + Send + 'static) {
+        if self.queue.is_some() || self.database.is_none() || self.path.as_os_str().is_empty() {
+            return;
+        }
+        self.queue = Some(library::queue::spawn(self.path.clone(), self.sources.clone(), wake));
+    }
+
+    /// Tells the thread that follows the Queue what was asked of a store, or that it should look now.
+    pub fn tell_queue(&self, ask: library::queue::Ask) {
+        if let Some(queue) = &self.queue {
+            queue.ask(ask);
+        }
+    }
+
+    /// What the thread that follows the Queue has said since this was last asked: the Queue, and a new snapshot of
+    /// the library when a source read again changed it.
+    pub fn queue_update(&mut self) -> Option<library::queue::Update> {
+        self.queue.as_ref()?.take()
     }
 
     /// The new snapshot, once, if the background sync changed the database.

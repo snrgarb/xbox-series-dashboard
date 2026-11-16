@@ -20,6 +20,7 @@
 //!   arguments and working folder.
 pub mod filters;
 pub mod history;
+pub mod queue;
 pub mod sources;
 
 use std::collections::HashMap;
@@ -96,6 +97,8 @@ const MIGRATIONS: &[&str] = &[
     -- 0 to 100, or none.
     ALTER TABLE games ADD COLUMN critic_score INTEGER;
     ALTER TABLE games ADD COLUMN community_score INTEGER;",
+    // 4: the Queue, and the games it held that finished installing.
+    queue::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -414,6 +417,7 @@ impl Database {
             filters: self.filters_at(now)?,
             history: history::rows(&self.conn, now)?,
             collections: None,
+            queue: self.queue()?,
         })
     }
 

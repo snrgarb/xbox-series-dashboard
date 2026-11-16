@@ -305,7 +305,9 @@ impl Home {
             (Focus::Wide(wide::SETTINGS), Button::A) => return open(Open::Settings(settings::Entry::Tile)),
             // As the profile: the achievements are the Guide's.
             (Focus::Wide(wide::ACHIEVEMENTS), Button::A) => return Some(HomeAction::OpenGuide),
-            (Focus::Wide(wide::DOWNLOADS), Button::A) => return open(Open::MyGames(my_games::Entry::Queue)),
+            (Focus::Wide(wide::DOWNLOADS), Button::A) => {
+                return open(my_games::manage_queue(my_games::QueueFrom::Downloads))
+            }
 
             // The Groups: along a Group's cards; up and down to the same place in the next Group, or its last
             // card if it is shorter; up from the first to the wide tile last focused; B back to the Recent row.
@@ -404,11 +406,11 @@ impl Home {
         ui.with_offset(0.0, -page, |ui| {
             if rows > 0.0 {
                 ui.with_alpha(rows, |ui| {
-                    recent::draw(ui, &row, on_recent);
-                    wide::draw(ui, on_wide);
+                    recent::draw(ui, &row, &library.queue, on_recent);
+                    wide::draw(ui, on_wide, library.queue.len());
                 });
             }
-            groups::draw(ui, &groups, on_group);
+            groups::draw(ui, &groups, &library.queue, on_group);
         });
     }
 }

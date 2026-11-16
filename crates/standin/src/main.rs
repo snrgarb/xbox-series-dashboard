@@ -2,8 +2,18 @@
 //!
 //!   standin make-steam <dir> [--json <file>] [--full-shelf]
 //!       Writes a fake Steam install at <dir> (`source_steam::fixture`), with a copy of this program as `game.exe` in
-//!       every installed game's folder, reads it back, and with --json writes the Library it read there. With
-//!       --full-shelf it is `Fixture::full_shelf`, twenty installed games, where it is otherwise `Fixture::standard`.
+//!       every installed game's folder and as the client's `steam.exe`, reads it back, and with --json writes the
+//!       Library it read there. With --full-shelf it is `Fixture::full_shelf`, twenty installed games, where it is
+//!       otherwise `Fixture::standard`.
+//!   steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>
+//!       The stand-in Steam client, when this program is named `steam.exe` in a fake Steam's folder, as the
+//!       Dashboard asks the real one (`source_steam::command`): says in the log what it was asked (`steam: asked to
+//!       install <appid>: ...`), and puts the game in its queue, Queued (its app manifest written as Steam writes
+//!       one), or uninstalls it (its manifest removed). Nothing is downloaded or deleted.
+//!   standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
+//!       Moves the fake Steam's install of <appid> at <dir> along, by rewriting its app manifest as Steam's client
+//!       would (`fixture::write_progress`): waiting, so many bytes of so many downloaded, paused there, installed
+//!       (with this program as its `game.exe`), or dropped (the manifest gone).
 //!   standin make-epic <dir> [--json <file>]
 //!   standin make-gog <dir> [--json <file>]
 //!       As make-steam, for a fake Epic Games Launcher (`source_epic::fixture`) or a fake GOG (`source_gog::fixture`):
@@ -81,7 +91,9 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin make-ea | make-ubisoft | make-battlenet <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin open-address <address>
-       standin toast <text>";
+       standin toast <text>
+       standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
+       steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>";
 
 /// The file beside this program that names the fakes `open-address` takes addresses for.
 const HANDLERS_FILE: &str = "handlers.json";
@@ -212,7 +224,6 @@ fn asked_of(url: &str) -> Option<(&'static str, u32)> {
 }
 
 /// Where the Steam install at `root` has `appid` installed, by its app manifest.
-#[cfg_attr(not(windows), allow(dead_code))]
 fn install_dir(root: &Path, appid: u32) -> Option<PathBuf> {
     let steamapps = root.join("steamapps");
     let manifest = std::fs::read_to_string(steamapps.join(format!("appmanifest_{appid}.acf"))).ok()?;
@@ -220,11 +231,16 @@ fn install_dir(root: &Path, appid: u32) -> Option<PathBuf> {
     Some(steamapps.join("common").join(manifest.str_at(&["AppState", "installdir"])?))
 }
 
-/// Writes `spec` at `dir` with this program as every installed game's `game.exe`, and reads it back.
+/// Writes `spec` at `dir` with this program as every installed game's `game.exe` and as the client's `steam.exe`,
+/// and reads it back.
 fn make_steam(dir: &Path, json: Option<&Path>, mut spec: Fixture) -> Result<(), String> {
     let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    spec.game_exe = Some(std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?);
+    let exe = std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?;
+    spec.game_exe = Some(exe.clone());
     fixture::write(&dir, &spec).map_err(|e| format!("writing {}: {e}", dir.display()))?;
+    // The client, which the Dashboard asks to install and uninstall (`steam_exe`).
+    let client = dir.join(STEAM_EXE);
+    std::fs::copy(&exe, &client).map_err(|e| format!("{}: {e}", client.display()))?;
     for game in spec.games.iter().filter(|g| g.installed) {
         // Each game's window is titled with its name, so a test can tell which one is in front.
         let args = dir.join("steamapps").join("common").join(&game.install_dir).join(GAME_ARGS_FILE);
@@ -243,6 +259,77 @@ fn make_steam(dir: &Path, json: Option<&Path>, mut spec: Fixture) -> Result<(), 
     }
     note(&format!("make-steam: {} games at {}", library.games.len(), dir.display()));
     Ok(())
+}
+
+/// The fake Steam's client, a copy of this program in its folder.
+const STEAM_EXE: &str = "steam.exe";
+
+/// What `steam-install` moves the fake Steam's install of a game to, from its arguments: `--queued`, `--bytes
+/// <done>/<total>`, `--paused <done>/<total>`, `--done` or `--drop`.
+fn progress_of(args: &[String]) -> Option<fixture::Progress> {
+    let bytes = |text: &str| {
+        let (done, total) = text.split_once('/')?;
+        Some((done.parse().ok()?, total.parse().ok()?))
+    };
+    match args {
+        [flag] if flag == "--queued" => Some(fixture::Progress::Queued),
+        [flag] if flag == "--done" => Some(fixture::Progress::Done),
+        [flag] if flag == "--drop" => Some(fixture::Progress::Dropped),
+        [flag, n] if flag == "--bytes" => bytes(n).map(|(done, total)| fixture::Progress::Downloading { done, total }),
+        [flag, n] if flag == "--paused" => bytes(n).map(|(done, total)| fixture::Progress::Paused { done, total }),
+        _ => None,
+    }
+}
+
+/// Moves the fake Steam's install of `appid` at `root` to `progress`, as the real client's files would show it:
+/// its app manifest rewritten (`fixture::write_progress`). Done, the game's folder has this program as its
+/// `game.exe`, titled with the game's name, so that it can be played. Nothing is downloaded.
+fn steam_install(root: &Path, appid: u32, progress: fixture::Progress) -> Result<(), String> {
+    let root = std::path::absolute(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    fixture::write_progress(&root, appid, progress).map_err(|e| format!("{}: {e}", root.display()))?;
+    if progress == fixture::Progress::Done {
+        let folder = install_dir(&root, appid).ok_or_else(|| format!("no manifest for {appid} once done"))?;
+        let exe = std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?;
+        std::fs::copy(&exe, folder.join("game.exe")).map_err(|e| format!("{}: {e}", folder.display()))?;
+        let manifest = std::fs::read_to_string(root.join("steamapps").join(format!("appmanifest_{appid}.acf")));
+        let manifest = manifest.map_err(|e| e.to_string())?;
+        let name = source_steam::vdf::parse_text(&manifest)
+            .ok()
+            .and_then(|vdf| vdf.str_at(&["AppState", "name"]).map(str::to_string))
+            .unwrap_or_else(|| format!("App {appid}"));
+        title_game(&folder.join("game.exe"), &name)?;
+    }
+    note(&format!("steam-install: {appid} {progress:?} at {}", root.display()));
+    Ok(())
+}
+
+/// The stand-in Steam client, as this program is named `steam.exe` in a fake Steam's folder: given what the
+/// Dashboard gives the real one, `-silent +app_install <appid>` or `-silent -console +app_uninstall <appid>`, it
+/// puts the game in its queue, Queued (its manifest written as Steam writes one as it takes an install on), or
+/// uninstalls it (its manifest removed); a test then moves the install along with `steam-install`.
+fn steam_client(args: &[String]) -> i32 {
+    let root = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.to_path_buf()));
+    let asked = |command: &str| {
+        let at = args.iter().position(|arg| arg.eq_ignore_ascii_case(command))?;
+        args.get(at + 1)?.parse::<u32>().ok().filter(|&id| id != 0)
+    };
+    let (verb, appid, progress) = match (asked("+app_install"), asked("+app_uninstall")) {
+        (Some(appid), _) => ("install", appid, fixture::Progress::Queued),
+        (None, Some(appid)) => ("uninstall", appid, fixture::Progress::Dropped),
+        _ => {
+            note(&format!("steam: not a command the stand-in Steam knows: {args:?}"));
+            return 2;
+        }
+    };
+    note(&format!("steam: asked to {verb} {appid}: {}", args.join(" ")));
+    let Some(root) = root else { return 1 };
+    match fixture::write_progress(&root, appid, progress) {
+        Ok(()) => 0,
+        Err(e) => {
+            note(&format!("steam: {}: {e}", root.display()));
+            1
+        }
+    }
 }
 
 /// Writes the fake `store` (ea, ubisoft or battlenet) at `dir`, with this program as every installed game's
@@ -604,8 +691,27 @@ fn run(args: &[String]) -> i32 {
                 2
             }
         },
+        Some("steam-install") => {
+            let parsed = match &args[1..] {
+                [root, appid, rest @ ..] => appid.parse::<u32>().ok().zip(progress_of(rest)).map(|got| (root, got)),
+                _ => None,
+            };
+            let Some((root, (appid, progress))) = parsed else {
+                note(USAGE);
+                return 2;
+            };
+            match steam_install(Path::new(root), appid, progress) {
+                Ok(()) => 0,
+                Err(e) => {
+                    note(&format!("steam-install: {e}"));
+                    1
+                }
+            }
+        }
         // As a fake Battle.net's client.
         _ if named("Battle.net") => battlenet(args),
+        // As a fake Steam's client.
+        _ if named("steam") => steam_client(args),
         // As a game's own program, in its install folder.
         None if named("game") => {
             let beside = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join(GAME_ARGS_FILE)));
@@ -682,6 +788,43 @@ mod tests {
         assert_eq!(asked_of("steam://install/"), None);
         assert_eq!(run(&strings(&["steam-url", "steam://uninstall/9100010"])), 0);
         assert_eq!(run(&strings(&["steam-url", "steam://store/9100010"])), 2);
+    }
+
+    #[test]
+    fn steam_install_moves_the_fake_steams_install_along_as_the_dashboard_reads_it() {
+        use model::{Install, InstallState, Source};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let mut spec = Fixture::standard();
+        spec.games.truncate(6);
+        make_steam(&root, None, spec).unwrap();
+        assert!(root.join(STEAM_EXE).is_file());
+        let steam = source_steam::Steam::at(Some(root.clone()));
+        let installs = || steam.installs().unwrap();
+        let path = root.to_str().unwrap();
+        // Saltwind Rally, the sixth, is not installed.
+        let appid = "9100060";
+        let at = |state| vec![Install { source_id: appid.into(), state }];
+        assert_eq!(run(&strings(&["steam-install", path, appid, "--queued"])), 0);
+        assert_eq!(installs(), at(InstallState::Queued));
+        assert_eq!(run(&strings(&["steam-install", path, appid, "--bytes", "25/100"])), 0);
+        assert_eq!(installs(), at(InstallState::Downloading { done: 25, total: 100 }));
+        assert_eq!(run(&strings(&["steam-install", path, appid, "--paused", "50/100"])), 0);
+        assert_eq!(installs(), at(InstallState::Paused { done: 50, total: 100 }));
+        assert_eq!(run(&strings(&["steam-install", path, appid, "--done"])), 0);
+        assert_eq!(installs(), []);
+        let game = |steam: &source_steam::Steam| {
+            let library = steam.read().unwrap().unwrap().library;
+            library.games.into_iter().find(|game| game.source_id == appid).unwrap()
+        };
+        assert!(game(&steam).installed);
+        assert!(install_dir(&root, 9_100_060).unwrap().join("game.exe").is_file());
+        assert_eq!(run(&strings(&["steam-install", path, appid, "--drop"])), 0);
+        assert!(!game(&steam).installed);
+        // What it can't make out.
+        assert_eq!(run(&strings(&["steam-install", path, appid, "--bytes", "half"])), 2);
+        assert_eq!(run(&strings(&["steam-install", path, "nine", "--done"])), 2);
+        assert_eq!(progress_of(&strings(&["--paused", "1/2"])), Some(fixture::Progress::Paused { done: 1, total: 2 }));
     }
 
     #[test]

@@ -2340,6 +2340,66 @@ fn game_hub_no_art() {
     stage.check("game-hub-no-art");
 }
 
+// --- The Queue (docs/spec/home.md 3.4, game-hub.md 6). No picture of the Bundle's shows a game in it. ---
+
+impl Stage {
+    /// The Recent row's tiles `queued` put in the Queue in that order, the first of them downloading a quarter of
+    /// the way if `downloading`, the rest waiting.
+    fn queue(&mut self, queued: &[usize], downloading: bool) {
+        let row = self.dashboard.library().recent(screens::home::RECENT_GAMES).to_vec();
+        let entries = queued.iter().enumerate().map(|(i, &tile)| {
+            let state = if i == 0 && downloading {
+                model::InstallState::Downloading { done: 1 << 30, total: 4 << 30 }
+            } else {
+                model::InstallState::Queued
+            };
+            model::Queued { game: row[tile].id, state, started: i as u64 }
+        });
+        self.dashboard.set_queue(model::Queue::new(entries.collect(), Vec::new()));
+    }
+}
+
+/// Two of the Recent row's games in the Queue: the second tile Queued, focused, the state under its title; the
+/// third Installing..., unfocused, the state at its foot. Downloads counts them.
+#[test]
+fn home_queue() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.queue(&[2, 1], true);
+    stage.press(&[Button::Right]);
+    stage.check("home-queue");
+}
+
+/// Focus on the Downloads tile, which counts the Queue; the Recent row's tiles all unfocused, both states at their
+/// foot.
+#[test]
+fn home_queue_downloads() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.queue(&[2, 1], true);
+    stage.press(&[Button::Down, Button::Right, Button::Right, Button::Right]);
+    stage.check("home-queue-downloads");
+}
+
+/// A game in the Queue, waiting: the main action reads QUEUED, and Queue stands between Manage and the toggle,
+/// with focus, saying its name.
+#[test]
+fn game_hub_queued() {
+    let mut stage = Stage::hub(5);
+    stage.queue(&[5], false);
+    stage.press(&[Button::Right, Button::Right]);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1005 Hub Queue");
+    stage.check("game-hub-queued");
+}
+
+/// A game downloading: the main action reads INSTALLING..., with focus.
+#[test]
+fn game_hub_installing() {
+    let mut stage = Stage::hub(5);
+    stage.queue(&[5], true);
+    stage.press(&[Button::Left]);
+    assert_eq!(stage.dashboard.focus_line(), "GameHub: 1005 Hub Installing");
+    stage.check("game-hub-installing");
+}
+
 /// The strips show the screen the hub was opened over as it was then, and keep showing it: Home is not drawn
 /// again under the hub, whatever becomes of it. B, and the next hub has a picture of its own.
 #[test]

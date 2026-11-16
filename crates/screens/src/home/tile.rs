@@ -163,9 +163,32 @@ pub fn collage<'a>(ui: &mut Ui, rect: Rect, games: impl Iterator<Item = &'a Game
     }
 }
 
-/// The band along a focused tile's foot with its title on it, at most two lines: in over 150 ms after 50, out
-/// over 100. The text is laid out `width` wide (the tile's width at its largest) and cut to the tile as it is.
-pub fn title_band(ui: &mut Ui, rect: Rect, id: impl std::hash::Hash, title: &str, focused: bool, width: f32) {
+/// The caption at an unfocused tile's foot while its game is in the Queue: its state, Queued or Installing..., on
+/// the title band's black, one line, cut with an ellipsis (the Bundle's HomeTiles.xaml StatusBand). A focused tile
+/// shows it under its title instead (`title_band`), and none of it here at once, as the Bundle hides it.
+pub fn status_band(ui: &mut Ui, rect: Rect, status: Option<&str>, focused: bool) {
+    let Some(status) = status.filter(|_| !focused) else { return };
+    let line = ui.measure_wrapped(&BODY, status, rect.w - 16.0 * S, 1).height;
+    let height = line + 16.0 * S;
+    ui.with_clip(Rect::new(rect.x, rect.bottom() - height, rect.w, height), |ui| {
+        ui.fill(rect, theme::BAND, RADIUS * S);
+        let text = Rect::new(rect.x + 8.0 * S, rect.bottom() - height + 8.0 * S, rect.w - 16.0 * S, line);
+        ui.paragraph(text, status, &BODY, HAlign::Left, VAlign::Top, 1);
+    });
+}
+
+/// The band along a focused tile's foot with its title on it, at most two lines, and under it the game's state in
+/// the Queue if it is in it, one line: in over 150 ms after 50, out over 100. The text is laid out `width` wide
+/// (the tile's width at its largest) and cut to the tile as it is.
+pub fn title_band(
+    ui: &mut Ui,
+    rect: Rect,
+    id: impl std::hash::Hash,
+    title: &str,
+    status: Option<&str>,
+    focused: bool,
+    width: f32,
+) {
     // Linear both ways. The first quarter of the value's way is the 50 ms wait, with nothing showing; the way out
     // crosses the same quarter unseen, after its 100 ms.
     let (to, seconds) = if focused { (1.0, 0.2) } else { (0.0, 0.1 / 0.75) };
@@ -175,13 +198,25 @@ pub fn title_band(ui: &mut Ui, rect: Rect, id: impl std::hash::Hash, title: &str
     }
     let width = width - 16.0 * S;
     let text = ui.measure_wrapped(&BODY, title, width, 2);
-    let height = text.height + 16.0 * S;
+    let under = status.map_or(0.0, |status| ui.measure_wrapped(&BODY, status, width, 1).height);
+    let height = text.height + under + 16.0 * S;
     ui.with_alpha(band, |ui| {
         // The tile's own shape, cut to the band: square across the top, the tile's corners at the foot.
         ui.with_clip(Rect::new(rect.x, rect.bottom() - height, rect.w, height), |ui| {
             ui.fill(rect, theme::BAND, RADIUS * S);
-            let lines = Rect::new(rect.x + 8.0 * S, rect.bottom() - height + 8.0 * S, width, text.height);
-            ui.paragraph(lines, title, &BODY, HAlign::Left, VAlign::Top, 2);
+            let top = rect.bottom() - height + 8.0 * S;
+            ui.paragraph(
+                Rect::new(rect.x + 8.0 * S, top, width, text.height),
+                title,
+                &BODY,
+                HAlign::Left,
+                VAlign::Top,
+                2,
+            );
+            if let Some(status) = status {
+                let line = Rect::new(rect.x + 8.0 * S, top + text.height, width, under);
+                ui.paragraph(line, status, &BODY, HAlign::Left, VAlign::Top, 1);
+            }
         });
     });
 }

@@ -10,15 +10,18 @@
 //! - `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json`: the user's collections, Steam's Favourites
 //!   and its hidden games (`collections`).
 //!
-//! [`Steam`] is the source the library reads (`model::Source`): it finds the install, reads it with [`load`], and
-//! starts, installs and uninstalls a game through Steam's own `steam://` addresses.
+//! [`Steam`] is the source the library reads (`model::Source`): it finds the install, reads it with [`load`],
+//! starts a game through Steam's own `steam://` address, installs and uninstalls one through `steam.exe` as the
+//! Bundle does, without Steam's windows ([`command`]), and reports the installs Steam has under way from its app
+//! manifests ([`installs`]).
 pub mod appcache;
 pub mod collections;
 pub mod fixture;
+pub mod installs;
 pub mod vdf;
 
 use anyhow::{Context, Result};
-use model::{Ask, Found, Game, Library, Source, Start};
+use model::{Ask, Found, Game, Install, Library, Source, Start};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,6 +46,37 @@ impl Steam {
     fn root(&self) -> Option<PathBuf> {
         self.root.clone().or_else(find_steam_root)
     }
+
+    /// The install's root, unless it is a named folder left empty: a machine with no Steam, as a test names one so
+    /// that the machine's own is never read.
+    fn installed_root(&self) -> Option<PathBuf> {
+        let root = self.root()?;
+        let empty = self.root.is_some() && fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_none());
+        (!empty).then_some(root)
+    }
+
+    /// Steam's own program: a named install's `steam.exe` and never another; else the one the registry records
+    /// (`SteamExe`), else the one in the registry's install folder. None when there is none on disk.
+    fn exe(&self) -> Option<PathBuf> {
+        if let Some(root) = &self.root {
+            return child(root, "steam.exe").filter(|exe| exe.is_file());
+        }
+        let recorded = registry::steam_exe().map(|exe| PathBuf::from(exe.replace('/', "\\")));
+        recorded.filter(|exe| exe.is_file()).or_else(|| child(&find_steam_root()?, "steam.exe").filter(|e| e.is_file()))
+    }
+}
+
+/// What `steam.exe` is given to ask the running client to install or uninstall an app, as the Bundle gives it when
+/// Steam's CEF debugger is not on: `-silent +app_install <appid>`, which starts the download with no install dialog
+/// and leaves Steam in the tray, and `-silent -console +app_uninstall <appid>`, which uninstalls with no
+/// confirmation of Steam's (the Dashboard has asked "Uninstall X?" already) and no Console page. A Steam that is not
+/// running is started by it, `-silent` keeping its main window down.
+pub fn command(ask: Ask, appid: u32) -> Vec<String> {
+    let verb: &[&str] = match ask {
+        Ask::Install => &["-silent", "+app_install"],
+        Ask::Uninstall => &["-silent", "-console", "+app_uninstall"],
+    };
+    verb.iter().map(|arg| arg.to_string()).chain(Some(appid.to_string())).collect()
 }
 
 impl Source for Steam {
@@ -55,12 +89,7 @@ impl Source for Steam {
     }
 
     fn read(&self) -> Result<Option<Found>> {
-        let Some(root) = self.root() else { return Ok(None) };
-        // An empty folder named for the install is a machine with no Steam: what a test gives so that the
-        // machine's own is never read.
-        if self.root.is_some() && fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_none()) {
-            return Ok(None);
-        }
+        let Some(root) = self.installed_root() else { return Ok(None) };
         let library = load(&root).with_context(|| root.display().to_string())?;
         Ok(Some(Found { library, from: root.display().to_string() }))
     }
@@ -69,14 +98,29 @@ impl Source for Steam {
         appid(game).map(|appid| Start::Address(format!("steam://rungameid/{appid}")))
     }
 
-    /// `steam://install/<appid>` and `steam://uninstall/<appid>`: Steam shows its own window and does the rest.
+    /// Steam's own program given the Bundle's command ([`command`]), run in its folder; with no `steam.exe` to be
+    /// found, `steam://install/<appid>` and `steam://uninstall/<appid>`, for which Steam shows its own window.
     fn ask(&self, game: &Game, ask: Ask) -> Option<Start> {
-        appid(game).map(|appid| Start::Address(format!("steam://{}/{appid}", ask.verb())))
+        let appid = appid(game)?;
+        Some(match self.exe() {
+            Some(exe) => {
+                Start::Program { dir: exe.parent().map(Path::to_path_buf), path: exe, args: command(ask, appid) }
+            }
+            None => Start::Address(format!("steam://{}/{appid}", ask.verb())),
+        })
     }
 
     /// Steam's own word: `HKCU\Software\Valve\Steam\Apps\<appid>\Running`.
     fn running(&self, game: &Game) -> bool {
         appid(game).is_some_and(registry::running)
+    }
+
+    /// From the app manifests in every library folder ([`installs::read`]), with the registry's `Updating` as a
+    /// second word on a download that has just started, for the install the registry names only.
+    fn installs(&self) -> Option<Vec<Install>> {
+        let root = self.installed_root()?;
+        let registry = self.root.is_none();
+        Some(installs::read(&steamapps_dirs(&root), &|appid| registry && registry::updating(appid)))
     }
 }
 
@@ -138,8 +182,8 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     last_played: played.max(manifest_played.unwrap_or(0)),
                     playtime_minutes: minutes,
                     added: 0,
-                    installed: manifest_played.is_some(),
-                    install_dir: manifest.and_then(|m| m.folder.clone()),
+                    installed: manifest.is_some_and(|m| m.installed),
+                    install_dir: manifest.filter(|m| m.installed).and_then(|m| m.folder.clone()),
                     cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),
                     hero: find("library_hero", None, &["library_hero.jpg"]),
                     header: find("library_header", Some("header_image"), &["header.jpg", "library_header.jpg"]),
@@ -148,7 +192,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     released: released(common),
                     developers: credits(info, "developer"),
                     publishers: credits(info, "publisher"),
-                    size_on_disk: manifest.map_or(0, |m| m.size),
+                    size_on_disk: manifest.filter(|m| m.installed).map_or(0, |m| m.size),
                     critic_score: score(common, "metacritic_score"),
                     community_score: score(common, "review_percentage"),
                     play_count: 0,
@@ -242,8 +286,10 @@ fn score(common: &Value, key: &str) -> Option<u8> {
     common.u64_at(&[key]).and_then(|score| u8::try_from(score).ok()).filter(|&score| score <= 100)
 }
 
-/// What an `appmanifest_*.acf` says of an installed game.
+/// What an `appmanifest_*.acf` says of a game Steam has, installed or on its way.
 struct Manifest {
+    /// Its files are all on disk, and no uninstall is under way (`installs::installed`).
+    installed: bool,
     /// Its LastPlayed, in Unix seconds.
     played: u64,
     /// The game's folder.
@@ -252,9 +298,9 @@ struct Manifest {
     size: u64,
 }
 
-/// appid -> its manifest, for every `appmanifest_*.acf` in the Steam root's `steamapps` and in any other library
-/// folder that exists here.
-fn installed_apps(steam_root: &Path) -> HashMap<u32, Manifest> {
+/// The `steamapps` folders of every library: those `libraryfolders.vdf` names that exist here, then the Steam
+/// root's own.
+fn steamapps_dirs(steam_root: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(main) = child(steam_root, "steamapps") {
         let folders = child(&main, "libraryfolders.vdf")
@@ -272,20 +318,24 @@ fn installed_apps(steam_root: &Path) -> HashMap<u32, Manifest> {
         }
         dirs.push(main);
     }
+    dirs
+}
+
+/// appid -> its manifest, for every `appmanifest_*.acf` in the Steam root's `steamapps` and in any other library
+/// folder that exists here.
+fn installed_apps(steam_root: &Path) -> HashMap<u32, Manifest> {
     let mut out = HashMap::new();
-    for dir in dirs {
-        for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-            let id = name.strip_prefix("appmanifest_").and_then(|s| s.strip_suffix(".acf"));
-            let Some(Ok(id)) = id.map(str::parse::<u32>) else { continue };
-            let manifest = fs::read(entry.path()).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
+    for dir in steamapps_dirs(steam_root) {
+        for (id, file) in installs::manifests(&dir) {
+            let manifest = fs::read(file).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
             let played = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "LastPlayed"])).unwrap_or(0);
             let folder = manifest
                 .as_ref()
                 .and_then(|v| v.str_at(&["AppState", "installdir"]))
                 .map(|name| dir.join("common").join(name));
             let size = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "SizeOnDisk"])).unwrap_or(0);
-            out.insert(id, Manifest { played, folder, size });
+            let flags = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "StateFlags"]));
+            out.insert(id, Manifest { installed: installs::installed(flags), played, folder, size });
         }
     }
     out
@@ -390,7 +440,17 @@ mod registry {
 
     /// `HKCU\Software\Valve\Steam\SteamPath`
     pub fn steam_path() -> Option<String> {
-        let (key, value) = (wide("Software\\Valve\\Steam"), wide("SteamPath"));
+        string("SteamPath")
+    }
+
+    /// `HKCU\Software\Valve\Steam\SteamExe`: Steam's own program, as Steam records it.
+    pub fn steam_exe() -> Option<String> {
+        string("SteamExe")
+    }
+
+    /// A text value of `HKCU\Software\Valve\Steam`.
+    fn string(name: &str) -> Option<String> {
+        let (key, value) = (wide("Software\\Valve\\Steam"), wide(name));
         let mut buf = [0u16; 1024];
         let mut len = std::mem::size_of_val(&buf) as u32;
         // SAFETY: all pointers are valid for the call; `len` is the buffer size in bytes.
@@ -415,7 +475,18 @@ mod registry {
 
     /// `HKCU\Software\Valve\Steam\Apps\<appid>\Running`, which Steam keeps at 1 while the game runs.
     pub fn running(appid: u32) -> bool {
-        let (key, value) = (wide(&format!("Software\\Valve\\Steam\\Apps\\{appid}")), wide("Running"));
+        flag(appid, "Running")
+    }
+
+    /// `HKCU\Software\Valve\Steam\Apps\<appid>\Updating`, which Steam sets as it works on the app's download,
+    /// sooner than its manifest says so.
+    pub fn updating(appid: u32) -> bool {
+        flag(appid, "Updating")
+    }
+
+    /// Whether a number of `HKCU\Software\Valve\Steam\Apps\<appid>` is there and not 0.
+    fn flag(appid: u32, name: &str) -> bool {
+        let (key, value) = (wide(&format!("Software\\Valve\\Steam\\Apps\\{appid}")), wide(name));
         let (mut data, mut len) = (0u32, 4u32);
         // SAFETY: all pointers are valid for the call; `len` is the size of `data` in bytes.
         let rc = unsafe {
@@ -439,7 +510,15 @@ mod registry {
         None
     }
 
+    pub fn steam_exe() -> Option<String> {
+        None
+    }
+
     pub fn running(_appid: u32) -> bool {
+        false
+    }
+
+    pub fn updating(_appid: u32) -> bool {
         false
     }
 }
@@ -537,9 +616,19 @@ mod tests {
 
         let game = Game { source: SOURCE.into(), source_id: "9100040".into(), ..Game::default() };
         assert_eq!(steam.start(&game), Some(Start::Address("steam://rungameid/9100040".into())));
-        let ask = |ask| steam.ask(&game, ask).map(|start| start.to_string());
-        assert_eq!(ask(Ask::Install).as_deref(), Some("steam://install/9100040"));
-        assert_eq!(ask(Ask::Uninstall).as_deref(), Some("steam://uninstall/9100040"));
+        // With no steam.exe in the install, Steam's own addresses, and its window.
+        let ask = |steam: &Steam, ask| steam.ask(&game, ask).map(|start| start.to_string());
+        assert_eq!(ask(&steam, Ask::Install).as_deref(), Some("steam://install/9100040"));
+        assert_eq!(ask(&steam, Ask::Uninstall).as_deref(), Some("steam://uninstall/9100040"));
+        // With one, the Bundle's command to it, in its folder.
+        std::fs::write(root.join("steam.exe"), b"").unwrap();
+        let exe = root.join("steam.exe").display().to_string();
+        assert_eq!(ask(&steam, Ask::Install), Some(format!("{exe} -silent +app_install 9100040")));
+        assert_eq!(ask(&steam, Ask::Uninstall), Some(format!("{exe} -silent -console +app_uninstall 9100040")));
+        let asked = steam.ask(&game, Ask::Install).unwrap();
+        assert_eq!(asked.folder(), Some(root.clone()));
+        // Nothing is under way in the fixture.
+        assert_eq!(steam.installs(), Some(Vec::new()));
         // Not Steam's, or no appid: nothing to ask Steam for.
         for other in [Game { source: "gog".into(), ..game.clone() }, Game { source_id: "x".into(), ..game.clone() }] {
             assert_eq!((steam.start(&other), steam.ask(&other, Ask::Install)), (None, None));

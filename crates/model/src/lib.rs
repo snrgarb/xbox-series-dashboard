@@ -1,6 +1,7 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod audio;
 pub mod post;
+pub mod queue;
 pub mod sound;
 pub mod source;
 
@@ -8,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub use audio::{Audio, AudioDevice, Flow};
+pub use queue::{Install, InstallState, Installed, Queue, Queued};
 pub use sound::Sound;
 pub use source::{Ask, Found, Source, Start};
 
@@ -319,6 +321,10 @@ pub struct Library {
     /// could not be read, which leaves the database's as they are; and always in a snapshot.
     #[serde(default)]
     pub collections: Option<Vec<Collection>>,
+    /// The Queue: every game being installed, and those it held that have finished. Only a snapshot of the library
+    /// database has it; a source reads none.
+    #[serde(default)]
+    pub queue: Queue,
 }
 
 impl Library {
