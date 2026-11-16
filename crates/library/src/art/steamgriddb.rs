@@ -184,7 +184,7 @@ pub fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, Error> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err(Error::Failed("a picture's address is not a web address".into()));
     }
-    let mut response = agent.get(url).call().map_err(|e| transport(e, "a picture's server"))?;
+    let mut response = agent.get(tidy(url)).call().map_err(|e| transport(e, "a picture's server"))?;
     match response.status().as_u16() {
         200..=299 => {}
         429 | 503 => return Err(Error::Busy(retry_after(&response))),
@@ -192,6 +192,22 @@ pub fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, Error> {
     }
     let body = response.body_mut().with_config().limit(MOST_BYTES).read_to_vec();
     body.map_err(|e| transport(e, "a picture's server"))
+}
+
+/// An address as a request can carry it: a store's catalogue may give one with spaces or other letters in it
+/// (Epic's does: `.../Landscaped Store-2560x1440-<hash>.jpg`, seen 2026-11-16), which a browser would mend. Every
+/// byte an address can't hold is written `%XX`; what is already an address is left as it is.
+pub fn tidy(url: &str) -> String {
+    let mut tidy = String::with_capacity(url.len());
+    for byte in url.bytes() {
+        let fine = byte.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=%".contains(&byte);
+        if fine {
+            tidy.push(byte as char);
+        } else {
+            tidy.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    tidy
 }
 
 /// How long a reply asks to be waited for: `Retry-After` in seconds (a date is not read, and waits the default).
@@ -207,6 +223,7 @@ pub fn transport(error: ureq::Error, who: &str) -> Error {
         ureq::Error::HostNotFound => format!("{who} could not be found: is the PC online?"),
         ureq::Error::ConnectionFailed | ureq::Error::Io(_) => format!("{who} could not be reached"),
         ureq::Error::BodyExceedsLimit(_) => "a picture was too large".to_string(),
+        ureq::Error::BadUri(_) | ureq::Error::Http(_) => format!("{who}'s address is not one a request can be made to"),
         _ => format!("{who}'s answer could not be read"),
     };
     Error::Failed(what)
@@ -228,6 +245,17 @@ pub(crate) fn segment(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_address_with_spaces_or_other_letters_is_made_one_a_request_can_carry() {
+        assert_eq!(
+            tidy("https://cdn.example/item/A Game Store-2560x1440-79aa.jpg"),
+            "https://cdn.example/item/A%20Game%20Store-2560x1440-79aa.jpg"
+        );
+        assert_eq!(tidy("https://cdn.example/é.png"), "https://cdn.example/%C3%A9.png");
+        let whole = "https://cdn.example/a%20b/c.jpg?w=600&h=900#x";
+        assert_eq!(tidy(whole), whole);
+    }
 
     #[test]
     fn names_match_only_when_they_are_the_same_name() {
