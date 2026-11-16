@@ -20,7 +20,9 @@ Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
 $failures = @()
 $data = Join-Path $env:TEMP 'dashboard-apps-test'
-$folder = 'C:\e2e\byhand'
+# The game added by hand: on the VM at C:\e2e\byhand as it always was; in safe mode under the payload's own folder,
+# since nothing of the test's goes anywhere else on someone's machine, and only a process from there is the test's.
+$folder = if (Test-SafeMode) { Join-Path $PSScriptRoot 'byhand' } else { 'C:\e2e\byhand' }
 $program = Join-Path $folder 'game.exe'
 $game = 'Hand Game'
 $notepad = 'C:\Windows\System32\notepad.exe'

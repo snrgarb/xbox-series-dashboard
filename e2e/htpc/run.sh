@@ -108,6 +108,14 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 on_tv "if exist \"$remote\" rmdir /s /q \"$remote\"" || true
+# A folder left by an earlier run that Windows will not remove (its dashboard.exe still held open by something that
+# watched the process) must not stop this run: it goes into a folder of its own beside it.
+if tv_says "if exist \"$remote\" echo there" there; then
+    again="$test.$(date +%H%M%S)"
+    log "an earlier run's folder cannot be removed ($remote); using xsd-e2e\\$again"
+    remote="%TEMP%\\xsd-e2e\\$again"
+    remote_scp="AppData/Local/Temp/xsd-e2e/$again"
+fi
 on_tv "mkdir \"$remote\"" >/dev/null || true
 copy "$stage"/* "$host:$remote_scp/" || { echo "could not copy the test to $host:$remote_scp" >&2; exit 2; }
 
