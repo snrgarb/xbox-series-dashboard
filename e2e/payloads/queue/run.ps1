@@ -239,7 +239,8 @@ try {
 
     # --- The third way: Manage's Queue box on My games & apps, by the top bar and the nav. Manage counts the Queue
     # in its box and on the nav, and the current download stands at the nav's foot. B back to the box, then Home.
-    Press Up 'TopBar\(Profile\)' | Out-Null
+    # Up from Recent lands on the top bar's button above the tile it left: which one depends on the tile.
+    Press Up 'TopBar\(\w+\)' | Out-Null
     Walk Right 'TopBar\(MyGames\)' 2
     Press A 'MyGames: Games: Tile\(0\)' | Out-Null
     Press Left 'MyGames: Games: Nav\(Games\)' | Out-Null
