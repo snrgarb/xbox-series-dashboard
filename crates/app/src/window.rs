@@ -2,10 +2,12 @@
 //! above every other window, which shows what the Dashboard wants over a game, and the Toast strip above that
 //! (docs/ui.md). This feeds the Dashboard the pad, the keyboard and the time, draws each window when what it shows
 //! has changed, and carries out what the Dashboard asks of the shell.
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use input::Pad;
+use library::art::Event as ArtEvent;
 use model::{Library, Sound};
 use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
@@ -156,7 +158,17 @@ struct App {
     frames: Option<([u32; 3], Instant)>,
     /// With --log-frames: how long Home's frames and the Overlay's took, since they were last said.
     frame_times: [FrameTimes; 2],
+    /// The art lookup under way, if one is (docs/sources.md, "Art"): dropped, it stops.
+    art: Option<library::art::Lookup>,
+    /// It has been started once the sources were read: a new key starts it again, nothing else does.
+    art_started: bool,
+    /// What it says as it goes, for the loop to take in.
+    art_events: (Sender<ArtEvent>, Receiver<ArtEvent>),
 }
+
+/// What a Toast says when SteamGridDB refuses the key (a 401): once, and no lookups until another key is entered.
+const KEY_REFUSED: &str =
+    "SteamGridDB didn't accept your key, so no art is being downloaded. Check it in Settings, Art.";
 
 /// How long a window's frames took, for --log-frames: the wait for the swap chain to give a frame to draw on, the
 /// drawing and the present, and the time from one frame's start to the next while something moved: a frame that
@@ -332,6 +344,9 @@ pub fn run(args: &Args, library: Library, store: Store) {
         minute: minute(),
         frames: args.log_frames.then(|| ([0; 3], Instant::now())),
         frame_times: Default::default(),
+        art: None,
+        art_started: false,
+        art_events: mpsc::channel(),
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
@@ -705,6 +720,19 @@ impl App {
                     let changed = self.store.change_filter(&change);
                     self.show(changed);
                 }
+                // Settings > Art: the key kept or forgotten, and a lookup with the new one; the art downloaded gone.
+                Effect::ArtKey(key) => {
+                    self.art = None;
+                    self.store.set_art_key(key.as_ref().map(|secret| secret.0.as_str()));
+                    if key.is_some() && self.art_started {
+                        self.start_art();
+                    }
+                }
+                Effect::ClearArt => {
+                    self.art = None;
+                    let cleared = self.store.clear_art();
+                    self.show(cleared);
+                }
                 Effect::Install(game) => {
                     let (library, sources) = (self.dashboard.library(), self.store.sources());
                     crate::games::ask_store(library, sources, game, Ask::Install, &mut *self.addresses);
@@ -715,6 +743,38 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Looks up the art the stores gave none for, with the key that is kept: what comes in wakes the loop.
+    fn start_art(&mut self) {
+        self.art_started = true;
+        let (sender, proxy) = (self.art_events.0.clone(), self.proxy.clone());
+        self.art = self.store.look_up_art(self.dashboard.library(), move |event| {
+            let _ = sender.send(event);
+            let _ = proxy.send_event(());
+        });
+    }
+
+    /// Takes in what the art lookup has said: a game's new picture is in the next snapshot, and a refused key is
+    /// said once in a Toast. True if a Toast was posted.
+    fn take_art(&mut self) -> bool {
+        let (mut found, mut toast) = (false, false);
+        while let Ok(event) = self.art_events.1.try_recv() {
+            match event {
+                ArtEvent::Found { .. } => found = true,
+                ArtEvent::KeyRefused => {
+                    self.store.art_key_refused();
+                    self.dashboard.notify(KEY_REFUSED);
+                    toast = true;
+                }
+                ArtEvent::Done(_) => self.art = None,
+            }
+        }
+        if found {
+            let library = self.store.snapshot();
+            self.show(library);
+        }
+        toast
     }
 
     /// A newer snapshot of the library, if there is one, takes the place of the one on screen.
@@ -839,6 +899,14 @@ impl ApplicationHandler for App {
         }
         if let Some(library) = self.store.changed() {
             self.show(Some(library));
+        }
+        // Art for the games a store gave none for, once the stores have been read and the first frame is out.
+        if !self.art_started && self.presented.is_some() && self.store.sources_read() {
+            self.start_art();
+        }
+        if self.take_art() {
+            toasts_changed = true;
+            self.overlay_stale = true;
         }
         // The keyboard is the Overlay's while it is the Guide over a game.
         if let Some(overlay) = &mut self.overlay {

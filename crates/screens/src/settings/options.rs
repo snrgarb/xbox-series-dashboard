@@ -68,6 +68,10 @@ impl Change {
     }
 }
 
+/// The settings row that holds the user's SteamGridDB key (`library::art::KEY_SETTING`). The core is told only
+/// whether there is one: what it is never comes back from the database to the screens.
+pub const ART_KEY: &str = "art.steamgriddb_key";
+
 /// Every option's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
@@ -76,6 +80,8 @@ pub struct Options {
     pub show_play_history: bool,
     pub show_battery_percent: bool,
     pub use_guide: bool,
+    /// A SteamGridDB key has been entered (Settings > Art): art is looked up for the games a store gives none for.
+    pub art_key: bool,
 }
 
 impl Default for Options {
@@ -87,6 +93,7 @@ impl Default for Options {
             show_play_history: of(Setting::ShowPlayHistory),
             show_battery_percent: of(Setting::ShowBatteryPercent),
             use_guide: of(Setting::UseGuide),
+            art_key: false,
         }
     }
 }
@@ -101,6 +108,7 @@ impl Options {
                 options.set(setting, on);
             }
         }
+        options.art_key = stored(ART_KEY).is_some_and(|key| !key.trim().is_empty());
         options
     }
 

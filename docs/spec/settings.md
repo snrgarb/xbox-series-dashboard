@@ -793,3 +793,26 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 ### 16.7 The controls, for the pages still to come
 
 `settings::controls` has every control of section 4 as a function that draws it in a rectangle, with or without focus: `settings_box` (a Box with an icon, or a checkbox box with its info text), `row`, `pane_button`, `checkbox_row`, `label` and `description`; `Dropdown` (the box, and its list while open, with the list's own presses and scrolling); `Grid` (a pane of boxes' places, its steps and its scrolling); and `focus_ring` and `glow`. A page is a struct that implements `settings::Pane` (its header, its focus line, `press`, `draw`) and is opened by a box (`boxes::Item::Opens`) of the pane it belongs to; `boxes::Boxes` is a whole pane of boxes made from a list of them. The Row, the pane button and the dropdown are on no page of M3: `crates/screens/tests/settings.rs` builds Idle's page and a list of Rows from them, for their pictures.
+
+### 16.8 Art (the port's own; #80)
+
+The Bundle has no such page: Playnite's metadata sources fetched missing art (section 14, "Download metadata"). The port's is the user's own SteamGridDB key and a way to take away what it downloaded (docs/sources.md, "Art"), and is decided here.
+
+- **Its box**: Theme settings' third, **Art**, icon U+EB9F, at (0, 1) (x 520..957, y 359..490), where the Bundle has Guide until Idle and Discord come back (they then take their places and Art goes after them).
+- **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190:
+
+| Element | y | Notes |
+|---|---|---|
+| "SteamGridDB key" (Text) | 190 | |
+| "Art for games their store has none for comes from SteamGridDB, with your own API key: make one at steamgriddb.com, under Preferences and API. Only a game's store id or name is sent." (MutedText, wrapping at 892) | 228.58 | |
+| The value, a 420-wide column at x 520 (Text): eight dots while a key is kept, whatever its length; "Not set" (MutedText) while none is. Then pane buttons **Type** (x 940..1120) and **Clear** (x 1140..1320), 58 tall | 30 under the description | Clear is dimmed (0.4) with no key, and focusable all the same (4.4) |
+| "Downloaded art" (Text) | 40 under the buttons | |
+| "Art downloaded for your games is kept on this PC. Clearing it removes only that: a store's own art stays." (MutedText) | 4 under | |
+| Pane button **Clear downloaded art** | 18 under | as wide as its label and 30 each side |
+
+- **Focus**: two rows, [Type, Clear] and [Clear downloaded art]; the page opens on Type. Up and Down go between the rows (Up to Type), Left and Right along the first; Left from the first column, or B, goes back to Theme settings' boxes on Art.
+- **Type** opens text entry over the page (caption "SteamGridDB key", from empty, shown as dots, 64 at most). A kept key is in force at once: saved, and art is looked up with it; an empty one kept leaves the key as it was. **Clear** forgets the key, and lookups stop.
+- **Clear downloaded art** asks first, a prompt over the dimmed page as the Groups page's Delete asks (filters.md 6.2): "Clear downloaded art?", "The art downloaded for your games is removed from this PC. A store's own art stays.", **Clear** and **Cancel**, focus on Clear. Clear removes the data folder's `art` folder and nothing else; the tiles show the stores' own art, or their names, at once. B or Cancel does nothing. Art is not looked up again until the next start, or a new key.
+- **A key SteamGridDB refuses** (401) is said once, as a Toast and in Notifications: "SteamGridDB didn't accept your key, so no art is being downloaded. Check it in Settings, Art." Nothing more is asked of it until another key is kept.
+- **Stored**: `art.steamgriddb_key` in the settings table, as the other options; the core is told only that there is one (`Options::art_key`), never what it is, and the key is in no log, focus line or `Debug`. `art.steamgriddb_refused` says the service refused the key in it.
+- **The focus log**: `Settings: Art: Type`, `Settings: Art: Clear`, `Settings: Art: Clear downloaded art`, and with the question up `Settings: Art: Prompt(Clear) of Clear downloaded art`. Text entry's line shows the key as stars (`TextEntry: Q; "****|" lower letters`).

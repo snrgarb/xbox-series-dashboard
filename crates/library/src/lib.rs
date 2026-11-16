@@ -18,6 +18,7 @@
 //!   owned in two stores is two games.
 //! - Games added by hand (#12): a source of their own, `manual`, with a table beside `games` for the program, its
 //!   arguments and working folder.
+pub mod art;
 pub mod filters;
 pub mod history;
 pub mod sources;
@@ -110,6 +111,9 @@ pub struct Synced {
 
 pub struct Database {
     conn: Connection,
+    /// Our own art cache, which a snapshot fills in from what a source gave no picture for. A database in a data
+    /// folder has that folder's; one in memory has none unless it is given one.
+    art: Option<art::ArtDir>,
 }
 
 /// Where the database lives when nothing says otherwise: `%LOCALAPPDATA%\XboxSeriesDashboard` on Windows;
@@ -136,7 +140,19 @@ impl Database {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
         }
-        Self::set_up(Connection::open(path)?)
+        let mut database = Self::set_up(Connection::open(path)?)?;
+        database.art = path.parent().map(art::ArtDir::under);
+        Ok(database)
+    }
+
+    /// The art cache a snapshot fills missing pictures from; none for no cache.
+    pub fn set_art_dir(&mut self, art: Option<art::ArtDir>) {
+        self.art = art;
+    }
+
+    /// The art cache this database's snapshots fill missing pictures from.
+    pub fn art_dir(&self) -> Option<&art::ArtDir> {
+        self.art.as_ref()
     }
 
     /// A database that lives in memory and goes with the value: for tests.
@@ -158,7 +174,7 @@ impl Database {
             tx.pragma_update(None, "user_version", done as i64 + 1)?;
             tx.commit()?;
         }
-        Ok(Self { conn })
+        Ok(Self { conn, art: None })
     }
 
     /// The schema's version.
@@ -509,6 +525,19 @@ impl Database {
                 _ => {}
             }
         }
+        // What the source gave no picture for, from our own cache (docs/sources.md, "Art"): the source's own wins.
+        if let Some(cached) = self.art.as_ref().map(art::ArtDir::index).filter(|index| !index.is_empty()) {
+            for game in &mut games {
+                let Some([cover, hero, header]) = cached.get(&(game.source.clone(), game.source_id.clone())) else {
+                    continue;
+                };
+                for (mine, ours) in [(&mut game.cover, cover), (&mut game.hero, hero), (&mut game.header, header)] {
+                    if mine.is_none() {
+                        mine.clone_from(ours);
+                    }
+                }
+            }
+        }
         Ok(games)
     }
 
@@ -571,6 +600,12 @@ impl Database {
 
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0)).optional()?)
+    }
+
+    /// Forgets a setting: it is its default again.
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {

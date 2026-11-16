@@ -56,6 +56,9 @@ pub struct Args {
     toasts: Vec<String>,
     /// Other programs may post notifications to the running Dashboard (docs/spec/guide.md, 9.7): for tests.
     allow_toast_posts: bool,
+    /// SteamGridDB's address, in place of its own: a test's stand-in (`standin serve-art`). Never the real
+    /// service in a test.
+    art_service: Option<String>,
     /// Notifications that are in the list as the Dashboard starts, in order, with no Toast: what a test has in the
     /// Notifications Flyout.
     notify: Vec<String>,
@@ -78,6 +81,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--epic <dir>] [--gog <dir>] [--ea <dir>] [--ubisoft <dir>] [--battlenet <dir>]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
+                 [--art-service <url>]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
@@ -152,6 +156,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--toast" => args.toasts.push(value()?),
             "--allow-toast-posts" => args.allow_toast_posts = true,
             "--notify" => args.notify.push(value()?),
+            "--art-service" => args.art_service = Some(value()?),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -168,6 +173,8 @@ fn main() {
     let args = parse_args(std::env::args().skip(1)).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
     let (library, store) = store::open(&args);
     if args.screenshot.is_some() {
+        // Art for the games a store gave none for, before the picture is taken, where there is a key.
+        let library = store.art_now(library);
         offscreen::run(&args, library, store.options());
     } else if args.bench || args.size.is_some() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));

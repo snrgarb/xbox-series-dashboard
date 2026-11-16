@@ -12,6 +12,9 @@ source-ea = { path = "../source-ea" }
 source-ubisoft = { path = "../source-ubisoft" }
 source-battlenet = { path = "../source-battlenet" }
 model = { path = "../model" }
+# serve-art: the stand-in SteamGridDB, and the plain pictures it serves.
+library = { path = "../library" }
+image = { version = "0.25", default-features = false, features = ["png"] }
 audio = { path = "../audio" }
 serde_json = "1"
 
