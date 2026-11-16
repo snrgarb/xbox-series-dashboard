@@ -515,7 +515,10 @@ pub(crate) fn catalogue_item(value: &Value) -> Option<Item> {
     if !has("games") || has("digitalextras") || (has("addons") && !has("addons/launchable")) {
         return None;
     }
-    if value.get("mainGameItem").is_some_and(|main| !main.is_null()) {
+    // DLC names its game. A real launcher's cache gives every entry a `mainGameItem`, an empty object on a game
+    // (seen 2026-11-16), so only one that names an id counts.
+    let main = value.get("mainGameItem").and_then(|main| main.get("id")).and_then(Value::as_str);
+    if main.is_some_and(|id| !id.is_empty()) {
         return None;
     }
     let item = catalogue_entry(value);
@@ -672,6 +675,8 @@ mod tests {
         assert_eq!(item(json!([{ "path": "applications" }]), json!({})), None);
         assert_eq!(item(json!([{ "path": "games" }, { "path": "digitalextras" }]), json!({})), None);
         assert_eq!(item(games.clone(), json!({ "mainGameItem": { "id": "e2a4" } })), None);
+        // A real cache gives a game an empty one.
+        assert!(item(games.clone(), json!({ "mainGameItem": { "namespace": "", "id": "" } })).is_some());
         assert_eq!(item(games.clone(), json!({ "releaseInfo": [] })), None);
 
         // Its key images, as the store's own art online: https only, nothing square.
