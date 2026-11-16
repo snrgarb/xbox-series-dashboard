@@ -192,7 +192,7 @@ function Advance([string] $Appid, [string[]] $To) {
 
 # The source's line as it was read, `<key>: <n> games from <dir> in <ms> ms`, which must say as many games as the fake
 # was read back with, from $Root (unless $Games is -1: any number, from anywhere); and no other line of the source's,
-# which would be one saying it could not be read. After <dir> a source may say which of its files gave what, in
+# which would be one saying it could not be read (a fake's one broken entry, `<key>: passed over: ...`, is meant). After <dir> a source may say which of its files gave what, in
 # brackets (Epic's).
 function Expect-Read([string] $Key, [string] $Root, [int] $Games) {
     $line = Wait-DashboardLog "^${Key}: \d+ games from .+ in \d+ ms`$" 60
@@ -201,7 +201,8 @@ function Expect-Read([string] $Key, [string] $Root, [int] $Games) {
     if ($Games -ge 0 -and $line -notmatch "^${Key}: $Games games from $([regex]::Escape($Root))( \(.+\))? in \d+ ms`$") {
         $script:failures += "${Key} should have been read as $Games games from ${Root}: '$line'"
     }
-    $other = @(Get-DashboardLog | Where-Object { $_ -match "^${Key}: " -and $_ -notmatch "^${Key}: \d+ games from " })
+    $other = @(Get-DashboardLog | Where-Object { $_ -match "^${Key}: " -and $_ -notmatch "^${Key}: \d+ games from " -and
+            $_ -notmatch "^${Key}: passed over: " })
     if ($other.Count) { $script:failures += "${Key} said more than what it read: $($other -join ' | ')" }
 }
 
