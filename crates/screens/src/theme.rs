@@ -35,6 +35,10 @@ pub mod glyph {
     /// A pad, connected.
     pub const GAMEPAD: char = '\u{E7FC}';
     pub const DOWNLOAD: char = '\u{E896}';
+    /// The play triangle: a game ready to play.
+    pub const PLAY: char = '\u{E768}';
+    /// The bin: a game uninstalled.
+    pub const DELETE: char = '\u{E74D}';
     pub const HISTORY: char = '\u{E81C}';
     /// Not in the icon font: `Ui::icon` draws it from Segoe UI Symbol, as the Bundle's body font does.
     pub const TROPHY: char = '\u{1F3C6}';

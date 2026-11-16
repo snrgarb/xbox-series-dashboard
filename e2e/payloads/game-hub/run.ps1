@@ -141,7 +141,7 @@ try {
             # A on Install is the Tile menu's Install: the hub closes, and Steam is asked for the game.
             $mark = Get-DashboardLogLength
             Press A "Recent\($tile\)"
-            Expect-Logged '^store: asked Steam to install .+: .*steam\.exe -silent \+app_install \d+$' $mark 'Install'
+            Expect-Logged '^store: asking Steam to install .+: app_install \d+$' $mark 'Install'
             Expect-Steam 'steam: asked to install \d+: -silent \+app_install \d+' 'Install'
             if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
             break

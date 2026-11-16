@@ -50,8 +50,11 @@ One row per Queue entry, the current download first and then the rest in the Que
 | Focus ring | `Margin="-8" BorderThickness="4" CornerRadius="8"`, `#FF2CA243`, with the focus glow |
 
 A game that is not downloading reads "Queued", "0.0%" and an empty bar, whatever of it is down already, and has no
-speed and no amount. A download whose store has said no bytes yet (or no whole) reads "Installing...", "0.0%", no
-amount and no speed: the Bundle's `Network:` line and speed are bound to values that are null until then.
+speed and no amount. A download whose store has said no bytes yet (or no whole) reads "Installing..." alone: no share, no
+amount, no speed, and the bar's empty track, as the Bundle's row does for a store that gives no bytes (its progress
+null: `Network:` line, speed and share are bound to values that are null until then). A share that stood at "0.0%"
+read as a stalled download on the real machine (#132). Steam's running download is counted live (docs/sources.md),
+so it has a share once Steam's client has written anything.
 
 **Speed** (C/ExtensionCore.Queue.cs:587, `SpeedOf`): null until the bytes first move, then worked out from successive byte counts; 0 once
 they have stood still 10 s.
@@ -91,7 +94,7 @@ hub's Queue action, B back to the hub on Queue; the Guide button during a Queued
 - **The nav's Manage item** has a second line, "Queue" at the label's x with the Queue's count at the count's right
   edge, both `#FF8F8F8F`, and is 108 tall in place of 68 while the Queue holds something (E/MyGamesControl.xaml:515-528).
 - **The nav's foot** has the current download over the storage ring (my-games.md 2.6): left x 75, 301 wide, 34 above
-  the ring; the game's name; its state with the speed right-aligned; "`{amount}, {percent}`". Only while the Queue's
+  the ring; the game's name; its state with the speed right-aligned; "`{amount}, {percent}`" (no line with no whole known). Only while the Queue's
   first entry is downloading.
 - **Manage's box** counts the Queue (my-games.md 9.1).
 
@@ -109,7 +112,7 @@ hub's Queue action, B back to the hub on Queue; the Guide button during a Queued
    Games finished while the Dashboard was up come first, as the Bundle's. A hidden game is left out.
 4. **What the focus log says.** `ManageQueue: <where>; <n> installing, <m> recently installed[; <state> <share>]`,
    where is `Cover(i) of <name>`, `Row(i) of <name>` or `Nothing`, and a row adds what it reads: `Installing...
-   25.0%`, `Queued 0.0%`. The speed is left out: it changes every second. A change of the Queue that moves focus or
+   25.0%`, `Queued 0.0%`; `Installing...` alone with no whole known. The speed is left out: it changes every second. A change of the Queue that moves focus or
    changes the row's share logs a new line without a press.
 5. **A on a game** is Home's tile's, the hub after the double tap's 300 ms; a row's game, not installed, has its hub
    on Installing or Queued.

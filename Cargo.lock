@@ -2190,6 +2190,7 @@ dependencies = [
  "model",
  "pollster",
  "render",
+ "source-steam",
  "tempfile",
  "wgpu",
  "windows",
@@ -2376,6 +2377,7 @@ dependencies = [
  "model",
  "serde_json",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

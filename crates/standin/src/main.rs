@@ -945,7 +945,7 @@ mod tests {
         let path = root.to_str().unwrap();
         // Saltwind Rally, the sixth, is not installed.
         let appid = "9100060";
-        let at = |state| vec![Install { source_id: appid.into(), state }];
+        let at = |state| vec![Install::new(appid, state)];
         assert_eq!(run(&strings(&["steam-install", path, appid, "--queued"])), 0);
         assert_eq!(installs(), at(InstallState::Queued));
         assert_eq!(run(&strings(&["steam-install", path, appid, "--bytes", "25/100"])), 0);

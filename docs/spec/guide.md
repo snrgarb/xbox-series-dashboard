@@ -638,8 +638,11 @@ In the port the Guide button says nothing as it goes down: a tap is told 300 ms 
 | Notification, Screenshot | the Guide with the Notifications Flyout open |
 | Greeting (M2 in the port), Achievement (M6) | Profile & system |
 | Call (M6) | the Discord tab |
-| Queued (M4) | Manage Queue (not the Guide) |
-| Installed (M4) | starts the game ("Press ... to start") |
+| Queued (M4) | Manage Queue (not the Guide), in front of a running game too; the other Queued Toasts waiting are let go; the Activate sound |
+| Installed (M4) | starts the game ("Press ... to start"); the Activate sound |
+| Uninstalled (M4) | the Guide |
+
+In the port these are `Dashboard::tell(kind, game)`, from the Queue's thread (`library::queue::Tell`, #132): Queued as the Dashboard asks a store to install a game, and as a game joins the Queue from its store's client while the Dashboard runs (not for those already in it as it starts); Installed as a game the Queue followed is installed; Uninstalled once a game the Dashboard asked to uninstall has really gone, never on a give-up. The `queue` payload checks each by its `toasts: shown "<line>" (<Kind>)` line, and both taps.
 
 ### 9.6 Kinds
 
@@ -647,7 +650,7 @@ In the port the Guide button says nothing as it goes down: a tap is told 300 ms 
 |---|---|---|---|
 | Notification | icon U+E91C | **M2** | E/ToastImages.xaml |
 | Screenshot (a notification whose id or text mentions "screenshot") | icon U+E722; slides | Dropped (#42): the port has no such notification | C/Notification.cs:18 |
-| Queued / Installed / Uninstalled | the game's cover, else U+E896 / U+E768 / U+E74D | M4 | |
+| Queued / Installed / Uninstalled | "Queued", "Ready to play", "<Name> was uninstalled". The game's square art, else its cover, cut from its middle to the tile's square, radius 4, bare on the card; until it is decoded, or with none, U+E896 / U+E768 / U+E74D on the lighter square. None slides | **M4** (#132) | C/ExtensionCore.Queue.cs |
 | Library updated | U+E895, with a detail line | M4 or drop | |
 | Greeting | round picture 80 x 80; slides | **M2** (#42); the picture itself M5 | |
 | Call | the Discord mark at 48 | M6 | |

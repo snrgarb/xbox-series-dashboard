@@ -58,6 +58,16 @@ impl InstallState {
 pub struct Install {
     pub source_id: String,
     pub state: InstallState,
+    /// How fast it downloads, in bits a second, where the store says so itself (Steam's download overview, its
+    /// Downloads page's number): the Queue shows it in place of the speed it works out from the bytes.
+    pub speed: Option<u64>,
+}
+
+impl Install {
+    /// An install with no speed of the store's own.
+    pub fn new(source_id: impl Into<String>, state: InstallState) -> Self {
+        Self { source_id: source_id.into(), state, speed: None }
+    }
 }
 
 /// A game in the Queue.

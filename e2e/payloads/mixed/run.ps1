@@ -17,7 +17,7 @@
 #   (`focus: GameHub: <its id> Hub Play`): the pictures show the hub's store chip and mark.
 # - Search by one word, "Courier", finding games of two stores (Steam's Ashfall Courier, Xbox's Pebble Courier): the
 #   Games row walked to its end, each game's store looked up.
-# - An install of a fake Steam game from its hub, as the queue test does it: `store: asked Steam to install <name>`,
+# - An install of a fake Steam game from its hub, as the queue test does it: `store: asking Steam to install <name>`,
 #   `queue: <name> joined, asked for`, `queue: <name> queued`, the tile Queued; `standin steam-install --bytes 25/100`,
 #   `queue: <name> downloading, 25% of 100 bytes`, the tile Installing...; Manage with its Queue box counted
 #   (`focus: MyGames: Manage: Queue`); Manage Queue on the game's row (`focus: ManageQueue: Row(0) of <name>; 1
@@ -25,7 +25,7 @@
 #   installed`, and focus going with it to the head of Recently installed (`ManageQueue: Cover(0) of <name>; 0
 #   installing, ...`).
 # - Uninstall from the game's Tile menu: the prompt opened (`TileMenu: Prompt(Uninstall) of <name>`), Cancel, and no
-#   `store: asked Steam to uninstall` line. It is never confirmed.
+#   `store: asking Steam to uninstall` line. It is never confirmed.
 #
 # Safe mode (the TV PC, E2E_SAFE=1): every fake is under the payload's folder (Get-FakeRoot), the hand-added game too,
 # and the data folder (Get-TestFolder); nothing is registered and nothing is started but the Dashboard. Each store
@@ -524,7 +524,7 @@ try {
     $steamMark = Steam-LogLength
     $script:installAsked = $true
     Press A $tilePattern | Out-Null
-    Expect-Logged "^store: asked Steam to install ${targetName}: .*steam\.exe -silent \+app_install $($target.source_id)$" $mark 'Install from the hub' | Out-Null
+    Expect-Logged "^store: asking Steam to install ${targetName}: app_install $($target.source_id)$" $mark 'Install from the hub' | Out-Null
     Expect-Steam "steam: asked to install $($target.source_id): -silent \+app_install $($target.source_id)" $steamMark 'Install from the hub'
     Expect-Logged "^queue: $targetName joined, asked for$" $mark 'the Queue' | Out-Null
     Expect-Logged "^queue: $targetName queued$" $mark 'Steam took it on' | Out-Null
@@ -571,7 +571,7 @@ try {
     Press Down "TileMenu: Prompt\(Cancel\) of $targetName" | Out-Null
     $mark = Get-DashboardLogLength
     Press A "TileMenu: Menu\(Uninstall\) of $targetName" | Out-Null
-    Expect-NotLogged '^store: asked Steam to uninstall' $mark 'Uninstall declined' 2
+    Expect-NotLogged '^store: asking Steam to uninstall' $mark 'Uninstall declined' 2
     Press B 'Recent\(\d+\)' | Out-Null
     Walk Left 'Recent\(0\)'
     Picture '22-home-end'

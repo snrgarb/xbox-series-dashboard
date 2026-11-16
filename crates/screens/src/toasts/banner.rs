@@ -1,11 +1,12 @@
 //! The Toast's banner (docs/spec/guide.md, 9.2 and 9.3): a green card low at the screen's middle, a tile at its left
-//! and a line beside it that takes turns with "Press (Guide) to view". It grows from its middle as it fades in, and
+//! and a line beside it that takes turns with "Press (Guide) to view" ("to start" for a game ready to play). It grows from its middle as it fades in, and
 //! goes by growing a little, then shrinking as it fades out. Where it is in all that is told by how long it has
 //! been showing and going, so nothing here is remembered between frames.
-use ui::{Color, Ease, Font, HAlign, Rect, TextStyle, Ui, VAlign};
+use ui::{Color, Crop, Ease, Font, HAlign, Rect, TextStyle, Ui, VAlign};
 
 use super::{Toast, ToastKind};
 use crate::guide::marks;
+use crate::home::square_art;
 use crate::profile;
 use crate::theme::{glyph, ACCENT};
 
@@ -160,7 +161,7 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
     // The line and the prompt share one place: the card is as wide as the longer, whichever shows.
     let line_width = ui.measure(&LINE, &toast.text).width;
     let press = ui.measure(&LINE, "Press").width;
-    let to_view = ui.measure(&LINE, "to view").width;
+    let to_view = ui.measure(&LINE, toast.kind.prompt()).width;
     let prompt_width = press + MARK_GAP + MARK + MARK_GAP + to_view;
     let text_width = line_width.max(prompt_width).min(MAX_WIDTH - AROUND_TEXT);
     let width = AROUND_TEXT + text_width;
@@ -181,14 +182,31 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
         // Cut to the card, so a sliding tile comes out from behind its left edge.
         ui.with_clip(at(card), |ui| {
             let tile = Rect::new(card.x + PAD + pose.shift, card.y + PAD, TILE, TILE);
+            let icon = |ui: &mut Ui, glyph: char| {
+                ui.fill(at(tile), TILE_FILL, 4.0 * scale);
+                ui.icon(across(tile.center().0), cy, glyph, 44.0 * scale, Color::WHITE);
+            };
             ui.with_alpha(pose.tile, |ui| match toast.kind {
-                ToastKind::Notification => {
-                    ui.fill(at(tile), TILE_FILL, 4.0 * scale);
-                    ui.icon(across(tile.center().0), cy, glyph::NOTIFICATIONS, 44.0 * scale, Color::WHITE);
-                }
+                ToastKind::Notification => icon(ui, glyph::NOTIFICATIONS),
                 // The profile's picture, round and 80 across, bare on the card.
                 ToastKind::Greeting => {
                     profile::picture(ui, at(tile.grow(-8.0)), toast.picture.as_ref().unwrap_or(&Default::default()))
+                }
+                // A game's cover, the tile's whole square cut from its middle and bare on the card; its kind's
+                // icon until it is decoded, or with none.
+                ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled => {
+                    let key = toast.art.as_deref().and_then(|game| square_art(game, ui.px()));
+                    let drawn = key.is_some_and(|key| ui.art(at(tile), &key, Crop::Center, 1.0, 4.0 * scale));
+                    if !drawn {
+                        icon(
+                            ui,
+                            match toast.kind {
+                                ToastKind::Queued => glyph::DOWNLOAD,
+                                ToastKind::Installed => glyph::PLAY,
+                                _ => glyph::DELETE,
+                            },
+                        );
+                    }
                 }
             });
 
@@ -205,7 +223,7 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
                 ui.label_middle(across(text), cy, "Press", &style);
                 let mark = Rect::new(text + press + MARK_GAP, cy - MARK / 2.0 + MARK_DOWN, MARK, MARK);
                 marks::xbox_mark(ui, at(mark), Color::WHITE);
-                ui.label_middle(across(mark.right() + MARK_GAP), cy, "to view", &style);
+                ui.label_middle(across(mark.right() + MARK_GAP), cy, toast.kind.prompt(), &style);
             });
         });
     });

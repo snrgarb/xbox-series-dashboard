@@ -30,6 +30,24 @@ pub enum ToastKind {
     Notification,
     /// "Hi <user>!" at start-up: the profile's picture, sliding in, and no prompt. A tap opens Profile & system.
     Greeting,
+    /// "Queued": a game joined the Queue (docs/spec/manage-queue.md). The game's cover, else the download arrow. A
+    /// tap opens Manage Queue, and those of its kind waiting are let go.
+    Queued,
+    /// "Ready to play": a game the Queue followed is installed. Its cover, else the play triangle; its prompt says
+    /// "to start", and a tap starts it.
+    Installed,
+    /// "<Name> was uninstalled". Its cover, else the bin. A tap opens the Guide.
+    Uninstalled,
+}
+
+impl ToastKind {
+    /// What the prompt says after the Guide button's mark.
+    pub fn prompt(self) -> &'static str {
+        match self {
+            ToastKind::Installed => "to start",
+            _ => "to view",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +59,17 @@ pub struct Toast {
     pub prompt: bool,
     /// The greeting's tile: the picture of the Profile it greets.
     pub picture: Option<model::Picture>,
+    /// The game it tells of, by its library id: a Queue Toast's.
+    pub game: Option<i64>,
+    /// The game whose cover its tile shows, where it has one: its art is picked for the screen as it is drawn.
+    pub art: Option<Box<model::Game>>,
+}
+
+impl Toast {
+    /// A Toast with only a line, of a kind with no game.
+    pub fn new(kind: ToastKind, text: impl Into<String>, prompt: bool) -> Self {
+        Self { kind, text: text.into(), prompt, picture: None, game: None, art: None }
+    }
 }
 
 /// A notification, as the Notifications Flyout lists it.
@@ -165,6 +194,28 @@ impl Toasts {
         false
     }
 
+    /// Those of `kind` waiting are let go: a tap on one has seen to them all (the Bundle's Queued Toasts, once
+    /// Manage Queue is open).
+    pub fn drop_waiting(&mut self, kind: ToastKind) {
+        self.waiting.retain(|toast| toast.kind != kind);
+        if self.waiting.is_empty() {
+            self.next_at = None;
+        }
+    }
+
+    /// The Toast showing goes, as if its time were up: one tapped to do what it says.
+    pub fn send_away(&mut self) {
+        if let Some(banner) = &mut self.banner {
+            match banner.since {
+                None => {
+                    self.banner = None;
+                    self.next_at = (!self.waiting.is_empty()).then_some(self.clock);
+                }
+                Some(_) => banner.going = true,
+            }
+        }
+    }
+
     /// The Guide opened: the Toast showing goes, and those waiting are forgotten.
     pub fn drop_all(&mut self) {
         self.waiting.clear();
@@ -255,7 +306,7 @@ mod tests {
     use super::*;
 
     fn toast(text: &str) -> Toast {
-        Toast { kind: ToastKind::Notification, text: text.into(), prompt: true, picture: None }
+        Toast::new(ToastKind::Notification, text, true)
     }
 
     fn showing(toasts: &Toasts) -> Option<&str> {
@@ -398,6 +449,23 @@ mod tests {
         toasts.post(toast("three"));
         toasts.drop_all();
         assert!(toasts.on_screen().is_none() && !toasts.awaits_frame());
+    }
+
+    #[test]
+    fn a_tapped_toast_goes_and_those_of_its_kind_waiting_are_let_go() {
+        let mut toasts = Toasts::default();
+        toasts.post(Toast::new(ToastKind::Queued, "Queued", true));
+        toasts.post(Toast::new(ToastKind::Queued, "Queued", true));
+        toasts.post(toast("other"));
+        pass(&mut toasts, 1.0);
+        toasts.drop_waiting(ToastKind::Queued);
+        toasts.send_away();
+        assert_eq!((showing(&toasts), toasts.waiting()), (None, 1));
+        pass(&mut toasts, 0.5);
+        assert!(pass(&mut toasts, 0.5));
+        assert_eq!(showing(&toasts), Some("other"));
+        assert_eq!(ToastKind::Installed.prompt(), "to start");
+        assert_eq!(ToastKind::Queued.prompt(), "to view");
     }
 
     #[test]

@@ -15,7 +15,13 @@
 //!   every [`READ_EVERY`] seconds, so a game that finished that quickly does not wait the minute.
 //!
 //! An uninstall the Dashboard asked for is followed the same way, by reading its source again every few seconds
-//! until the game reads uninstalled, for two minutes at most ([`UNINSTALL_FOR`]).
+//! until the game reads uninstalled: for two minutes at most ([`UNINSTALL_FOR`]) where asking is all it takes
+//! (`Source::uninstalls_by_itself`, Steam's), after which the log says it is still there; for ten
+//! ([`USER_UNINSTALL_FOR`]) where the uninstall is the user's to finish in a window of its own (Settings' installed
+//! apps, a game's uninstaller), after which it is no longer followed, and nothing is said.
+//!
+//! What the screens tell the user of in a Toast ([`Tell`]) goes with each update: a game joining the Queue (but for
+//! those already in it as the Dashboard starts), one finishing installing, and one seen uninstalled.
 //!
 //! While a game downloads, its speed is worked out from its bytes at successive looks ([`Follower::queue`]): the
 //! bytes gained over the time since they last moved, smoothed, and 0 once they have stood still for
@@ -61,8 +67,11 @@ pub const GIVE_UP_AFTER: u64 = 60;
 pub const READ_EVERY: u64 = 10;
 /// How soon after an uninstall is asked for its source is first read again.
 pub const UNINSTALL_FIRST_READ: u64 = 2;
-/// How long an uninstall is followed.
+/// How long an uninstall is followed where asking is all it takes, in seconds.
 pub const UNINSTALL_FOR: u64 = 120;
+/// How long an uninstall is followed where it is the user's to finish in a window of its own, in seconds: as long
+/// as the Bundle follows one before giving up.
+pub const USER_UNINSTALL_FOR: u64 = 600;
 /// How many finished installs a snapshot carries.
 pub const RECENTLY_INSTALLED: usize = 8;
 /// How often the Queue is looked at while there is something to follow.
@@ -271,11 +280,19 @@ pub struct Follower {
     read_at: HashMap<&'static str, u64>,
     /// Each downloading game's bytes and speed, by game.
     samples: HashMap<i64, Sample>,
+    /// Each downloading game's speed as its store says it, by game: shown in place of the sample's.
+    told: HashMap<i64, u64>,
 }
 
 impl Follower {
     pub fn new(sources: Vec<Arc<dyn Source>>) -> Self {
-        Self { sources, uninstalls: HashMap::new(), read_at: HashMap::new(), samples: HashMap::new() }
+        Self {
+            sources,
+            uninstalls: HashMap::new(),
+            read_at: HashMap::new(),
+            samples: HashMap::new(),
+            told: HashMap::new(),
+        }
     }
 
     /// The Queue as the database has it, each download with the speed it has been given.
@@ -287,9 +304,11 @@ impl Follower {
         Ok(queue)
     }
 
-    /// The game's download speed in bits a second, to the whole bit.
+    /// The game's download speed in bits a second, to the whole bit: its store's, where it says, else the one
+    /// worked out from its bytes.
     fn speed(&self, game: i64) -> Option<u64> {
-        self.samples.get(&game).and_then(|sample| sample.speed).map(|speed| speed.round() as u64)
+        let worked_out = || self.samples.get(&game).and_then(|sample| sample.speed).map(|speed| speed.round() as u64);
+        self.told.get(&game).copied().or_else(worked_out)
     }
 
     /// Each download's bytes as they are now, at `at`: its speed worked out again. Whether any speed changed.
@@ -390,10 +409,14 @@ impl Follower {
         }
         let rows = db.rows()?;
         let mut seen: Vec<i64> = Vec::new();
+        let told_before = std::mem::take(&mut self.told);
         for (&key, installs) in &reports {
             for install in installs {
                 let Some(game) = db.game_of(key, &install.source_id)? else { continue };
                 seen.push(game);
+                if let Some(speed) = install.speed.filter(|_| install.state.downloading()) {
+                    self.told.insert(game, speed);
+                }
                 match rows.iter().find(|row| row.game == game) {
                     Some(row) if row.reported && row.state == install.state => {}
                     Some(row) => {
@@ -415,6 +438,8 @@ impl Follower {
                 }
             }
         }
+        // A store's own speed that changed is the Queue moving, as bytes are.
+        polled.moved |= self.told != told_before;
 
         // What its source no longer has, or never had: ended, or to be looked at again.
         let mut ended: Vec<&Row> = Vec::new();
@@ -468,9 +493,19 @@ impl Follower {
             if !db.installed(game)? {
                 self.uninstalls.remove(&game);
                 polled.changes.push(Change::Uninstalled(game));
-            } else if now.saturating_sub(asked) >= UNINSTALL_FOR {
+                continue;
+            }
+            // Where the uninstall is the user's to finish, a game still there is their choice: nothing is said.
+            let by_itself = match db.game(game)? {
+                Some(found) => self.source(&found.source).is_some_and(|source| source.uninstalls_by_itself()),
+                None => false,
+            };
+            let follow_for = if by_itself { UNINSTALL_FOR } else { USER_UNINSTALL_FOR };
+            if now.saturating_sub(asked) >= follow_for {
                 self.uninstalls.remove(&game);
-                polled.changes.push(Change::StillInstalled(game));
+                if by_itself {
+                    polled.changes.push(Change::StillInstalled(game));
+                }
             }
         }
         Ok(polled)
@@ -515,12 +550,37 @@ pub enum Ask {
     Look,
 }
 
-/// What the thread has for the screens: the Queue, and with it the library's snapshot when a source read again
-/// changed it.
+/// What the screens tell the user of, in a Toast, as the Bundle does (its glossary's Toast).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tell {
+    /// The game joined the Queue: "Queued". Not for those already in it as the Dashboard starts.
+    Queued(i64),
+    /// The game the Queue held has finished installing: "Ready to play".
+    Ready(i64),
+    /// An uninstall the Dashboard asked for is done: "<game> was uninstalled".
+    Uninstalled(i64),
+}
+
+impl Tell {
+    /// What a change is told as, if anything. `first`: the change was found by the look as the thread started,
+    /// whose games had joined before the Dashboard was there to see.
+    pub fn of(change: &Change, first: bool) -> Option<Tell> {
+        match *change {
+            Change::Joined { game, .. } if !first => Some(Tell::Queued(game)),
+            Change::Installed(game) => Some(Tell::Ready(game)),
+            Change::Uninstalled(game) => Some(Tell::Uninstalled(game)),
+            _ => None,
+        }
+    }
+}
+
+/// What the thread has for the screens: the Queue, with it the library's snapshot when a source read again
+/// changed it, and what to tell the user of.
 #[derive(Debug, Clone)]
 pub struct Update {
     pub queue: Queue,
     pub library: Option<Library>,
+    pub tell: Vec<Tell>,
 }
 
 /// The thread that follows the Queue, as its starter holds it.
@@ -538,9 +598,13 @@ impl Handle {
     pub fn take(&self) -> Option<Update> {
         let mut latest: Option<Update> = None;
         while let Ok(update) = self.updates.try_recv() {
-            // A library snapshot is kept, should a later update carry only the Queue.
-            let library = update.library.or(latest.and_then(|latest| latest.library));
-            latest = Some(Update { queue: update.queue, library });
+            // A library snapshot is kept, should a later update carry only the Queue, and every Toast.
+            let (library, mut tell) = match latest {
+                Some(latest) => (update.library.or(latest.library), latest.tell),
+                None => (update.library, Vec::new()),
+            };
+            tell.extend(update.tell);
+            latest = Some(Update { queue: update.queue, library, tell });
         }
         latest
     }
@@ -571,6 +635,7 @@ fn follow(
     let mut db = Database::open(path)?;
     let mut follower = Follower::new(sources);
     let clock = std::time::Instant::now();
+    let mut first = true;
     loop {
         let Polled { changes, library_changed, moved } =
             follower.poll_at(&mut db, crate::now(), clock.elapsed().as_secs_f64())?;
@@ -580,11 +645,13 @@ fn follow(
                 eprintln!("{}", describe(change, &name));
             }
             let library = if library_changed { Some(db.snapshot()?) } else { None };
-            if send.send(Update { queue: follower.queue(&db)?, library }).is_err() {
+            let tell = changes.iter().filter_map(|change| Tell::of(change, first)).collect();
+            if send.send(Update { queue: follower.queue(&db)?, library, tell }).is_err() {
                 return Ok(());
             }
             wake();
         }
+        first = false;
         let next = if follower.busy(&db)? {
             asked.recv_timeout(POLL)
         } else {
@@ -595,7 +662,8 @@ fn follow(
                 if follower.asked_install(&mut db, game, crate::now())? {
                     let name = db.game(game)?.map_or_else(|| format!("game {game}"), |g| g.name);
                     eprintln!("{}", describe(&Change::Joined { game, asked: true }, &|_| name.clone()));
-                    if send.send(Update { queue: follower.queue(&db)?, library: None }).is_err() {
+                    let update = Update { queue: follower.queue(&db)?, library: None, tell: vec![Tell::Queued(game)] };
+                    if send.send(update).is_err() {
                         return Ok(());
                     }
                     wake();
@@ -650,8 +718,7 @@ mod tests {
         }
 
         fn report(&self, installs: &[(&str, InstallState)]) {
-            *self.installs.lock().unwrap() =
-                installs.iter().map(|&(id, state)| Install { source_id: id.into(), state }).collect();
+            *self.installs.lock().unwrap() = installs.iter().map(|&(id, state)| Install::new(id, state)).collect();
         }
 
         fn set_installed(&self, id: &str, installed: bool) {
@@ -688,6 +755,11 @@ mod tests {
 
         fn installs(&self) -> Option<Vec<Install>> {
             self.follows.then(|| self.installs.lock().unwrap().clone())
+        }
+
+        /// The store that reports its installs uninstalls by itself too, as Steam does; the other is the user's.
+        fn uninstalls_by_itself(&self) -> bool {
+            self.follows
         }
     }
 
@@ -879,11 +951,43 @@ mod tests {
         assert_eq!(polled.changes, [Change::Uninstalled(wren)]);
         assert!(polled.library_changed && !world.installed("Wren"));
         assert!(!world.follower.busy(&world.db).unwrap());
-        // One that never goes is given up on.
+        // One that never goes is given up on, and said to be still there: asking was all it took.
+        world.fake.set_installed("3", true);
+        world.follower.asked_uninstall(wren, NOW + 1000);
+        assert!(world.poll(1000 + UNINSTALL_FOR - 1).changes.is_empty());
+        assert_eq!(world.poll(1000 + UNINSTALL_FOR).changes, [Change::StillInstalled(wren)]);
+        assert!(!world.follower.busy(&world.db).unwrap());
+    }
+
+    #[test]
+    fn an_uninstall_that_is_the_users_to_finish_is_followed_longer_and_its_wait_ends_quietly() {
+        let mut world = World::new();
         let kite = world.id("Kite");
         world.other.set_installed("9", true);
         world.follower.asked_uninstall(kite, NOW);
-        assert_eq!(world.poll(UNINSTALL_FOR).changes, [Change::StillInstalled(kite)]);
+        // Still there after two minutes: the user may not have got to it yet.
+        assert!(world.poll(UNINSTALL_FOR).changes.is_empty());
+        assert!(world.follower.busy(&world.db).unwrap());
+        // Ten minutes on it is no longer followed, and nothing is said of it.
+        assert!(world.poll(USER_UNINSTALL_FOR).changes.is_empty());
+        assert!(!world.follower.busy(&world.db).unwrap());
+        // One the user does uninstall meanwhile is seen to go, and told of.
+        world.follower.asked_uninstall(kite, NOW + 1000);
+        world.other.set_installed("9", false);
+        assert_eq!(world.poll(1000 + 300).changes, [Change::Uninstalled(kite)]);
+    }
+
+    #[test]
+    fn what_is_told_in_a_toast() {
+        let joined = Change::Joined { game: 1, asked: false };
+        assert_eq!(Tell::of(&joined, false), Some(Tell::Queued(1)));
+        // Already in the Queue as the Dashboard starts: it joined before anyone was there to see.
+        assert_eq!(Tell::of(&joined, true), None);
+        assert_eq!(Tell::of(&Change::Installed(2), true), Some(Tell::Ready(2)));
+        assert_eq!(Tell::of(&Change::Uninstalled(3), false), Some(Tell::Uninstalled(3)));
+        let state = Change::State { game: 1, state: QUEUED };
+        assert_eq!((Tell::of(&state, false), Tell::of(&Change::Dropped(1), false)), (None, None));
+        assert_eq!(Tell::of(&Change::StillInstalled(1), false), None);
     }
 
     #[test]
@@ -960,13 +1064,16 @@ mod tests {
             handle.take().expect("an update")
         };
         handle.ask(Ask::Install(moss));
-        assert_eq!(wait(&handle).queue.status(moss), Some(model::queue::QUEUED));
+        let update = wait(&handle);
+        assert_eq!((update.queue.status(moss), update.tell), (Some(model::queue::QUEUED), vec![Tell::Queued(moss)]));
         fake.report(&[("1", InstallState::Downloading { done: 1, total: 2 })]);
-        assert_eq!(wait(&handle).queue.status(moss), Some(model::queue::INSTALLING));
+        let update = wait(&handle);
+        assert_eq!((update.queue.status(moss), update.tell), (Some(model::queue::INSTALLING), vec![]));
         fake.report(&[]);
         fake.set_installed("1", true);
         let update = wait(&handle);
         assert!(update.queue.is_empty());
+        assert_eq!(update.tell, [Tell::Ready(moss)]);
         assert!(update.library.expect("a snapshot").games[0].installed);
     }
 }

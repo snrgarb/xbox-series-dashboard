@@ -10,5 +10,19 @@ serde_json = "1"
 # For the fixture's generated art only.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
+# How far a download has got, live (`live`), and what `probe` reads for `--log-queue-sources`.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 tempfile = "3"

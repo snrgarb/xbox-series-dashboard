@@ -1,8 +1,10 @@
 //! What Steam has under way, from its app manifests, as the Bundle reads them (its `SteamDownloads`): a manifest is
 //! written as Steam takes an app on, its `StateFlags` (Steam's `EAppState`) say where the app is, and its
-//! `BytesDownloaded` and `BytesToDownload` how far the download has got, as Steam last wrote them down (every few
-//! seconds, and as it pauses or ends). An install Steam drops loses its manifest; one that finishes keeps it, with
-//! `FullyInstalled` set.
+//! `BytesDownloaded` and `BytesToDownload` how far the download has got, as Steam last wrote them down. Seen on a
+//! real Steam (2026-11-16) that is seldom: as the download starts, now and then on the way (0%, 11%, 100% for a
+//! 510 MB game) and as it pauses or ends, so how far a running download has got is worked out live elsewhere
+//! (`crate::live`). An install Steam drops loses its manifest; one that finishes keeps it, with `FullyInstalled`
+//! set.
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -61,28 +63,53 @@ pub fn state(flags: u64, done: u64, total: u64, running: bool) -> Option<Install
     })
 }
 
-/// The installs under way in these `steamapps` folders. Each manifest is read on its own: one Steam is rewriting as
-/// it is read is passed over this time, and the rest still count. `updating` is the registry's word for an appid.
-pub fn read(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<Install> {
-    let mut installs: Vec<Install> = Vec::new();
+/// What an app's manifest says of its download, as Steam last wrote it: its flags, the bytes downloaded of those to
+/// download, and the bytes staged (written out whole, as Steam downloads them compressed) of those to stage.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counts {
+    pub flags: u64,
+    pub downloaded: u64,
+    pub to_download: u64,
+    pub staged: u64,
+    pub to_stage: u64,
+}
+
+/// What the manifest at `file` says, if it can be read and has its flags. One Steam is rewriting as it is read
+/// may not be: it is passed over this time.
+pub fn counts(file: &Path) -> Option<Counts> {
+    let manifest = fs::read(file).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok())?;
+    let number = |key: &str| manifest.u64_at(&["AppState", key]);
+    Some(Counts {
+        flags: number("StateFlags")?,
+        downloaded: number("BytesDownloaded").unwrap_or(0),
+        to_download: number("BytesToDownload").unwrap_or(0),
+        staged: number("BytesStaged").unwrap_or(0),
+        to_stage: number("BytesToStage").unwrap_or(0),
+    })
+}
+
+/// The installs under way in these `steamapps` folders, each with its manifest's counts. Each manifest is read on
+/// its own: one Steam is rewriting as it is read is passed over this time, and the rest still count. `updating` is
+/// the registry's word for an appid.
+pub fn under_way(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<(u32, InstallState, Counts)> {
+    let mut found: Vec<(u32, InstallState, Counts)> = Vec::new();
     for dir in steamapps {
         for (appid, file) in manifests(dir) {
-            let Some(manifest) = fs::read(&file).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok())
-            else {
-                continue;
-            };
-            let number = |key: &str| manifest.u64_at(&["AppState", key]);
-            let Some(flags) = number("StateFlags") else { continue };
-            let (done, total) = (number("BytesDownloaded").unwrap_or(0), number("BytesToDownload").unwrap_or(0));
-            let source_id = appid.to_string();
+            let Some(counts) = counts(&file) else { continue };
+            let (flags, done, total) = (counts.flags, counts.downloaded, counts.to_download);
             // The registry is asked only of an app that is under way.
-            let under_way = state(flags, done, total, false).map(|_| state(flags, done, total, updating(appid)));
-            if let Some(Some(state)) = under_way.filter(|_| !installs.iter().any(|i| i.source_id == source_id)) {
-                installs.push(Install { source_id, state });
+            let state = state(flags, done, total, false).and_then(|_| state(flags, done, total, updating(appid)));
+            if let Some(state) = state.filter(|_| !found.iter().any(|&(id, ..)| id == appid)) {
+                found.push((appid, state, counts));
             }
         }
     }
-    installs
+    found
+}
+
+/// The installs under way in these `steamapps` folders, by their manifests alone ([`under_way`]).
+pub fn read(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<Install> {
+    under_way(steamapps, updating).into_iter().map(|(appid, state, _)| Install::new(appid.to_string(), state)).collect()
 }
 
 #[cfg(test)]
@@ -122,7 +149,7 @@ mod tests {
         let quiet = 9_100_040; // Quiet Orbit, not installed.
         let read = |updating: &dyn Fn(u32) -> bool| read(&steamapps, updating);
         assert_eq!(read(&|_| false), []);
-        let install = |state| vec![Install { source_id: quiet.to_string(), state }];
+        let install = |state| vec![Install::new(quiet.to_string(), state)];
 
         fixture::write_progress(&root, quiet, Progress::Queued).unwrap();
         assert_eq!(read(&|_| false), install(InstallState::Queued));

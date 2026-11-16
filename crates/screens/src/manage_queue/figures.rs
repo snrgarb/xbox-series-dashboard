@@ -12,8 +12,10 @@ pub struct Figures {
     pub speed: Option<String>,
     /// "67.80 MB of 3.55 GB": none while it waits, or while its client does not know the whole yet.
     pub amount: Option<String>,
-    /// "1.9%"; "0.0%" while it waits, whatever of it is down already, as on the console.
-    pub percent: String,
+    /// "1.9%"; "0.0%" while it waits, whatever of it is down already, as on the console. None while it installs
+    /// with no whole known (its client gives no count yet): the row says "Installing..." alone, as the Bundle's
+    /// does for a store that gives no bytes, rather than a share that stands at 0.0% (#132).
+    pub percent: Option<String>,
     /// How far the bar fills, 0 to 1.
     pub fraction: f32,
 }
@@ -27,14 +29,18 @@ impl Figures {
                     state: entry.state.status(),
                     speed: entry.speed.map(speed),
                     amount: (total > 0).then(|| format!("{} of {}", size(done, 2), size(total, 2))),
-                    percent: percent(fraction),
+                    percent: (total > 0).then(|| percent(fraction)),
                     fraction: fraction as f32,
                 }
             }
             // Waiting its turn, or paused in the client: the Bundle reads a download that is not active as Queued.
-            InstallState::Queued | InstallState::Paused { .. } => {
-                Figures { state: entry.state.status(), speed: None, amount: None, percent: percent(0.0), fraction: 0.0 }
-            }
+            InstallState::Queued | InstallState::Paused { .. } => Figures {
+                state: entry.state.status(),
+                speed: None,
+                amount: None,
+                percent: Some(percent(0.0)),
+                fraction: 0.0,
+            },
         }
     }
 }
@@ -104,16 +110,17 @@ mod tests {
         assert_eq!(figures.state, "Installing...");
         assert_eq!(figures.speed.as_deref(), Some("106 Mbps"));
         assert_eq!(figures.amount.as_deref(), Some("67.80 MB of 3.55 GB"));
-        assert_eq!(figures.percent, "1.9%");
+        assert_eq!(figures.percent.as_deref(), Some("1.9%"));
         assert!((figures.fraction - 0.01865).abs() < 0.0001);
-        // Its client not knowing the whole yet, nor its bytes moved: no amount, no speed.
+        // Its client not knowing the whole yet, nor its bytes moved: Installing... alone, the bar empty.
         let starting = Queued { state: InstallState::Downloading { done: 0, total: 0 }, speed: None, ..downloading };
         let figures = Figures::of(&starting);
-        assert_eq!((figures.amount, figures.speed, figures.percent.as_str()), (None, None, "0.0%"));
+        assert_eq!((figures.amount, figures.speed, figures.percent), (None, None, None));
+        assert_eq!((figures.state, figures.fraction), ("Installing...", 0.0));
         // Paused half way: Queued, 0.0%, the bar empty.
         let paused = Queued { state: InstallState::Paused { done: 50, total: 100 }, ..downloading };
         let figures = Figures::of(&paused);
-        assert_eq!((figures.state, figures.percent.as_str(), figures.fraction), ("Queued", "0.0%", 0.0));
+        assert_eq!((figures.state, figures.percent.as_deref(), figures.fraction), ("Queued", Some("0.0%"), 0.0));
         assert_eq!((figures.speed, figures.amount), (None, None));
     }
 }

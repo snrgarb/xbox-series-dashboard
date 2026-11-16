@@ -617,7 +617,7 @@ mod tests {
 
         freezer.thaw();
         assert!(!freezer.is_frozen());
-        assert_eq!(fake.suspended(), []);
+        assert_eq!(fake.suspended(), [0u32; 0]);
         assert!(!record.exists(), "the record goes once all are resumed");
         freezer.thaw();
         assert_eq!(fake.0.borrow().recorded.len(), 4, "a second thaw resumes nothing");
@@ -664,7 +664,7 @@ mod tests {
         for root in ["C:\\", "c:", "C:/", "\\\\server\\share\\", ""] {
             freezer.freeze(root, Some(10));
             assert!(freezer.is_frozen(), "a freeze that froze none is still one");
-            assert_eq!(fake.suspended(), [], "{root}");
+            assert_eq!(fake.suspended(), [0u32; 0], "{root}");
             freezer.thaw();
         }
         assert!(!is_root("C:\\Games"));
@@ -684,7 +684,7 @@ mod tests {
         // An elevated game with nothing else: nothing frozen, and no record left.
         fake.0.borrow_mut().guarded = vec![10, 11];
         freezer.freeze(GAME_DIR, Some(10));
-        assert_eq!(fake.suspended(), []);
+        assert_eq!(fake.suspended(), [0u32; 0]);
         assert!(freezer.is_frozen());
         assert!(!data.path().join(RECORD).exists());
         freezer.thaw();
@@ -697,7 +697,7 @@ mod tests {
         assert_eq!(fake.suspended(), [11]);
         assert_eq!(std::fs::read_to_string(data.path().join(RECORD)).unwrap(), "11 1011 helper\n");
         freezer.thaw();
-        assert_eq!(fake.suspended(), []);
+        assert_eq!(fake.suspended(), [0u32; 0]);
     }
 
     #[test]
@@ -729,7 +729,7 @@ mod tests {
         let (fake, mut freezer) = machine(data.path());
         freezer.freeze(GAME_DIR, Some(10));
         drop(freezer);
-        assert_eq!(fake.suspended(), []);
+        assert_eq!(fake.suspended(), [0u32; 0]);
         assert!(!data.path().join(RECORD).exists());
     }
 
@@ -739,7 +739,7 @@ mod tests {
         fake.run(10, "C:\\Steam\\steamapps\\common\\Brass Meridian\\game.exe");
         let mut freezer = Freezer::with(Box::new(fake.clone()), None);
         freezer.freeze(GAME_DIR, Some(10));
-        assert_eq!(fake.suspended(), []);
+        assert_eq!(fake.suspended(), [0u32; 0]);
 
         // Nor where the record can't be written: its folder is a file.
         let data = tempfile::tempdir().unwrap();
@@ -747,7 +747,7 @@ mod tests {
         std::fs::write(&file, b"").unwrap();
         let mut freezer = Freezer::with(Box::new(fake.clone()), Some(&file));
         freezer.freeze(GAME_DIR, Some(10));
-        assert_eq!(fake.suspended(), []);
+        assert_eq!(fake.suspended(), [0u32; 0]);
     }
 
     #[test]

@@ -25,6 +25,10 @@
 # - Uninstall from the Tile menu: the question, cancelled first; then yes, and Steam's client is asked (`steam.exe
 #   -silent -console +app_uninstall <appid>`); the stand-in removes the fake's manifest, and the Dashboard sees the
 #   game go (`queue: <name> uninstalled`).
+# - The Queue's Toasts (#132), by `toasts: shown "<line>" (<Kind>)`: "Queued" as the first install is asked, the
+#   Guide button on it opening Manage Queue; "<name> was uninstalled" once the uninstall is seen; "Ready to play" as
+#   the second game, installed again, is done, the Guide button on it starting the game (`launch: <name> (<appid>)
+#   asked of Steam`).
 #
 # Judged by --log-focus a press at a time (`focus: GameHub: 9100040 Hub Queued`, `... Hub Installing`, `... Hub
 # Queue`, `focus: ManageQueue: Row(0) of <name>; ...`), the Dashboard's `store:` and `queue:` lines, and the stand-in
@@ -185,7 +189,15 @@ try {
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
     Press A $tilePattern | Out-Null
-    Expect-Logged "^store: asked Steam to install ${firstName}: .*steam\.exe -silent \+app_install $($first.source_id)$" $mark 'Install from the hub' | Out-Null
+    # The Queued Toast, with the game's cover; the Guide button while it shows opens Manage Queue, not the Guide,
+    # and B is Home again on the tile.
+    if (Expect-Logged '^toasts: shown "Queued" \(Queued\)' $mark 'Install from the hub, its Toast' 10) {
+        Press Guide "ManageQueue: (Cover|Row)\(0\) of .+" '01b-queued-toast-opened-manage-queue' | Out-Null
+        Press B $tilePattern | Out-Null
+    }
+    Expect-Logged "^store: asking Steam to install ${firstName}: app_install $($first.source_id)$" $mark 'Install from the hub' | Out-Null
+    # How: the fake has no CEF debugger, so through its steam.exe, its windows watched (#132).
+    Expect-Logged "^store: ran .*steam\.exe -silent \+app_install $($first.source_id) at \d+ ms$" $mark 'Install from the hub, by steam.exe' | Out-Null
     Expect-Steam "steam: asked to install $($first.source_id): -silent \+app_install $($first.source_id)" $steamMark 'Install from the hub'
     Expect-Logged "^queue: $firstName joined, asked for$" $mark 'Install from the hub, the Queue' | Out-Null
     Expect-Logged "^queue: $firstName queued$" $mark 'Install from the hub, Steam took it on' | Out-Null
@@ -256,7 +268,7 @@ try {
     if ($menu -and (Menu-Row $menu) -ne 'Install') { $failures += "a queued game's menu starts with $(Menu-Row $menu), not Install" }
     $mark = Get-DashboardLogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-NotLogged '^store: asked Steam' $mark 'Install of a queued game'
+    Expect-NotLogged '^store: asking Steam' $mark 'Install of a queued game'
 
     # --- Paused, then done: the game leaves the Queue installed, and its hub reads Play.
     $mark = Get-DashboardLogLength
@@ -304,7 +316,7 @@ try {
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Logged "^store: asked Steam to install ${secondName}: .*steam\.exe -silent \+app_install $($second.source_id)$" $mark 'Install from the menu' | Out-Null
+    Expect-Logged "^store: asking Steam to install ${secondName}: app_install $($second.source_id)$" $mark 'Install from the menu' | Out-Null
     Expect-Steam "steam: asked to install $($second.source_id)" $steamMark 'Install from the menu'
     Expect-Logged "^queue: $secondName joined, asked for$" $mark 'Install from the menu, the Queue' | Out-Null
     # Dropped once Steam has taken it on (its manifest seen, Queued): as a player cancels it in Steam.
@@ -323,17 +335,34 @@ try {
     Press Down "TileMenu: Prompt\(Cancel\) of $firstName" | Out-Null
     $mark = Get-DashboardLogLength
     Press A "TileMenu: Menu\(Uninstall\) of $firstName" | Out-Null
-    Expect-NotLogged '^store: asked Steam' $mark 'Uninstall cancelled' 1
+    Expect-NotLogged '^store: asking Steam' $mark 'Uninstall cancelled' 1
     Press A "TileMenu: Prompt\(Uninstall\) of $firstName" | Out-Null
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Logged "^store: asked Steam to uninstall ${firstName}: .*steam\.exe -silent -console \+app_uninstall $($first.source_id)$" $mark 'Uninstall' | Out-Null
+    Expect-Logged "^store: asking Steam to uninstall ${firstName}: app_uninstall $($first.source_id)$" $mark 'Uninstall' | Out-Null
     Expect-Steam "steam: asked to uninstall $($first.source_id)" $steamMark 'Uninstall'
     Expect-Logged "^queue: $firstName uninstalled$" $mark 'Uninstalled' 30 | Out-Null
+    Expect-Logged "^toasts: shown `"$firstName was uninstalled`" \(Uninstalled\)" $mark 'Uninstalled, its Toast' 30 | Out-Null
     In-Front
     Start-Sleep -Milliseconds 2000
     Save-Screen '13-uninstalled'
+
+    # --- Ready to play: the second game installed from its Tile menu and done at once. Its Toast waits behind the
+    # Queued one; the Guide button while it shows starts the game, as A on Play would.
+    Start-Sleep -Seconds 6
+    $menu = Open-MenuOf $second.name
+    $mark = Get-DashboardLogLength
+    Press A 'Recent\(\d+\)' | Out-Null
+    Expect-Logged "^queue: $secondName queued$" $mark 'Install again, Steam took it on' | Out-Null
+    Advance $second.source_id @('--done')
+    Expect-Logged "^queue: $secondName installed$" $mark 'Install again, done' | Out-Null
+    if (Expect-Logged '^toasts: shown "Ready to play" \(Installed\)' $mark 'Done, its Toast' 20) {
+        $tapped = Get-DashboardLogLength
+        Push-Button Guide
+        Expect-Logged "^launch: $secondName \($($second.source_id)\) asked of Steam" $tapped 'The Guide button on Ready to play starts the game' | Out-Null
+        Expect-NotLogged '^guide: ' $tapped 'The Guide button on Ready to play opens no Guide' 1
+    }
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }
