@@ -15,6 +15,10 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         Arc::new(source_epic::Epic::at(args.epic.clone())),
         // `--gog` names a folder standing for GOG's; else the registry and `%ProgramData%\GOG.com`.
         Arc::new(source_gog::Gog::at(args.gog.clone())),
+        // `--ea`, `--ubisoft` and `--battlenet` name a fake store; else this machine's are read.
+        Arc::new(source_ea::Ea::at(args.ea.clone())),
+        Arc::new(source_ubisoft::Ubisoft::at(args.ubisoft.clone())),
+        Arc::new(source_battlenet::BattleNet::at(args.battlenet.clone())),
     ]
 }
 

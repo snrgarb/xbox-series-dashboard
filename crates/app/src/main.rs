@@ -18,6 +18,11 @@ pub struct Args {
     epic: Option<PathBuf>,
     /// A folder standing for GOG's (`source_gog::Places::under`).
     gog: Option<PathBuf>,
+    /// Fake stores to read in place of this machine's (the end-to-end tests'): each a folder with its own
+    /// `registry.json` (docs/sources.md).
+    ea: Option<PathBuf>,
+    ubisoft: Option<PathBuf>,
+    battlenet: Option<PathBuf>,
     /// The folder the library database is in, in place of the user's own.
     data_dir: Option<PathBuf>,
     launch_screen: bool,
@@ -67,7 +72,8 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 }
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
-                 [--epic <dir>] [--gog <dir>] [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
+                 [--epic <dir>] [--gog <dir>] [--ea <dir>] [--ubisoft <dir>] [--battlenet <dir>]
+                 [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
@@ -118,6 +124,9 @@ fn parse_args() -> Result<Args, String> {
             "--steam" => args.steam = Some(value()?.into()),
             "--epic" => args.epic = Some(value()?.into()),
             "--gog" => args.gog = Some(value()?.into()),
+            "--ea" => args.ea = Some(value()?.into()),
+            "--ubisoft" => args.ubisoft = Some(value()?.into()),
+            "--battlenet" => args.battlenet = Some(value()?.into()),
             "--data-dir" => args.data_dir = Some(value()?.into()),
             "--screenshot" => args.screenshot = Some(value()?.into()),
             "--size" => {

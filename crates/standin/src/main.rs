@@ -36,6 +36,20 @@
 //!       Dashboard took it: none is running, or it has no Toast strip yet.
 //!   standin steam-url steam://install/<appid> | steam://uninstall/<appid>
 //!       Says in the log which it was asked, the address with it, and does nothing more: a test reads the line.
+//!   standin make-ea <dir> [--json <file>] | make-ubisoft <dir> [--json <file>] | make-battlenet <dir> [--json <file>]
+//!       Writes that store's fake at <dir> (`source_ea::fixture`, `source_ubisoft::fixture`,
+//!       `source_battlenet::fixture`: made-up games, each installed one with a copy of this program as its
+//!       `game.exe`, titled with its name), reads it back as the Dashboard does with `--ea <dir>` (and the others),
+//!       and with --json writes the Library it read there. Battle.net's client in the fake, `Battle.net.exe`, is a
+//!       copy of this program too.
+//!   standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
+//!       The stand-in Ubisoft Connect, registered as the `uplay://` handler for the fake at <dir>: starts the game's
+//!       `game.exe` from its install folder and waits for it; asked to install or uninstall, says so in the log and
+//!       does nothing more. Exits 1, having done nothing, when the game isn't installed.
+//!   Battle.net.exe --exec="launch <code>" | --game=<uid>
+//!       The stand-in Battle.net, when this program is named `Battle.net.exe` in a fake Battle.net's folder: starts
+//!       the game with that product code from its install folder and waits for it; asked for a game's page, says so
+//!       in the log.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -56,6 +70,8 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin make-tones <dir>
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
+       standin make-ea | make-ubisoft | make-battlenet <dir> [--json <file>]
+       standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin toast <text>";
 
 /// The arguments a `game.exe` run with none takes instead, one a line.
@@ -136,6 +152,43 @@ fn make_steam(dir: &Path, json: Option<&Path>, mut spec: Fixture) -> Result<(), 
     }
     note(&format!("make-steam: {} games at {}", library.games.len(), dir.display()));
     Ok(())
+}
+
+/// Writes the fake `store` (ea, ubisoft or battlenet) at `dir`, with this program as every installed game's
+/// `game.exe`, and reads it back as the Dashboard does.
+fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String> {
+    let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let exe = std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?;
+    let written = |e: std::io::Error| format!("writing {}: {e}", dir.display());
+    let names = |names: Vec<&str>| names.into_iter().map(str::to_string).collect::<Vec<_>>();
+    let (source, expected): (Box<dyn model::Source>, Vec<String>) = match store {
+        "ea" => {
+            let spec = source_ea::fixture::Fixture { game_exe: Some(exe), ..source_ea::fixture::Fixture::standard() };
+            source_ea::fixture::write(&dir, &spec).map_err(written)?;
+            (Box::new(source_ea::Ea::at(Some(dir.clone()))), names(spec.expected()))
+        }
+        "ubisoft" => {
+            let standard = source_ubisoft::fixture::Fixture::standard();
+            let spec = source_ubisoft::fixture::Fixture { game_exe: Some(exe), ..standard };
+            source_ubisoft::fixture::write(&dir, &spec).map_err(written)?;
+            (Box::new(source_ubisoft::Ubisoft::at(Some(dir.clone()))), names(spec.expected()))
+        }
+        "battlenet" => {
+            let standard = source_battlenet::fixture::Fixture::standard();
+            let spec = source_battlenet::fixture::Fixture { game_exe: Some(exe), ..standard };
+            source_battlenet::fixture::write(&dir, &spec).map_err(written)?;
+            (Box::new(source_battlenet::BattleNet::at(Some(dir.clone()))), names(spec.expected()))
+        }
+        _ => return Err(format!("no fake store {store}")),
+    };
+    // Read back with the reader the Dashboard uses, on the machine it will run on.
+    let found = source.read().map_err(|e| format!("reading {} back: {e:#}", dir.display()))?;
+    let library = found.ok_or_else(|| format!("reading {} back: no {store} there", dir.display()))?.library;
+    let read: Vec<String> = library.games.iter().map(|game| game.name.clone()).collect();
+    if read != expected {
+        return Err(format!("wrote {expected:?}, read {read:?} back"));
+    }
+    read_back(&format!("make-{store}"), &dir, library, expected.len(), json)
 }
 
 /// Writes `--title <name>` as the arguments of the stand-in game `exe`, so its window is titled with the game's
@@ -252,6 +305,91 @@ fn made(what: &str, dir: &Path, result: Result<(), String>) -> i32 {
     1
 }
 
+/// What a `uplay://` address asks: launch, install or uninstall, and of which game.
+fn uplay_asked(url: &str) -> Option<(&'static str, u32)> {
+    let rest = url.trim().strip_prefix("uplay://")?;
+    let mut parts = rest.trim_end_matches('/').split('/');
+    let verb = parts.next()?;
+    let verb = ["launch", "install", "uninstall"].into_iter().find(|&known| known == verb)?;
+    parts.next()?.parse().ok().map(|id| (verb, id))
+}
+
+/// What the client is asked on its command line: `--exec="launch <code>"` (which Windows hands over as one
+/// argument, `--exec=launch <code>`, or as two when unquoted) or `--game=<uid>`.
+fn battlenet_asked(args: &[String]) -> Option<(&'static str, String)> {
+    let line = args.join(" ");
+    if let Some(exec) = line.split("--exec=").nth(1) {
+        let code = exec.trim().trim_matches('"').strip_prefix("launch")?.trim().trim_matches('"');
+        return code.split_whitespace().next().map(|code| ("launch", code.to_string()));
+    }
+    let uid = args.iter().find_map(|arg| arg.strip_prefix("--game="))?;
+    Some(("game", uid.to_string()))
+}
+
+/// Starts the game's `game.exe` from its install folder, as its store's client would, and waits for it. `who` is
+/// what the log calls the store's stand-in, `id` the game's id in the store.
+fn run_game(who: &str, game: Option<&model::Game>, id: &str) -> i32 {
+    let Some(dir) = game.and_then(|game| game.install_dir.clone()) else {
+        note(&format!("{who}: {id} isn't installed"));
+        return 1;
+    };
+    let exe = dir.join("game.exe");
+    let mut child = match std::process::Command::new(&exe).current_dir(&dir).spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            note(&format!("{who}: could not start {}: {e}", exe.display()));
+            return 1;
+        }
+    };
+    note(&format!("{who}: {id} running, {} pid {}", exe.display(), child.id()));
+    let status = child.wait();
+    note(&format!("{who}: {id} ended ({})", status.map_or_else(|e| e.to_string(), |s| s.to_string())));
+    0
+}
+
+/// The installed game with this `source_id` in a store's fake.
+fn game_of(source: &dyn model::Source, id: &str) -> Option<model::Game> {
+    let library = source.read().ok()??.library;
+    library.games.into_iter().find(|game| game.source_id == id && game.installed)
+}
+
+/// The stand-in Ubisoft Connect, for the fake at `dir`.
+fn uplay_url(dir: &Path, url: &str) -> i32 {
+    match uplay_asked(url) {
+        Some(("launch", id)) => {
+            let id = id.to_string();
+            run_game("uplay-url", game_of(&source_ubisoft::Ubisoft::at(Some(dir.to_path_buf())), &id).as_ref(), &id)
+        }
+        Some((verb, id)) => {
+            note(&format!("uplay-url: asked to {verb} {id}: {}", url.trim()));
+            0
+        }
+        None => {
+            note(&format!("uplay-url: not an address the stand-in Ubisoft Connect knows: {url:?}"));
+            2
+        }
+    }
+}
+
+/// The stand-in Battle.net, as this program is named in a fake Battle.net's folder, which it reads.
+fn battlenet(args: &[String]) -> i32 {
+    let dir = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.to_path_buf()));
+    match (battlenet_asked(args), dir) {
+        (Some(("launch", code)), Some(dir)) => {
+            note(&format!("battlenet: asked to launch {code}: {}", args.join(" ")));
+            run_game("battlenet", game_of(&source_battlenet::BattleNet::at(Some(dir)), &code).as_ref(), &code)
+        }
+        (Some((verb, id)), _) => {
+            note(&format!("battlenet: asked for {verb} {id}: {}", args.join(" ")));
+            0
+        }
+        (None, _) => {
+            note(&format!("battlenet: not a command the stand-in Battle.net knows: {args:?}"));
+            2
+        }
+    }
+}
+
 /// A line in `%E2E_OUT%\standin.log`, and on stderr where there is one.
 fn note(message: &str) {
     eprintln!("standin: {message}");
@@ -316,6 +454,20 @@ fn run(args: &[String]) -> i32 {
                 2
             }
         },
+        Some(what @ ("make-ea" | "make-ubisoft" | "make-battlenet")) => {
+            let Some((dir, json)) = dir_and_json(&args[1..]) else {
+                note(USAGE);
+                return 2;
+            };
+            made(what, dir, make_store(&what["make-".len()..], dir, json))
+        }
+        Some("uplay-url") => match &args[1..] {
+            [dir, url] => uplay_url(Path::new(dir), url),
+            _ => {
+                note(USAGE);
+                2
+            }
+        },
         Some("make-tones") => {
             let [dir] = &args[1..] else {
                 note(USAGE);
@@ -353,8 +505,10 @@ fn run(args: &[String]) -> i32 {
                 2
             }
         },
+        // As a fake Battle.net's client.
+        _ if named("Battle.net") => battlenet(args),
         // As a game's own program, in its install folder.
-        None if named_game() => {
+        None if named("game") => {
             let beside = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join(GAME_ARGS_FILE)));
             let lines = beside.and_then(|file| std::fs::read_to_string(file).ok()).unwrap_or_default();
             let args: Vec<String> = lines.lines().filter(|l| !l.is_empty()).map(str::to_string).collect();
@@ -367,9 +521,9 @@ fn run(args: &[String]) -> i32 {
     }
 }
 
-/// Whether this program is running as `game.exe`.
-fn named_game() -> bool {
-    std::env::current_exe().is_ok_and(|exe| exe.file_stem().is_some_and(|s| s.eq_ignore_ascii_case("game")))
+/// Whether this program is running as `<name>.exe`: `game.exe`, a game's; `Battle.net.exe`, a fake Battle.net's.
+fn named(name: &str) -> bool {
+    std::env::current_exe().is_ok_and(|exe| exe.file_stem().is_some_and(|s| s.eq_ignore_ascii_case(name)))
 }
 
 fn main() {
@@ -503,6 +657,49 @@ mod tests {
         assert_eq!(title(&juniper), "Juniper Signal");
         assert_eq!(run(&strings(&["make-gog"])), 2);
         assert_eq!(run(&strings(&["make-epic", "a", "--yaml", "b"])), 2);
+    }
+
+    #[test]
+    fn make_store_writes_each_fake_and_reads_it_back() {
+        let dir = tempfile::tempdir().unwrap();
+        for store in ["ea", "ubisoft", "battlenet"] {
+            let (root, json) = (dir.path().join(store), dir.path().join(format!("{store}.json")));
+            let args = strings(&[&format!("make-{store}"), root.to_str().unwrap(), "--json", json.to_str().unwrap()]);
+            assert_eq!(run(&args), 0, "make-{store}");
+            let library: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(json).unwrap()).unwrap();
+            let games = library["games"].as_array().unwrap();
+            assert!(games.len() >= 2, "{store}: {games:?}");
+            // Every installed game has this program as its game.exe.
+            for game in games.iter().filter(|g| g["installed"] == true) {
+                let exe = Path::new(game["install_dir"].as_str().unwrap()).join("game.exe");
+                assert!(exe.is_file(), "{}", exe.display());
+            }
+        }
+        assert!(dir.path().join("battlenet").join("Battle.net.exe").is_file());
+        assert_eq!(run(&strings(&["make-ea"])), 2);
+    }
+
+    #[test]
+    fn uplay_and_battlenet_commands() {
+        assert_eq!(uplay_asked("uplay://launch/90310"), Some(("launch", 90_310)));
+        assert_eq!(uplay_asked("uplay://launch/90310/0"), Some(("launch", 90_310)));
+        assert_eq!(uplay_asked("uplay://install/90410/"), Some(("install", 90_410)));
+        assert_eq!(uplay_asked("uplay://uninstall/x"), None);
+        assert_eq!(uplay_asked("steam://launch/5"), None);
+        assert_eq!(battlenet_asked(&strings(&["--exec=launch emb"])), Some(("launch", "emb".into())));
+        assert_eq!(battlenet_asked(&strings(&["--exec=launch", "emb"])), Some(("launch", "emb".into())));
+        assert_eq!(battlenet_asked(&strings(&["--exec=\"launch jnv\""])), Some(("launch", "jnv".into())));
+        assert_eq!(battlenet_asked(&strings(&["--game=emberwatch"])), Some(("game", "emberwatch".into())));
+        assert_eq!(battlenet_asked(&strings(&["--exec=install emb"])), None);
+        assert_eq!(battlenet_asked(&[]), None);
+
+        // A game the fake does not have installed starts nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ubisoft");
+        assert_eq!(run(&strings(&["make-ubisoft", root.to_str().unwrap()])), 0);
+        assert_eq!(uplay_url(&root, "uplay://launch/90410"), 1);
+        assert_eq!(uplay_url(&root, "uplay://install/90410"), 0);
+        assert_eq!(uplay_url(&root, "uplay://store/90410"), 2);
     }
 
     #[test]

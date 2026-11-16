@@ -292,8 +292,9 @@ function Initialize-FakeSteam([string] $Root = 'C:\e2e\steam', [switch] $FullShe
     $library
 }
 
-# Writes a fake store at $Root with `standin <Command> $Root` (make-epic, make-gog) and returns the Library as the
-# Dashboard's own reader read it back, which is also $Json in the test's output.
+# Writes a fake store at $Root with `standin <Command> $Root` (make-epic, make-gog, make-ea, make-ubisoft,
+# make-battlenet) and returns the Library as the Dashboard's own reader read it back, which is also $Json in the
+# test's output.
 function New-FakeStore([string] $Command, [string] $Root, [string] $Json) {
     $standin = Join-Path $script:Payload 'standin.exe'
     if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
@@ -338,6 +339,56 @@ function Initialize-FakeGog([string] $Root = 'C:\e2e\gog') {
     $library = New-FakeStore 'make-gog' $Root 'fake-gog.json'
     $games = @($library.games)
     Say "fake GOG at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard an EA app to read, with none installed: a fake at $Root written by `standin make-ea` (made-up
+# games in a registry.json of Uninstall keys, each installed one's folder with its installerdata.xml:
+# crates/source-ea/src/fixture.rs), which the Dashboard reads when started with `--ea $Root`. An EA game starts as its
+# own program, its folder's game.exe, a copy of standin.exe: nothing is registered.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-ea.json in the test's output): games by
+# name, each with source_id (its content id), name, installed, install_dir.
+function Initialize-FakeEa([string] $Root = 'C:\e2e\ea') {
+    $library = New-FakeStore 'make-ea' $Root 'fake-ea.json'
+    $games = @($library.games)
+    Say "fake EA app at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard a Ubisoft Connect to read, with none installed: a fake at $Root written by `standin make-ubisoft`
+# (made-up games in a registry.json of Installs keys and the client's cache, installed and owned:
+# crates/source-ubisoft/src/fixture.rs), which the Dashboard reads when started with `--ubisoft $Root`; and standin.exe
+# registered as this user's uplay:// handler with $Root, the stand-in client, which starts the game a launch link
+# names: its folder's game.exe, a copy of standin.exe.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-ubisoft.json in the test's output): games
+# by name, each with source_id (its uplay_id), name, installed, install_dir.
+function Initialize-FakeUbisoft([string] $Root = 'C:\e2e\ubisoft') {
+    $library = New-FakeStore 'make-ubisoft' $Root 'fake-ubisoft.json'
+    $standin = Join-Path $script:Payload 'standin.exe'
+    $class = 'HKCU:\Software\Classes\uplay'
+    New-Item "$class\shell\open\command" -Force | Out-Null
+    Set-ItemProperty $class '(default)' 'URL:uplay protocol'
+    Set-ItemProperty $class 'URL Protocol' ''
+    Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" uplay-url `"$Root`" `"%1`""
+    $games = @($library.games)
+    Say "fake Ubisoft Connect at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
+    $library
+}
+
+# Gives the Dashboard a Battle.net to read, with none installed: a fake at $Root written by `standin make-battlenet`
+# (made-up games in the agent's product.db and aggregate.json, and a registry.json of Uninstall keys:
+# crates/source-battlenet/src/fixture.rs), which the Dashboard reads when started with `--battlenet $Root`. Its client,
+# $Root\Battle.net.exe, is a copy of standin.exe, the stand-in Battle.net, which starts the game `--exec="launch <code>"`
+# names: its folder's game.exe. Nothing is registered.
+#
+# Returns the Library as the Dashboard's own reader read it back (also fake-battlenet.json in the test's output):
+# games by name, each with source_id (its product code), name, installed, install_dir.
+function Initialize-FakeBattleNet([string] $Root = 'C:\e2e\battlenet') {
+    $library = New-FakeStore 'make-battlenet' $Root 'fake-battlenet.json'
+    $games = @($library.games)
+    Say "fake Battle.net at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
     $library
 }
 

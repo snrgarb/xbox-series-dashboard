@@ -2,12 +2,15 @@
 name = "standin"
 version = "0.0.0"
 edition = "2021"
-description = "Test support: a fake Steam install, a stand-in Steam and a stand-in game, for the end-to-end tests."
+description = "Test support: fake stores (Steam, EA, Ubisoft, Battle.net), stand-ins for their clients and a stand-in game, for the end-to-end tests."
 
 [dependencies]
 source-steam = { path = "../source-steam" }
 source-epic = { path = "../source-epic" }
 source-gog = { path = "../source-gog" }
+source-ea = { path = "../source-ea" }
+source-ubisoft = { path = "../source-ubisoft" }
+source-battlenet = { path = "../source-battlenet" }
 model = { path = "../model" }
 audio = { path = "../audio" }
 serde_json = "1"
