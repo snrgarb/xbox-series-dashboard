@@ -16,6 +16,21 @@ pub fn ask_store(library: &Library, sources: &[Arc<dyn Source>], game: i64, ask:
     }
 }
 
+/// Starts the App with this id, as it is: no Launch screen and no Play session, whatever is running
+/// (docs/spec/apps.md). The log says `apps: started Notepad: C:\Windows\System32\notepad.exe`.
+pub fn start_app(library: &Library, app: i64, addresses: &mut dyn Addresses) {
+    let Some(app) = library.apps.iter().find(|found| found.id == app) else {
+        eprintln!("apps: no App {app} in the library: nothing started");
+        return;
+    };
+    let start = app.start();
+    if addresses.open(&start) {
+        eprintln!("apps: started {}: {start}", app.name);
+    } else {
+        eprintln!("apps: nothing took {start}: {} isn't started", app.name);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use model::Game;
@@ -47,6 +62,32 @@ mod tests {
         ask_store(&library(), &sources(), 3, Ask::Install, &mut addresses);
         ask_store(&library(), &sources(), 1, Ask::Uninstall, &mut addresses);
         assert_eq!(addresses.opened, ["steam://install/9100040", "steam://uninstall/9100010"]);
+    }
+
+    #[test]
+    fn an_app_is_opened_as_it_is_and_one_not_there_is_not() {
+        let app = |id: i64, kind, target: &str| model::App {
+            id,
+            name: format!("App {id}"),
+            kind,
+            target: target.into(),
+            icon: None,
+        };
+        let library = Library {
+            apps: vec![
+                app(1, model::AppKind::Program, r"C:\Windows\System32\notepad.exe"),
+                app(2, model::AppKind::Store, "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"),
+            ],
+            ..library()
+        };
+        let mut addresses = Recorded::default();
+        for id in [2, 1, 3] {
+            start_app(&library, id, &mut addresses);
+        }
+        assert_eq!(
+            addresses.opened,
+            [r"shell:AppsFolder\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", r"C:\Windows\System32\notepad.exe"]
+        );
     }
 
     #[test]

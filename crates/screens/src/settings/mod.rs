@@ -8,6 +8,8 @@
 //!
 //! **Adding a page:** a struct that implements [`Pane`], and a box that opens it on the pane it belongs to
 //! ([`boxes::Item::Opens`]). Nothing here changes.
+mod add;
+mod added;
 pub mod boxes;
 pub mod controls;
 mod group;
@@ -51,6 +53,8 @@ pub enum Step {
     Open(Box<dyn Pane>),
     /// Something for the Dashboard: an option changed (`Effect::Set`), or another page over Settings.
     Do(PageAction),
+    /// Back one level, and this for the Dashboard: a page that is done once it asks (Add a game's Add).
+    BackWith(PageAction),
 }
 
 /// What shows right of the rail: a category's boxes, or a page a box opened in their place.
@@ -201,6 +205,12 @@ impl Page for Settings {
             }
             Step::Open(pane) => self.panes.push(pane),
             Step::Do(action) => return Some(action),
+            Step::BackWith(action) => {
+                if self.panes.len() > 1 {
+                    self.panes.pop();
+                }
+                return Some(action);
+            }
         }
         None
     }

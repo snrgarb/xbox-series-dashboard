@@ -33,7 +33,7 @@ const BAR: f32 = 6.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Item {
     Games,
-    /// M4: until then its item is there, counts none and shows a note.
+    /// The Apps (docs/spec/apps.md): a grid of them, or a note while there are none.
     Apps,
     PlayHistory,
     FullLibrary,

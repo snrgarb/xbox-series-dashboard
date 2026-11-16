@@ -11,6 +11,8 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
     vec![
         // `--steam` names the install; else the registry does.
         Arc::new(source_steam::Steam::at(args.steam.clone())),
+        // The games added by hand, which are the database's own (docs/spec/apps.md).
+        Arc::new(library::by_hand::Manual),
     ]
 }
 

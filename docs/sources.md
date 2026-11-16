@@ -38,6 +38,10 @@ A source holds no state that changes: one is made at start and shared, as `Arc<d
 - Play sessions, favourite and hidden are the user's: a refresh never touches them. A source's own word on favourites or hidden is taken once, as the game is first seen.
 - The snapshot's `user` is that of the source with the most games shown.
 
+## Games added by hand
+
+The source `manual` (`library::by_hand::Manual`, docs/spec/apps.md) is the user's: its games are added, renamed and removed in Settings' Games & apps, straight into the database (`Database::by_hand`), with `source_id` the program's full path. Its `read` gives nothing, so a sync never touches them; its `start` runs the program in its own folder. Apps are not games and not a source's: they are kept apart, in the `apps` table, and started as they are.
+
 ## Adding a source
 
 1. A crate `crates/source-<store>` depending on `model` and `anyhow`, with a type that implements `model::Source`, its parsers tested on made-up fixtures only (never a real machine's files: `data/` is private).

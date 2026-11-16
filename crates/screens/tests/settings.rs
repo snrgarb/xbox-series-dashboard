@@ -98,10 +98,15 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let database = database();
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
-    // Theme settings: Personalisation, then Guide beside it. The row's end, the top and the foot stop.
-    press(&mut dashboard, &[Right, Right, Up, Down]);
+    // Theme settings: Personalisation, then Guide beside it, and Games & apps under them. The row's end, the top
+    // and the foot stop.
+    press(&mut dashboard, &[Right, Right, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
+    press(&mut dashboard, &[Down, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
+    press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
     // Left from the first column is back a level, as B: the rail.
     press(&mut dashboard, &[Left]);

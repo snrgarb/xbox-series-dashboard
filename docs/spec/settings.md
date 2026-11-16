@@ -241,6 +241,8 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
+The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. Until Idle and Discord come, the boxes close up: Personalisation and Guide on the first row, Games & apps under Personalisation.
+
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
 E/PersonalisationPane.xaml:119-278; a grid of two auto columns and six auto rows.
