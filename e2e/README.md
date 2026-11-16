@@ -179,7 +179,10 @@ from the hub and the Tile menu, the fake install moved along by `standin steam-i
 tiles, the hub's Queue action, Downloads' count, Manage Queue from all three ways in (the hub, Downloads, Manage's
 box) and B back to each with focus restored, its row following the bytes, View on it, an install started in the
 client, one dropped, one done with Manage Queue up and focus going with it to Recently installed, and Uninstall seen
-through), and `overlay` and `video` for the spikes.
+through), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
+Home, in Games a screenful at a time and in Full library, a Game hub of each store's, Search finding two stores' games
+by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
+each), and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets
