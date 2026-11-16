@@ -112,7 +112,10 @@ impl Presses {
         let down = buttons & (GUIDE | GUIDE_KEY) != 0;
         self.guide = match std::mem::take(&mut self.guide) {
             // Pressed again before its tap was told: that tap is dropped, as the Bundle drops it.
-            GuideButton::Up | GuideButton::Tapped { .. } if down => GuideButton::Down { since: now, pad: on_pad },
+            GuideButton::Up | GuideButton::Tapped { .. } if down => {
+                out.push(PadEvent::GuideDown);
+                GuideButton::Down { since: now, pad: on_pad }
+            }
             GuideButton::Up => GuideButton::Up,
             GuideButton::Tapped { due } if now >= due => {
                 out.push(PadEvent::GuideTap);
@@ -206,11 +209,71 @@ fn battery(kind: u8, level: u8) -> Option<Battery> {
     }
 }
 
+/// One pad as XInput reads it: its buttons (the Guide button's bit among them), its triggers and its sticks.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Reading {
+    pub buttons: u16,
+    pub left_trigger: u8,
+    pub right_trigger: u8,
+    pub left: (i16, i16),
+    pub right: (i16, i16),
+}
+
+/// XINPUT_GAMEPAD_TRIGGER_THRESHOLD: a trigger pressed past it is pressed.
+const TRIGGER_THRESHOLD: u8 = 30;
+/// XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE and the right's: a stick pushed less far than this, any way, is at rest.
+const LEFT_DEADZONE: i32 = 7849;
+const RIGHT_DEADZONE: i32 = 8689;
+/// How far a trigger (of 255) or a stick's axis (of 32767 each way) moves before it counts as moved, not as noise.
+const TRIGGER_STEP: i32 = 16;
+const STICK_STEP: i32 = 2048;
+
+impl Reading {
+    /// Whether someone holds the pad off its rest: a button down, a trigger past its threshold, or a stick pushed past
+    /// its deadzone, measured round it as XInput's guidance has, so part way on both axes counts.
+    pub fn off_rest(&self) -> bool {
+        let pushed = |(x, y): (i16, i16), zone: i32| {
+            let (x, y) = (i64::from(x), i64::from(y));
+            x * x + y * y > i64::from(zone) * i64::from(zone)
+        };
+        self.buttons != 0
+            || self.left_trigger > TRIGGER_THRESHOLD
+            || self.right_trigger > TRIGGER_THRESHOLD
+            || pushed(self.left, LEFT_DEADZONE)
+            || pushed(self.right, RIGHT_DEADZONE)
+    }
+
+    /// Whether someone moved the pad from `before` to this: a button pressed or let go, or a trigger or a stick moved
+    /// more than a small step, inside its deadzone or not, so easing one counts and a pad lying still, its readings
+    /// jittering, never does.
+    pub fn moved_since(&self, before: &Reading) -> bool {
+        let moved = |a: i32, b: i32, step: i32| (a - b).abs() > step;
+        let axes = [
+            (self.left.0, before.left.0),
+            (self.left.1, before.left.1),
+            (self.right.0, before.right.0),
+            (self.right.1, before.right.1),
+        ];
+        self.buttons != before.buttons
+            || moved(self.left_trigger.into(), before.left_trigger.into(), TRIGGER_STEP)
+            || moved(self.right_trigger.into(), before.right_trigger.into(), TRIGGER_STEP)
+            || axes.iter().any(|&(now, was)| moved(now.into(), was.into(), STICK_STEP))
+    }
+
+    /// Whether this reading says someone is using the pad, after `before` (none: the pad had just come): what the
+    /// Idle screen counts as input (docs/spec/idle-screen.md).
+    pub fn used(&self, before: Option<&Reading>) -> bool {
+        self.off_rest() || before.is_some_and(|before| self.moved_since(before))
+    }
+}
+
 /// What the thread that reads the pads and the one that asks share.
 #[derive(Default)]
 struct Shared {
     repeat: Mutex<Repeat>,
     status: Mutex<PadStatus>,
+    /// When a pad was last used: held off its rest or moved (`Reading::used`).
+    used: Mutex<Option<Instant>>,
 }
 
 /// The pads, read on a thread of their own every few milliseconds, so a short press is caught however long a frame
@@ -271,9 +334,10 @@ impl Pad {
                 move || {
                     let reader = Reader::new();
                     let (mut held, mut watch) = (Presses::default(), Watch::default());
+                    let mut last: [Option<Reading>; 4] = [None; 4];
                     loop {
                         let now = Instant::now();
-                        let (buttons, first) = reader.read();
+                        let (buttons, first, readings) = reader.read();
                         held.set_repeat(*shared.repeat.lock().unwrap());
                         let events = held.update(buttons, now);
                         let mut news = !events.is_empty();
@@ -281,6 +345,13 @@ impl Pad {
                             if sender.send(event).is_err() {
                                 return;
                             }
+                        }
+                        // After the events: whoever sees a pad used also finds the presses it made waiting.
+                        let used =
+                            readings.iter().zip(&last).any(|(now, was)| now.is_some_and(|n| n.used(was.as_ref())));
+                        last = readings;
+                        if used {
+                            *shared.used.lock().unwrap() = Some(now);
                         }
                         if watch.update(first, now, |pad| reader.battery(pad)) {
                             match first {
@@ -319,6 +390,13 @@ impl Pad {
     pub fn set_repeat(&self, repeat: Repeat) {
         *self.shared.repeat.lock().unwrap() = repeat;
     }
+
+    /// When someone last used a pad, whichever window is in front: a button, a trigger past its threshold or a stick
+    /// past its deadzone held, or any of them moved (`Reading::used`). None since the start, and anywhere but
+    /// Windows. Asked before `poll`, whatever presses that use made are in the `poll` after.
+    pub fn last_used(&self) -> Option<Instant> {
+        *self.shared.used.lock().unwrap()
+    }
 }
 
 #[cfg(windows)]
@@ -343,9 +421,10 @@ impl Reader {
         }
     }
 
-    /// Every pad's buttons together, the left stick counting as the d-pad, and the first pad connected.
-    fn read(&self) -> (u32, Option<u32>) {
-        let (mut buttons, mut first) = (0u32, None);
+    /// Every pad's buttons together, the left stick counting as the d-pad, the first pad connected, and each slot's
+    /// reading.
+    fn read(&self) -> (u32, Option<u32>, [Option<Reading>; 4]) {
+        let (mut buttons, mut first, mut readings) = (0u32, None, [None; 4]);
         unsafe {
             use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_MENU};
             if let Some(get_state) = self.get_state {
@@ -355,6 +434,13 @@ impl Reader {
                         continue;
                     }
                     first = first.or(Some(user));
+                    readings[user as usize] = Some(Reading {
+                        buttons: state.buttons,
+                        left_trigger: state.left_trigger,
+                        right_trigger: state.right_trigger,
+                        left: (state.left_x, state.left_y),
+                        right: (state.right_x, state.right_y),
+                    });
                     buttons |= state.buttons as u32;
                     buttons |= if state.left_x > STICK {
                         RIGHT
@@ -379,7 +465,7 @@ impl Reader {
                 buttons |= GUIDE_KEY;
             }
         }
-        (buttons, first)
+        (buttons, first, readings)
     }
 
     /// What powers this pad, as XInput says it.
@@ -468,8 +554,8 @@ mod tests {
     fn a_tap_of_the_guide_button_is_told_300_ms_after_the_press() {
         let mut presses = Presses::default();
         let start = Instant::now();
-        // Nothing as it goes down: it may yet be a hold.
-        assert!(presses.update(GUIDE, start).is_empty());
+        // Only that it went down: it may yet be a hold.
+        assert_eq!(presses.update(GUIDE, start), [PadEvent::GuideDown]);
         assert!(presses.update(GUIDE, start + ms(100)).is_empty());
         assert_eq!(presses.update(0, start + ms(120)), [GUIDE_UP]);
         assert!(presses.update(0, start + ms(299)).is_empty());
@@ -516,7 +602,7 @@ mod tests {
         let start = Instant::now();
         presses.update(GUIDE, start);
         assert_eq!(presses.update(0, start + ms(100)), [GUIDE_UP]);
-        assert!(presses.update(GUIDE, start + ms(200)).is_empty());
+        assert_eq!(presses.update(GUIDE, start + ms(200)), [PadEvent::GuideDown]);
         assert!(presses.update(GUIDE, start + ms(400)).is_empty());
         assert_eq!(presses.update(0, start + ms(450)), [GUIDE_UP]);
         assert_eq!(presses.update(0, start + ms(500)), [PadEvent::GuideTap]);
@@ -526,7 +612,7 @@ mod tests {
     fn other_buttons_go_on_as_they_do_while_the_guide_button_is_down() {
         let mut presses = Presses::default();
         let start = Instant::now();
-        presses.update(GUIDE, start);
+        assert_eq!(presses.update(GUIDE, start), [PadEvent::GuideDown]);
         assert_eq!(presses.update(GUIDE | A, start + ms(100)), [press(Button::A)]);
         assert_eq!(presses.update(GUIDE, start + ms(700)), [PadEvent::Release(Button::A), PadEvent::GuideHeld]);
     }
@@ -535,7 +621,7 @@ mod tests {
     fn the_keyboards_guide_button_is_a_tap_however_long_it_is_held() {
         let mut presses = Presses::default();
         let start = Instant::now();
-        assert!(presses.update(GUIDE_KEY, start).is_empty());
+        assert_eq!(presses.update(GUIDE_KEY, start), [PadEvent::GuideDown]);
         assert!(presses.update(GUIDE_KEY, start + ms(2000)).is_empty());
         assert_eq!(presses.update(0, start + ms(2100)), [GUIDE_UP, PadEvent::GuideTap]);
     }
@@ -571,6 +657,34 @@ mod tests {
         // A pad that does not say what powers it is still a pad.
         assert!(watch.update(Some(2), start + BATTERY_EVERY * 4, |_| None));
         assert_eq!(watch.status, PadStatus { connected: true, battery: None });
+    }
+
+    #[test]
+    fn a_pad_held_off_its_rest_is_in_use_and_one_at_rest_is_not() {
+        let rest = Reading::default();
+        assert!(!rest.used(None) && !rest.used(Some(&rest)));
+        // A button, the Guide button's bit among them.
+        assert!(Reading { buttons: 0x0400, ..rest }.used(Some(&rest)));
+        // A trigger past its threshold, not at it.
+        assert!(!Reading { left_trigger: 30, ..rest }.off_rest());
+        assert!(Reading { right_trigger: 31, ..rest }.off_rest());
+        // A stick past its deadzone round it: part way on both axes counts, where neither alone would.
+        assert!(!Reading { left: (7000, 0), ..rest }.off_rest());
+        assert!(Reading { left: (6000, 6000), ..rest }.off_rest());
+        assert!(!Reading { right: (8689, 0), ..rest }.off_rest());
+        assert!(Reading { right: (0, -8690), ..rest }.off_rest());
+    }
+
+    #[test]
+    fn a_pad_moved_inside_its_deadzone_is_in_use_and_one_jittering_is_not() {
+        let lying = Reading { left: (1200, -900), right: (300, 400), left_trigger: 3, ..Reading::default() };
+        let jitter = Reading { left: (1300, -1000), right: (250, 450), left_trigger: 10, ..lying };
+        assert!(!jitter.used(Some(&lying)));
+        // Eased a little more than a step, inside the deadzone still.
+        assert!(Reading { left: (1200 + 2049, -900), ..lying }.used(Some(&lying)));
+        assert!(Reading { left_trigger: 3 + 17, ..lying }.used(Some(&lying)));
+        // A pad that has just come counts only if it is held.
+        assert!(!lying.used(None));
     }
 
     #[test]

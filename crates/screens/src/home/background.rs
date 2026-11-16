@@ -25,7 +25,7 @@ pub const FADE_SECONDS: f32 = 0.4;
 pub const FADE_SECONDS_REDUCED: f32 = 0.15;
 
 /// How much of a blurred cover's light its darkening leaves: it lies under a sheet of `#99000000`.
-const BLURRED_LIGHT: f32 = 1.0 - 0x99 as f32 / 255.0;
+pub(crate) const BLURRED_LIGHT: f32 = 1.0 - 0x99 as f32 / 255.0;
 
 /// A game's art for the whole screen, and whether it is the blurred stand-in.
 type Hero = (ArtKey, bool);

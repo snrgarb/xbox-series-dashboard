@@ -130,12 +130,17 @@ try {
     Start-Sleep -Milliseconds 800
     if ((Focus-Now) -notmatch 'Settings: Rail: Theme settings$') { $failures += "Down on the rail's one item moved focus: '$(Focus-Now)'" }
 
-    # Into the category: its first box. Along the row to its end, the Guide box; its page, and B back on the box.
+    # Into the category: its first box. Along the row to its end, the Idle box; its page, and B back on the box. Then
+    # down to the Guide box, its page, and back.
     Press Right 'Settings: Theme settings: Personalisation' '29-settings-theme-settings-box-focused'
-    Walk-ToEdge Right 'Settings: Theme settings: Guide'
+    Walk-ToEdge Right 'Settings: Theme settings: Idle'
+    Press A 'Settings: Idle: Dim after' '33-settings-idle'
+    Press B 'Settings: Theme settings: Idle'
+    Walk Left 'Settings: Theme settings: Personalisation' 3
+    Press Down 'Settings: Theme settings: Guide'
     Press A 'Settings: Guide: Use the Guide' '35-settings-guide'
     Press B 'Settings: Theme settings: Guide'
-    Walk Left 'Settings: Theme settings: Personalisation' 3
+    Press Up 'Settings: Theme settings: Personalisation'
 
     # Personalisation: Boot video and Profiles, Groups, then a checkbox box a row, the focused one's info beside it.
     # Background delay off, Reduce motion on.

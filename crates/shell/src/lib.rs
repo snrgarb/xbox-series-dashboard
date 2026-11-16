@@ -7,6 +7,7 @@
 pub mod account;
 pub mod audio;
 pub mod freeze;
+pub mod idle;
 mod launch;
 pub mod media;
 pub mod overlay;

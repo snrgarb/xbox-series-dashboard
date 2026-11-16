@@ -1,12 +1,13 @@
 //! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). The boxes of
-//! features still to come (Who's playing today?, Idle, Discord) come with them, and those that are here close up in
-//! the grid meanwhile. Games & apps and Art are the port's own.
+//! features still to come (Who's playing today?, Discord) come with them, and those that are here close up in the
+//! grid meanwhile. Games & apps and Art are the port's own.
 use super::added::{self, Added};
 use super::art::Art;
 use super::boot_video::BootVideoPage;
 use super::boxes::{Boxes, Item};
 use super::groups::Groups;
 use super::guide::Guide;
+use super::idle::Idle;
 use super::profiles::Profiles;
 use super::Setting;
 
@@ -14,11 +15,13 @@ use super::Setting;
 pub fn theme_settings() -> Boxes {
     let personalisation =
         Item::Opens { icon: '\u{E771}', name: "Personalisation", pane: |_| Box::new(personalisation()) };
+    let idle = Item::Opens { icon: '\u{E708}', name: "Idle", pane: |_| Box::new(Idle::new()) };
     let guide = Item::Opens { icon: '\u{E7FC}', name: "Guide", pane: |_| Box::new(Guide::new()) };
     let added = Item::Opens { icon: '\u{E71D}', name: added::TITLE, pane: |around| Box::new(Added::open(around)) };
-    // The port's own (docs/spec/settings.md, 16.8): beside Games & apps, where the Bundle has Discord.
+    // The port's own (docs/spec/settings.md, 16.8): beside Games & apps. Idle is in the Bundle's place beside
+    // Personalisation, and Guide under it; Discord's place beside Guide is empty until it comes (M6).
     let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |_| Box::new(Art::default()) };
-    Boxes::new("Theme settings", vec![vec![personalisation, guide], vec![added, art]])
+    Boxes::new("Theme settings", vec![vec![personalisation, idle], vec![guide], vec![added, art]])
 }
 
 /// Personalisation's boxes: Boot video (docs/spec/start-up.md) and Profiles (docs/spec/profiles.md) on the first

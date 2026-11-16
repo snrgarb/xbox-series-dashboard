@@ -37,11 +37,15 @@ pub struct Press {
     pub repeat: bool,
 }
 
-/// What a pad says happened. Every button but the Guide button is a `Press` as it goes down; the Guide button does
-/// nothing as it goes down, since only what follows says whether it was a tap or a hold (docs/spec/guide.md, 7.1).
+/// What a pad says happened. Every button but the Guide button is a `Press` as it goes down; the Guide button is
+/// only `GuideDown` as it goes down, which means nothing yet, since only what follows says whether it was a tap or a
+/// hold (docs/spec/guide.md, 7.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PadEvent {
     Press(Press),
+    /// The Guide button went down. It does nothing but wake the Idle screen, whose wake swallows the tap or hold
+    /// that follows (docs/spec/idle-screen.md).
+    GuideDown,
     /// The button was let go.
     Release(Button),
     /// The Guide button was let go before it had been held: a tap. Told 300 ms after it went down, or as it is let

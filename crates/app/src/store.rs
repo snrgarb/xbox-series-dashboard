@@ -446,9 +446,10 @@ impl Store {
     /// Settings' options as the database has them: each its default until it has been set. Those that are set
     /// are said in the log, which is how a test knows a change outlived the Dashboard that made it.
     pub fn options(&self) -> Options {
-        for setting in Setting::ALL {
-            if let Some(value) = self.setting(setting.key()) {
-                eprintln!("settings: {} is {value}", setting.key());
+        let keys = Setting::ALL.iter().map(|setting| setting.key());
+        for key in keys.chain([screens::idle::DIM_KEY, screens::idle::SHOW_KEY]) {
+            if let Some(value) = self.setting(key) {
+                eprintln!("settings: {key} is {value}");
             }
         }
         if let Some(value) = self.setting(screens::settings::BOOT_VIDEO) {

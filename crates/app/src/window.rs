@@ -12,8 +12,9 @@ use model::{Library, Sound};
 use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
 use screens::toasts::Seen;
-use screens::{Dashboard, Effect, OverlayShows, Setting};
+use screens::{Dashboard, Effect, Options, OverlayShows, Setting};
 use shell::audio::{self, AudioControl, SystemAudio};
+use shell::idle::LastInput;
 use shell::media::{self, MediaSessions};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::store::{Addresses, Ask, ProgramAddresses, SystemAddresses};
@@ -178,6 +179,11 @@ struct App {
     art_started: bool,
     /// What it says as it goes, for the loop to take in.
     art_events: (Sender<ArtEvent>, Receiver<ArtEvent>),
+    /// When the keyboard or the mouse was last used anywhere in Windows: the Idle screen counts from it, and from
+    /// the pads' own (docs/spec/idle-screen.md, 2).
+    input_clock: Box<dyn LastInput>,
+    /// `--idle-after`'s times: in force in place of Settings' whatever Settings says, and never saved.
+    idle_after: Option<screens::idle::Times>,
 }
 
 /// What a Toast says when SteamGridDB refuses the key (a 401): once, and no lookups until another key is entered.
@@ -286,7 +292,13 @@ pub fn run(args: &Args, library: Library, store: Store) {
     if !options.use_guide {
         eprintln!("guide: off ({}): the Guide button does nothing", Setting::UseGuide.key());
     }
+    // The Idle screen's times: Settings', or a test's in their place (docs/spec/idle-screen.md).
+    let options = Options { idle: args.idle_after.unwrap_or(options.idle), ..options };
+    let given = if args.idle_after.is_some() { "--idle-after" } else { "Settings" };
+    eprintln!("idle: {} ({given})", options.idle.describe());
     dashboard.set_options(options);
+    // The cards come in a different order each time the Dashboard starts.
+    dashboard.seed_idle(SystemTime::now().duration_since(UNIX_EPOCH).map_or(1, |since| since.as_nanos() as u64));
     // Settings > Guide's Now Playing source, as it was left: Spotify until one is chosen.
     dashboard.set_now_playing_source(store.setting(screens::now_playing::SOURCE_KEY).as_deref());
     for text in &args.notify {
@@ -382,6 +394,8 @@ pub fn run(args: &Args, library: Library, store: Store) {
         art: None,
         art_started: false,
         art_events: mpsc::channel(),
+        input_clock: shell::idle::system(),
+        idle_after: args.idle_after,
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
@@ -761,6 +775,13 @@ impl App {
                     self.stale = true;
                     self.overlay_stale = true;
                 }
+                // Settings > Idle's two times: in force already, from now, and saved.
+                Effect::IdleTimes(times) => {
+                    for (key, value) in times.saved() {
+                        self.store.set_text(key, &value);
+                    }
+                    eprintln!("idle: {}", times.describe());
+                }
                 // In force already: saved, so that it is still so the next time.
                 Effect::Set(change) => {
                     self.store.set(change);
@@ -910,6 +931,26 @@ impl App {
     fn log_groups(&self) {
         eprintln!("groups: {}", self.dashboard.home_groups().join(", "));
     }
+
+    /// What the Idle screen did this turn, in the log whatever the flags (`idle: dimmed at 4012 ms`, `idle:
+    /// showing things at 7003 ms`, `idle: woken by A at 9120 ms`): both windows draw it afresh.
+    fn say_idle(&mut self) {
+        for news in self.dashboard.take_idle_news() {
+            eprintln!("idle: {news} at {:.0} ms", since_start());
+            self.stale = true;
+            self.overlay_stale = true;
+        }
+    }
+
+    /// With --idle-after, its times stay in force: a change in Settings is saved as ever, but counted by only from
+    /// the Dashboard's next start.
+    fn keep_idle_after(&mut self) {
+        let Some(times) = self.idle_after else { return };
+        if self.dashboard.idle_times() != times {
+            eprintln!("idle: {} (--idle-after, in place of Settings')", times.describe());
+            self.dashboard.set_options(screens::Options { idle: times, ..self.dashboard.options() });
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -977,6 +1018,11 @@ impl ApplicationHandler for App {
         // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
         let focus = self.dashboard.focus_line();
         let guide = self.dashboard.guide_line();
+        // The last input anywhere, read before the pad's events are taken (`pad.poll`): a press among them that
+        // made it is then still to come, and is the Idle screen's wake press (docs/spec/idle-screen.md, 5).
+        if let Some(at) = shell::idle::later(self.input_clock.last_input(), self.pad.last_used()) {
+            self.dashboard.input_seen(at);
+        }
         // Toasts are timed by the time the Dashboard is told has passed: told first, so that one posted this turn
         // starts from its start.
         let mut toasts_changed = self.dashboard.advance(told(&mut self.told_time));
@@ -1112,6 +1158,7 @@ impl ApplicationHandler for App {
         for press in presses {
             self.dashboard.press(press);
         }
+        self.say_idle();
         if self.log_focus && self.dashboard.focus_line() != focus {
             eprintln!("focus: {}", self.dashboard.focus_line());
         }
@@ -1132,6 +1179,8 @@ impl ApplicationHandler for App {
         if self.log_focus && self.dashboard.focus_line() != said {
             eprintln!("focus: {}", self.dashboard.focus_line());
         }
+        // Settings > Idle's times, which an --idle-after run keeps in place of them.
+        self.keep_idle_after();
         let audio_wants = self.follow_audio();
         self.follow_media();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
@@ -1195,6 +1244,10 @@ impl ApplicationHandler for App {
         // at all behind a game or under its Launch screen, where it keeps the last frame it showed. The loop looks
         // every IDLE at most, which is how late the clock can be.
         let due = minute() != self.minute;
+        // The Idle screen's time is on the Overlay.
+        if due && self.dashboard.idle_stage() == screens::idle::Stage::ShowingThings {
+            self.overlay_stale = true;
+        }
         // And when what was drawn last asked to be drawn again: a delay's end, the swirl's next step.
         let covered = self.dashboard.home_covered();
         let wake = state.host.wake().filter(|_| !covered).map(Duration::from_secs_f32);
@@ -1226,8 +1279,20 @@ impl ApplicationHandler for App {
         // And in time for the Toasts' next change: one goes, the next shows.
         let toasts = queue;
         let timer = self.dashboard.timer().map(Duration::from_secs_f32);
-        let wants =
-            [Some(IDLE), launch, overlay_wants, toasts_want, toasts, home_wants, release_wants, timer, audio_wants];
+        // And on the moment the Idle screen dims, shows things or turns a card.
+        let idle = self.dashboard.idle_timer().map(Duration::from_secs_f32);
+        let wants = [
+            Some(IDLE),
+            launch,
+            overlay_wants,
+            toasts_want,
+            toasts,
+            home_wants,
+            release_wants,
+            timer,
+            audio_wants,
+            idle,
+        ];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
     }

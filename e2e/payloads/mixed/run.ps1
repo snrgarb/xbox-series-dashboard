@@ -242,6 +242,7 @@ function Open-GamesAndApps {
     Go-TopBar 'Settings'
     Press A 'Settings: Rail: Theme settings' | Out-Null
     Press Right 'Settings: Theme settings: Personalisation' | Out-Null
+    Press Down 'Settings: Theme settings: Guide' | Out-Null
     Press Down 'Settings: Theme settings: Games & apps' | Out-Null
     Press A 'Settings: GamesAndApps: Add a game; .+' | Out-Null
 }

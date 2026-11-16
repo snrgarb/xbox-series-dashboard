@@ -136,7 +136,7 @@ try {
     if ((Get-LastLine 'focus') -notmatch 'TopBar\(Settings\)$') { throw "Focus never reached the top bar's Settings (focus: $(Get-LastLine 'focus'))" }
     Step A '^focus: Settings: Rail: Theme settings$' | Out-Null
     Step Right '^focus: Settings: Theme settings: Personalisation$' | Out-Null
-    Step Right '^focus: Settings: Theme settings: Guide$' | Out-Null
+    Step Down '^focus: Settings: Theme settings: Guide$' | Out-Null
     Step A '^focus: Settings: Guide: Use the Guide$' | Out-Null
     Step Down '^focus: Settings: Guide: Now Playing source$' | Out-Null
     Step A '^focus: Settings: Guide: Now Playing source, list on "' '01-source-list' | Out-Null

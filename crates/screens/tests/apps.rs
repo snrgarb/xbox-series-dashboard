@@ -48,7 +48,7 @@ impl Shell {
     /// Theme settings > Games & apps, focus on its first Row.
     fn games_and_apps(&mut self) {
         self.dashboard.open_page(Open::Settings(settings::Entry::Rail));
-        self.press(&[Right, Down]);
+        self.press(&[Right, Down, Down]);
         assert_eq!(self.focus(), "Settings: Theme settings: Games & apps");
         self.press(&[A]);
         assert!(self.focus().starts_with("Settings: GamesAndApps: Add a game; "), "{}", self.focus());
@@ -551,7 +551,7 @@ fn my_games_apps() {
 fn settings_games_and_apps() {
     let mut stage = Stage::with_apps();
     stage.shell.dashboard.open_page(Open::Settings(settings::Entry::Rail));
-    stage.press(&[Right, Down]);
+    stage.press(&[Right, Down, Down]);
     stage.check("settings-theme-settings-games-and-apps");
     stage.press(&[A, Down, Down, Down]);
     assert_eq!(stage.shell.focus(), "Settings: GamesAndApps: App Orbit; 1 game, 4 apps");

@@ -2,7 +2,7 @@
 //! focused game's art. docs/spec/home.md has the Bundle's measures and rules, which these are.
 //!
 //! This file is where focus is and where it goes; each part of the page draws itself in its own module.
-mod background;
+pub(crate) mod background;
 pub(crate) mod groups;
 mod recent;
 mod swirl;

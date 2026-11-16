@@ -11,6 +11,7 @@ pub mod game_hub;
 pub mod guide;
 pub mod hint_bar;
 pub mod home;
+pub mod idle;
 pub mod keyboard;
 pub mod launch;
 pub mod manage_queue;
@@ -84,6 +85,9 @@ pub enum Effect {
     /// Settings changed an option. The Dashboard has taken the change already: this is for whoever keeps the
     /// settings to save it.
     Set(settings::Change),
+    /// Settings > Idle changed its times: the Dashboard counts by them already, from now; they are for whoever
+    /// keeps the settings to save (`idle::Times::saved`).
+    IdleTimes(idle::Times),
     /// Mark the game with this id in the library database as a favourite, or as one no longer. The shell answers
     /// with a new snapshot of the library (`set_library`).
     Favourite { game: i64, on: bool },
@@ -231,11 +235,16 @@ pub struct Dashboard {
     /// Start-up, while it shows (docs/spec/start-up.md): full screen over everything, with the pad and the Guide
     /// button to itself.
     startup: Option<Startup>,
+    /// The Idle screen (docs/spec/idle-screen.md): its stage, counted on the Dashboard's clock.
+    idle: idle::Idle,
+    /// What the Idle screen's cards count "Played yesterday" from, in place of the machine's date: a test's.
+    date: Option<chrono::NaiveDate>,
     effects: Vec<Effect>,
 }
 
 impl Dashboard {
     pub fn new(library: Library) -> Self {
+        let now = Instant::now();
         Self {
             library,
             clock: None,
@@ -263,9 +272,11 @@ impl Dashboard {
             audio: Audio::default(),
             now_playing: now_playing::NowPlaying::default(),
             now_playing_second: None,
-            now: Instant::now(),
+            now,
             waiting: None,
             startup: None,
+            idle: idle::Idle::new(now),
+            date: None,
             effects: Vec::new(),
         }
     }
@@ -479,6 +490,10 @@ impl Dashboard {
 
     /// Every option at once, as the settings table has them at start-up. In force from the next press and frame.
     pub fn set_options(&mut self, options: Options) {
+        // New idle times count from now.
+        if options.idle != self.idle.times() {
+            self.idle.set_times(options.idle, self.now);
+        }
         self.options = options;
         self.home.set_background_delay(options.background_delay);
         self.home.set_play_history(options.show_play_history, &self.library);
@@ -537,6 +552,10 @@ impl Dashboard {
     /// pad, if that takes text now (text entry; Search). False if nothing took it: Backspace is then B, as it is
     /// everywhere else, and anything else nothing.
     pub fn typed(&mut self, typed: keyboard::Typed) -> bool {
+        // The key that wakes the Idle screen types nothing.
+        if self.idle.typed(self.now) {
+            return true;
+        }
         if !self.page_has_pad() {
             return false;
         }
@@ -561,7 +580,22 @@ impl Dashboard {
             return;
         }
         let guide = Press { button: Button::Guide, repeat: false };
+        // While the Idle screen is up the first input only wakes it, and nothing of that press does more.
+        let now = self.now;
+        let swallowed = match event {
+            PadEvent::Press(press) => self.idle_press(press),
+            PadEvent::Release(Button::Guide) => self.idle.guide_release(),
+            PadEvent::Release(button) => self.idle.release(button),
+            PadEvent::GuideDown => self.idle.guide_down(now),
+            PadEvent::GuideTap => self.idle.guide_tap(),
+            PadEvent::GuideHeld => self.idle.guide_held(),
+        };
+        if swallowed {
+            return;
+        }
         match event {
+            // Nothing yet: whether it is a tap or a hold is told later.
+            PadEvent::GuideDown => {}
             PadEvent::Press(press) => {
                 let was_open = self.guide.is_open();
                 let page = self.page_has_pad().then(|| self.pages.depth());
@@ -629,6 +663,7 @@ impl Dashboard {
             startup.advance(seconds);
         }
         self.timed |= self.wait_out();
+        self.timed |= self.idle_tick();
         // The Now Playing card's time turned a second: it is drawn again.
         let second = self.now_playing_second();
         if second != self.now_playing_second {
@@ -667,6 +702,12 @@ impl Dashboard {
         let second = self.audio_shown().then(|| self.now_playing.next_second(self.now)).flatten();
         let second = second.map(|left| left.as_secs_f32());
         [quit, self.close_in, tap, second].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+    }
+
+    /// How soon the Idle screen has something to do, in seconds: dim, show things, turn a card, end a wake's grace.
+    /// Apart from `timer`, which is what the screens time, as this is nearly always counting.
+    pub fn idle_timer(&self) -> Option<f32> {
+        self.idle.due(self.now).map(|left| left.as_secs_f32())
     }
 
     /// The double tap's wait, at `now`: the Game hub of the game whose tile A chose on Home once its time has
@@ -847,6 +888,9 @@ impl Dashboard {
             self.startup_press(press);
             return;
         }
+        if self.idle_press(press) {
+            return;
+        }
         let now = self.now;
         let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
@@ -913,6 +957,11 @@ impl Dashboard {
                 self.pages.open_over(open, around);
             }
             PageAction::Effect(Effect::Set(change)) => self.set(change),
+            // Settings > Idle: in force at once, counting from now, and saved.
+            PageAction::Effect(Effect::IdleTimes(times)) => {
+                self.set_options(Options { idle: times, ..self.options });
+                self.effects.push(Effect::IdleTimes(times));
+            }
             // Settings > Guide's Now Playing source: followed at once, and saved; one that was set already, or is
             // not among the choices, changes nothing.
             PageAction::Effect(Effect::NowPlayingSource(source)) => {
@@ -1551,7 +1600,7 @@ impl Dashboard {
         let guide = self.guide_overlaid && self.guide.showing();
         if self.guide_overlaid && (self.guide.is_open() || self.release_awaited.is_some()) {
             OverlayShows::Guide
-        } else if guide || self.launch.showing() {
+        } else if guide || self.launch.showing() || (self.has_overlay && self.idle.shown()) {
             OverlayShows::Passive
         } else {
             OverlayShows::Nothing
@@ -1719,6 +1768,10 @@ impl Dashboard {
         if !self.guide_overlaid {
             self.draw_guide(ui);
         }
+        // With no Overlay the Idle screen dims Home's window, over everything in it but the Toast.
+        if !self.has_overlay {
+            self.draw_idle(ui);
+        }
     }
 
     /// The Overlay: the Launch screen, and the Guide. Drawn over nothing, so where it draws nothing the game shows,
@@ -1730,6 +1783,10 @@ impl Dashboard {
         self.launch.draw(ui, self.slow_renderer);
         if self.guide_overlaid {
             self.draw_guide(ui);
+        }
+        // Over all of it: the Launch screen, the Guide, its dialogs; under the Toasts' strip.
+        if self.has_overlay {
+            self.draw_idle(ui);
         }
     }
 
@@ -1822,7 +1879,7 @@ impl Dashboard {
                 }
             }
             PadEvent::GuideTap => self.guide_button_spent = false,
-            PadEvent::Release(_) => {}
+            PadEvent::GuideDown | PadEvent::Release(_) => {}
         }
     }
 
@@ -1837,6 +1894,80 @@ impl Dashboard {
             startup.draw(ui);
         }
         true
+    }
+
+    // --- The Idle screen (docs/spec/idle-screen.md) ---
+
+    /// Where the Idle screen is.
+    pub fn idle_stage(&self) -> idle::Stage {
+        self.idle.stage()
+    }
+
+    /// The card the Idle screen's panel shows, while it is Showing things.
+    pub fn idle_card(&self) -> Option<&idle::Card> {
+        (self.idle.stage() == idle::Stage::ShowingThings).then(|| self.idle.card().map(|(_, card)| card)).flatten()
+    }
+
+    /// The Idle screen's times as they are in force: Settings', or `--idle-after`'s.
+    pub fn idle_times(&self) -> idle::Times {
+        self.idle.times()
+    }
+
+    /// What the Idle screen did since this was last asked, for the log (`idle: dimmed`, `idle: woken by A`).
+    pub fn take_idle_news(&mut self) -> Vec<idle::News> {
+        self.idle.take_news()
+    }
+
+    /// The shell's clock saw input anywhere in Windows at `at`: the keyboard, the mouse, a pad. Told each turn,
+    /// before `advance` and before the presses the input made, so that one of those is the wake press.
+    pub fn input_seen(&mut self, at: Instant) {
+        self.idle.input_at(at, self.now);
+    }
+
+    /// The Idle screen's cards are shuffled from here: the window's, from the time it starts.
+    pub fn seed_idle(&mut self, seed: u64) {
+        self.idle.seed(seed);
+    }
+
+    /// The date the Idle screen's cards count from ("Played yesterday"), in place of the machine's: a test's.
+    pub fn set_date(&mut self, date: Option<chrono::NaiveDate>) {
+        self.date = date;
+    }
+
+    /// The Idle screen at the Dashboard's clock: it waits while Start-up or a Launch screen shows, else moves on if
+    /// its time has come. True when what it shows changed.
+    fn idle_tick(&mut self) -> bool {
+        let now = self.now;
+        self.idle.wait(self.startup.is_some() || self.launch.up(), now);
+        let (library, use_guide) = (&self.library, self.options.use_guide);
+        let today = self.date.unwrap_or_else(idle::cards::today);
+        self.idle.tick(now, || idle::cards::pool(library, use_guide, today))
+    }
+
+    /// A press as the Idle screen has it: true when it was the wake press, or part of it, and does nothing more. Y's
+    /// wake press on a game's card opens the game's Game hub, unless a game is running (the Bundle's "See game").
+    fn idle_press(&mut self, press: Press) -> bool {
+        match self.idle.press(press, self.now) {
+            idle::Pressed::Pass => false,
+            idle::Pressed::Swallowed => true,
+            idle::Pressed::Woke(card) => {
+                let game = card.and_then(|card| card.game).filter(|_| press.button == Button::Y);
+                let game = game.and_then(|key| self.library.games.iter().find(|game| game.is(&key)));
+                if let Some(entry) = game.map(game_hub::Entry::of).filter(|_| self.playing.is_none()) {
+                    self.close_guide();
+                    self.close_pages();
+                    self.open_page(Open::GameHub(entry));
+                }
+                self.timed = true;
+                true
+            }
+        }
+    }
+
+    /// The dim and the panel, over whatever is drawn already.
+    fn draw_idle(&mut self, ui: &mut Ui) {
+        let clock = self.clock();
+        idle::draw(ui, &mut self.idle, &self.library, &clock);
     }
 }
 

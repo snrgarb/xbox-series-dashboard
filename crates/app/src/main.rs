@@ -83,6 +83,8 @@ pub struct Args {
     /// Notifications that are in the list as the Dashboard starts, in order, with no Toast: what a test has in the
     /// Notifications Flyout.
     notify: Vec<String>,
+    /// The Idle screen's two times in seconds, in place of Settings' and not saved: a test's, a few seconds long.
+    idle_after: Option<screens::idle::Times>,
 }
 
 impl Args {
@@ -110,7 +112,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--fake-media [--fake-media-art <picture>]]
                  [--log-queue-sources]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
-                 [--art-service <url>] [--store-art-service <url>]
+                 [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
@@ -193,6 +195,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--notify" => args.notify.push(value()?),
             "--art-service" => args.art_service = Some(value()?),
             "--store-art-service" => args.store_art_service = Some(value()?),
+            "--idle-after" => args.idle_after = Some(screens::idle::Times::parse_seconds(&value()?)?),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -259,5 +262,14 @@ mod tests {
         assert!(args.dry_power);
         assert_eq!(parse(&[]).unwrap().open_addresses_with, None);
         assert!(parse(&["--open-addresses-with"]).is_err());
+    }
+
+    #[test]
+    fn idle_after_is_two_times_in_seconds() {
+        let args = parse(&["--idle-after", "3,6"]).unwrap();
+        let secs = |n| Some(std::time::Duration::from_secs(n));
+        assert_eq!(args.idle_after, Some(screens::idle::Times { dim_after: secs(3), show_after: secs(6) }));
+        assert!(parse(&["--idle-after", "3"]).is_err());
+        assert_eq!(parse(&[]).unwrap().idle_after, None);
     }
 }
