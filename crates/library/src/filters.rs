@@ -106,7 +106,7 @@ fn order(sort: Sort, descending: bool) -> String {
 
 /// The `WHERE` of a rule, with the values its `?`s stand for.
 fn clauses(rule: &Rule, collection: Option<i64>, now: i64) -> (String, Vec<Value>) {
-    let mut clauses = vec!["gone = 0".to_string(), format!("hidden = {}", i64::from(rule.hidden))];
+    let mut clauses = vec![crate::launchers::shown("games"), format!("hidden = {}", i64::from(rule.hidden))];
     let mut values: Vec<Value> = Vec::new();
     let mut clause = |text: &str, value: i64| {
         clauses.push(text.to_string());

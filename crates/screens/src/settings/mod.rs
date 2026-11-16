@@ -19,6 +19,7 @@ mod group;
 pub mod groups;
 mod guide;
 pub mod idle;
+pub mod launchers;
 pub mod options;
 mod profiles;
 mod theme_settings;

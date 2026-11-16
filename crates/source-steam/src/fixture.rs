@@ -273,6 +273,17 @@ pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
     for dir in [&appcache, &steamapps, &config] {
         fs::create_dir_all(dir)?;
     }
+    // Written afresh: no change made to an earlier fixture here ([`change`]) is kept.
+    let mut gone = vec![root.join(CHANGES)];
+    if spec.games.iter().all(|game| game.appid != ADDED_GAME.0) {
+        gone.push(steamapps.join(format!("appmanifest_{}.acf", ADDED_GAME.0)));
+    }
+    for file in gone {
+        match fs::remove_file(&file) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
     fs::write(appcache.join("appinfo.vdf"), appinfo(spec))?;
     fs::write(appcache.join("packageinfo.vdf"), packageinfo(spec))?;
     fs::write(config.join("localconfig.vdf"), localconfig(spec))?;
@@ -664,6 +675,112 @@ pub fn write_progress(root: &Path, appid: u32, progress: Progress) -> io::Result
     fs::rename(part, file)
 }
 
+// ------------------------------------------------------------------- changes
+
+/// The game a change adds to the standard fixture ([`Change::AddGame`]): installed, never played.
+pub const ADDED_GAME: (u32, &str) = (9_100_800, "Paper Lighthouse");
+
+/// The file in a fake Steam's folder that keeps the changes made to it, one a line, so that each is written over
+/// the standard fixture with those before it.
+const CHANGES: &str = "fixture-changes.txt";
+
+/// A change to the standard fixture while the Dashboard reads it, as Steam's own files change: what Settings >
+/// Launchers' Update now is to bring in (`standin steam-change`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    /// [`ADDED_GAME`] is the user's, installed.
+    AddGame,
+    /// The game `appid` was played `minutes` more, last at `at` (Unix seconds).
+    Played { appid: u32, minutes: u32, at: u64 },
+}
+
+impl Change {
+    fn line(self) -> String {
+        match self {
+            Change::AddGame => "add".to_string(),
+            Change::Played { appid, minutes, at } => format!("played {appid} {minutes} {at}"),
+        }
+    }
+
+    fn parse(line: &str) -> Option<Change> {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            ["add"] => Some(Change::AddGame),
+            ["played", appid, minutes, at] => Some(Change::Played {
+                appid: appid.parse().ok()?,
+                minutes: minutes.parse().ok()?,
+                at: at.parse().ok()?,
+            }),
+            _ => None,
+        }
+    }
+
+    fn apply(self, spec: &mut Fixture) {
+        match self {
+            Change::AddGame if spec.games.iter().all(|game| game.appid != ADDED_GAME.0) => {
+                spec.games.push(FixtureGame {
+                    appid: ADDED_GAME.0,
+                    name: ADDED_GAME.1.to_string(),
+                    install_dir: ADDED_GAME.1.to_string(),
+                    installed: true,
+                    last_played: 0,
+                    playtime_minutes: 0,
+                    art: Art::Flat,
+                    facts: Facts::default(),
+                    size_on_disk: 2_000_000_000,
+                });
+            }
+            Change::AddGame => {}
+            Change::Played { appid, minutes, at } => {
+                if let Some(game) = spec.games.iter_mut().find(|game| game.appid == appid) {
+                    game.playtime_minutes += minutes;
+                    game.last_played = game.last_played.max(at);
+                }
+            }
+        }
+    }
+}
+
+/// Makes `change` to the standard fixture written at `root` (with `game_exe` as an added game's program), on top of
+/// the changes made before it: the files that list the games and their play time are written again, and an added
+/// game's manifest, folder and art. Everything else is left as it is, an install under way and the achievements'
+/// stats among them.
+pub fn change(root: &Path, change: Change, game_exe: Option<&Path>) -> io::Result<()> {
+    let root = std::path::absolute(root)?;
+    let kept = root.join(CHANGES);
+    let mut changes: Vec<Change> = match fs::read_to_string(&kept) {
+        Ok(text) => text.lines().filter_map(Change::parse).collect(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    changes.push(change);
+    let mut spec = Fixture::standard();
+    for change in &changes {
+        change.apply(&mut spec);
+    }
+    let config = root.join("userdata").join(spec.user_id.to_string()).join("config");
+    let steamapps = root.join("steamapps");
+    fs::write(root.join("appcache").join("appinfo.vdf"), appinfo(&spec))?;
+    fs::write(root.join("appcache").join("packageinfo.vdf"), packageinfo(&spec))?;
+    fs::write(config.join("localconfig.vdf"), localconfig(&spec))?;
+    fs::write(steamapps.join("libraryfolders.vdf"), libraryfolders(&root, &spec))?;
+    if let Some(game) = spec.games.iter().find(|game| game.appid == ADDED_GAME.0) {
+        fs::write(steamapps.join(format!("appmanifest_{}.acf", game.appid)), manifest(game))?;
+        let dir = steamapps.join("common").join(&game.install_dir);
+        fs::create_dir_all(&dir)?;
+        if let Some(exe) = game_exe {
+            fs::copy(exe, dir.join("game.exe"))?;
+        }
+        for (asset, image) in art(game) {
+            let file = root.join("appcache").join("librarycache").join(game.appid.to_string()).join(asset.path(game));
+            fs::create_dir_all(file.parent().expect("an art file is in a folder"))?;
+            image.save_with_format(&file, ImageFormat::Jpeg).map_err(io::Error::other)?;
+        }
+    }
+    let lines: Vec<String> = changes.iter().map(|change| change.line()).collect();
+    fs::write(kept, lines.join("\n") + "\n")
+}
+
 // --------------------------------------------------------------- achievements
 
 /// The game of the fixture's that has achievements: Ashfall Courier, the first of the Recent row.
@@ -881,6 +998,36 @@ mod tests {
         let reader = image::ImageReader::open(path).unwrap().with_guessed_format().unwrap();
         let format = reader.format().unwrap();
         (format, reader.into_dimensions().unwrap())
+    }
+
+    #[test]
+    fn a_change_adds_a_game_and_moves_play_time_on_over_the_changes_before_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        write(&root, &Fixture::standard()).unwrap();
+        let before = load(&root).unwrap();
+        let ashfall = ACHIEVEMENTS_GAME.to_string();
+        let played = |library: &model::Library| {
+            let game = library.games.iter().find(|game| game.source_id == ashfall).unwrap();
+            (game.playtime_minutes, game.last_played)
+        };
+        let (minutes, _) = played(&before);
+
+        change(&root, Change::AddGame, None).unwrap();
+        let added = load(&root).unwrap();
+        assert_eq!(added.games.len(), before.games.len() + 1);
+        let paper = added.games.iter().find(|game| game.source_id == ADDED_GAME.0.to_string()).unwrap();
+        assert!(paper.name == ADDED_GAME.1 && paper.installed && paper.cover.is_some());
+
+        let at = NEWEST_PLAY + 3600;
+        change(&root, Change::Played { appid: ACHIEVEMENTS_GAME, minutes: 45, at }, None).unwrap();
+        let after = load(&root).unwrap();
+        assert_eq!(after.games.len(), added.games.len(), "the game added before is still there");
+        assert_eq!(played(&after), (minutes + 45, at));
+        // Its achievements' stats are left as they were.
+        let steam = crate::achievements::SteamAchievements::at(Some(root.clone()));
+        use model::achievement::AchievementSource;
+        assert!(steam.read(&ashfall).unwrap().is_some());
     }
 
     #[test]

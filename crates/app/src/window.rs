@@ -883,6 +883,21 @@ impl App {
                     let cleared = self.store.clear_art();
                     self.show(cleared);
                 }
+                // Settings > Launchers (docs/spec/launchers.md): a launcher's games leave every list or come back at
+                // once; one switched on is read again, as Update now reads them all.
+                Effect::Launcher { key, on } => {
+                    let library = self.dashboard.library();
+                    let playing = self.dashboard.playing().and_then(|game| library.games.get(game)).cloned();
+                    let switched = self.store.set_launcher(&key, on, playing.as_ref());
+                    if switched.is_some() {
+                        self.store.tell_queue(::library::queue::Ask::Look);
+                    }
+                    self.show(switched);
+                    if on {
+                        self.update_launchers(Some(vec![key]));
+                    }
+                }
+                Effect::UpdateLaunchers => self.update_launchers(None),
                 // Settings' Games & apps: the database changes, and the screens follow its next snapshot. What it
                 // refuses (a program that is not there) the user is told of.
                 Effect::ByHand(change) => match self.store.by_hand(change) {
@@ -929,6 +944,34 @@ impl App {
         }
         self.stale = true;
         self.overlay_stale = true;
+    }
+
+    /// Reads the launchers switched on again (`only`: these alone) off this thread: the page shows it working.
+    fn update_launchers(&mut self, only: Option<Vec<String>>) {
+        let proxy = self.proxy.clone();
+        if self.store.update_launchers(only, move || {
+            let _ = proxy.send_event(());
+        }) {
+            let working = self.store.snapshot();
+            self.show(working);
+        }
+    }
+
+    /// An update of the launchers is done: its snapshot shown, then what it does not read itself fetched again in
+    /// the background, art for the games that lack it and every game's achievements and rarity; and the launchers
+    /// switched on meanwhile read.
+    fn take_launchers_update(&mut self) {
+        let Some(snapshot) = self.store.launchers_updated() else { return };
+        self.show(Some(snapshot));
+        self.store.tell_queue(library::queue::Ask::Look);
+        self.store.ask_achievements(library::achievements::Ask::ReadAll);
+        if self.art_started {
+            self.art = None;
+            self.start_art();
+        }
+        if let Some(again) = self.store.take_update_again() {
+            self.update_launchers(Some(again));
+        }
     }
 
     /// Looks up the art the stores gave none for, with the key that is kept: what comes in wakes the loop.
@@ -1201,6 +1244,7 @@ impl ApplicationHandler for App {
                 let _ = proxy.send_event(());
             });
         }
+        self.take_launchers_update();
         if let Some(update) = self.store.achievements_update() {
             let listed = self.achievements_listed.0;
             self.achievements_listed.1 |= update.library.is_some() || listed.is_some_and(|g| update.icons.contains(&g));

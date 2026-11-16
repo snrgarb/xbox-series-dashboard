@@ -24,6 +24,7 @@ pub mod art;
 pub mod by_hand;
 pub mod filters;
 pub mod history;
+pub mod launchers;
 pub mod profiles;
 pub mod queue;
 pub mod sources;
@@ -449,8 +450,8 @@ impl Database {
     pub fn snapshot_at(&self, now: u64) -> Result<Library> {
         Ok(Library {
             user: self.user()?,
-            games: self.games("hidden = 0 AND gone = 0", &[], None)?,
-            hidden: self.games("hidden = 1 AND gone = 0", &[], None)?,
+            games: self.games(&format!("hidden = 0 AND {}", launchers::shown("games")), &[], None)?,
+            hidden: self.games(&format!("hidden = 1 AND {}", launchers::shown("games")), &[], None)?,
             filters: self.filters_at(now)?,
             history: history::rows(&self.conn, now)?,
             collections: None,
@@ -459,6 +460,7 @@ impl Database {
             store_apps: None,
             profiles: self.profiles()?,
             achievements: self.achievement_summary()?,
+            launchers: self.launchers()?,
         })
     }
 
@@ -470,10 +472,13 @@ impl Database {
             .query_row(
                 &format!(
                     "SELECT value FROM settings
-                     WHERE key LIKE '%.{USER}'
+                     WHERE key LIKE '%.{USER}' AND substr(key, 1, length(key) - {}) NOT IN {}
                      ORDER BY (SELECT COUNT(*) FROM games
-                               WHERE gone = 0 AND source || '.{USER}' = settings.key) DESC, key
-                     LIMIT 1"
+                               WHERE {} AND source || '.{USER}' = settings.key) DESC, key
+                     LIMIT 1",
+                    USER.len() + 1,
+                    launchers::OFF,
+                    launchers::shown("games")
                 ),
                 [],
                 |row| row.get(0),
@@ -484,7 +489,7 @@ impl Database {
 
     /// The Recent row: the `n` most recently played games.
     pub fn recent(&self, n: usize) -> Result<Vec<Game>> {
-        self.games("hidden = 0 AND gone = 0 AND last_played > 0", &[], Some(n))
+        self.games(&format!("hidden = 0 AND last_played > 0 AND {}", launchers::shown("games")), &[], Some(n))
     }
 
     /// One game by its id, hidden or gone as it may be.
@@ -715,6 +720,7 @@ mod tests {
         library.games.iter_mut().for_each(|g| (g.id, g.added) = (0, 0));
         library.filters.clear();
         library.history.clear();
+        library.launchers = Default::default();
         library
     }
 

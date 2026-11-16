@@ -3,6 +3,7 @@ pub mod achievement;
 pub mod audio;
 pub mod by_hand;
 pub mod discord;
+pub mod launcher;
 pub mod media;
 pub mod post;
 pub mod profile;
@@ -16,6 +17,7 @@ use std::path::PathBuf;
 pub use achievement::{AchievementSource, Achievements};
 pub use audio::{Audio, AudioDevice, Flow};
 pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
+pub use launcher::{Launcher, Launchers};
 pub use media::{Media, MediaCommand, MediaSession};
 pub use profile::{Picture, Profile, ProfileChange, Profiles};
 pub use queue::{Install, InstallState, Installed, Queue, Queued};
@@ -403,6 +405,11 @@ pub struct Library {
     /// snapshot of the library database has any.
     #[serde(default)]
     pub achievements: Achievements,
+    /// The launchers games come in from, each switched on or off, and how an update of them is going (Settings >
+    /// Launchers). Only a snapshot of the library database has them; the games of one switched off are in none of
+    /// the lists above.
+    #[serde(default)]
+    pub launchers: Launchers,
 }
 
 impl Library {

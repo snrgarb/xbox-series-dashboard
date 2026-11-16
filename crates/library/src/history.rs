@@ -52,13 +52,14 @@ fn local_day(at: u64) -> NaiveDate {
 /// Play history as of `now`: the last played first, then by name.
 pub(crate) fn rows(conn: &Connection, now: u64) -> Result<Vec<HistoryRow>> {
     let today = local_day(now);
-    let mut rows = conn.prepare(
+    let mut rows = conn.prepare(&format!(
         "SELECT g.id, MAX(g.last_played, COALESCE(MAX(s.started), 0), COALESCE(MAX(s.ended), 0)) AS at
          FROM games g LEFT JOIN play_sessions s ON s.game = g.id
-         WHERE g.hidden = 0 AND g.gone = 0
+         WHERE g.hidden = 0 AND {}
          GROUP BY g.id HAVING at > 0
          ORDER BY at DESC, g.sort_name, g.name, g.id",
-    )?;
+        crate::launchers::shown("g")
+    ))?;
     let rows = rows.query_map([], |row| {
         let (game, at): (i64, i64) = (row.get(0)?, row.get(1)?);
         let at = at.max(0) as u64;
