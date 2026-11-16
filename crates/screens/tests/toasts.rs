@@ -115,14 +115,15 @@ fn the_greeting_has_no_prompt_and_a_tap_during_it_opens_profile_and_system() {
     let mut dashboard = dashboard();
     dashboard.greet();
     assert_eq!(dashboard.take_effects(), [NOTIFICATION]);
-    // The fake library's user is Player One: the first name alone.
+    // The fake library has no Profiles: its user, Player One, is the gamertag, and with no real name the greeting
+    // says the whole of it (docs/spec/profiles.md, 1).
     let toast = dashboard.toasts().showing().unwrap();
-    assert_eq!((toast.text.as_str(), toast.kind, toast.prompt), ("Hi Player!", ToastKind::Greeting, false));
+    assert_eq!((toast.text.as_str(), toast.kind, toast.prompt), ("Hi Player One!", ToastKind::Greeting, false));
     // It is no notification.
     assert!(dashboard.notifications().is_empty());
     // One posted meanwhile waits behind it.
     dashboard.notify("one");
-    assert_eq!((showing(&dashboard).as_deref(), dashboard.toasts().waiting()), (Some("Hi Player!"), 1));
+    assert_eq!((showing(&dashboard).as_deref(), dashboard.toasts().waiting()), (Some("Hi Player One!"), 1));
 
     assert_eq!(press(&mut dashboard, Button::Guide), [GUIDE_OPEN]);
     assert_eq!(dashboard.guide().focus(), (Tab::ProfileAndSystem, Focus::Entry(0)));

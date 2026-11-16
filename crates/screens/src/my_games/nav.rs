@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use ui::{Color, HAlign, Rect, Ui, VAlign};
 
 use super::look::{self, glyph as page_glyph, DIVIDER, LINE as TEXT_LINE, NAV_LABEL, SELECTED, TEXT, TEXT_DIM};
-use crate::home::profile_picture;
 use crate::manage_queue::figures::Figures;
+use crate::profile;
 use crate::theme::{glyph, ACCENT};
 
 /// The nav's column, and the divider's two units right of it.
@@ -166,7 +166,8 @@ impl Settle {
 
 /// What the nav is drawn from.
 pub struct Face<'a> {
-    pub user: &'a str,
+    /// The Profile signed in: its picture and gamertag at the nav's top.
+    pub profile: &'a model::Profile,
     /// The item whose content is up: lit grey, with the bar.
     pub showing: Item,
     /// The item with focus, if focus is on the nav: filled with the accent.
@@ -184,8 +185,8 @@ pub struct Face<'a> {
 /// ground run out to the screen's left edge.
 pub fn draw(ui: &mut Ui, face: &Face) {
     let screen = ui.screen();
-    profile_picture(ui, PICTURE);
-    ui.label_middle(PICTURE.right() + 14.0, PICTURE.center().1, face.user, &TEXT_DIM);
+    profile::picture(ui, PICTURE, &face.profile.picture);
+    ui.label_middle(PICTURE.right() + 14.0, PICTURE.center().1, &face.profile.gamertag, &TEXT_DIM);
 
     let full = |rect: Rect| Rect::new(screen.x, rect.y, rect.right() - screen.x, rect.h);
     let showing = face.showing.drawn(face.queued);

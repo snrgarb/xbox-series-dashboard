@@ -1,12 +1,12 @@
-//! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). Only what
-//! M3 owns is here: the boxes of later milestones (Boot video, Profiles, Who's playing today?, Idle, Discord) come
-//! with their features, and those that are here close up in the grid meanwhile. Games & apps and Art are the port's
-//! own.
+//! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). The boxes of
+//! features still to come (Boot video, Who's playing today?, Idle, Discord) come with them, and those that are here
+//! close up in the grid meanwhile. Games & apps and Art are the port's own.
 use super::added::{self, Added};
 use super::art::Art;
 use super::boxes::{Boxes, Item};
 use super::groups::Groups;
 use super::guide::Guide;
+use super::profiles::Profiles;
 use super::Setting;
 
 /// Theme settings' boxes.
@@ -20,16 +20,18 @@ pub fn theme_settings() -> Boxes {
     Boxes::new("Theme settings", vec![vec![personalisation, guide], vec![added, art]])
 }
 
-/// Personalisation's boxes: Groups (docs/spec/filters.md, 6.1), then a checkbox box a row, the second column's
-/// place kept for the focused one's info. Groups is the Bundle's column 1 of row 1, beside Who's playing today?;
-/// with the boxes of M5 not there yet the boxes close up, and it is first, alone on its row.
+/// Personalisation's boxes: Groups (docs/spec/filters.md, 6.1) and Profiles (docs/spec/profiles.md) on the first
+/// row, then a checkbox box a row, the second column's place kept for the focused one's info. Profiles is in the
+/// Bundle's place, column 1 of row 0; Groups is the Bundle's empty column 1 of row 1, and with Boot video and Who's
+/// playing today? not there yet it is first, beside Profiles.
 pub fn personalisation() -> Boxes {
     let check = |setting, name, info| vec![Item::Check { setting, name, info }];
     let groups = Item::Opens { icon: '\u{E8FD}', name: "Groups", pane: |around| Box::new(Groups::open(around)) };
+    let profiles = Item::Opens { icon: '\u{E716}', name: "Profiles", pane: |around| Box::new(Profiles::open(around)) };
     Boxes::new(
         "Personalisation",
         vec![
-            vec![groups],
+            vec![groups, profiles],
             check(
                 Setting::BackgroundDelay,
                 "Background delay",

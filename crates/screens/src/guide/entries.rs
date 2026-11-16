@@ -5,7 +5,8 @@ use ui::{Color, Crop, HAlign, Rect, Ui, VAlign};
 
 use super::panel::{PANEL, STRIP};
 use super::{focus_ring, marks, Around, Tab};
-use crate::home::{profile_picture, square_art};
+use crate::home::square_art;
+use crate::profile;
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 
 /// How many games the landing tab lists, the running one among them.
@@ -168,7 +169,8 @@ pub fn scroll_to(scroll: f32, first: bool, extent: (f32, f32), viewport: (f32, f
 /// What an entry's face needs from outside the Guide.
 pub struct Faces<'a> {
     pub library: &'a Library,
-    pub user: &'a str,
+    /// The Profile signed in: the profile entry's picture and gamertag.
+    pub profile: &'a model::Profile,
 }
 
 /// Draws one entry at `placed`.
@@ -200,7 +202,7 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
         Kind::Profile => {
             let picture = Rect::new(rect.x + 18.0, cy - 30.0, 60.0, 60.0);
             ui.fill(picture, Color::rgb(0x4A4A4A), 999.0);
-            profile_picture(ui, picture);
+            profile::picture(ui, picture, &faces.profile.picture);
             (text_x, lines) = (rect.x + 96.0, 1);
         }
         Kind::SwitchProfile | Kind::Settings | Kind::Power => {
@@ -219,7 +221,7 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
     }
 
     // The title, at most two lines, and under it the second line some kinds have: together in the box's middle.
-    let title = if entry.kind == Kind::Profile { faces.user } else { &entry.title };
+    let title = if entry.kind == Kind::Profile { &faces.profile.gamertag } else { &entry.title };
     let width = rect.right() - 16.0 - text_x;
     // A title that fits is set with no limit of lines: with one, the lines after the first start with the space
     // they were broken at.

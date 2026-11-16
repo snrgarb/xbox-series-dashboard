@@ -218,7 +218,7 @@ While the Guide is open the list is rebuilt when a game starts, stops or the lib
 
 Heading "Profile & system". Entries (C/ExtensionCore.cs:1228-1243):
 
-1. Profile: the picture and the gamertag (the Windows user name until Profiles, M5). Focusable, A does nothing.
+1. Profile: the picture and the gamertag of the Profile signed in (profiles.md 3). Focusable, A does nothing.
 2. Switch profile (M5).
 3. Recent achievements (M6).
 4. Settings, divider above (M3).
@@ -678,7 +678,7 @@ Decided in #42. The Dashboard core keeps the notifications itself (`screens::toa
 | The Guide on/off setting, Reduce motion, show battery percent | Config values now, Settings in M3 |
 | Library updated Toast; "Update after downloads" | M4 or drop |
 | PlayniteAchievements for the achievements section | M6 (#7) |
-| Gamertag and picture from the Bundle's Profiles | The Windows account until M5, as Home's top bar |
+| Gamertag and picture from the Bundle's Profiles | From the port's Profiles (profiles.md), as Home's top bar |
 | Prewarming the window offscreen; pictures cached as bitmaps; the close deadline timer; the blurred picture of the panel; the shadow as a nine-patch | Drop: WPF workarounds. Draw live |
 | Debug-only mouse clicks on entries | Drop. Keep Esc and the keyboard stand-in for the Guide button |
 | The Xbox mark, Discord mark and store marks as vector paths in the XAML | Not ours to ship: as `home.md`, drawn at runtime from what Windows has or a plain stand-in (open question 5) |

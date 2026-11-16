@@ -140,6 +140,8 @@ struct App {
     /// With --log-focus: say where focus went, on Home or on the page over it (`Dashboard::focus_line`) and in the
     /// Guide (`Dashboard::guide_line`), for a test that must know before it presses on.
     log_focus: bool,
+    /// The Profile signed in as the log last said it (`profile: ...`), so that it is said again only as it changes.
+    profile_said: String,
     /// What turns the machine off, restarts it and puts it to sleep: for real, or with --dry-power in the log only.
     power: Box<dyn Power>,
     /// What opens a store's address for a game, to install or uninstall it.
@@ -328,6 +330,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         library_ready: since_start(),
         moving: false,
         log_focus: args.log_focus,
+        profile_said: String::new(),
         // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
         power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
         // A store's address goes to the program Windows has for it, or with --open-addresses-with to that program.
@@ -750,6 +753,14 @@ impl App {
                         self.dashboard.notify(&why);
                     }
                 },
+                // Settings' Profiles pages, or a Profile signing in: the database changes, and every place a Profile
+                // shows follows its next snapshot. What it refuses (a picture that is not there) the user is told of.
+                Effect::Profile(change) => match self.store.change_profile(&change) {
+                    Ok(changed) => self.show(changed),
+                    Err(why) => {
+                        self.dashboard.notify(&why);
+                    }
+                },
                 Effect::StartApp(app) => crate::games::start_app(self.dashboard.library(), app, &mut *self.addresses),
                 // The store is asked, and the Queue told: the game joins it, or its uninstall is followed.
                 Effect::Install(game) => {
@@ -766,6 +777,8 @@ impl App {
                 }
             }
         }
+        // A Profile signed in by the core itself (`Dashboard::sign_in`) changed before its effect was carried out.
+        self.log_profile();
     }
 
     /// Looks up the art the stores gave none for, with the key that is kept: what comes in wakes the loop.
@@ -810,6 +823,17 @@ impl App {
             if self.log_focus && self.dashboard.home_groups() != groups {
                 self.log_groups();
             }
+            self.log_profile();
+        }
+    }
+
+    /// The Profile signed in, as Home's top bar, the Guide and the greeting show it
+    /// (`profile: "Alpha", real name "", shape 0`). Said with the first frame and again whenever it changes.
+    fn log_profile(&mut self) {
+        let line = self.dashboard.profile_line();
+        if line != self.profile_said {
+            eprintln!("profile: {line}");
+            self.profile_said = line;
         }
     }
 
@@ -1230,6 +1254,7 @@ impl ApplicationHandler for App {
                          at {renderer:.0} ms, first frame begun at {began:.0} ms"
                     );
                     eprintln!("first frame presented at {:.0} ms since process start", since_start());
+                    self.log_profile();
                     if self.log_focus {
                         self.log_groups();
                     }

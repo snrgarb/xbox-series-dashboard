@@ -14,10 +14,13 @@ use anyhow::Result;
 use library::art::{self, ArtDir, Event, Hosts, Lookup, Pace, Service, Services, StoreArt};
 use library::sources::Read;
 use library::Database;
-use model::{ByHand, FilterChange, Game, Library, Source, StoreApp};
+use model::{ByHand, FilterChange, Game, Library, ProfileChange, Source, StoreApp};
 use screens::settings::{Change, Options, Setting};
 
 use crate::{fail, Args};
+
+/// The folder in the data folder whose pictures a Profile may wear, as the Bundle's Gamerpics folder.
+const GAMERPICS: &str = "Gamerpics";
 
 #[derive(Default)]
 pub struct Store {
@@ -45,6 +48,8 @@ pub struct Store {
     store_apps: Option<Vec<StoreApp>>,
     /// Hears from the thread that lists them.
     listed: Option<Receiver<Option<Vec<StoreApp>>>>,
+    /// The Windows user's account picture, as it was when the Dashboard started: the first a Profile may wear.
+    account_picture: Option<PathBuf>,
 }
 
 /// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from every source
@@ -70,19 +75,20 @@ pub fn open(args: &Args) -> (Library, Store) {
             let path = dir.join(library::FILE);
             let into = |library: &Library| -> Result<(Library, Database)> {
                 let mut database = Database::open(&path)?;
+                first_profile(&mut database);
                 let library = through(&mut database, library)?;
                 Ok((library, database))
             };
             match into(&library) {
                 Ok((library, database)) => {
                     let store = Store { database: Some(database), path, sources, art_service, ..Store::default() };
-                    return (library, Store { store_art_service, ..store });
+                    return dressed(library, Store { store_art_service, ..store });
                 }
                 Err(e) => eprintln!("library: {}: {e:#}", path.display()),
             }
         }
         let (library, database) = with_filters(library);
-        return (library, Store { database, sources, art_service, store_art_service, ..Store::default() });
+        return dressed(library, Store { database, sources, art_service, store_art_service, ..Store::default() });
     }
     let window = args.screenshot.is_none();
     let dir = args.data_dir.clone().or_else(|| if window { library::data_dir() } else { None });
@@ -92,6 +98,9 @@ pub fn open(args: &Args) -> (Library, Store) {
     let mut database = path
         .as_ref()
         .and_then(|path| Database::open(path).map_err(|e| eprintln!("library: {}: {e:#}", path.display())).ok());
+    if let Some(database) = &mut database {
+        first_profile(database);
+    }
     let stored = database.as_ref().and_then(|db| db.snapshot().ok()).filter(|library| !library.games.is_empty());
     if let Some(library) = &stored {
         let ms = started.elapsed().as_millis();
@@ -114,6 +123,7 @@ pub fn open(args: &Args) -> (Library, Store) {
                     // With no file to keep it in, the library is kept in memory for as long as the Dashboard runs.
                     if database.is_none() {
                         database = Database::in_memory().map_err(|e| eprintln!("library: {e:#}")).ok();
+                        database.iter_mut().for_each(first_profile);
                     }
                     match database.as_mut().map(|db| sync(db, &read)) {
                         Some(Ok(library)) => library,
@@ -131,7 +141,35 @@ pub fn open(args: &Args) -> (Library, Store) {
     let (library, memory) = with_filters(library);
     let database = memory.or(database);
     let path = path.unwrap_or_default();
-    (library, Store { database, path, sources, pending, art_service, store_art_service, ..Store::default() })
+    dressed(library, Store { database, path, sources, pending, art_service, store_art_service, ..Store::default() })
+}
+
+/// The Store, with the Windows user's account picture read, and the Library as every snapshot it gives is: with
+/// the pictures a Profile may wear. The Profiles are said in the log.
+fn dressed(library: Library, mut store: Store) -> (Library, Store) {
+    store.account_picture = shell::account::picture();
+    let mut library = library;
+    library.profiles.pictures = store.pictures();
+    let profiles = &library.profiles;
+    if let Some(signed_in) = profiles.signed_in() {
+        eprintln!(
+            "profiles: {} of them, {} {:?} signed in last",
+            profiles.list.len(),
+            signed_in.id,
+            signed_in.gamertag
+        );
+    }
+    (library, store)
+}
+
+/// With no Profile in the database yet, the first, made from the Windows user: their name, and their account
+/// picture if Windows has one.
+fn first_profile(database: &mut Database) {
+    match database.first_profile(&shell::account::name(), shell::account::picture().as_deref()) {
+        Ok(Some(made)) => eprintln!("profiles: {made}"),
+        Ok(None) => {}
+        Err(e) => eprintln!("profiles: {e:#}"),
+    }
 }
 
 /// What the sources read, put together with no database: every game of each in one Library.
@@ -157,6 +195,7 @@ fn with_filters(library: Library) -> (Library, Option<Database>) {
     }
     let in_memory = || -> Result<(Library, Option<Database>)> {
         let mut database = Database::in_memory()?;
+        first_profile(&mut database);
         let library = through(&mut database, &library)?;
         Ok((library, Some(database)))
     };
@@ -204,8 +243,10 @@ impl Store {
         if !std::mem::take(&mut self.pending) {
             return;
         }
-        // What the database says is compared with what is shown, which has the Store apps from elsewhere.
-        let shown = Library { store_apps: None, ..shown.clone() };
+        // What the database says is compared with what is shown, which has the Store apps and the pictures a
+        // Profile may wear from elsewhere.
+        let mut shown = Library { store_apps: None, ..shown.clone() };
+        shown.profiles.pictures.clear();
         let (path, sources) = (self.path.clone(), self.sources.clone());
         let (changed, synced) = mpsc::channel();
         self.synced = Some(synced);
@@ -266,9 +307,10 @@ impl Store {
     /// the library when a source read again changed it.
     pub fn queue_update(&mut self) -> Option<library::queue::Update> {
         let mut update = self.queue.as_ref()?.take()?;
-        // A snapshot the thread took carries what every snapshot here does: the Store apps listed.
+        // A snapshot the thread took carries what every snapshot here does: the Store apps listed, the pictures.
         if let Some(library) = &mut update.library {
             library.store_apps = self.store_apps.clone();
+            library.profiles.pictures = self.pictures();
         }
         Some(update)
     }
@@ -508,8 +550,42 @@ impl Store {
 
     /// The library database's snapshot as it is now: what the screens show after art has come in.
     pub fn snapshot(&self) -> Option<Library> {
-        let library = self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()?;
+        let mut library = self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()?;
+        library.profiles.pictures = self.pictures();
         Some(Library { store_apps: self.store_apps.clone(), ..library })
+    }
+
+    /// The pictures a Profile may wear besides the plain ones: the Windows account picture, then the pictures in
+    /// the data folder's Gamerpics folder, by name. The folder is made if it is not there, for the user to find.
+    pub fn pictures(&self) -> Vec<PathBuf> {
+        let mut pictures: Vec<PathBuf> = self.account_picture.iter().cloned().collect();
+        let Some(folder) = self.path.parent().filter(|_| !self.path.as_os_str().is_empty()) else { return pictures };
+        let folder = folder.join(GAMERPICS);
+        let _ = std::fs::create_dir_all(&folder);
+        let mut found: Vec<PathBuf> = std::fs::read_dir(&folder)
+            .map(|entries| entries.flatten().map(|entry| entry.path()).collect())
+            .unwrap_or_default();
+        found.retain(|path| path.is_file() && model::profile::is_picture(path));
+        found.sort_by_key(|path| path.file_name().map(|name| name.to_string_lossy().to_lowercase()));
+        pictures.extend(found);
+        pictures
+    }
+
+    /// Carries out a change Settings' Profiles pages asked for. Gives the snapshot after; what the database
+    /// refuses (a picture that is not there) is the user's to be told of.
+    pub fn change_profile(&mut self, change: &ProfileChange) -> Result<Option<Library>, String> {
+        let Some(database) = self.database.as_mut() else { return Ok(None) };
+        match database.change_profile(change) {
+            Ok(done) => eprintln!("profiles: {done}"),
+            Err(e) => {
+                eprintln!("profiles: {e:#}");
+                return Err(match change {
+                    ProfileChange::Picture { .. } => format!("{e:#}").replacen("there's", "There's", 1),
+                    _ => format!("{e:#}"),
+                });
+            }
+        }
+        Ok(self.snapshot())
     }
 }
 

@@ -2,8 +2,8 @@
 //! right. Its measures are the screen's own, not the rows': nothing here is multiplied by ROW_SCALE.
 use ui::{Color, Ease, Rect, Ui};
 
-use crate::guide;
 use crate::theme::{self, glyph, BODY, MARGIN};
+use crate::{guide, profile};
 
 const MIDDLE: f32 = 114.0;
 const BUTTON: f32 = 60.0;
@@ -70,22 +70,32 @@ impl TopButton {
     }
 }
 
-/// The profile's picture. Until Profiles have pictures it is what the Bundle shows for a Windows account with no
-/// picture of its own, Windows' default: a grey figure, head and shoulders, on a pale disc.
-pub fn profile_picture(ui: &mut Ui, rect: Rect) {
-    const DISC: Color = Color::rgb(0xF2F2F2);
-    const FIGURE: Color = Color::rgb(0x9B9B9B);
-    // Drawn for a picture 56 across, and in proportion for any other.
-    let unit = rect.w / 56.0;
-    let (cx, cy) = rect.center();
-    ui.fill(rect, DISC, 999.0);
-    ui.fill(Rect::new(cx - 8.0 * unit, cy - 16.0 * unit, 16.0 * unit, 16.0 * unit), FIGURE, 999.0);
-    ui.fill(Rect::new(cx - 14.0 * unit, cy + 3.0 * unit, 28.0 * unit, 14.0 * unit), FIGURE, 999.0);
+/// With a real name, the gamertag and the real name take turns in the name's place, as on the console: each for
+/// 7.2 s, then a 0.3 s crossfade to the other, over and over (the Bundle's `NameSwap`).
+const NAME_TURN: f32 = 15.0;
+const NAME_HOLD: f32 = 7.2;
+const NAME_FADE: f32 = 0.3;
+
+/// How much of the gamertag shows at `t` seconds into the turns: 1, fading to 0 at 7.2..7.5, 0, back to 1 at
+/// 14.7..15. The real name shows the rest.
+pub fn gamertag_share(t: f32) -> f32 {
+    let t = t.rem_euclid(NAME_TURN);
+    let half = NAME_TURN / 2.0;
+    if t < NAME_HOLD {
+        1.0
+    } else if t < half {
+        1.0 - (t - NAME_HOLD) / NAME_FADE
+    } else if t < half + NAME_HOLD {
+        0.0
+    } else {
+        (t - half - NAME_HOLD) / NAME_FADE
+    }
 }
 
 /// What the top bar shows that is not a button.
 pub struct Status<'a> {
-    pub user: &'a str,
+    /// The Profile signed in: its picture and gamertag, taking turns with its real name if it has one.
+    pub profile: &'a model::Profile,
     pub clock: &'a str,
     /// Whether a pad is connected: it stands left of the clock.
     pub pad: bool,
@@ -96,15 +106,36 @@ pub struct Status<'a> {
 }
 
 pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
-    let Status { user, clock, pad, pad_battery, show_percent } = *status;
+    let Status { profile, clock, pad, pad_battery, show_percent } = *status;
     let picture = TopButton::Profile.rect();
-    profile_picture(ui, picture);
+    profile::picture(ui, picture, &profile.picture);
     if focused == Some(TopButton::Profile) {
         // The ring stands 4 clear of the picture.
         theme::focus_ring_round(ui, picture, 4.0);
     }
     // Segoe UI sits 2 up on the icons' middle, Bahnschrift 2 down.
-    ui.label_middle(picture.right() + 16.0, MIDDLE - 2.0, user, &BODY);
+    let name_at = picture.right() + 16.0;
+    // The turns run on the ui's clock, not under Reduce motion, when the gamertag stays. Frames are asked for only
+    // while the two cross; at rest the bar asks to be woken for the next crossing.
+    let share = if profile.has_real_name() && !ui.store.reduce_motion {
+        let t = ui.store.time().rem_euclid(f64::from(NAME_TURN)) as f32;
+        let share = gamertag_share(t);
+        if share > 0.0 && share < 1.0 {
+            ui.time();
+        } else {
+            let next = [NAME_HOLD, NAME_TURN / 2.0 + NAME_HOLD, NAME_TURN].into_iter().find(|&at| at > t);
+            ui.store.wake_in(next.unwrap_or(NAME_TURN) - t);
+        }
+        share
+    } else {
+        1.0
+    };
+    if share > 0.0 {
+        ui.with_alpha(share, |ui| ui.label_middle(name_at, MIDDLE - 2.0, &profile.gamertag, &BODY));
+    }
+    if share < 1.0 {
+        ui.with_alpha(1.0 - share, |ui| ui.label_middle(name_at, MIDDLE - 2.0, &profile.real_name, &BODY));
+    }
 
     for button in TopButton::ALL {
         let Some((glyph, glyph_focused, label)) = button.face() else { continue };
@@ -130,5 +161,24 @@ pub fn draw(ui: &mut Ui, status: &Status, focused: Option<TopButton>) {
         // On a cable the pad's glyph; wireless its battery, with its charge beside it unless Settings says not.
         let battery = guide::Status { pad_battery, show_percent, ..guide::Status::default() };
         guide::pad_battery(ui, 1725.0 - clock.width - 16.0, MIDDLE, &battery);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gamertag_share;
+
+    /// The Bundle's swap (home.md 2.1): the gamertag for 7.2 s, out by 7.5, the real name until 14.7, back by 15.
+    #[test]
+    fn the_gamertag_and_the_real_name_take_turns() {
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(near(gamertag_share(0.0), 1.0));
+        assert!(near(gamertag_share(7.2), 1.0));
+        assert!(near(gamertag_share(7.35), 0.5));
+        assert!(near(gamertag_share(7.5), 0.0));
+        assert!(near(gamertag_share(14.7), 0.0));
+        assert!(near(gamertag_share(14.85), 0.5));
+        assert!(near(gamertag_share(15.0), 1.0));
+        assert!(near(gamertag_share(22.5), 0.0), "the next turn");
     }
 }

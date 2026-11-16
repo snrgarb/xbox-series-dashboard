@@ -290,7 +290,7 @@ E/PersonalisationPane.xaml:281-286; names at E/PersonalisationPane.xaml.cs:29-40
 
 E/PersonalisationPane.xaml:289-294; E/PersonalisationPane.xaml.cs:194-200. As Boot video: "Choose who's playing as Playnite starts in Fullscreen and wakes from sleep." then two Rows at y 270.58 and 344.58: **Ask every time** (the default) and **Sign in the last profile**. Opens with focus on the ticked one.
 
-### 6.5 ... > Personalisation > Profiles, and one Profile - **M5** (entry point and layout only)
+### 6.5 ... > Personalisation > Profiles, and one Profile - built in #125 (profiles.md 4)
 
 E/PersonalisationPane.xaml:300-351; E/PersonalisationPane.xaml.cs:139-153, 419-443.
 
@@ -299,7 +299,7 @@ E/PersonalisationPane.xaml:300-351; E/PersonalisationPane.xaml.cs:139-153, 419-4
 - Gamertag and Real name open text entry from what they are now; Add profile opens text entry for a gamertag (caption "Gamertag", empty) and adds the Profile once it is kept, focus going to the new Profile's box (C/ExtensionCore.TextEntry.cs:59-85).
 - Remove profile asks "Remove {gamertag}?" (title "Remove profile", Yes / No) in **Playnite's own message box**.
 
-### 6.6 ... > Profiles > a Profile > Picture - **M5** (layout only)
+### 6.6 ... > Profiles > a Profile > Picture - built in #125 (profiles.md 4)
 
 E/PersonalisationPane.xaml:354-381; E/PersonalisationPane.xaml.cs:419-449. Gamerpic buttons (section 4.8) four wide from (520, 210), pitch 202, the Windows account picture first, then the Gamerpics folder's (C/ExtensionCore.Startup.cs:387-400); scrolls as Profiles does (set 24 up and left). The one worn carries the tick badge and has focus as the page opens. With at most one picture to choose from, a line shows above them, "Add images to the Gamerpics folder to choose from more." (MutedText, 26 under it, so the buttons start at y 270.58). A wears the picture and steps back to the Profile's page. With no pictures at all the Picture box opens no page: Playnite's message box says "Add images to the Gamerpics folder to choose from." (title "Picture").
 
@@ -737,7 +737,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 | Pane | Boxes |
 |---|---|
 | Theme settings | Personalisation (0, 0), Guide (1, 0). Idle (M5) and Discord (M6) come back to the Bundle's places with their features. |
-| Personalisation | **Groups** (0, 0), alone on its row (filters.md 6.1); then four checkbox boxes, a row each: Background delay (y 359), Reduce motion (508), Show Play history (657), Show battery percentages (806). Boot video, Profiles and Who's playing today? are M5's and go over them when they come, and Groups then takes the Bundle's empty slot, (1, 1). |
+| Personalisation | **Groups** (0, 0) (filters.md 6.1) and **Profiles** (1, 0), at the Bundle's place (#125, profiles.md 4); then four checkbox boxes, a row each: Background delay (y 359), Reduce motion (508), Show Play history (657), Show battery percentages (806). Boot video and Who's playing today? are M5's and go over them when they come, and Groups then takes the Bundle's empty slot, (1, 1). |
 | Guide | "Guide", its description and Use the Guide, as 6.8. The Now Playing source under it is M5's. |
 
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
@@ -773,6 +773,8 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Use the Guide | `guide.enabled` | on |
 | Download art online (16.8) | `art.online` | on |
 
+The same table keeps `profile.last`, the id of the Profile signed in last (profiles.md 1); the Profiles themselves are the `profiles` table's (profiles.md 2).
+
 Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too). **Saved only once set** is kept: an option has no row until it is changed, so a later change of default reaches those who never chose. Nothing here is secret and nothing is encrypted; Discord's secret and tokens are M6's, and do not go in this table as they are. Every option is shared by every Profile. The log says `settings: <key> is <value>` for each option that is set as the Dashboard starts, and `settings: <key> = <value>` as one is saved.
 
 ### 16.5 What each option changes
@@ -789,7 +791,7 @@ Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too
 
 The Dashboard's one rule for every screen (docs/ui.md, "Sounds") holds here: focus landing on another control is the move sound, a level up or down included, as Playnite's navigation sound is in the Bundle; A that turns a checkbox over is the activation sound, where the Bundle's is unverified (open question 11); B out of Settings is silent.
 
-`--log-focus` says `focus: Settings: ` and then the rail (`Rail: Theme settings`) or the pane and its control (`Theme settings: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3).
+`--log-focus` says `focus: Settings: ` and then the rail (`Rail: Theme settings`) or the pane and its control (`Theme settings: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3), a Profile's page the Profile and the Picture page `worn` (profiles.md 5).
 
 The Groups page's menu is a dialog the page shows over itself: while it is up `Page::dialog` says so, it has a dialog's sounds and the Guide puts it away (filters.md 6.2).
 

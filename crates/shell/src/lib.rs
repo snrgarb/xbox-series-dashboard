@@ -4,6 +4,7 @@
 //! frozen, and the same calls say so or do nothing.
 //! Turning the machine off is behind a trait, so that only a run that means it can do it, and so is asking a store
 //! to install or uninstall a game.
+pub mod account;
 pub mod audio;
 pub mod freeze;
 mod launch;

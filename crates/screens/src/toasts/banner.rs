@@ -6,7 +6,7 @@ use ui::{Color, Ease, Font, HAlign, Rect, TextStyle, Ui, VAlign};
 
 use super::{Toast, ToastKind};
 use crate::guide::marks;
-use crate::home::profile_picture;
+use crate::profile;
 use crate::theme::{glyph, ACCENT};
 
 /// The card is 128 high, its foot 64 above the screen's, and as wide as what is on it, to 640 at most.
@@ -187,7 +187,9 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
                     ui.icon(across(tile.center().0), cy, glyph::NOTIFICATIONS, 44.0 * scale, Color::WHITE);
                 }
                 // The profile's picture, round and 80 across, bare on the card.
-                ToastKind::Greeting => profile_picture(ui, at(tile.grow(-8.0))),
+                ToastKind::Greeting => {
+                    profile::picture(ui, at(tile.grow(-8.0)), toast.picture.as_ref().unwrap_or(&Default::default()))
+                }
             });
 
             let text = tile.right() + TILE_GAP;

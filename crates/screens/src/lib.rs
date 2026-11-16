@@ -17,6 +17,7 @@ pub mod manage_queue;
 pub mod menu_panel;
 pub mod my_games;
 pub mod pages;
+pub mod profile;
 pub mod search;
 pub mod settings;
 pub mod spinner;
@@ -27,8 +28,8 @@ pub mod wide_dialog;
 
 use std::time::{Duration, Instant};
 
-use model::{Audio, Flow, Library};
-pub use model::{FilterChange, PowerCommand, Sound};
+use model::{Audio, Flow, Library, Profile};
+pub use model::{FilterChange, PowerCommand, ProfileChange, Sound};
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
 use crate::guide::{Around, DialogFocus, Face, Flyout, FlyoutFocus, Guide, GuideAction, PowerChoice, Status, Tab};
@@ -99,6 +100,10 @@ pub enum Effect {
     /// Settings > Art: remove the art downloaded into the data folder (the user has said yes). A store's own art is
     /// not touched.
     ClearArt,
+    /// Settings' Profiles pages added, renamed or removed a Profile, or changed its picture; or a Profile signed in
+    /// (`Dashboard::sign_in`). A new snapshot follows, as for a favourite, and every place a Profile shows follows
+    /// it (docs/spec/profiles.md).
+    Profile(ProfileChange),
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.
@@ -151,7 +156,6 @@ pub enum OverlayShows {
 
 pub struct Dashboard {
     library: Library,
-    user: String,
     /// What the clock reads, in place of the time: a screenshot test's is the same every run.
     clock: Option<String>,
     /// Whether a pad is connected and what powers it, which the Status area shows.
@@ -212,10 +216,8 @@ pub struct Dashboard {
 
 impl Dashboard {
     pub fn new(library: Library) -> Self {
-        let user = library.user.clone().unwrap_or_else(|| "Player".into());
         Self {
             library,
-            user,
             clock: None,
             pad: PadStatus::default(),
             status: Status::default(),
@@ -271,7 +273,6 @@ impl Dashboard {
         if let Some(quit) = &mut self.quit {
             quit.then = quit.then.and_then(place);
         }
-        self.user = library.user.clone().unwrap_or_else(|| "Player".into());
         self.library = library;
         // A focused game that has left the Recent row leaves focus on the tile where it was, or the row's last.
         let last = self.library.recent(self.home.recent_games()).len().saturating_sub(1);
@@ -1208,7 +1209,8 @@ impl Dashboard {
         let id = self.record(text);
         if !self.notifications_open() {
             // With the Guide off the Guide button does nothing, and the Toast does not say to press it.
-            self.toast(Toast { kind: ToastKind::Notification, text: text.to_string(), prompt: self.options.use_guide });
+            let prompt = self.options.use_guide;
+            self.toast(Toast { kind: ToastKind::Notification, text: text.to_string(), prompt, picture: None });
         }
         id
     }
@@ -1219,10 +1221,38 @@ impl Dashboard {
         self.toasts.notifications()
     }
 
-    /// Greets the user, as the Dashboard starts: "Hi <first name>!" in a Toast with no prompt.
+    /// Greets the Profile signed in, as the Dashboard starts: "Hi <first name>!" in a Toast with its picture and
+    /// no prompt. (Who's playing today?, #127, signs one in first and greets it so.)
     pub fn greet(&mut self) {
-        let name = self.user.split_whitespace().next().unwrap_or(&self.user);
-        self.toast(Toast { kind: ToastKind::Greeting, text: format!("Hi {name}!"), prompt: false });
+        let profile = self.profile();
+        let text = format!("Hi {}!", profile.first_name());
+        let picture = Some(profile.picture);
+        self.toast(Toast { kind: ToastKind::Greeting, text, prompt: false, picture });
+    }
+
+    /// The Profile signed in, which every place a Profile shows draws (docs/spec/profiles.md): the one the library
+    /// database remembers, or with no database the store's user under the first plain picture.
+    pub fn profile(&self) -> Profile {
+        profile::signed_in(&self.library)
+    }
+
+    /// What the log says of the Profile signed in, as Home's top bar, the Guide and the greeting show it:
+    /// `"Alpha", real name "Ann Smith", shape 3`. The executable says it (`profile: ...`) whenever it changes.
+    pub fn profile_line(&self) -> String {
+        let profile = self.profile();
+        format!("{:?}, real name {:?}, {}", profile.gamertag, profile.real_name, profile.picture.describe())
+    }
+
+    /// Signs this Profile in: every place a Profile shows has it at once, and the library database is asked to
+    /// remember it as the one signed in last. The hook Who's playing today? and Switch profile sign in by (#127);
+    /// nothing calls it yet. A Profile the library has not got changes nothing.
+    pub fn sign_in(&mut self, profile: i64) {
+        if self.library.profiles.get(profile).is_none() {
+            return;
+        }
+        self.library.profiles.signed_in = Some(profile);
+        self.refresh_guide();
+        self.effects.push(Effect::Profile(ProfileChange::SignIn(profile)));
     }
 
     fn toast(&mut self, toast: Toast) {
@@ -1435,7 +1465,8 @@ impl Dashboard {
             notifications,
             ..self.status.clone()
         };
-        let face = Face { user: &self.user, clock: &clock, pad: self.pad.connected, status: &status };
+        let profile = self.profile();
+        let face = Face { profile: &profile, clock: &clock, pad: self.pad.connected, status: &status };
         self.guide.draw(ui, around, &face);
     }
 
@@ -1456,8 +1487,9 @@ impl Dashboard {
             Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),
             _ => None,
         });
+        let profile = self.profile();
         let status = home::Status {
-            user: &self.user,
+            profile: &profile,
             clock: &clock,
             pad: self.pad.connected,
             pad_battery,
@@ -1562,12 +1594,13 @@ mod tests {
         game.last_played = next.games[0].last_played + 60;
         next.games.insert(0, game);
         next.user = Some("Someone Else".into());
+        assert_eq!(dashboard.profile().gamertag, "Player One");
         dashboard.set_library(next);
 
         assert_eq!(dashboard.home_focus(), Focus::Recent(0));
         assert_eq!(dashboard.focused_game().map(|g| dashboard.library().games[g].key()), Some(focused));
         assert_eq!(dashboard.playing().map(|g| dashboard.library().games[g].key()), Some(playing));
-        assert_eq!(dashboard.user, "Someone Else");
+        assert_eq!(dashboard.profile().gamertag, "Someone Else");
     }
 
     #[test]
