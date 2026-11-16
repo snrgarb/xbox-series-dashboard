@@ -661,7 +661,7 @@ In the port these are `Dashboard::tell(kind, game)`, from the Queue's thread (`l
 | Library updated | U+E895, with a detail line | M4 or drop | |
 | Greeting | round picture 80 x 80; slides | **M2** (#42); the picture itself M5 | |
 | Call | the Discord mark at 48 | M6 | |
-| Achievement | its own pill (E/AchievementToast.xaml), 8.5 s | M6 | |
+| Achievement | its own pill (E/AchievementToast.xaml), 8.5 s; its rare form | **M6** (#142): [achievement-toast.md](achievement-toast.md) | |
 
 ### 9.7 Notifications in the port
 

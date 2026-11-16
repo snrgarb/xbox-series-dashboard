@@ -131,6 +131,7 @@ mod tests {
             "PowerOff.wav",
             "Notification.wav",
             "Login.wav",
+            "RareAchievement.wav",
         ];
         tones(&extension, &rest);
         tones(&theme, &["navigation.wav", "activation.wav"]);

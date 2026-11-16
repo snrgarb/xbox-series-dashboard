@@ -29,10 +29,13 @@ pub enum Sound {
     Notification,
     /// A Profile signs in: Signing you in shows (docs/spec/start-up.md).
     Login,
+    /// A Rare achievement's Toast shows, told of alone: the console's own, in place of `Notification`
+    /// (docs/spec/achievement-toast.md).
+    RareAchievement,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 10] = [
+    pub const ALL: [Sound; 11] = [
         Sound::Move,
         Sound::Activate,
         Sound::GuideOpen,
@@ -43,6 +46,7 @@ impl Sound {
         Sound::PowerOff,
         Sound::Notification,
         Sound::Login,
+        Sound::RareAchievement,
     ];
 
     /// The sound's files, by the Bundle's names: one, or several that take turns in this order. The first two are
@@ -59,6 +63,7 @@ impl Sound {
             Sound::PowerOff => &["PowerOff.wav"],
             Sound::Notification => &["Notification.wav"],
             Sound::Login => &["Login.wav"],
+            Sound::RareAchievement => &["RareAchievement.wav"],
         }
     }
 

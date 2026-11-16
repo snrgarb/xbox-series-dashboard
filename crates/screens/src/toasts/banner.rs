@@ -188,6 +188,8 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
             };
             ui.with_alpha(pose.tile, |ui| match toast.kind {
                 ToastKind::Notification => icon(ui, glyph::NOTIFICATIONS),
+                // Drawn as the pill (`pill::draw`), never as a banner.
+                ToastKind::Achievement | ToastKind::RareAchievement => icon(ui, glyph::TROPHY),
                 // The profile's picture, round and 80 across, bare on the card.
                 ToastKind::Greeting => {
                     profile::picture(ui, at(tile.grow(-8.0)), toast.picture.as_ref().unwrap_or(&Default::default()))

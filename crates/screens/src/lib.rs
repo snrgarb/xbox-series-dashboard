@@ -257,6 +257,8 @@ pub struct Dashboard {
     toasts_ready: bool,
     /// Toasts that came while Start-up showed or its greeting was owed: they follow the greeting.
     held_toasts: Vec<Toast>,
+    /// Achievements unlocked, waiting a second for others found with them: one Toast tells of them all.
+    unlocks: toasts::achievement::Gather,
     effects: Vec<Effect>,
 }
 
@@ -301,6 +303,7 @@ impl Dashboard {
             greeted: false,
             toasts_ready: false,
             held_toasts: Vec::new(),
+            unlocks: Default::default(),
             effects: Vec::new(),
         }
     }
@@ -693,9 +696,14 @@ impl Dashboard {
     pub fn advance(&mut self, seconds: f32) -> bool {
         let before = (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some());
         if self.toasts.advance(seconds) {
-            self.effects.push(Effect::Sound(Sound::Notification));
+            self.effects.push(Effect::Sound(self.toast_sound()));
         }
         self.pass(seconds);
+        // Unlocks whose second is up are told of here, not as a frame is presented: their Toast is not on the
+        // screen yet.
+        if let Some(unlocks) = self.unlocks.take() {
+            self.tell_unlocks(&unlocks);
+        }
         before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
     }
 
@@ -730,6 +738,7 @@ impl Dashboard {
                 self.close_guide();
             }
         }
+        self.unlocks.pass(seconds);
     }
 
     /// Whether the time told since this was last asked changed what is shown: "Force quit?" came up, the Guide
@@ -747,7 +756,12 @@ impl Dashboard {
         let second = second.map(|left| left.as_secs_f32());
         // Signing you in's three seconds.
         let signing_in = self.startup.as_ref().and_then(Startup::timer);
-        [quit, self.close_in, tap, second, signing_in].into_iter().flatten().reduce(f32::min).map(|left| left.max(0.0))
+        let unlocks = self.unlocks.timer();
+        [quit, self.close_in, tap, second, signing_in, unlocks]
+            .into_iter()
+            .flatten()
+            .reduce(f32::min)
+            .map(|left| left.max(0.0))
     }
 
     /// How soon the Idle screen has something to do, in seconds: dim, show things, turn a card, end a wake's grace.
@@ -1360,6 +1374,7 @@ impl Dashboard {
             GuideAction::MyGames => self.guide_opens(Open::MyGames(my_games::Entry::Games)),
             GuideAction::Settings => self.guide_opens(Open::Settings(settings::Entry::Rail)),
             GuideAction::Search => self.guide_opens(Open::Search),
+            GuideAction::Achievements(game) => self.open_achievements(game),
             // The Guide stays open over a game being quit, and closes a moment after the game has stopped.
             GuideAction::QuitGame => self.quit_game(),
             // The game that was running is quit, and the one chosen starts when it has stopped.
@@ -1489,7 +1504,8 @@ impl Dashboard {
         match toast {
             ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled => {}
             ToastKind::Notification => self.open_notifications(),
-            ToastKind::Greeting => {
+            // An achievement's opens it where the Profile's totals and last unlocks are, Rare or not.
+            ToastKind::Greeting | ToastKind::Achievement | ToastKind::RareAchievement => {
                 let around = Around {
                     library: &self.library,
                     playing: self.playing,
@@ -1597,7 +1613,9 @@ impl Dashboard {
             ToastKind::Queued => "Queued".to_string(),
             ToastKind::Installed => "Ready to play".to_string(),
             ToastKind::Uninstalled => format!("{} was uninstalled", found.name),
-            ToastKind::Notification | ToastKind::Greeting => return,
+            ToastKind::Notification | ToastKind::Greeting | ToastKind::Achievement | ToastKind::RareAchievement => {
+                return
+            }
         };
         let art = Some(Box::new(found.clone()));
         self.toast(Toast { game: Some(game), art, ..Toast::new(kind, text, self.options.use_guide) });
@@ -1610,8 +1628,49 @@ impl Dashboard {
             return;
         }
         if self.toasts.post(toast) {
-            self.effects.push(Effect::Sound(Sound::Notification));
+            self.effects.push(Effect::Sound(self.toast_sound()));
         }
+    }
+
+    /// The sound of the Toast that has just begun to show: a Rare achievement's own, else the notification's.
+    fn toast_sound(&self) -> Sound {
+        match self.toasts.showing().map(|toast| toast.kind) {
+            Some(ToastKind::RareAchievement) => Sound::RareAchievement,
+            _ => Sound::Notification,
+        }
+    }
+
+    /// Achievements newly unlocked in the game watched (docs/achievements.md), found together: told of in one
+    /// Achievement unlocked Toast a second after the first, with any others found by then (docs/spec/
+    /// achievement-toast.md). The totals and the last unlocks come with the library's next snapshot.
+    pub fn unlocked(&mut self, unlocks: Vec<model::achievement::Unlock>) {
+        self.unlocks.add(unlocks);
+    }
+
+    /// The Toast for unlocks found together, waiting its turn as a notification's does, and its notification in
+    /// the list, which A on in the Notifications Flyout opens the game's Achievements page from. It shows whether
+    /// or not the Notifications Flyout is open, as the Bundle's does.
+    fn tell_unlocks(&mut self, unlocks: &[model::achievement::Unlock]) {
+        if unlocks.is_empty() {
+            return;
+        }
+        let toast = toasts::achievement::toast(unlocks, self.options.use_guide);
+        let text = toasts::achievement::notification(&toast, &self.library);
+        self.toasts.record_of(&text, toast.game);
+        self.refresh_guide();
+        self.toast(toast);
+    }
+
+    /// A on an Achievement unlocked notification in the Guide: the Guide closes onto the game's Achievements page,
+    /// over Home (B goes back to Home), in front of a running game as the Guide's pages are. A game with no
+    /// achievements now has its Game hub instead; one the library has lost, nothing.
+    fn open_achievements(&mut self, game: i64) {
+        let library = &self.library;
+        let Some(found) = library.games.iter().chain(&library.hidden).find(|found| found.id == game) else { return };
+        let page = achievements::Entry { game: found.key(), id: found.id, behind: game_hub::serial() };
+        let hub = game_hub::Entry::of(found);
+        let has = library.achievements.of(found.id).is_some();
+        self.guide_opens(if has { Open::Achievements(page) } else { Open::GameHub(hub) });
     }
 
     /// The Toasts' picture as it is now has been put on the screen, or taken off it: said by whoever shows it,

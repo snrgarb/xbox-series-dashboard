@@ -10,7 +10,12 @@
 //! seconds begin when its first frame is out, its going when the first frame of that is, and the next one waits
 //! until a frame without the last is. What the queue says and what is on the screen are then the same thing however
 //! slowly frames come.
+//!
+//! An Achievement unlocked Toast is the console's pill instead (`pill`, docs/spec/achievement-toast.md), shown for
+//! longer and going for longer, and made from the unlocks the Dashboard is given (`achievement`).
+pub mod achievement;
 mod banner;
+pub mod pill;
 
 use std::collections::VecDeque;
 
@@ -38,6 +43,12 @@ pub enum ToastKind {
     Installed,
     /// "<Name> was uninstalled". Its cover, else the bin. A tap opens the Guide.
     Uninstalled,
+    /// "Achievement unlocked", or "<n> achievements unlocked": the green pill with the achievement's icon, or the
+    /// trophy. A tap opens Profile & system.
+    Achievement,
+    /// "Rare Achievement unlocked - <n>%": one Rare achievement told of alone, the blue pill with the spinning
+    /// diamond and a sound of its own. A tap opens Profile & system.
+    RareAchievement,
 }
 
 impl ToastKind {
@@ -63,12 +74,53 @@ pub struct Toast {
     pub game: Option<i64>,
     /// The game whose cover its tile shows, where it has one: its art is picked for the screen as it is drawn.
     pub art: Option<Box<model::Game>>,
+    /// What an Achievement unlocked Toast tells of, beyond its line.
+    pub told: Option<Box<achievement::Told>>,
 }
 
 impl Toast {
     /// A Toast with only a line, of a kind with no game.
     pub fn new(kind: ToastKind, text: impl Into<String>, prompt: bool) -> Self {
-        Self { kind, text: text.into(), prompt, picture: None, game: None, art: None }
+        Self { kind, text: text.into(), prompt, picture: None, game: None, art: None, told: None }
+    }
+
+    /// Whether it is the pill, an achievement's, rather than the banner.
+    pub fn is_pill(&self) -> bool {
+        matches!(self.kind, ToastKind::Achievement | ToastKind::RareAchievement)
+    }
+
+    /// How long it shows, from its first frame, before it goes: five seconds, an achievement's longer.
+    pub fn shown_seconds(&self) -> f64 {
+        match self.kind {
+            ToastKind::Achievement | ToastKind::RareAchievement => {
+                let description = self.told.as_ref().and_then(|told| told.description.as_deref());
+                f64::from(pill::shown_for(self.kind == ToastKind::RareAchievement, description))
+            }
+            _ => SHOWN_SECONDS,
+        }
+    }
+
+    /// How long it takes to go, on the screen meanwhile.
+    pub fn going_seconds(&self) -> f64 {
+        if self.is_pill() {
+            f64::from(pill::OUT_SECONDS)
+        } else {
+            GOING_SECONDS
+        }
+    }
+
+    /// How long after it begins to go the next one waiting shows: the gap, after an achievement's pill has gone.
+    fn next_after(&self) -> f64 {
+        if self.is_pill() {
+            self.going_seconds() + GAP_SECONDS
+        } else {
+            GAP_SECONDS
+        }
+    }
+
+    /// What the log adds after its line and kind: an achievement's name, Score and rarity, else nothing.
+    pub fn told_line(&self) -> String {
+        self.told.as_ref().map_or_else(String::new, |told| told.line())
     }
 }
 
@@ -78,6 +130,9 @@ pub struct Notification {
     /// Its own for as long as the Dashboard runs: 1 for the first, counting up.
     pub id: u64,
     pub text: String,
+    /// The game an Achievement unlocked notification is of, by its row in the library database: A on it opens
+    /// that game's Achievements page. None for any other.
+    pub game: Option<i64>,
 }
 
 /// The Toast on screen.
@@ -122,8 +177,13 @@ pub struct Toasts {
 impl Toasts {
     /// Adds a notification to the list, and gives its id. Its Toast is `post`'s business.
     pub fn record(&mut self, text: &str) -> u64 {
+        self.record_of(text, None)
+    }
+
+    /// The same, for a notification of a game's achievements: A on it in the Flyout opens their page.
+    pub fn record_of(&mut self, text: &str, game: Option<i64>) -> u64 {
         let id = self.notifications.last().map_or(1, |last| last.id + 1);
-        self.notifications.push(Notification { id, text: text.to_string() });
+        self.notifications.push(Notification { id, text: text.to_string(), game });
         id
     }
 
@@ -165,7 +225,8 @@ impl Toasts {
                 if banner.going && banner.going_since.is_none() {
                     banner.going_since = Some(self.clock);
                     // With none behind it nothing is waited for: one that comes later shows at once.
-                    self.next_at = (!self.waiting.is_empty()).then_some(self.clock + GAP_SECONDS);
+                    let after = banner.toast.next_after();
+                    self.next_at = (!self.waiting.is_empty()).then_some(self.clock + after);
                 }
             }
             None => self.uncleared = false,
@@ -178,8 +239,10 @@ impl Toasts {
         self.clock += seconds.max(0.0) as f64;
         if let Some(banner) = &mut self.banner {
             match (banner.since, banner.going_since) {
-                (Some(since), None) if !banner.going && self.clock >= since + SHOWN_SECONDS => banner.going = true,
-                (_, Some(went)) if self.clock >= went + GOING_SECONDS => {
+                (Some(since), None) if !banner.going && self.clock >= since + banner.toast.shown_seconds() => {
+                    banner.going = true
+                }
+                (_, Some(went)) if self.clock >= went + banner.toast.going_seconds() => {
                     self.banner = None;
                     self.uncleared = true;
                 }
@@ -282,8 +345,8 @@ impl Toasts {
         let at = match &self.banner {
             Some(banner) => match banner.going_since {
                 None if banner.going => return None,
-                None => banner.since? + SHOWN_SECONDS,
-                Some(went) => went + GOING_SECONDS,
+                None => banner.since? + banner.toast.shown_seconds(),
+                Some(went) => went + banner.toast.going_seconds(),
             },
             None if self.uncleared => return None,
             None => self.next_at?,
@@ -296,7 +359,11 @@ impl Toasts {
         if let Some(banner) = &self.banner {
             let age = banner.since.map_or(0.0, |since| (self.clock - since) as f32);
             let going = banner.going.then(|| banner.going_since.map_or(0.0, |went| (self.clock - went) as f32));
-            banner::draw(ui, &banner.toast, age, going);
+            if banner.toast.is_pill() {
+                pill::draw(ui, &banner.toast, age, going);
+            } else {
+                banner::draw(ui, &banner.toast, age, going);
+            }
         }
     }
 }

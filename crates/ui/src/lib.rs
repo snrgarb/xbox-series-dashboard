@@ -426,6 +426,42 @@ impl<'a> Ui<'a> {
         }
     }
 
+    /// A part of a piece of art stretched over `rect`: `uv` is its left, top, right and bottom, 0 to 1 across the
+    /// picture, and past the picture's edge are its edge's pixels (a painted picture with a clear margin is clear
+    /// there). What moves inside a round window: a picture zoomed about a point, cut to a circle that is not its own
+    /// shape. False until it is decoded.
+    pub fn art_part(&mut self, rect: Rect, key: &ArtKey, uv: [f32; 4], alpha: f32, radius: f32) -> bool {
+        match self.art.get(key) {
+            Art::Ready { tex, .. } => {
+                self.push(Quad::image(rect, tex, uv, alpha * self.alpha, radius));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// As `art` with `Crop::Center`, its middle `1 / zoom` of it: the picture seen `zoom` times as large, still cut
+    /// to `rect` and its corners.
+    pub fn art_zoomed(&mut self, rect: Rect, key: &ArtKey, zoom: f32, alpha: f32, radius: f32) -> bool {
+        let Art::Ready { width, height, .. } = self.art.get(key) else { return false };
+        let (iw, ih) = (width.max(1) as f32, height.max(1) as f32);
+        let (mut u, mut v) = (1.0, 1.0);
+        if iw / ih > rect.w / rect.h {
+            u = (rect.w / rect.h) * ih / iw;
+        } else {
+            v = (rect.h / rect.w) * iw / ih;
+        }
+        let (u, v) = (u / zoom.max(1e-3), v / zoom.max(1e-3));
+        let uv = [0.5 - u / 2.0, 0.5 - v / 2.0, 0.5 + u / 2.0, 0.5 + v / 2.0];
+        self.art_part(rect, key, uv, alpha, radius)
+    }
+
+    /// `gradient` with the rectangle turned `turn` radians clockwise about its middle: a band of light that leans.
+    pub fn gradient_turned(&mut self, rect: Rect, from: Color, to: Color, gradient: Gradient, turn: f32) {
+        let quad = Quad::gradient(rect, from.quad(self.alpha), to.quad(self.alpha), gradient, 0.0);
+        self.push(Quad { turn, ..quad });
+    }
+
     /// A piece of art filling `rect`, once it is decoded; false until then, or if it can't be.
     pub fn art(&mut self, rect: Rect, key: &ArtKey, crop: Crop, alpha: f32, radius: f32) -> bool {
         match self.art.get(key) {
