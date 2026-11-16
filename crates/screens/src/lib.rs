@@ -982,6 +982,12 @@ impl Dashboard {
         }
         if press.button == Button::Guide {
             if !press.repeat && self.options.use_guide {
+                // A tap while a Queue Toast is up does what it says: Manage Queue, or the game started.
+                if let Some(toast) = self.toasts.showing().cloned() {
+                    if let Some(done) = self.do_what_toast_says(&toast) {
+                        return done;
+                    }
+                }
                 // A tap while a Toast is on screen opens the Guide on what the Toast is about. Opening drops it.
                 let toast = self.toasts.on_screen().map(|toast| toast.kind);
                 self.open_guide();
@@ -1288,10 +1294,34 @@ impl Dashboard {
         self.toasts.drop_all();
     }
 
+    /// A tap of the Guide button while a Queue Toast shows, as the Bundle's (docs/spec/guide.md, 9.6): "Queued"
+    /// opens Manage Queue in front of whatever is up, those waiting of its kind let go; "Ready to play" starts its
+    /// game. Either way the Toast goes, and the tap sounds as A does. None for any other Toast: the Guide opens.
+    fn do_what_toast_says(&mut self, toast: &Toast) -> Option<bool> {
+        match toast.kind {
+            ToastKind::Queued => {
+                self.toasts.drop_waiting(ToastKind::Queued);
+                self.toasts.send_away();
+                self.open_page(Open::ManageQueue);
+                self.show_dashboard();
+                Some(true)
+            }
+            ToastKind::Installed => {
+                let game = toast.game?;
+                let place = self.library.games.iter().position(|found| found.id == game)?;
+                self.toasts.send_away();
+                self.play(place);
+                Some(true)
+            }
+            _ => None,
+        }
+    }
+
     /// The Guide, just opened by a tap while a Toast of this kind was on screen, shows what the Toast was about
-    /// (docs/spec/guide.md, 9.5).
+    /// (docs/spec/guide.md, 9.5). An Uninstalled Toast's is the Guide as it opens.
     fn show_what_toast_told(&mut self, toast: ToastKind) {
         match toast {
+            ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled => {}
             ToastKind::Notification => self.open_notifications(),
             ToastKind::Greeting => {
                 let around = Around {
@@ -1327,8 +1357,7 @@ impl Dashboard {
         let id = self.record(text);
         if !self.notifications_open() {
             // With the Guide off the Guide button does nothing, and the Toast does not say to press it.
-            let prompt = self.options.use_guide;
-            self.toast(Toast { kind: ToastKind::Notification, text: text.to_string(), prompt, picture: None });
+            self.toast(Toast::new(ToastKind::Notification, text, self.options.use_guide));
         }
         id
     }
@@ -1345,7 +1374,7 @@ impl Dashboard {
         let profile = self.profile();
         let text = format!("Hi {}!", profile.first_name());
         let picture = Some(profile.picture);
-        self.toast(Toast { kind: ToastKind::Greeting, text, prompt: false, picture });
+        self.toast(Toast { picture, ..Toast::new(ToastKind::Greeting, text, false) });
     }
 
     /// The Profile signed in, which every place a Profile shows draws (docs/spec/profiles.md): the one the library
@@ -1371,6 +1400,21 @@ impl Dashboard {
         self.library.profiles.signed_in = Some(profile);
         self.refresh_guide();
         self.effects.push(Effect::Profile(ProfileChange::SignIn(profile)));
+    }
+
+    /// Tells of a game in the Queue in a Toast with its cover (docs/spec/guide.md, 9.6), as the Bundle words them:
+    /// `Queued` as the Dashboard asks for its install, "Ready to play" once it is installed, "<Name> was
+    /// uninstalled" once it is gone. Nothing for a game the library does not have, or for any other kind.
+    pub fn tell(&mut self, kind: ToastKind, game: i64) {
+        let Some(found) = self.library.games.iter().find(|found| found.id == game) else { return };
+        let text = match kind {
+            ToastKind::Queued => "Queued".to_string(),
+            ToastKind::Installed => "Ready to play".to_string(),
+            ToastKind::Uninstalled => format!("{} was uninstalled", found.name),
+            ToastKind::Notification | ToastKind::Greeting => return,
+        };
+        let art = Some(Box::new(found.clone()));
+        self.toast(Toast { game: Some(game), art, ..Toast::new(kind, text, self.options.use_guide) });
     }
 
     fn toast(&mut self, toast: Toast) {

@@ -125,6 +125,15 @@ pub trait Source: Send + Sync {
     fn installs(&self) -> Option<Vec<Install>> {
         None
     }
+
+    /// Whether asking the store to uninstall a game (`ask`) is all it takes: nothing of the store's, or of the
+    /// game's, asks the user anything, so the game should be gone within a minute or two, and a log line says so
+    /// when it is not (Steam's `+app_uninstall`). Any other store's uninstall is the user's to finish in a window
+    /// of its own (Settings' installed apps, a game's uninstaller), which may take as long as they like or never
+    /// happen: it is followed a while longer, and the wait ends quietly. False, the default.
+    fn uninstalls_by_itself(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

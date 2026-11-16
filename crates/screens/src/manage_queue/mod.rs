@@ -199,7 +199,10 @@ impl ManageQueue {
         self.row = match self.focus {
             Focus::Row(i) => {
                 let figures = Figures::of(&rows[i]);
-                Some(format!("{} {}", figures.state, figures.percent))
+                Some(match &figures.percent {
+                    Some(percent) => format!("{} {percent}", figures.state),
+                    None => figures.state.to_string(),
+                })
             }
             _ => None,
         };
@@ -417,8 +420,9 @@ fn row(ui: &mut Ui, rect: Rect, game: Option<&Game>, figures: &Figures) {
     let second = first + LINE;
     ui.paragraph(line(second, 0.0), figures.state, &TEXT, HAlign::Left, VAlign::Top, 1);
     let third = second + LINE + AMOUNT_DOWN;
-    let percent_width = ui.measure(&TEXT, &figures.percent).width;
-    right_aligned(ui, third, &figures.percent);
+    let percent = figures.percent.as_deref().unwrap_or("");
+    let percent_width = ui.measure(&TEXT, percent).width;
+    right_aligned(ui, third, percent);
     if let Some(amount) = &figures.amount {
         let network = format!("Network: {amount}");
         ui.paragraph(line(third, percent_width), &network, &TEXT, HAlign::Left, VAlign::Top, 1);

@@ -230,7 +230,10 @@ fn foot(ui: &mut Ui, download: Option<&(&str, Figures)>) {
     let Some((name, figures)) = download else { return };
     // Its name; its state with the speed at the right; then how much is down of the whole and the share, a line
     // that is not there while the client does not know the whole.
-    let amount = figures.amount.as_ref().map(|amount| format!("{amount}, {}", figures.percent));
+    let amount = figures.amount.as_ref().map(|amount| match &figures.percent {
+        Some(percent) => format!("{amount}, {percent}"),
+        None => amount.clone(),
+    });
     let lines = if amount.is_some() { 3.0 } else { 2.0 };
     let height = lines * TEXT_LINE + (lines - 1.0) * BLOCK_GAP;
     let top = ui.screen().bottom() - FOOT_BOTTOM - BLOCK_UNDER - height;

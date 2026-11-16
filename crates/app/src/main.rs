@@ -49,6 +49,9 @@ pub struct Args {
     log_frames: bool,
     /// Say where focus goes: Home's, the Guide's, a dialog's.
     log_focus: bool,
+    /// Say once a second, while Steam has a download under way, every count of how far it has got that might be
+    /// read (`source_steam::probe`): what a real install is checked by.
+    log_queue_sources: bool,
     /// Turning off, restarting and sleeping are said in the log and not done.
     dry_power: bool,
     /// A media session made up in place of Windows' (`shell::media::FakeMedia::stand_in`): the Now Playing card
@@ -99,6 +102,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--xbox <dir>]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--fake-media [--fake-media-art <picture>]]
+                 [--log-queue-sources]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
@@ -171,6 +175,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--log-sounds" => args.log_sounds = true,
             "--log-frames" => args.log_frames = true,
             "--log-focus" => args.log_focus = true,
+            "--log-queue-sources" => args.log_queue_sources = true,
             "--dry-power" => args.dry_power = true,
             "--fake-media" => args.fake_media = true,
             "--fake-media-art" => args.fake_media_art = Some(value()?.into()),
@@ -208,8 +213,28 @@ fn main() {
     } else if args.bench || args.size.is_some() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));
     } else {
+        if args.log_queue_sources {
+            log_queue_sources(&args);
+        }
         window::run(&args, library, store);
     }
+}
+
+/// `--log-queue-sources`: a thread of its own looks at the Steam the Dashboard reads once a second, and says each
+/// count of every download under way (`queue-sources: <appid> at <s> s: ...`), nothing while there is none.
+fn log_queue_sources(args: &Args) {
+    let Some(root) = args.steam.clone().or_else(source_steam::find_steam_root) else {
+        eprintln!("queue-sources: no Steam to look at");
+        return;
+    };
+    eprintln!("queue-sources: looking at {} once a second while a download is under way", root.display());
+    let mut probe = source_steam::probe::Probe::new(root, args.steam.is_none());
+    std::thread::spawn(move || loop {
+        for line in probe.look() {
+            eprintln!("{line}");
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    });
 }
 
 #[cfg(test)]

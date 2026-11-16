@@ -998,6 +998,16 @@ impl ApplicationHandler for App {
                 self.stale = true;
                 self.overlay_stale = true;
             }
+            // A game queued, ready to play, or uninstalled: a Toast each, with its cover (#132).
+            for tell in update.tell {
+                let (kind, game) = match tell {
+                    library::queue::Tell::Queued(game) => (screens::toasts::ToastKind::Queued, game),
+                    library::queue::Tell::Ready(game) => (screens::toasts::ToastKind::Installed, game),
+                    library::queue::Tell::Uninstalled(game) => (screens::toasts::ToastKind::Uninstalled, game),
+                };
+                self.dashboard.tell(kind, game);
+                toasts_changed = true;
+            }
         }
         // Art for the games a store gave none for, once the stores have been read and the first frame is out.
         if !self.art_started && self.presented.is_some() && self.store.sources_read() {

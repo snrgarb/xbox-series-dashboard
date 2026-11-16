@@ -1,7 +1,7 @@
 //! Toasts (docs/spec/guide.md, section 9): the queue and what the Guide button does while one shows, told the time
 //! by the test, and the banner drawn offscreen and compared with the committed reference images, as shots.rs does.
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use render::gpu::{self, Gpu};
 use render::offscreen::{read_back, wait, FORMAT};
@@ -17,6 +17,37 @@ const GUIDE_OPEN: Effect = Effect::Sound(Sound::GuideOpen);
 fn dashboard() -> Dashboard {
     Dashboard::new(screens::fake_library())
 }
+
+/// A cover for a game of the Queue's Toasts: tall, with bands across it, so a crop to its middle square shows.
+fn cover() -> PathBuf {
+    static COVER: OnceLock<PathBuf> = OnceLock::new();
+    COVER
+        .get_or_init(|| {
+            let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("toast-cover.png");
+            let image = image::RgbImage::from_fn(300, 450, |_, y| match (y * 9 / 450) % 2 {
+                0 => image::Rgb([200, 60, 40]),
+                _ => image::Rgb([40, 60, 200]),
+            });
+            shots::save_shared(&image, &path);
+            path
+        })
+        .clone()
+}
+
+/// The fake library with each game in a database's row, 1 up, and the first two and Baldur's Gate 3 with a cover: what the Queue's
+/// Toasts name games by.
+fn library_with_ids() -> model::Library {
+    let mut library = screens::fake_library();
+    for (i, game) in library.games.iter_mut().enumerate() {
+        game.id = i as i64 + 1;
+        game.cover = (i < 2 || i == BALDURS_GATE.0).then(cover);
+    }
+    library
+}
+
+/// Places and rows of two of its games: Halo Infinite, installed, and Baldur's Gate 3, not.
+const HALO: (usize, i64) = (0, 1);
+const BALDURS_GATE: (usize, i64) = (5, 6);
 
 fn press(dashboard: &mut Dashboard, button: Button) -> Vec<Effect> {
     dashboard.press(Press { button, repeat: false });
@@ -166,6 +197,53 @@ fn with_the_guide_off_a_toast_has_no_prompt_and_the_guide_button_does_nothing() 
 }
 
 #[test]
+fn queue_toasts_are_worded_as_the_bundles_and_a_tap_on_queued_opens_manage_queue() {
+    let mut dashboard = Dashboard::new(library_with_ids());
+    dashboard.tell(ToastKind::Queued, BALDURS_GATE.1);
+    dashboard.tell(ToastKind::Queued, HALO.1);
+    dashboard.tell(ToastKind::Uninstalled, HALO.1);
+    assert_eq!(dashboard.take_effects(), [NOTIFICATION]);
+    let toast = dashboard.toasts().showing().unwrap().clone();
+    assert_eq!((toast.text.as_str(), toast.kind, toast.prompt), ("Queued", ToastKind::Queued, true));
+    assert_eq!(toast.game, Some(BALDURS_GATE.1));
+    assert_eq!(toast.art.as_deref().map(|game| game.name.as_str()), Some("Baldur's Gate 3"));
+    // None for a game the library does not have, nor as a notification.
+    dashboard.tell(ToastKind::Installed, 999);
+    dashboard.tell(ToastKind::Notification, HALO.1);
+    assert_eq!((dashboard.toasts().waiting(), dashboard.notifications().len()), (2, 0));
+
+    // The Guide button opens Manage Queue, not the Guide; the Toast goes, the other Queued one with it, and the
+    // tap sounds as A does.
+    pass(&mut dashboard, 1.0);
+    assert_eq!(press(&mut dashboard, Button::Guide), [Effect::Sound(Sound::Activate)]);
+    assert!(!dashboard.guide_open());
+    assert_eq!(dashboard.page(), Some("ManageQueue"));
+    assert_eq!((showing(&dashboard), dashboard.toasts().waiting()), (None, 1));
+    // The Uninstalled one shows after, worded with the game's name, and a tap on it opens the Guide.
+    pass(&mut dashboard, 0.5);
+    pass(&mut dashboard, 0.5);
+    assert_eq!(showing(&dashboard).as_deref(), Some("Halo Infinite was uninstalled"));
+    assert_eq!(dashboard.toasts().showing().unwrap().kind, ToastKind::Uninstalled);
+    dashboard.take_effects();
+    press(&mut dashboard, Button::Guide);
+    assert!(dashboard.guide_open());
+}
+
+#[test]
+fn a_tap_on_ready_to_play_starts_the_game() {
+    let mut dashboard = Dashboard::new(library_with_ids());
+    dashboard.tell(ToastKind::Installed, HALO.1);
+    let toast = dashboard.toasts().showing().unwrap();
+    assert_eq!((toast.text.as_str(), toast.kind, toast.prompt), ("Ready to play", ToastKind::Installed, true));
+    dashboard.take_effects();
+    pass(&mut dashboard, 1.0);
+    let effects = press(&mut dashboard, Button::Guide);
+    assert_eq!(effects, [Effect::Sound(Sound::Activate), Effect::Launch(HALO.0)]);
+    assert!(!dashboard.guide_open());
+    assert_eq!(showing(&dashboard), None);
+}
+
+#[test]
 fn the_notifications_badge_counts_what_the_dashboard_holds() {
     // Seen in the pictures below; here, that the list is what is counted.
     let mut dashboard = dashboard();
@@ -199,6 +277,10 @@ struct Stage {
 
 impl Stage {
     fn new(size: (u32, u32)) -> Self {
+        Self::with(size, screens::fake_library())
+    }
+
+    fn with(size: (u32, u32), library: model::Library) -> Self {
         let drawing = DRAWING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let fonts = target_dir().join("fonts");
         assert!(fonts.join("selawk.ttf").is_file(), "no test fonts: run tools/test-fonts.sh");
@@ -206,7 +288,7 @@ impl Stage {
         let gpu = gpu::init(gpu::instance(None), None);
         let host = Host::new(&gpu, FORMAT, || {});
         let target = Offscreen::new(&gpu, size);
-        let mut dashboard = dashboard();
+        let mut dashboard = Dashboard::new(library);
         dashboard.set_clock(Some("9:41 AM".into()));
         Self { gpu, host, target, dashboard, _drawing: drawing }
     }
@@ -313,6 +395,22 @@ fn the_banner() {
     stage.dashboard.press(Press { button: Button::Guide, repeat: false });
     stage.dashboard.notify("Screenshot saved");
     compare("toast-over-guide", &stage.still());
+
+    // The Queue's Toasts: a game's cover, its middle square, bare on the card and rounded 4.
+    drop(stage);
+    let mut stage = Stage::with(HD, library_with_ids());
+    stage.dashboard.tell(ToastKind::Queued, BALDURS_GATE.1);
+    compare("toast-queued", &stage.still());
+    // Ready to play, on its prompt: "Press (Guide) to start".
+    drop(stage);
+    let mut stage = Stage::with(HD, library_with_ids());
+    stage.dashboard.tell(ToastKind::Installed, HALO.1);
+    compare("toast-ready-to-play-prompt", &stage.frame_after(3.0));
+    // A game with no cover (Sea of Thieves): its kind's icon on the lighter square, as a notification's bell is.
+    drop(stage);
+    let mut stage = Stage::with(HD, library_with_ids());
+    stage.dashboard.tell(ToastKind::Uninstalled, 3);
+    compare("toast-uninstalled", &stage.still());
 
     // On a screen of another shape the card is in the middle across, and as far from the foot of the canvas.
     drop(stage);

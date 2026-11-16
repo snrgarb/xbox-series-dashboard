@@ -11,20 +11,25 @@
 //!   and its hidden games (`collections`).
 //!
 //! [`Steam`] is the source the library reads (`model::Source`): it finds the install, reads it with [`load`],
-//! starts a game through Steam's own `steam://` address, installs and uninstalls one through `steam.exe` as the
-//! Bundle does, without Steam's windows ([`command`]), and reports the installs Steam has under way from its app
-//! manifests ([`installs`]).
+//! starts a game through Steam's own `steam://` address, installs and uninstalls one as the Bundle does, without
+//! Steam's windows ([`command`]; the shell types it into Steam's console over its CEF debugger where the user has
+//! that on, [`cef`]), and reports the installs Steam has under way from its app manifests ([`installs`]), a running
+//! download's bytes counted live ([`live`]). [`probe`] is `--log-queue-sources`' look at every candidate count.
 pub mod appcache;
+pub mod cef;
 pub mod collections;
 pub mod fixture;
 pub mod installs;
+pub mod live;
+pub mod probe;
 pub mod vdf;
 
 use anyhow::{Context, Result};
-use model::{Ask, Found, Game, Install, Library, Source, Start};
+use model::{Ask, Found, Game, Install, InstallState, Library, Source, Start};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use vdf::Value;
 
 /// Steam, as a game's `source` names it.
@@ -35,12 +40,15 @@ pub const SOURCE: &str = "steam";
 pub struct Steam {
     /// The install to read; with none, the one the registry names.
     root: Option<PathBuf>,
+    /// Where each running download's live count starts, by appid ([`live`]): the one thing a source keeps between
+    /// looks, as the Bundle's `SteamDownloads` keeps it.
+    baselines: Arc<Mutex<HashMap<u32, live::Baseline>>>,
 }
 
 impl Steam {
     /// The Steam install at `root`, or with none the one the registry names (`--steam` on the command line).
     pub fn at(root: Option<PathBuf>) -> Self {
-        Self { root }
+        Self { root, baselines: Arc::default() }
     }
 
     fn root(&self) -> Option<PathBuf> {
@@ -49,7 +57,7 @@ impl Steam {
 
     /// The install's root, unless it is a named folder left empty: a machine with no Steam, as a test names one so
     /// that the machine's own is never read.
-    fn installed_root(&self) -> Option<PathBuf> {
+    pub fn installed_root(&self) -> Option<PathBuf> {
         let root = self.root()?;
         let empty = self.root.is_some() && fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_none());
         (!empty).then_some(root)
@@ -115,13 +123,55 @@ impl Source for Steam {
         appid(game).is_some_and(registry::running)
     }
 
-    /// From the app manifests in every library folder ([`installs::read`]), with the registry's `Updating` as a
-    /// second word on a download that has just started, for the install the registry names only.
+    /// From the app manifests in every library folder ([`installs::under_way`]), with the registry's `Updating` as
+    /// a second word on a download that has just started, for the install the registry names only; a running
+    /// download's bytes counted live from what Steam's client has written ([`live`]).
     fn installs(&self) -> Option<Vec<Install>> {
         let root = self.installed_root()?;
         let registry = self.root.is_none();
-        Some(installs::read(&steamapps_dirs(&root), &|appid| registry && registry::updating(appid)))
+        let found = installs::under_way(&steamapps_dirs(&root), &|appid| registry && registry::updating(appid));
+        let running = found.iter().any(|(_, state, _)| state.downloading());
+        let writes = if running { live::writes(&root) } else { None };
+        let mut baselines = self.baselines.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        baselines.retain(|appid, _| found.iter().any(|(id, state, _)| id == appid && state.downloading()));
+        let installs = found
+            .into_iter()
+            .map(|(appid, state, counts)| {
+                let state = match state {
+                    InstallState::Downloading { .. } => {
+                        let mut baseline = baselines.get(&appid).copied();
+                        let state = live::downloading(&mut baseline, &counts, writes);
+                        match baseline {
+                            Some(baseline) => baselines.insert(appid, baseline),
+                            None => baselines.remove(&appid),
+                        };
+                        state
+                    }
+                    state => state,
+                };
+                Install { source_id: appid.to_string(), state }
+            })
+            .collect();
+        Some(installs)
     }
+
+    /// Asking is all it takes: `+app_uninstall` asks the user nothing.
+    fn uninstalls_by_itself(&self) -> bool {
+        true
+    }
+}
+
+/// Whether `path` is under `folder`, by either kind of slash and in any case, as Windows compares paths.
+pub fn under(folder: &Path, path: &Path) -> bool {
+    let (folder, path) = (folder.to_string_lossy().to_lowercase(), path.to_string_lossy().to_lowercase());
+    let (folder, path) = (folder.replace('/', "\\"), path.replace('/', "\\"));
+    let folder = folder.trim_end_matches('\\');
+    path.strip_prefix(folder).is_some_and(|rest| rest.starts_with('\\'))
+}
+
+/// Every `steamapps` folder of the install at `root`: its libraries' and its own.
+pub fn libraries(root: &Path) -> Vec<PathBuf> {
+    steamapps_dirs(root)
 }
 
 /// The game's appid, if it is one of Steam's.
