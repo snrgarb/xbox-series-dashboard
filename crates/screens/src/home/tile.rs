@@ -148,12 +148,8 @@ fn xbox_mark(ui: &mut Ui, mark: Rect) {
     ui.fill(down, Color::WHITE, thick * 0.2);
 }
 
-/// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow.
-pub fn source_badge(ui: &mut Ui, tile: Rect, source: Source) {
-    source_badge_at(ui, tile, source, S);
-}
-
-/// The source's badge at another scale than the rows': 1 on My games & apps, where nothing is scaled.
+/// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow, at `scale` (the rows', or
+/// 1 on My games & apps and Manage Queue, where nothing is scaled).
 pub fn source_badge_at(ui: &mut Ui, tile: Rect, source: Source, scale: f32) {
     let side = 20.0 * scale;
     let mark = Rect::new(tile.x + 10.0 * scale, tile.bottom() - 10.0 * scale - side, side, side);
@@ -167,18 +163,24 @@ pub fn source_badge_at(ui: &mut Ui, tile: Rect, source: Source, scale: f32) {
 /// for want of either its name on the dark tile, set `name_width` wide so that it doesn't reflow as a tile grows;
 /// and its source's badge, which a focused tile hides for its title.
 pub fn game(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: bool) {
-    let radius = RADIUS * S;
+    game_at(ui, rect, game, name_width, focused, S);
+}
+
+/// [`game`] at another scale than the rows': 1 on Manage Queue, where nothing is scaled.
+pub fn game_at(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: bool, scale: f32) {
+    let s = scale;
+    let radius = RADIUS * s;
     ui.fill(rect, theme::TILE, radius);
     // A cover downloaded while the Dashboard runs fades in over the name.
     let key = art_for(game, rect, ui.px());
     let cover = ui.art_arriving((&game.source, &game.source_id, &game.name), rect, key.as_ref(), Crop::Top, radius);
     if cover < 1.0 {
-        let width = name_width - 20.0 * S;
-        let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * S, width, rect.h - 20.0 * S);
+        let width = name_width - 20.0 * s;
+        let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * s, width, rect.h - 20.0 * s);
         ui.with_alpha(1.0 - cover, |ui| ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0));
     }
     if let Some(source) = source(game).filter(|_| !focused) {
-        source_badge(ui, rect, source);
+        source_badge_at(ui, rect, source, s);
     }
 }
 
@@ -208,12 +210,17 @@ pub fn collage<'a>(ui: &mut Ui, rect: Rect, games: impl Iterator<Item = &'a Game
 /// the title band's black, one line, cut with an ellipsis (the Bundle's HomeTiles.xaml StatusBand). A focused tile
 /// shows it under its title instead (`title_band`), and none of it here at once, as the Bundle hides it.
 pub fn status_band(ui: &mut Ui, rect: Rect, status: Option<&str>, focused: bool) {
+    status_band_at(ui, rect, status, focused, S);
+}
+
+/// [`status_band`] at another scale than the rows'.
+pub fn status_band_at(ui: &mut Ui, rect: Rect, status: Option<&str>, focused: bool, s: f32) {
     let Some(status) = status.filter(|_| !focused) else { return };
-    let line = ui.measure_wrapped(&BODY, status, rect.w - 16.0 * S, 1).height;
-    let height = line + 16.0 * S;
+    let line = ui.measure_wrapped(&BODY, status, rect.w - 16.0 * s, 1).height;
+    let height = line + 16.0 * s;
     ui.with_clip(Rect::new(rect.x, rect.bottom() - height, rect.w, height), |ui| {
-        ui.fill(rect, theme::BAND, RADIUS * S);
-        let text = Rect::new(rect.x + 8.0 * S, rect.bottom() - height + 8.0 * S, rect.w - 16.0 * S, line);
+        ui.fill(rect, theme::BAND, RADIUS * s);
+        let text = Rect::new(rect.x + 8.0 * s, rect.bottom() - height + 8.0 * s, rect.w - 16.0 * s, line);
         ui.paragraph(text, status, &BODY, HAlign::Left, VAlign::Top, 1);
     });
 }
@@ -230,6 +237,21 @@ pub fn title_band(
     focused: bool,
     width: f32,
 ) {
+    title_band_at(ui, rect, id, title, status, focused, width, S);
+}
+
+/// [`title_band`] at another scale than the rows'.
+#[allow(clippy::too_many_arguments)]
+pub fn title_band_at(
+    ui: &mut Ui,
+    rect: Rect,
+    id: impl std::hash::Hash,
+    title: &str,
+    status: Option<&str>,
+    focused: bool,
+    width: f32,
+    s: f32,
+) {
     // Linear both ways. The first quarter of the value's way is the 50 ms wait, with nothing showing; the way out
     // crosses the same quarter unseen, after its 100 ms.
     let (to, seconds) = if focused { (1.0, 0.2) } else { (0.0, 0.1 / 0.75) };
@@ -237,17 +259,17 @@ pub fn title_band(
     if band <= 0.0 {
         return;
     }
-    let width = width - 16.0 * S;
+    let width = width - 16.0 * s;
     let text = ui.measure_wrapped(&BODY, title, width, 2);
     let under = status.map_or(0.0, |status| ui.measure_wrapped(&BODY, status, width, 1).height);
-    let height = text.height + under + 16.0 * S;
+    let height = text.height + under + 16.0 * s;
     ui.with_alpha(band, |ui| {
         // The tile's own shape, cut to the band: square across the top, the tile's corners at the foot.
         ui.with_clip(Rect::new(rect.x, rect.bottom() - height, rect.w, height), |ui| {
-            ui.fill(rect, theme::BAND, RADIUS * S);
-            let top = rect.bottom() - height + 8.0 * S;
+            ui.fill(rect, theme::BAND, RADIUS * s);
+            let top = rect.bottom() - height + 8.0 * s;
             ui.paragraph(
-                Rect::new(rect.x + 8.0 * S, top, width, text.height),
+                Rect::new(rect.x + 8.0 * s, top, width, text.height),
                 title,
                 &BODY,
                 HAlign::Left,
@@ -255,7 +277,7 @@ pub fn title_band(
                 2,
             );
             if let Some(status) = status {
-                let line = Rect::new(rect.x + 8.0 * S, top + text.height, width, under);
+                let line = Rect::new(rect.x + 8.0 * s, top + text.height, width, under);
                 ui.paragraph(line, status, &BODY, HAlign::Left, VAlign::Top, 1);
             }
         });

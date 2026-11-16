@@ -69,6 +69,11 @@ pub struct Queued {
     /// Unix seconds: when it joined the Queue, asked for here or first seen in the client. What "next up" is ordered
     /// by, the client's own order not being readable.
     pub started: u64,
+    /// How fast it is downloading, in bits a second, as the library's follower works it out from the bytes done
+    /// at successive looks (`library::queue`): none while it is not downloading, or until its bytes have first
+    /// moved. The database keeps no speed: a Queue read from it has none.
+    #[serde(default)]
+    pub speed: Option<u64>,
 }
 
 /// A game the Queue held that finished installing.
@@ -121,7 +126,7 @@ mod tests {
     use super::*;
 
     fn entry(game: i64, state: InstallState, started: u64) -> Queued {
-        Queued { game, state, started }
+        Queued { game, state, started, speed: None }
     }
 
     #[test]

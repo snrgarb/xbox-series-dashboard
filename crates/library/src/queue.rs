@@ -17,6 +17,10 @@
 //! An uninstall the Dashboard asked for is followed the same way, by reading its source again every few seconds
 //! until the game reads uninstalled, for two minutes at most ([`UNINSTALL_FOR`]).
 //!
+//! While a game downloads, its speed is worked out from its bytes at successive looks ([`Follower::queue`]): the
+//! bytes gained over the time since they last moved, smoothed, and 0 once they have stood still for
+//! [`STALLED_AFTER`] seconds, as Steam writes its progress only every few seconds. None until they first move.
+//!
 //! [`spawn`] runs all this on a thread of its own, which polls only while there is something to follow and wakes
 //! whoever started it when the Queue or the library has changed.
 use std::collections::HashMap;
@@ -63,6 +67,12 @@ pub const UNINSTALL_FOR: u64 = 120;
 pub const RECENTLY_INSTALLED: usize = 8;
 /// How often the Queue is looked at while there is something to follow.
 pub const POLL: Duration = Duration::from_secs(1);
+/// How long a download's bytes may stand still, in seconds, before its speed reads 0. Steam writes its progress
+/// every few seconds, so a look that finds them where they were keeps the last speed until then.
+pub const STALLED_AFTER: f64 = 10.0;
+/// How much of the speed between two looks a download's speed takes on: the rest is the speed it had, so that one
+/// burst of Steam's writing does not make it jump.
+pub const SMOOTHING: f64 = 0.5;
 
 /// What happened to the Queue, for the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +133,7 @@ impl Database {
             .rows()?
             .into_iter()
             .filter(|row| !row.gone)
-            .map(|row| Queued { game: row.game, state: row.state, started: row.started })
+            .map(|row| Queued { game: row.game, state: row.state, started: row.started, speed: None })
             .collect();
         let mut installed = self.conn.prepare(
             "SELECT game, finished FROM installed JOIN games ON games.id = installed.game
@@ -214,6 +224,42 @@ pub struct Polled {
     pub changes: Vec<Change>,
     /// A source was read again and changed the library: the screens want a new snapshot, not only the Queue.
     pub library_changed: bool,
+    /// The Queue changed in what the log does not tell of: a download's bytes, or its speed.
+    pub moved: bool,
+}
+
+/// A downloading game's bytes when they last moved, when that was (seconds on the follower's own clock), and the
+/// speed it has been given, in bits a second.
+#[derive(Debug, Clone, Copy)]
+struct Sample {
+    bytes: u64,
+    at: f64,
+    speed: Option<f64>,
+}
+
+impl Sample {
+    /// The sample after a look at `at` finds `bytes` done.
+    fn next(self, bytes: u64, at: f64) -> Sample {
+        let elapsed = at - self.at;
+        if bytes == self.bytes {
+            // Standing still: the last speed, until it has stood still too long. Then 0, and a speed it picks up
+            // again is counted from there, not over the whole time it stood.
+            return match self.speed {
+                Some(speed) if speed > 0.0 && elapsed > STALLED_AFTER => Sample { at, speed: Some(0.0), ..self },
+                _ => self,
+            };
+        }
+        // Fewer than before is a download started again: counted from here.
+        if bytes < self.bytes || elapsed <= 0.0 {
+            return Sample { bytes, at, speed: self.speed.filter(|_| bytes > self.bytes) };
+        }
+        let now = (bytes - self.bytes) as f64 * 8.0 / elapsed;
+        let speed = match self.speed {
+            Some(was) if was > 0.0 => was + SMOOTHING * (now - was),
+            _ => now,
+        };
+        Sample { bytes, at, speed: Some(speed) }
+    }
 }
 
 /// Follows the Queue and the uninstalls asked for: what is kept between looks and is not the database's.
@@ -223,11 +269,52 @@ pub struct Follower {
     uninstalls: HashMap<i64, u64>,
     /// When each source was last read again, by its key.
     read_at: HashMap<&'static str, u64>,
+    /// Each downloading game's bytes and speed, by game.
+    samples: HashMap<i64, Sample>,
 }
 
 impl Follower {
     pub fn new(sources: Vec<Arc<dyn Source>>) -> Self {
-        Self { sources, uninstalls: HashMap::new(), read_at: HashMap::new() }
+        Self { sources, uninstalls: HashMap::new(), read_at: HashMap::new(), samples: HashMap::new() }
+    }
+
+    /// The Queue as the database has it, each download with the speed it has been given.
+    pub fn queue(&self, db: &Database) -> Result<Queue> {
+        let mut queue = db.queue()?;
+        for entry in &mut queue.entries {
+            entry.speed = self.speed(entry.game);
+        }
+        Ok(queue)
+    }
+
+    /// The game's download speed in bits a second, to the whole bit.
+    fn speed(&self, game: i64) -> Option<u64> {
+        self.samples.get(&game).and_then(|sample| sample.speed).map(|speed| speed.round() as u64)
+    }
+
+    /// Each download's bytes as they are now, at `at`: its speed worked out again. Whether any speed changed.
+    fn sample(&mut self, db: &Database, at: f64) -> Result<bool> {
+        let rows = db.rows()?;
+        let downloading: HashMap<i64, u64> = rows
+            .iter()
+            .filter_map(|row| match row.state {
+                InstallState::Downloading { done, .. } if !row.gone => Some((row.game, done)),
+                _ => None,
+            })
+            .collect();
+        let speeds = |follower: &Self| -> HashMap<i64, u64> {
+            follower.samples.keys().filter_map(|&game| Some((game, follower.speed(game)?))).collect()
+        };
+        let before = speeds(self);
+        self.samples.retain(|game, _| downloading.contains_key(game));
+        for (&game, &bytes) in &downloading {
+            let next = match self.samples.get(&game) {
+                Some(&sample) => sample.next(bytes, at),
+                None => Sample { bytes, at, speed: None },
+            };
+            self.samples.insert(game, next);
+        }
+        Ok(speeds(self) != before)
     }
 
     fn source(&self, key: &str) -> Option<&Arc<dyn Source>> {
@@ -280,8 +367,20 @@ impl Follower {
         self.read_at.get(key).is_none_or(|&at| now.saturating_sub(at) >= every)
     }
 
-    /// Squares the Queue with what the sources say they have under way, at `now`.
+    /// Squares the Queue with what the sources say they have under way, at `now`, a speed's clock reading the same.
     pub fn poll(&mut self, db: &mut Database, now: u64) -> Result<Polled> {
+        self.poll_at(db, now, now as f64)
+    }
+
+    /// [`poll`](Self::poll), with a finer clock for the speeds: `at`, in seconds, from wherever the caller's
+    /// clock starts.
+    pub fn poll_at(&mut self, db: &mut Database, now: u64, at: f64) -> Result<Polled> {
+        let mut polled = self.square(db, now)?;
+        polled.moved |= self.sample(db, at)?;
+        Ok(polled)
+    }
+
+    fn square(&mut self, db: &mut Database, now: u64) -> Result<Polled> {
         let mut polled = Polled::default();
         let mut reports: HashMap<&'static str, Vec<model::Install>> = HashMap::new();
         for source in &self.sources {
@@ -299,6 +398,7 @@ impl Follower {
                     Some(row) if row.reported && row.state == install.state => {}
                     Some(row) => {
                         db.set_state(game, install.state)?;
+                        polled.moved = true;
                         // Its first report is told of even as it stays Queued: from here, the store has taken
                         // it on, and the moment it reports it no more it has ended.
                         if !row.reported || moved(row.state, install.state) {
@@ -470,15 +570,17 @@ fn follow(
 ) -> Result<()> {
     let mut db = Database::open(path)?;
     let mut follower = Follower::new(sources);
+    let clock = std::time::Instant::now();
     loop {
-        let Polled { changes, library_changed } = follower.poll(&mut db, crate::now())?;
-        if !changes.is_empty() || library_changed {
+        let Polled { changes, library_changed, moved } =
+            follower.poll_at(&mut db, crate::now(), clock.elapsed().as_secs_f64())?;
+        if !changes.is_empty() || library_changed || moved {
             let name = |game: i64| db.game(game).ok().flatten().map_or_else(|| format!("game {game}"), |g| g.name);
             for change in &changes {
                 eprintln!("{}", describe(change, &name));
             }
             let library = if library_changed { Some(db.snapshot()?) } else { None };
-            if send.send(Update { queue: db.queue()?, library }).is_err() {
+            if send.send(Update { queue: follower.queue(&db)?, library }).is_err() {
                 return Ok(());
             }
             wake();
@@ -493,7 +595,7 @@ fn follow(
                 if follower.asked_install(&mut db, game, crate::now())? {
                     let name = db.game(game)?.map_or_else(|| format!("game {game}"), |g| g.name);
                     eprintln!("{}", describe(&Change::Joined { game, asked: true }, &|_| name.clone()));
-                    if send.send(Update { queue: db.queue()?, library: None }).is_err() {
+                    if send.send(Update { queue: follower.queue(&db)?, library: None }).is_err() {
                         return Ok(());
                     }
                     wake();
@@ -782,6 +884,44 @@ mod tests {
         world.other.set_installed("9", true);
         world.follower.asked_uninstall(kite, NOW);
         assert_eq!(world.poll(UNINSTALL_FOR).changes, [Change::StillInstalled(kite)]);
+    }
+
+    #[test]
+    fn a_downloads_speed_is_worked_out_from_its_bytes_smoothed_and_falls_to_nothing_once_they_stand_still() {
+        let mut world = World::new();
+        let moss = world.id("Moss");
+        world.ask("Moss", 0);
+        let speed = |world: &World| world.follower.queue(&world.db).unwrap().get(moss).unwrap().speed;
+        let at = |world: &mut World, done: u64, at: u64| {
+            world.fake.report(&[("1", InstallState::Downloading { done, total: 10_000 })]);
+            world.poll(at)
+        };
+        // Queued, and the first look at its bytes: no speed yet.
+        assert!(!world.poll(1).moved);
+        assert!(at(&mut world, 0, 2).moved);
+        assert_eq!(speed(&world), None);
+        // 250 bytes in a second: 2 kilobits a second.
+        assert!(at(&mut world, 250, 3).moved);
+        assert_eq!(speed(&world), Some(2000));
+        // The bytes where they were: the speed stays, and nothing has moved.
+        assert!(!at(&mut world, 250, 4).moved);
+        assert_eq!(speed(&world), Some(2000));
+        // A thousand more over the two seconds since they last moved: 4 kilobits a second, of which half is taken.
+        at(&mut world, 1250, 5);
+        assert_eq!(speed(&world), Some(3000));
+        // Standing still for longer than Steam goes between writes: 0.
+        at(&mut world, 1250, 5 + STALLED_AFTER as u64);
+        assert_eq!(speed(&world), Some(3000));
+        assert!(at(&mut world, 1250, 6 + STALLED_AFTER as u64).moved);
+        assert_eq!(speed(&world), Some(0));
+        // Moving again, it starts from what it moves at; paused, it has none.
+        at(&mut world, 2250, 7 + STALLED_AFTER as u64);
+        assert_eq!(speed(&world), Some(8000));
+        world.fake.report(&[("1", InstallState::Paused { done: 2250, total: 10_000 })]);
+        world.poll(8 + STALLED_AFTER as u64);
+        assert_eq!(speed(&world), None);
+        // The database keeps no speed.
+        assert!(world.db.queue().unwrap().entries.iter().all(|entry| entry.speed.is_none()));
     }
 
     #[test]

@@ -11,16 +11,16 @@
 //! | Apps | `apps` (its tile is `crate::app_tile`) |
 //! | Play history | `history` |
 //! | Full library | `full_library`: the tabs, the Sort and Filter row, and the grid under them |
-//! | Manage | `manage` |
+//! | Manage | `manage`: its Queue box opens Manage Queue (`crate::manage_queue`), a page of its own |
 //!
-//! **Hooks for other tickets**, each one function that does nothing yet: [`manage_queue`],
-//! `manage::open_manage_queue` and `nav::foot` (#79), [`progress`] (the library updating).
+//! **Hooks for other tickets**, each one function that does nothing yet: [`progress`] (the library updating), and
+//! the storage ring in `nav::foot`.
 mod apps;
 mod full_library;
 mod games;
 mod grid;
 mod history;
-mod look;
+pub(crate) mod look;
 mod manage;
 mod nav;
 mod tile;
@@ -53,27 +53,8 @@ pub enum Entry {
     /// Full library: See all on a Group, on the tab of that Group's saved filter (`model::Filter::id`). None is
     /// plain Full library, as the nav opens it.
     FullLibrary { filter: Option<i64> },
-    /// Manage's Queue (M4): Home's Downloads tile. Until there is a Manage Queue it is Manage, focus on the Queue
-    /// box.
-    Queue,
-}
-
-/// The ways into Manage Queue (docs/spec/my-games.md, 9.2), for its hook to tell apart.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QueueFrom {
-    /// Home's Downloads tile.
-    Downloads,
-    /// The Game hub's Queue action, which B on Manage Queue comes back to.
-    GameHub,
-}
-
-/// **#79's hook.** What opens Manage Queue from outside My games & apps: Home's Downloads tile and the Game hub's
-/// Queue action, opened over the page that asked, so that B comes back to it. Until there is a Manage Queue it is
-/// My games & apps on Manage, focus on its Queue box, whichever way in. The third way in, A on that Queue box, is
-/// `manage::open_manage_queue`.
-pub fn manage_queue(from: QueueFrom) -> Open {
-    let _ = from;
-    Open::MyGames(Entry::Queue)
+    /// Manage, focus on its Queue box: what the nav comes to below its line.
+    Manage,
 }
 
 /// The content's left edge and its right; the header's top, and the content row's 118 under it.
@@ -242,7 +223,7 @@ impl MyGames {
             Entry::Games => (Item::Games, None),
             Entry::PlayHistory => (Item::PlayHistory, None),
             Entry::FullLibrary { filter } => (Item::FullLibrary, filter),
-            Entry::Queue => (Item::Manage, None),
+            Entry::Manage => (Item::Manage, None),
         };
         let mut page = Self {
             showing,
@@ -472,7 +453,15 @@ impl MyGames {
             Focus::Content => None,
         };
         let count = |item: Item| self.pane(item).nav_count(around);
-        nav::draw(ui, &nav::Face { user: Self::user(around), showing, focused, count: &count });
+        let queue = &around.library.queue;
+        // The current download: the Queue's first, while it downloads.
+        let download = queue.entries.first().filter(|entry| entry.state.downloading()).and_then(|entry| {
+            let game = around.library.game(entry.game)?;
+            Some((game.name.as_str(), crate::manage_queue::figures::Figures::of(entry)))
+        });
+        let face =
+            nav::Face { user: Self::user(around), showing, focused, count: &count, queued: queue.len(), download };
+        nav::draw(ui, &face);
 
         // The pane that came by the nav slides the 50 to its rest and fades in as it does; the grid of games
         // slides with it at its full strength. Under Reduce motion it is simply there.

@@ -119,7 +119,7 @@ try {
     Press B 'Settings: Rail: Theme settings'
     Press B 'Wide\(1\)'
     Walk Right 'Wide\(3\)' 3
-    Press A 'MyGames: Manage: Queue'
+    Press A 'ManageQueue: (Cover\(0\) of .+|Nothing); 0 installing, \d+ recently installed'
     Press B 'Wide\(3\)' '06-back-on-downloads'
 
     # The first Group: the hint bar is up on a game's card, bottom right. Y there is Search, and B comes back to

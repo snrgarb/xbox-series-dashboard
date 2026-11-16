@@ -928,9 +928,11 @@ impl ApplicationHandler for App {
         // The Queue moved on: a new snapshot when a source read again changed the library, else the Queue alone.
         if let Some(update) = self.store.queue_update() {
             self.show(update.library);
-            self.dashboard.set_queue(update.queue);
-            self.stale = true;
-            self.overlay_stale = true;
+            // A download's bytes and speed alone draw nothing new on Home.
+            if self.dashboard.set_queue(update.queue) {
+                self.stale = true;
+                self.overlay_stale = true;
+            }
         }
         // Art for the games a store gave none for, once the stores have been read and the first frame is out.
         if !self.art_started && self.presented.is_some() && self.store.sources_read() {

@@ -13,6 +13,7 @@ pub mod hint_bar;
 pub mod home;
 pub mod keyboard;
 pub mod launch;
+pub mod manage_queue;
 pub mod menu_panel;
 pub mod my_games;
 pub mod pages;
@@ -250,7 +251,14 @@ impl Dashboard {
 
     /// A newer snapshot of the library takes the old one's place. Focus stays on the game it was on and the game
     /// being played stays the one being played, wherever the snapshot has them now.
-    pub fn set_library(&mut self, library: Library) {
+    pub fn set_library(&mut self, mut library: Library) {
+        // A snapshot read from the database has no speeds (the Queue's follower works them out): a download keeps
+        // the one it had until the follower next says.
+        for entry in library.queue.entries.iter_mut().filter(|entry| entry.speed.is_none() && entry.state.downloading())
+        {
+            let had = self.library.queue.get(entry.game).filter(|was| was.state.downloading());
+            entry.speed = had.and_then(|was| was.speed);
+        }
         let place = |at: usize| {
             let game = self.library.games.get(at)?;
             library.games.iter().position(|g| g.is(&game.key()))
@@ -280,15 +288,24 @@ impl Dashboard {
     }
 
     /// The Queue moved on (`library::queue`): it takes the old one's place, the games staying as they are. A page
-    /// that shows it (the Game hub's Queue action) is told, as of any change to the library.
-    pub fn set_queue(&mut self, queue: model::Queue) {
+    /// that shows it (the Game hub's Queue action, Manage Queue) is told, as of any change to the library. Whether
+    /// the screen may show the change: a download's bytes and speed are shown only on a page (Manage Queue, My
+    /// games & apps' current download), never on Home, which need not be drawn again for them.
+    pub fn set_queue(&mut self, queue: model::Queue) -> bool {
         if self.library.queue == queue {
-            return;
+            return false;
         }
+        let order = |queue: &model::Queue| -> Vec<(i64, &'static str)> {
+            queue.entries.iter().map(|entry| (entry.game, entry.state.status())).collect()
+        };
+        let shown = !self.pages.is_empty()
+            || order(&self.library.queue) != order(&queue)
+            || self.library.queue.installed != queue.installed;
         self.library.queue = queue;
         let around =
             pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
         self.pages.library_changed(around);
+        shown
     }
 
     /// The names of Home's Groups, in order, as Home shows them now: what `--log-focus` says of them

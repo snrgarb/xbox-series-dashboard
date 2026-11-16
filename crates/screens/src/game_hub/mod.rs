@@ -7,8 +7,8 @@
 //! modules beside it draw.
 //!
 //! Menu anywhere, and A on Manage, open the game's Tile menu (`tile_menu`, without its Manage game row); A on
-//! Install is the Tile menu's Install; A on Queue opens Manage Queue over the hub (`my_games::manage_queue`, #79's
-//! hook). **Hook for the tickets to come:** the Achievements row's in `cards::stats` (M6).
+//! Install is the Tile menu's Install; A on Queue opens Manage Queue over the hub (`manage_queue`), which B there
+//! comes back from. **Hook for the tickets to come:** the Achievements row's in `cards::stats` (M6).
 mod actions;
 mod backdrop;
 mod cards;
@@ -235,7 +235,7 @@ impl Page for GameHub {
             },
             // Manage Queue over the hub, which B there comes back to, focus still on Queue.
             (Button::A, Focus::Action(Action::Queue)) => {
-                return Some(PageAction::Open(crate::my_games::manage_queue(crate::my_games::QueueFrom::GameHub)));
+                return Some(PageAction::Open(crate::manage_queue::open()));
             }
             // The other page's cards; focus stays on the toggle, which now names the page it left.
             (Button::A, Focus::Action(Action::Toggle)) => {
