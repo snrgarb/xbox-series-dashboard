@@ -102,14 +102,19 @@
 //!       http://127.0.0.1:<n>/api/oauth2/token --discord-cdn-url http://127.0.0.1:<n>`: listens on the named pipe
 //!       <name> (never Discord's own `discord-ipc-N`), answers the handshake and AUTHORIZE at once, as if the user had
 //!       approved, signs the user in as "E2E Tester", and grants tokens at its own endpoint on 127.0.0.1 at <n> (any
-//!       free port without one), where it also serves every avatar asked as a plain picture of one colour. Says
+//!       free port without one), where it also serves every avatar and server icon asked as a plain picture of one
+//!       colour. It has three made-up servers (Stand-in Server, Another Server, art club) with their voice, stage
+//!       and text channels, and DMs made as `discord-say` puts the user in them. Says
 //!       `discord fake: listening on <name>, tokens at <url>, avatars at <url>`, then a line a command, until it is
 //!       killed.
-//!   standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | speak <who> |
+//!   standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel> |
+//!                       dm <person> | group <person>... | join <person> | leave <person> | speak <who> |
 //!                       hush <who> | mute <who> | unmute <who> | deafen <who> | undeafen <who> | hold | confirm |
 //!                       refuse [message] | hang-up | go-away | come-back | close <message>
-//!       Tells the fake Discord on <name> to put the user in a Call in the voice channel <channel> (General or
-//!       Late_night) with those people, to have someone join or leave it, start or stop speaking, or be muted or
+//!       Tells the fake Discord on <name> to put the user in a Call in the voice channel <channel> (General,
+//!       Late_night, Lobby or Town_hall) with those people, to put people in a voice channel without the user (who
+//!       a server's Flyout shows in it), to join a voice channel as from another device, to put the user in a DM or
+//!       group DM with those people, to have someone join or leave the Call, start or stop speaking, or be muted or
 //!       deafened (<who> is a name, or `me` for the user, whose mute and deafen are their voice settings), to hold
 //!       the voice commands (Mute, Deafen, Leave) until told to confirm (carry them out) or refuse them, to leave the
 //!       Call, to go away as Discord quitting does (the connection dropped, nothing listening) and come back, or to
@@ -141,7 +146,8 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>]
        standin discord --pipe <name> [--port <n>]
-       standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | speak <who>
+       standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel>
+                               | dm <person> | group <person>... | join <person> | leave <person> | speak <who>
                                | hush <who> | mute|unmute|deafen|undeafen <who> | hold | confirm
                                | refuse [message] | hang-up | go-away | come-back | close <message>
        standin toast <text>

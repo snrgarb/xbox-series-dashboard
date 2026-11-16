@@ -50,9 +50,11 @@ const CONNECT_GAP: f32 = 35.0;
 const STATUS_GAP: f32 = 24.0;
 /// Connect and Disconnect, 20 apart.
 const BUTTONS_GAP: f32 = 20.0;
-/// The QR code's stand-in: the Bundle's picture is not the port's to copy (docs/discord.md).
+/// The QR code: made here from the address (the Bundle's picture is not the port's to copy), black on white.
 const QR_FILL: Color = Color::rgb(0xFFFFFF);
-const QR_MARK: Color = Color::argb(0x80000000);
+const QR_DARK: Color = Color::rgb(0x000000);
+const QR_VERSION: u8 = 4;
+const QR_QUIET: i32 = 4;
 
 /// Three rows of two: [Type, Paste], [Type, Paste], [Connect, Disconnect] (section 9.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -107,21 +109,47 @@ fn address_lines() -> Vec<&'static str> {
     lines
 }
 
-/// The developer portal's QR code. Its stand-in for now: a white square with the code's three corner marks' places
-/// outlined, so that nobody takes it for a code to scan. Where the real one is drawn (docs/discord.md).
+/// The developer portal's address as a QR code, as the Bundle's picture has it: version 4 (33 modules), error
+/// correction M, with the quiet zone of 4 modules round it: 41 across. Dark modules are true, by row.
+fn portal_modules() -> &'static [Vec<bool>] {
+    static MODULES: std::sync::OnceLock<Vec<Vec<bool>>> = std::sync::OnceLock::new();
+    MODULES.get_or_init(|| {
+        use qrcodegen::{QrCode, QrCodeEcc, QrSegment, Version};
+        let segments = QrSegment::make_segments(PORTAL_URL);
+        let version = Version::new(QR_VERSION);
+        let Ok(code) = QrCode::encode_segments_advanced(&segments, QrCodeEcc::Medium, version, version, None, false)
+        else {
+            return Vec::new();
+        };
+        let size = code.size();
+        let side = size + 2 * QR_QUIET;
+        (0..side).map(|y| (0..side).map(|x| code.get_module(x - QR_QUIET, y - QR_QUIET)).collect()).collect()
+    })
+}
+
+/// The developer portal's QR code, `rect` square, white, its modules black: the Bundle's 8 pixels a module drawn
+/// at 200 with no smoothing, so each starts on a whole pixel and is 4 or 5 across.
 fn portal_qr(ui: &mut Ui, rect: Rect) {
     ui.fill(rect, QR_FILL, 0.0);
-    let mark = 56.0;
-    let inset = 14.0;
-    for (x, y) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)] {
-        let at = Rect::new(
-            rect.x + inset + x * (rect.w - 2.0 * inset - mark),
-            rect.y + inset + y * (rect.h - 2.0 * inset - mark),
-            mark,
-            mark,
-        );
-        ui.fill(at, QR_MARK, 0.0);
-        ui.fill(Rect::new(at.x + 8.0, at.y + 8.0, at.w - 16.0, at.h - 16.0), QR_FILL, 0.0);
+    let modules = portal_modules();
+    let count = modules.len() as f32;
+    let edge = |at: usize, from: f32, length: f32| from + (at as f32 * length / count).ceil();
+    for (y, row) in modules.iter().enumerate() {
+        let (top, bottom) = (edge(y, rect.y, rect.h), edge(y + 1, rect.y, rect.h));
+        // Each run of dark modules along the row as one rectangle.
+        let mut x = 0;
+        while x < row.len() {
+            if !row[x] {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < row.len() && row[x] {
+                x += 1;
+            }
+            let (left, right) = (edge(start, rect.x, rect.w), edge(x, rect.x, rect.w));
+            ui.fill(Rect::new(left, top, right - left, bottom - top), QR_DARK, 0.0);
+        }
     }
 }
 
@@ -271,5 +299,18 @@ mod tests {
     #[test]
     fn the_address_breaks_after_each_slash_as_the_bundle_shows_it() {
         assert_eq!(address_lines(), ["https://", "discord.com/", "developers/", "applications"]);
+    }
+
+    #[test]
+    fn the_qr_code_is_version_4_with_its_quiet_zone_41_across_as_the_bundles() {
+        let modules = portal_modules();
+        assert_eq!(modules.len(), 41);
+        assert!(modules.iter().all(|row| row.len() == 41));
+        // The quiet zone is light; the finder pattern's corner is dark at (4, 4), and its ring light inside it.
+        assert!(modules[0].iter().all(|&dark| !dark));
+        assert!(modules[4][4] && modules[4][10] && modules[10][4]);
+        assert!(!modules[5][5] && modules[6][6]);
+        // The top right and bottom left have theirs; the quiet zone runs round to the foot.
+        assert!(modules[4][36] && modules[36][4] && modules[40].iter().all(|&dark| !dark));
     }
 }

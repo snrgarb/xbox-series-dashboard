@@ -248,6 +248,11 @@ impl<T: Transport, O: Tokens, S: Secrets> Client<T, O, S> {
         &self.secrets
     }
 
+    /// The secret store, for what else is kept in it: the Known channels (docs/discord.md).
+    pub fn secrets_mut(&mut self) -> &mut S {
+        &mut self.secrets
+    }
+
     /// What happened on the connection since this was last asked.
     pub fn take_events(&mut self) -> Vec<Event> {
         std::mem::take(&mut self.events)

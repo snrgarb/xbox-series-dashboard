@@ -1,6 +1,7 @@
-//! The avatars of the people in a Call (docs/discord.md, "Avatars"): fetched from Discord's CDN on a thread of their
-//! own, off the frame, and kept in the data folder as art is (`art/discord/avatars/<user>/<hash>.png`,
-//! `art/discord/embed/<n>.png`), so each is fetched once. An avatar's hash changes with the picture, so a kept one is
+//! The avatars of the people in a Call, a Shortcut's and a server's voice channels', and the servers' icons
+//! (docs/discord.md, "Avatars"): fetched from Discord's CDN on a thread of their own, off the frame, and kept in the
+//! data folder as art is (`art/discord/avatars/<user>/<hash>.png`, `art/discord/embed/<n>.png`,
+//! `art/discord/icons/<guild>/<hash>.png`), so each is fetched once. An avatar's hash changes with the picture, so a kept one is
 //! never stale. Until one is there the Discord tab draws a plain disc in its place.
 //!
 //! A test points it at a stand-in CDN (`standin discord` serves plain pictures), never Discord's: with a test's pipe
@@ -100,14 +101,15 @@ impl Avatars {
     pub fn pump(&mut self) -> bool {
         let mut arrived = false;
         while let Ok((avatar, name, fetched)) = self.done.try_recv() {
+            let what = if matches!(avatar, Avatar::Icon { .. }) { "icon" } else { "avatar" };
             match fetched {
                 Ok(path) => {
-                    self.log.push(format!("discord: avatar of {name} fetched"));
+                    self.log.push(format!("discord: {what} of {name} fetched"));
                     self.known.insert(avatar, State::Kept(path));
                     arrived = true;
                 }
                 Err(why) => {
-                    self.log.push(format!("discord: avatar of {name} couldn't be fetched: {why}"));
+                    self.log.push(format!("discord: {what} of {name} couldn't be fetched: {why}"));
                     self.known.insert(avatar, State::Failed);
                 }
             }

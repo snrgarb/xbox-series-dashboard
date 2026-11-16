@@ -5,11 +5,12 @@
 #
 #   1. Connect in Settings > Discord as e2e/payloads/discord does (a Client ID and a Secret of one letter each), then
 #      B back to Home's top bar.
-#   2. The Guide, and the right bumper to its Discord tab: signed in, out of a Call (Account, focus on it).
+#   2. The Guide, and the right bumper to its Discord tab: signed in, out of a Call, focus on Servers (#145).
 #   3. The fake puts the user in General with Ana and Bo: the Call arrives, focus goes to Mute, the avatars are fetched
 #      from the stand-in CDN. Ana speaks: her ring.
 #   4. The fake holds the voice commands. A on Mute: asked, and the switch stays off until the fake confirms; then on.
-#   5. Down to Leave, held again: A asks, the Call stays until the fake confirms; then out of it, focus on Account.
+#   5. Down to Leave, held again: A asks, the Call stays until the fake confirms; then out of it, focus on the
+#      Shortcut to General it left behind (#145).
 #   6. Into Late night with Ana; the fake holds and refuses Mute (now unmute): nothing changes, the connection stays.
 #   7. The fake goes away: the tab says "Discord isn't running".
 #
@@ -164,7 +165,7 @@ try {
 
     # --- 2. The Guide's Discord tab: signed in, out of a Call.
     Step Guide 'Landing Entry\(0\)' | Out-Null
-    Step RightShoulder 'Discord Entry\(0\) Account; not in a call; mute off, deafen off$' '1-signed-in' | Out-Null
+    Step RightShoulder 'Discord Entry\(2\) Servers; not in a call; mute off, deafen off$' '1-signed-in' | Out-Null
 
     # --- 3. The Call arrives: focus on Mute; the avatars come; Ana speaks.
     $mark = Get-DashboardLogLength
@@ -200,7 +201,7 @@ try {
     $mark = Get-DashboardLogLength
     Tell-Fake @('confirm')
     Expect-Log '^discord: out of the call$' 10 $mark 'left' | Out-Null
-    Expect-Guide 'Discord Entry\(0\) Account; not in a call; mute on, deafen off$' 10 $mark 'out of the call on the tab' '4-left' | Out-Null
+    Expect-Guide 'Discord Entry\(2\) Shortcut "General"( \(Stand-in Server\))?; not in a call; mute on, deafen off$' 10 $mark 'out of the call on the tab' '4-left' | Out-Null
 
     # --- 6. A refused command changes nothing.
     $mark = Get-DashboardLogLength

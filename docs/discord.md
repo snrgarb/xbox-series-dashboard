@@ -26,6 +26,8 @@ Secret. The page's four steps say so.
 | `crates/discord/src/tokens.rs` | The real `Tokens`: Discord's OAuth2 token endpoint, asked on a thread of its own. |
 | `crates/discord/src/secrets.rs` | The real `Secrets`: `discord-secrets.dat` in the data folder, the whole file encrypted with DPAPI for the Windows user (a stand-in that keeps it as it is elsewhere). |
 | `crates/discord/src/lib.rs` | `Connection`: the client over the real pieces, as the Dashboard's loop drives it. |
+| `crates/discord/src/voice.rs`, `shortcuts.rs`, `servers.rs`, `following.rs` | The Call, the Known channels, the Servers Flyouts, and the three followed together from the client's events. Pure, as the client is. |
+| `crates/discord/src/avatars.rs` | The avatars and server icons, fetched off the frame into the data folder. |
 | `crates/discord/src/fake.rs` | `FakeDiscord`: a fake Discord on a pipe of the test's naming, with its own token endpoint (`standin discord`). |
 | `crates/screens/src/settings/discord.rs` | The Settings page. |
 | `crates/app/src/window.rs` | Makes the `Connection`, starts it, pumps it every turn, carries out `Effect::Discord`, hands `Discord` to the screens. |
@@ -110,19 +112,59 @@ started) into `<data>/art/discord/avatars/<id>/<hash>.png` and `.../embed/<n>.pn
 at once ever after, as art is. Until one is there the tab draws a grey disc with a figure. At most 1 MB, written
 beside its place then moved there. With a test's pipe there is no CDN at all unless `--discord-cdn-url` names one.
 
-## For the Shortcuts and Servers (#145)
+## Following it all (#145)
 
-- `Discord::has_tab()`: the Guide has a Discord tab (signed in, or tokens saved). `Discord::tab_line()`: what the tab
-  says in Discord's place while it can't show it (`Connecting to Discord`, `Discord isn't running`, `Reconnect
-  Discord in settings`), None while signed in.
-- The client's events now belong to the `Connection` (`Connection::follow`): #145 hands them to its own follower
-  beside `voice::Follower`, from the same loop. The places #145 hooks into are marked `#145` in `voice.rs` (the
-  GET_CHANNEL answers for the Shortcuts' occupants and rings, VOICE_STATE_CREATE for a ring, the known channel on
-  show, a ring's own subscriptions on UNSUBSCRIBE).
-- The tab's entries: `guide::discord::entries` ends where the Shortcuts then Servers (under a divider) go;
-  `first_focus` goes to the first Shortcut, else Servers, out of a Call, as the Bundle's does.
-- `Dashboard::set_discord` sets `status.discord` from `has_tab()`: Home's Discord tile opens the tab then, Settings
-  otherwise.
+The client's events belong to the `Connection` (`Connection::follow`), which hands each to `following::Following`:
+the Call (`voice::Follower`), the Known channels (`shortcuts::Known`) and the Servers Flyouts (`servers::Browser`),
+told apart by command and nonce. A GET_CHANNEL sent for who is in a server's voice channel is known by its nonce and
+never becomes the Call; every channel Discord sends (the Call's too) fills in who is in it in a server's Flyout.
+GET_GUILD answers go to the Known channels, GET_GUILDS and GET_CHANNELS (and their refusals) to the browser.
+`Following` is pure, as its parts are; the `Connection` gives it the time, sends what it asks through the client,
+saves what it hands back in the secret store, and wakes the loop for the Flyout's spinner (`next_timer`).
+
+`Discord::has_tab()`: the Guide has a Discord tab (signed in, or tokens saved). `Discord::tab_line()`: what the tab
+says in Discord's place while it can't show it, None while signed in. `Dashboard::set_discord` sets
+`status.discord` from `has_tab()`: Home's Discord tile opens the tab then, Settings otherwise.
+
+### Known channels
+
+Ported from the Bundle's `ExtensionCore.DiscordShortcuts.cs` and its tests, in `crates/discord/src/shortcuts.rs`:
+
+- Each Call begun is learned, at the front: its channel's id, server, name (the Call's heading: the channel's name,
+  else the people in it) and picture (a DM's first other person's avatar). A voice channel's server is asked for its
+  name and icon (GET_GUILD) and becomes the most recent server; the answer lands on every Known channel of that server.
+  The Call's own Known channel takes the name and picture it lacked as people join, without a save for an unchanged
+  one; joined again, it is named afresh.
+- **DMs are kept until removed; a server's voice channel only while among the six most recent.** The first six are
+  the Shortcuts. Remove shortcut forgets one for good, and a removed one is not brought back by its Call going on;
+  removing one leaves the servers' order alone.
+- Kept in the secret store (`discord-secrets.dat`, encrypted) under the Bundle's names and in its JSON:
+  `Discord.Shortcuts`, an array of `{Id, GuildId, Name, Image, ServerName}` (`Image` the picture's address on
+  Discord's CDN), and `Discord.RecentServers`, the servers' ids, most recent first. Unreadable data reads as none.
+  They are read as the Dashboard starts, so the Shortcuts show as soon as Discord signs in, and kept across Disconnect.
+- A Shortcut's picture is fetched as an avatar is, its address mapped onto the CDN the Dashboard was given (so a test
+  never reaches Discord's); a server's icon is kept in `<data>/art/discord/icons/<guild>/<hash>.png`.
+- A on one sends SELECT_VOICE_CHANNEL `{channel_id, force: true}`, unless it is the Call's already.
+
+### Servers
+
+Ported from `ExtensionCore.DiscordServers.cs` and its tests, in `crates/discord/src/servers.rs`. What the Flyout is
+for, and its looks, are docs/spec/discord-tab.md, 5.
+
+- Servers sends GET_GUILDS; a server, GET_CHANNELS `{guild_id}`, keeping its voice (2) and stage (13) channels in
+  Discord's order, then GET_CHANNEL for each to learn who is in it. Only the answer to the request still awaited is
+  shown (by nonce): one for a Flyout backed out of, or a server left for another, is dropped.
+- The servers come in the Bundle's order: the Known servers most recent first, then the rest by name ignoring case.
+- The spinner shows a second at least: an answer that comes sooner is held until then, and dropped if the Flyout has
+  closed meanwhile.
+- What was answered is kept while signed in: Servers or a server opened again shows it at once and asks afresh; a
+  refusal then keeps it. B back to the servers asks nothing. Discord going forgets it all.
+- A on a channel sends SELECT_VOICE_CHANNEL as a Shortcut does, and closes the Flyout.
+
+`Discord.shortcuts` (`Shortcut { id, name, server, picture, dm }`) and `Discord.browse` (`Browse::Closed | Servers {
+loading, servers } | Server { id, name, loading, channels }`) are the screens' copies. `Ask::Join(id)`,
+`Ask::RemoveShortcut(id)` and `Ask::Browse(Servers | Server { id, name } | Back | Close)` are what the tab asks; the
+screens hold the Flyout itself (open, focus, B), and close it as `browse` closes or Discord goes.
 
 ## Testing
 
@@ -131,13 +173,22 @@ beside its place then moved there. With a test's pipe there is no CDN at all unl
 - `crates/discord/tests/fake.rs`: the real `Connection` (pipe, threads, HTTP) against `FakeDiscord`: connects, is
   lost as the fake goes away, tries again and signs in by itself as it comes back; starting again signs in with the
   saved tokens. A Call arrives with everyone's avatar from the fake's stand-in CDN; people join, speak and leave;
-  Mute and Leave, held by the fake, show only once it confirms; a refused one changes nothing.
+  Mute and Leave, held by the fake, show only once it confirms; a refused one changes nothing. The servers listed
+  with their icons, a server's channels with who is in them, one joined becoming a Shortcut, a DM's Shortcut, both
+  there as the Dashboard starts again, one rejoined in one ask and removed.
 - `crates/discord/tests/voice.rs`: the Bundle's DiscordCallTests, the follower against a recording of what it sends.
+- `crates/discord/tests/shortcuts.rs` and `servers.rs`: the Bundle's DiscordShortcutsTests and DiscordServersTests,
+  `Following` against a recording of what it sends, a secret store and a clock the test moves.
 - `standin discord --pipe <name> [--port <n>]` runs the fake; `standin discord-say <name> go-away | come-back | close
-  <message> | call <channel> <person>... | join <person> | leave <person> | speak|hush <who> |
-  mute|unmute|deafen|undeafen <who> | hold | confirm | refuse [message] | hang-up` steers it (`<who>` a name, or
-  `me`). `hold` keeps SET_VOICE_SETTINGS and SELECT_VOICE_CHANNEL waiting until `confirm` carries them out or
-  `refuse` errors them. Its HTTP port serves every avatar asked as a plain picture of one colour: nobody's real one.
+  <message> | call <channel> <person>... | in <channel> [person]... | select <channel> | dm <person> | group
+  <person>... | join <person> | leave <person> | speak|hush <who> | mute|unmute|deafen|undeafen <who> | hold | confirm
+  | refuse [message] | hang-up` steers it (`<who>` a name, or `me`; `<channel>` General, Late_night, Lobby or
+  Town_hall). `in` puts people in a voice channel without the user; `select` joins one as another device would; `dm`
+  and `group` put the user in a DM or group DM with those people. `hold` keeps SET_VOICE_SETTINGS and
+  SELECT_VOICE_CHANNEL waiting until `confirm` carries them out or `refuse` errors them. It has three servers
+  (`fake::SERVERS`): Stand-in Server (with an icon: a text channel, General, Late night), Another Server (no icon:
+  Lobby, a text channel, the stage Town hall) and art club (an icon, text only). Its HTTP port serves every avatar and
+  icon asked as a plain picture of one colour: nobody's real one.
 - `dashboard --discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]` points the Dashboard at
   it: only that pipe is tried, and with no token URL or CDN URL there is none at all, so a test never reaches
   discord.com. The e2e helpers add
@@ -146,6 +197,9 @@ beside its place then moved there. With a test's pipe there is no CDN at all unl
 - `e2e/payloads/discord/run.ps1`: Settings > Discord with the pad, against `standin discord`.
 - `e2e/payloads/discord-tab/run.ps1`: the Guide's Discord tab against it: the Call arriving, a speaker's ring, Mute
   and Leave only once the fake confirms, and the tab's line as the fake goes away.
+- `e2e/payloads/discord-servers/run.ps1`: Servers against it: the spinner then the servers, a server's channels with
+  who is in them, B back onto the server, a channel joined, its Shortcut after leaving, rejoined in one press, and
+  Remove shortcut from its menu.
 
 The log, prefixed `discord: `: `client id set|forgotten`, `client secret saved|forgotten`, `connecting`, `not
 running`, `retry in <n> s`, `asking Discord to authorize: approve the request in Discord`, `approved in Discord:
@@ -160,15 +214,24 @@ the call` (`: Discord has gone` as it closes), `Discord says mute on|off, deafen
 Discord to mute|unmute|deafen|undeafen|leave the call` (as sent), `Discord refused <CMD>: <message>`, `avatar of <name>
 fetched`, `avatar of <name> couldn't be fetched: <why>`. With `--log-focus` the Guide's line on the tab says the
 entry focus is on and what Discord says: `guide: Discord Entry(5) Mute; in "General" with E2E Tester, Ana
-(speaking), Bo (muted, deafened); mute off, deafen off`, `guide: Discord Entry(0) Account; not in a call; mute off,
-deafen off`, `guide: Discord Entry(0) Unavailable; "Discord isn't running"`.
+(speaking), Bo (muted, deafened); mute off, deafen off`, `guide: Discord Entry(2) Servers; not in a call; mute off,
+deafen off`, `guide: Discord Entry(0) Unavailable; "Discord isn't running"`; with the Flyout open what it shows
+(docs/spec/discord-tab.md, 7).
+
+The Shortcuts' and Servers' lines: `asking Discord for the servers`, `servers: "<name>", ...` (or `none`), `asking
+Discord for "<server>"'s voice channels`, `voice channels of "<server>": "<name>", ...`, `in "<channel>": <people>`
+(or `nobody`, as who is in it changes), `asking Discord to join "<name>"`, `"<name>" is the call's already: nothing
+asked`, `shortcut "<name>" removed`, `icon of <server> fetched`.
 
 ## Left for a human
 
 - A real Discord application (Client ID and Secret, the redirect, the user as App Tester) and a signed-in Discord on
   the TV PC: the fake stands in for both in every test here. Real avatars from Discord's CDN, and a real Call's
   Mute, Deafen and Leave, are only seen there.
-- Discord's mark on the account card is a plain stand-in shape (`marks::discord_mark`), as on the tab strip.
-- The QR code: the page draws a plain stand-in (`portal_qr` in the page), a white square with the corner marks'
-  places outlined, so nobody takes it for a code to scan. The Bundle's `DiscordPortalQr.png` is not copied. A real
-  code of `PORTAL_URL` can be drawn there at run time (a QR encoder crate, nearest-neighbour squares).
+- Discord's mark on the account card, the Status area, a DM's Shortcut and a server without an icon is a plain
+  stand-in shape (`marks::discord_mark`), as on the tab strip.
+- Rings (an incoming DM call) are not built; their hooks are marked "Rings" in `voice.rs`.
+- The QR code is made at run time from `PORTAL_URL` (`portal_qr` in the page, with `qrcodegen`, a pure-Rust encoder
+  with no dependencies): version 4, error correction M, a quiet zone of 4 modules, 41 across, drawn 200 square at x
+  1540 as the Bundle's 328-pixel picture is shown, with no smoothing. The Bundle's `DiscordPortalQr.png` is not
+  copied. Whether a phone reads it off the TV is for a human to try.
