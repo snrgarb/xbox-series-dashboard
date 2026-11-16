@@ -98,15 +98,22 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let database = database();
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
-    // Theme settings: Personalisation, then Guide beside it. The row's end and the top stop.
+    // Theme settings: Personalisation, then Guide beside it, and Games & apps and Art under them. The row's end,
+    // the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
-    // Art alone on the row under them: Down from either is Art, and the foot stops.
+    // Down from Guide is Art, beside Games & apps.
     press(&mut dashboard, &[Down, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
+    press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
     press(&mut dashboard, &[Up, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
+    press(&mut dashboard, &[Down, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
+    press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
     // Left from the first column is back a level, as B: the rail.
     press(&mut dashboard, &[Left]);
@@ -714,7 +721,7 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
 fn settings_art() {
     const KEY: &str = "f00dfeedcafe1234";
     let mut stage = settings_stage();
-    stage.press(&[Right, Down]);
+    stage.press(&[Right, Down, Right]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
     stage.check("settings-theme-settings-art-box");
     stage.press(&[A]);

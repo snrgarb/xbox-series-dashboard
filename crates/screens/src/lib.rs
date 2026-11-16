@@ -6,6 +6,7 @@
 //! other that shows the Launch screen and the Guide, over a running game and over Home alike. `overlay` says what
 //! the Overlay is wanted for, which the executable follows by showing and hiding it.
 //! Toasts are a third (`draw_toasts`), for the strip above both.
+mod app_tile;
 pub mod game_hub;
 pub mod guide;
 pub mod hint_bar;
@@ -85,6 +86,12 @@ pub enum Effect {
     /// (docs/spec/filters.md, section 6). A new snapshot follows, as for a favourite, and the pages over Home are
     /// told of it.
     Filter(FilterChange),
+    /// Start the App with this id in the library database (`Library::apps`): as it is, whatever is running, with no
+    /// Launch screen and no Play session (docs/spec/apps.md).
+    StartApp(i64),
+    /// Settings' Games & apps pages added, renamed or removed a game added by hand or an App. A new snapshot
+    /// follows, as for a favourite, and the pages over Home are told of it.
+    ByHand(model::ByHand),
     /// Settings > Art: the user's SteamGridDB key, to keep (none: forget it). The Dashboard takes note that there
     /// is one, never what it is; whoever keeps the settings saves it and looks up art with it.
     ArtKey(Option<Secret>),

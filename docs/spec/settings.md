@@ -241,6 +241,8 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
+The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. Until Idle and Discord come, the boxes close up: Personalisation and Guide on the first row, Games & apps under Personalisation, and Art (16.8) beside it.
+
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
 E/PersonalisationPane.xaml:119-278; a grid of two auto columns and six auto rows.
@@ -798,7 +800,7 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 
 The Bundle has no such page: Playnite's metadata sources fetched missing art (section 14, "Download metadata"). The port's is the user's own SteamGridDB key and a way to take away what it downloaded (docs/sources.md, "Art"), and is decided here.
 
-- **Its box**: Theme settings' third, **Art**, icon U+EB9F, at (0, 1) (x 520..957, y 359..490), where the Bundle has Guide until Idle and Discord come back (they then take their places and Art goes after them).
+- **Its box**: **Art**, icon U+EB9F, at (1, 1) (x 975..1412, y 359..490), beside Games & apps and under Guide, until Idle and Discord come back (they then take their places and Art goes after them). Down from Guide is Art; Left from it is Games & apps.
 - **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190:
 
 | Element | y | Notes |

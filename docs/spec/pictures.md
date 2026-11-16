@@ -27,6 +27,8 @@ The library is the theme's test seed plus twelve installed games, so Games scrol
 | [`07-my-games-full-library-from-nav.jpg`](https://github.com/snrgarb/xbox-series-dashboard/blob/reports/m3-reference/07-my-games-full-library-from-nav.jpg) | Full library opened by the nav: focus on its nav item, no tab lit |
 | [`08-my-games-manage.jpg`](https://github.com/snrgarb/xbox-series-dashboard/blob/reports/m3-reference/08-my-games-manage.jpg) | Manage, focus on its Queue box |
 
+**Still to take:** Apps with Apps in it (a program with an icon, one without, a Microsoft Store app), focus on the nav and on a tile, for [apps.md](apps.md) section 2. 05 is the only picture of Apps, and it is empty.
+
 ## Full library
 
 | Picture | Shows |

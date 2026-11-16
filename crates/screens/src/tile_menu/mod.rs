@@ -128,9 +128,9 @@ fn rows(game: &Game, running: bool, opener: Opener) -> Vec<Row<Choice>> {
 }
 
 /// Whether the game's store can be asked to uninstall it: any store's can, its source giving the address. A game
-/// from no store (a made-up one) has no Uninstall row.
+/// from no store (a made-up one) has no Uninstall row, nor one added by hand, which Settings removes.
 fn has_uninstaller(game: &Game) -> bool {
-    !game.source.is_empty()
+    !game.source.is_empty() && game.source != model::by_hand::MANUAL
 }
 
 /// The flyout's rows (section 4): what is left of the Bundle's once Playnite's own are gone (section 13).
@@ -404,6 +404,8 @@ mod tests {
         let by_hand = Game { source: String::new(), ..game() };
         assert_eq!(labels(&by_hand, false, Opener::Home).len(), 5);
         assert!(!labels(&by_hand, false, Opener::Home).contains(&"Uninstall".to_string()));
+        let manual = Game { source: model::by_hand::MANUAL.into(), ..game() };
+        assert!(!labels(&manual, false, Opener::Home).contains(&"Uninstall".to_string()));
     }
 
     #[test]

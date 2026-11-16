@@ -145,7 +145,9 @@ the grid's edges and its scroll, Play history, Manage, and B and Y), `search` (Y
 keyboard with the pad, the symbols, the keyboard put away, A on a result opening its hub, and B back step by step),
 `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 the grid's edges and its scroll, Play history, Manage, and B and Y), `groups` (Settings' Groups: a Group hidden, two swapped and one added by
-name, Home's Groups seen to follow each, and all put back), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
+name, Home's Groups seen to follow each, and all put back), `apps` (Settings' Games & apps: a copy of the stand-in
+game added as a game and Notepad as an App by typing their paths, the App started from My games & apps' Apps, the game
+launched from its hub and first in the Recent row after, and both removed), `flyouts` (the Guide's Notifications and Audio Flyouts over a game; where the VM has an
 output device it moves the real volume and mute and puts them back), `toast` (the greeting, Toasts over the game and
 the Guide, the queue, the Guide button during a Toast), `stores-ea-ubisoft-battlenet` (a fake of each beside Steam's:
 each read, and one game of each found through Search and launched from its hub through its store), and `overlay` and `video` for the spikes.

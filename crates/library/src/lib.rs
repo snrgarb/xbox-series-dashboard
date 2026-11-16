@@ -16,9 +16,10 @@
 //! version `n` to `n + 1`, and one is never edited once released. What is still to come has its place:
 //! - More sources: a game is keyed by `(source, source_id)`, both text, so each store keeps its own ids, and a game
 //!   owned in two stores is two games.
-//! - Games added by hand (#12): a source of their own, `manual`, with a table beside `games` for the program, its
-//!   arguments and working folder.
+//! - Games added by hand and Apps (`by_hand`): the games a source of their own, `manual`, each a row of `games`
+//!   keyed by its program's path; the Apps a table of their own, `apps`, as they are not games.
 pub mod art;
+pub mod by_hand;
 pub mod filters;
 pub mod history;
 pub mod sources;
@@ -97,6 +98,8 @@ const MIGRATIONS: &[&str] = &[
     -- 0 to 100, or none.
     ALTER TABLE games ADD COLUMN critic_score INTEGER;
     ALTER TABLE games ADD COLUMN community_score INTEGER;",
+    // 4: the Apps (docs/spec/apps.md).
+    by_hand::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -430,6 +433,8 @@ impl Database {
             filters: self.filters_at(now)?,
             history: history::rows(&self.conn, now)?,
             collections: None,
+            apps: self.apps()?,
+            store_apps: None,
         })
     }
 
