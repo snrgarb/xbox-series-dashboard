@@ -100,7 +100,7 @@ function Save-Screen([string] $Name) {
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     try {
         $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-        $scale = [Math]::Min(1, [Math]::Min(1920 / $b.Width, 1080 / $b.Height))
+        $scale = [Math]::Min(1.0, [Math]::Min(1920.0 / $b.Width, 1080.0 / $b.Height))
         if ($scale -lt 1) {
             $small = New-Object System.Drawing.Bitmap ([int] ($b.Width * $scale)), ([int] ($b.Height * $scale))
             $sg = [System.Drawing.Graphics]::FromImage($small)
