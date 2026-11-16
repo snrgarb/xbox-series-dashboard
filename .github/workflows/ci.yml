@@ -62,8 +62,8 @@ jobs:
           cargo nextest --version
       - name: Test
         run: |
-          cargo nextest run --workspace --profile ci
-          cargo test --workspace --doc
+          cargo nextest run --workspace --profile ci --cargo-profile ci
+          cargo test --workspace --doc --profile ci
       - name: Upload what the screenshot tests drew
         if: failure()
         uses: actions/upload-artifact@v4
