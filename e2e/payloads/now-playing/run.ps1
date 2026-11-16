@@ -123,7 +123,7 @@ try {
     $listed = Wait-DashboardLog "^media: .*`"$([regex]::Escape($title))`" playing" 20
     if (-not $listed) { throw "Windows never listed the stand-in's session to the Dashboard (media: $(Get-LastLine 'media'))" }
     # `media: 2 sessions, current "...": <App> (<app id>) "<title>" playing; ...`: the stand-in's app as named.
-    if ($listed -notmatch "(?:: |; )([^;]+?) \(([^)]*)\) `"$([regex]::Escape($title))`"") { throw "No app name for the stand-in in: $listed" }
+    if ($listed -notmatch "(?:: |; )([^;:`"]+?) \(([^)]*)\) `"$([regex]::Escape($title))`"") { throw "No app name for the stand-in in: $listed" }
     $app, $appId = $Matches[1], $Matches[2]
     Say "Windows lists the stand-in as $appId, which the Dashboard calls '$app'"
 
