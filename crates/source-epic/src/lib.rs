@@ -12,8 +12,9 @@
 //! - `%LOCALAPPDATA%\com.epicgames.eglv2`: the new launcher's `installations.jsonl` and its library and catalogue
 //!   caches (`modern`).
 //!
-//! No art: the launcher caches its pictures' addresses, not the pictures. No play history either: Epic keeps it on
-//! its servers.
+//! No art on disk: the launcher caches its pictures' addresses, not the pictures. Those addresses (a catalogue
+//! item's `keyImages`, on Epic's CDN) are the game's `OnlineArt`, which the art lookup downloads (#110). No play
+//! history either: Epic keeps it on its servers.
 //!
 //! [`Epic`] is the source the library reads (`model::Source`): it starts a game, and asks for one to be installed,
 //! through the launcher's `com.epicgames.launcher://` links, the launcher checking the game is the user's.
@@ -25,7 +26,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use model::{Ask, Found, Game, Library, Source, Start};
+use model::{Ask, Found, Game, Library, OnlineArt, Source, Start};
 use serde_json::Value;
 
 /// Epic, as a game's `source` names it.
@@ -170,6 +171,27 @@ pub(crate) struct Item {
     pub install: Option<(PathBuf, String)>,
     /// What it takes on disk, where the manifest says.
     pub size: u64,
+    /// The addresses of its key images on Epic's CDN, as its catalogue item names them.
+    pub art: OnlineArt,
+}
+
+/// A catalogue item's `keyImages` (`[{"type", "url"}]`) as the store's own art online: the tall box art the cover,
+/// the wide one the hero, the wide offer image (else the box art) the header. Only `https` addresses. Nothing is
+/// square.
+pub(crate) fn key_images(value: &Value) -> OnlineArt {
+    let images = value.get("keyImages").and_then(Value::as_array);
+    let image = |types: &[&str]| {
+        types.iter().find_map(|wanted| {
+            let found = images.into_iter().flatten().find(|i| i.get("type").and_then(Value::as_str) == Some(wanted))?;
+            found.get("url")?.as_str().filter(|url| url.starts_with("https://")).map(str::to_string)
+        })
+    };
+    OnlineArt {
+        cover: image(&["DieselGameBoxTall", "OfferImageTall"]),
+        hero: image(&["DieselGameBox", "OfferImageWide"]),
+        header: image(&["OfferImageWide", "DieselStoreFrontWide", "DieselGameBox"]),
+        ..OnlineArt::default()
+    }
 }
 
 /// The launcher's link for the item: the three-part form where the item's namespace and catalogue id are known,
@@ -214,6 +236,7 @@ pub fn load(places: &Places) -> Result<Library> {
             installed: item.install.is_some(),
             size_on_disk: item.size,
             install_dir: item.install.map(|(dir, _)| dir),
+            online: item.art,
             ..Game::default()
         })
         .collect();
@@ -268,6 +291,7 @@ fn legacy(places: &Places) -> Result<Vec<Item>> {
             title: manifest.title,
             install: Some((dir.clone(), manifest.exe)),
             size: manifest.size,
+            art: OnlineArt::default(),
         };
         // Two manifests of one game: the one the install list agrees with.
         match items.iter_mut().find(|known| known.app_name == item.app_name) {
@@ -289,8 +313,13 @@ fn legacy(places: &Places) -> Result<Vec<Item>> {
             (!owned.item_id.is_empty() && item.item_id == owned.item_id) || item.app_name == owned.app_name
         });
         match installed {
-            Some(item) if item.title.is_empty() => item.title = owned.title,
-            Some(_) => {}
+            Some(item) => {
+                if item.title.is_empty() {
+                    item.title = owned.title;
+                }
+                // The manifest names no pictures: the catalogue's.
+                item.art = owned.art;
+            }
             None => items.push(owned),
         }
     }
@@ -386,6 +415,7 @@ pub(crate) fn catalogue_item(value: &Value) -> Option<Item> {
         title,
         install: None,
         size: 0,
+        art: key_images(value),
     })
 }
 
@@ -514,7 +544,20 @@ mod tests {
         assert_eq!(item(json!([{ "path": "applications" }]), json!({})), None);
         assert_eq!(item(json!([{ "path": "games" }, { "path": "digitalextras" }]), json!({})), None);
         assert_eq!(item(games.clone(), json!({ "mainGameItem": { "id": "e2a4" } })), None);
-        assert_eq!(item(games, json!({ "releaseInfo": [] })), None);
+        assert_eq!(item(games.clone(), json!({ "releaseInfo": [] })), None);
+
+        // Its key images, as the store's own art online: https only, nothing square.
+        let images = json!({ "keyImages": [
+            { "type": "Thumbnail", "url": "https://cdn1.epicgames.com/x/thumb.jpg" },
+            { "type": "DieselGameBoxTall", "url": "https://cdn1.epicgames.com/x/tall.jpg" },
+            { "type": "DieselGameBox", "url": "https://cdn1.epicgames.com/x/wide.jpg" },
+            { "type": "OfferImageWide", "url": "http://cdn1.epicgames.com/x/offer.jpg" },
+        ]});
+        let art = item(games, images).unwrap().art;
+        assert_eq!(art.cover.as_deref(), Some("https://cdn1.epicgames.com/x/tall.jpg"));
+        assert_eq!(art.hero.as_deref(), Some("https://cdn1.epicgames.com/x/wide.jpg"));
+        assert_eq!(art.header.as_deref(), Some("https://cdn1.epicgames.com/x/wide.jpg"), "not the http one");
+        assert_eq!((art.square, art.product), (None, None));
     }
 
     #[test]

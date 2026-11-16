@@ -122,6 +122,7 @@ fn library_items(
             let title = entry.get("title").and_then(Value::as_str).filter(|title| !title.is_empty());
             let title = title.map(str::to_string).or_else(|| Some(known?.as_ref()?.title.clone()))?;
             let install = installs.get(item_id).map(|install| (install.dir.clone(), install.exe.clone()));
+            let art = known.and_then(|item| Some(item.as_ref()?.art.clone())).unwrap_or_default();
             Some(Item {
                 app_name: app.to_string(),
                 namespace: namespace.to_string(),
@@ -129,6 +130,7 @@ fn library_items(
                 title,
                 install,
                 size: 0,
+                art,
             })
         })
         .collect()

@@ -89,8 +89,13 @@ the TV PC, not for here.
   it has been presented.
 - **`standin serve-art --port <n> --key <key>`** is a stand-in SteamGridDB on `127.0.0.1:<n>` until it is killed, for
   `dashboard --art-service http://127.0.0.1:<n>`: it takes only `<key>`, finds a game of any name, and gives each one
-  a plain orange cover (`F08010`), teal hero and violet header. It says `serve-art: listening on <url>` and then
-  `serve-art: <path> (no key|the key|another key)` a request in `standin.log`. No test asks the real service.
+  a plain orange cover (`F08010`), teal hero, violet header and yellow square (`E0D020`). Under `/stores` it is the
+  stores' own art online too (Steam's, the Microsoft Store's and GOG's), for `dashboard --store-art-service
+  http://127.0.0.1:<n>/stores`: a game of any id has a red cover, blue hero, green header and magenta square
+  (`D02090`). It says `serve-art: listening on <url>` and `serve-art: the stores' own art online at <url>/stores`,
+  then `serve-art: <path> (no key|the key|another key)` a request in `standin.log`. No test asks a real service:
+  `Start-Dashboard` gives every run `--store-art-service http://127.0.0.1:9`, which answers nothing, unless the test
+  gives its own.
 
 Every start shows the greeting's Toast, "Hi <user>!", for five seconds, low in the middle of the screen. A test that
 looks at Home or taps the Guide button waits it out first: `Wait-Greeting`.

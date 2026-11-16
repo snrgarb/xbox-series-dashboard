@@ -5,7 +5,7 @@ use ui::{Color, Crop, HAlign, Rect, Ui, VAlign};
 
 use super::panel::{PANEL, STRIP};
 use super::{focus_ring, marks, Around, Tab};
-use crate::home::{cover_art, profile_picture};
+use crate::home::{profile_picture, square_art};
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 
 /// How many games the landing tab lists, the running one among them.
@@ -249,7 +249,7 @@ fn cover(ui: &mut Ui, rect: Rect, library: &Library, game: usize) {
     let Some(game) = library.games.get(game) else { return };
     ui.fill(rect, ACCENT_LIGHT, 0.0);
     let (cx, cy) = rect.center();
-    let drawn = cover_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, 0.0));
+    let drawn = square_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, 0.0));
     if !drawn {
         ui.icon(cx, cy, glyph::GAMEPAD, 36.0, Color::WHITE);
     }

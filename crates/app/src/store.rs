@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
-use library::art::{self, ArtDir, Event, Lookup, Pace, Service};
+use library::art::{self, ArtDir, Event, Hosts, Lookup, Pace, Service, Services, StoreArt};
 use library::sources::Read;
 use library::Database;
 use model::{ByHand, FilterChange, Game, Library, Source, StoreApp};
@@ -32,6 +32,8 @@ pub struct Store {
     synced: Option<Receiver<bool>>,
     /// SteamGridDB's address: its own, or a test's (`--art-service`).
     art_service: String,
+    /// The stores' own art online at a test's stand-in (`--store-art-service`), in place of their own.
+    store_art_service: Option<String>,
     /// A game is running, and `game_booted` has been told so.
     booted: bool,
     /// The running game's Play session.
@@ -54,6 +56,7 @@ pub struct Store {
 pub fn open(args: &Args) -> (Library, Store) {
     let sources = crate::sources::all(args);
     let art_service = args.art_service.clone().unwrap_or_else(|| art::SERVICE.to_string());
+    let store_art_service = args.store_art_service.clone();
     if let Some(path) = &args.library {
         let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("{}: {e}", path.display())));
         let library: Library =
@@ -70,13 +73,13 @@ pub fn open(args: &Args) -> (Library, Store) {
             match into(&library) {
                 Ok((library, database)) => {
                     let store = Store { database: Some(database), path, sources, art_service, ..Store::default() };
-                    return (library, store);
+                    return (library, Store { store_art_service, ..store });
                 }
                 Err(e) => eprintln!("library: {}: {e:#}", path.display()),
             }
         }
         let (library, database) = with_filters(library);
-        return (library, Store { database, sources, art_service, ..Store::default() });
+        return (library, Store { database, sources, art_service, store_art_service, ..Store::default() });
     }
     let window = args.screenshot.is_none();
     let dir = args.data_dir.clone().or_else(|| if window { library::data_dir() } else { None });
@@ -124,7 +127,8 @@ pub fn open(args: &Args) -> (Library, Store) {
     // The marks the user makes (a favourite, a hidden game) go to the database the Library on screen came from.
     let (library, memory) = with_filters(library);
     let database = memory.or(database);
-    (library, Store { database, path: path.unwrap_or_default(), sources, pending, art_service, ..Store::default() })
+    let path = path.unwrap_or_default();
+    (library, Store { database, path, sources, pending, art_service, store_art_service, ..Store::default() })
 }
 
 /// What the sources read, put together with no database: every game of each in one Library.
@@ -390,26 +394,37 @@ impl Store {
         self.setting(art::KEY_SETTING).filter(|key| !key.trim().is_empty())
     }
 
-    /// The service, asked with the user's key: none without a key, or with no art cache to download into.
-    fn art_service(&self) -> Option<(ArtDir, Service)> {
-        let key = self.art_key()?;
-        Some((self.art_dir()?, Service::new(&self.art_service, &key)))
+    /// Where art is asked for online, and the cache it goes into: the stores' own art, unless Settings' Download
+    /// art online is off; SteamGridDB too with the user's key. None with neither, or no art cache to download into.
+    fn art_services(&self) -> Option<(ArtDir, Services)> {
+        let online =
+            self.setting(art::ONLINE_SETTING).is_none_or(|value| !matches!(value.trim(), "false" | "0" | "off" | "no"));
+        if !online {
+            return None;
+        }
+        let hosts = self.store_art_service.as_deref().map_or_else(Hosts::default, Hosts::all_at);
+        let services = Services {
+            stores: Some(StoreArt::new(hosts)),
+            steamgriddb: self.art_key().map(|key| Service::new(&self.art_service, &key)),
+        };
+        Some((self.art_dir()?, services))
     }
 
-    /// Looks up, on threads of their own, the art the stores gave none for: of the games of `library` that lack a
-    /// picture, those our cache has not got, from SteamGridDB, only with a key (docs/sources.md, "Art"). `tell` is
-    /// told as pictures come in. None when there is nothing to do it with.
+    /// Looks up, on threads of their own, the art the stores' files on the PC gave none for: of the games of
+    /// `library` that lack a picture, those our cache has not got, from the store's own art online, then from
+    /// SteamGridDB with a key (docs/sources.md, "Art"). `tell` is told as pictures come in. None when there is
+    /// nothing to do it with.
     pub fn look_up_art(&self, library: &Library, tell: impl Fn(Event) + Send + Sync + 'static) -> Option<Lookup> {
-        let (dir, service) = self.art_service()?;
+        let (dir, services) = self.art_services()?;
         let log: art::Log = std::sync::Arc::new(|line| eprintln!("{line}"));
-        Some(Lookup::start(dir, service, art::wanted(library), library::now(), Pace::default(), log, tell))
+        Some(Lookup::start(dir, services, art::wanted(library), library::now(), Pace::default(), log, tell))
     }
 
     /// The same here and now, for a picture drawn offscreen: gives the snapshot after, or `library` as it was.
     pub fn art_now(&self, library: Library) -> Library {
-        let Some((dir, service)) = self.art_service() else { return library };
+        let Some((dir, services)) = self.art_services() else { return library };
         let log: art::Log = std::sync::Arc::new(|line| eprintln!("{line}"));
-        let summary = Lookup::run_now(dir, service, art::wanted(&library), library::now(), Pace::default(), log);
+        let summary = Lookup::run_now(dir, services, art::wanted(&library), library::now(), Pace::default(), log);
         if summary.found == 0 {
             return library;
         }

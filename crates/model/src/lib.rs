@@ -55,6 +55,13 @@ pub struct Game {
     pub hero: Option<PathBuf>,
     /// Landscape header (460x215), if on disk.
     pub header: Option<PathBuf>,
+    /// Square art (the Microsoft Store's box art, 1:1), if on disk: what a square tile shows, else its cover cropped.
+    #[serde(default)]
+    pub square: Option<PathBuf>,
+    /// Where the store's own pictures of the game are online, as far as its client's files on this PC say: what the
+    /// art lookup asks for before SteamGridDB (docs/sources.md, "Art"). Never a picture itself.
+    #[serde(default, skip_serializing_if = "OnlineArt::is_empty")]
+    pub online: OnlineArt,
     /// The user's own mark. A source may say a game it has just read is one (Steam's Favourites): the database
     /// takes that when it first sees the game and never again.
     #[serde(default)]
@@ -87,6 +94,52 @@ pub struct Game {
     /// snapshot counts them; a source reads 0.
     #[serde(default)]
     pub play_count: u32,
+}
+
+/// What a store's client on this PC says of the game's own art online: the id its public catalogue knows the game by
+/// where that is not `Game::source_id` (an Xbox game's Store product id), and the addresses of pictures it has
+/// named (the Epic launcher's catalogue cache names its games' key images). Each is optional; most games have none.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OnlineArt {
+    #[serde(default)]
+    pub product: Option<String>,
+    #[serde(default)]
+    pub cover: Option<String>,
+    #[serde(default)]
+    pub hero: Option<String>,
+    #[serde(default)]
+    pub header: Option<String>,
+    #[serde(default)]
+    pub square: Option<String>,
+}
+
+impl OnlineArt {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Each part by the name the library database keeps it under (`online:<name>`), with its value.
+    pub fn parts(&self) -> [(&'static str, &Option<String>); 5] {
+        [
+            ("product", &self.product),
+            ("cover", &self.cover),
+            ("hero", &self.hero),
+            ("header", &self.header),
+            ("square", &self.square),
+        ]
+    }
+
+    /// The part of this name, to be set.
+    pub fn part_mut(&mut self, name: &str) -> Option<&mut Option<String>> {
+        match name {
+            "product" => Some(&mut self.product),
+            "cover" => Some(&mut self.cover),
+            "hero" => Some(&mut self.hero),
+            "header" => Some(&mut self.header),
+            "square" => Some(&mut self.square),
+            _ => None,
+        }
+    }
 }
 
 /// What tells one game from another across snapshots of the library: its row in the library database, and its

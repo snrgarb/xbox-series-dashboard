@@ -159,7 +159,9 @@ fn manifest(game: &FixtureGame, dir: &Path, guid: &str) -> Value {
     })
 }
 
-/// The item in the catalogue cache. Its pictures' addresses go nowhere: nothing may fetch them.
+/// The item in the catalogue cache. It names no pictures (`keyImages`): an address the art lookup cannot reach is a
+/// failed request, tried again every run, and a test's stand-ins serve none of Epic's CDN. Reading `keyImages` is
+/// `key_images`' own test.
 fn catalogue_item(game: &FixtureGame) -> Value {
     let categories = match game.kind {
         Kind::Game => json!([{ "path": "games" }, { "path": "applications" }]),
@@ -172,7 +174,6 @@ fn catalogue_item(game: &FixtureGame) -> Value {
         "title": game.name,
         "categories": categories,
         "releaseInfo": [{ "appId": game.app_name, "dateAdded": "2025-03-02T10:00:00.000Z" }],
-        "keyImages": [{ "type": "DieselGameBoxTall", "url": "https://cdn.example.invalid/tall.jpg", "width": 1200, "height": 1600 }],
     })
 }
 

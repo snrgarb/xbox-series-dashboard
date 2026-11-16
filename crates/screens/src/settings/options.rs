@@ -17,15 +17,19 @@ pub enum Setting {
     ShowBatteryPercent,
     /// The Guide opens with the Guide button and from Home; off, the button is left to Steam or another program.
     UseGuide,
+    /// Art is downloaded for the games that have none on the PC: the stores' own online, and SteamGridDB's with a
+    /// key (Settings > Art). Off, nothing is asked of any service.
+    DownloadArtOnline,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 5] = [
+    pub const ALL: [Setting; 6] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
         Setting::ShowBatteryPercent,
         Setting::UseGuide,
+        Setting::DownloadArtOnline,
     ];
 
     /// The option's key in the settings table. Never changed: a database has it.
@@ -36,6 +40,8 @@ impl Setting {
             Setting::ShowPlayHistory => "home.play_history",
             Setting::ShowBatteryPercent => "status.battery_percent",
             Setting::UseGuide => "guide.enabled",
+            // `library::art::ONLINE_SETTING`.
+            Setting::DownloadArtOnline => "art.online",
         }
     }
 
@@ -80,7 +86,9 @@ pub struct Options {
     pub show_play_history: bool,
     pub show_battery_percent: bool,
     pub use_guide: bool,
-    /// A SteamGridDB key has been entered (Settings > Art): art is looked up for the games a store gives none for.
+    /// Art is downloaded for the games that have none on the PC (Settings > Art): on by default.
+    pub art_online: bool,
+    /// A SteamGridDB key has been entered (Settings > Art): with art online on, SteamGridDB is asked too.
     pub art_key: bool,
 }
 
@@ -93,6 +101,7 @@ impl Default for Options {
             show_play_history: of(Setting::ShowPlayHistory),
             show_battery_percent: of(Setting::ShowBatteryPercent),
             use_guide: of(Setting::UseGuide),
+            art_online: of(Setting::DownloadArtOnline),
             art_key: false,
         }
     }
@@ -119,6 +128,7 @@ impl Options {
             Setting::ShowPlayHistory => self.show_play_history,
             Setting::ShowBatteryPercent => self.show_battery_percent,
             Setting::UseGuide => self.use_guide,
+            Setting::DownloadArtOnline => self.art_online,
         }
     }
 
@@ -129,6 +139,7 @@ impl Options {
             Setting::ShowPlayHistory => &mut self.show_play_history,
             Setting::ShowBatteryPercent => &mut self.show_battery_percent,
             Setting::UseGuide => &mut self.use_guide,
+            Setting::DownloadArtOnline => &mut self.art_online,
         } = on;
     }
 }
@@ -151,6 +162,8 @@ mod tests {
         let options = Options::default();
         assert!(options.background_delay && options.show_play_history && options.show_battery_percent);
         assert!(options.use_guide && !options.reduce_motion);
+        // The port's own: art online is on until it is turned off.
+        assert!(options.art_online && !options.art_key);
     }
 
     #[test]

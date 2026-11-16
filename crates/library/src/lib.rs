@@ -68,7 +68,7 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE TABLE art (
         game INTEGER NOT NULL REFERENCES games (id) ON DELETE CASCADE,
-        -- cover, background, logo, icon or header.
+        -- cover, background, logo, icon, header or square; online:<part>, what the client says of its art online.
         kind TEXT NOT NULL,
         path TEXT NOT NULL,
         PRIMARY KEY (game, kind)
@@ -298,11 +298,19 @@ impl Database {
         };
         for game in &found.games {
             let source_id = game.source_id.clone();
-            let mut art: Vec<(String, String)> =
-                [("cover", &game.cover), ("background", &game.hero), ("header", &game.header)]
-                    .into_iter()
-                    .filter_map(|(kind, path)| Some((kind.to_string(), text(path.as_deref()?))))
-                    .collect();
+            let pictures = [
+                ("cover", &game.cover),
+                ("background", &game.hero),
+                ("header", &game.header),
+                ("square", &game.square),
+            ];
+            let online = game.online.parts().into_iter();
+            let mut art: Vec<(String, String)> = pictures
+                .into_iter()
+                .filter_map(|(kind, path)| Some((kind.to_string(), text(path.as_deref()?))))
+                // What the client says of the game's art online, as `online:<part>`.
+                .chain(online.filter_map(|(part, value)| Some((format!("online:{part}"), value.clone()?))))
+                .collect();
             art.sort();
             let mut state = State {
                 name: game.name.clone(),
@@ -512,6 +520,8 @@ impl Database {
                 cover: None,
                 hero: None,
                 header: None,
+                square: None,
+                online: Default::default(),
             });
         }
         // With no limit here: art for games past it is read and dropped.
@@ -526,17 +536,29 @@ impl Database {
                 "cover" => game.cover = Some(path.into()),
                 "background" => game.hero = Some(path.into()),
                 "header" => game.header = Some(path.into()),
-                // A logo or an icon: no screen draws one yet.
-                _ => {}
+                "square" => game.square = Some(path.into()),
+                other => {
+                    // What the client says of its art online; a logo or an icon, which no screen draws yet, is not.
+                    if let Some(part) = other.strip_prefix("online:").and_then(|part| game.online.part_mut(part)) {
+                        *part = Some(path);
+                    }
+                }
             }
         }
         // What the source gave no picture for, from our own cache (docs/sources.md, "Art"): the source's own wins.
         if let Some(cached) = self.art.as_ref().map(art::ArtDir::index).filter(|index| !index.is_empty()) {
             for game in &mut games {
-                let Some([cover, hero, header]) = cached.get(&(game.source.clone(), game.source_id.clone())) else {
+                let Some([cover, hero, header, square]) = cached.get(&(game.source.clone(), game.source_id.clone()))
+                else {
                     continue;
                 };
-                for (mine, ours) in [(&mut game.cover, cover), (&mut game.hero, hero), (&mut game.header, header)] {
+                let pictures = [
+                    (&mut game.cover, cover),
+                    (&mut game.hero, hero),
+                    (&mut game.header, header),
+                    (&mut game.square, square),
+                ];
+                for (mine, ours) in pictures {
                     if mine.is_none() {
                         mine.clone_from(ours);
                     }

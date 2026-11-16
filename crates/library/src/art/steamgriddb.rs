@@ -84,20 +84,14 @@ impl std::fmt::Debug for Service {
 impl Service {
     /// The service at `base` (`SERVICE`, or a test's), asked with `key`.
     pub fn new(base: &str, key: &str) -> Self {
-        let agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(30)))
-            .user_agent(concat!("xbox-series-dashboard/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .into();
-        Self { base: base.trim_end_matches('/').to_string(), key: key.to_string(), agent }
+        Self { base: base.trim_end_matches('/').to_string(), key: key.to_string(), agent: agent() }
     }
 
     /// The API's reply to `path`, its `data`; None for 404.
     fn get(&self, path: &str) -> Result<Option<Value>, Error> {
         let request =
             self.agent.get(format!("{}/{path}", self.base)).header("Authorization", format!("Bearer {}", self.key));
-        let mut response = request.call().map_err(transport)?;
+        let mut response = request.call().map_err(|e| transport(e, NAME))?;
         let status = response.status().as_u16();
         match status {
             200..=299 => {}
@@ -106,7 +100,7 @@ impl Service {
             429 | 503 => return Err(Error::Busy(retry_after(&response))),
             _ => return Err(Error::Failed(format!("SteamGridDB answered {status}"))),
         }
-        let text = response.body_mut().read_to_string().map_err(transport)?;
+        let text = response.body_mut().read_to_string().map_err(|e| transport(e, NAME))?;
         let reply: Value =
             serde_json::from_str(&text).map_err(|_| Error::Failed("SteamGridDB's reply is not JSON".into()))?;
         if reply.get("success").and_then(Value::as_bool) != Some(true) {
@@ -153,6 +147,7 @@ impl Service {
             Kind::Cover => format!("grids/game/{game}?dimensions=600x900&{SAFE}&limit=5"),
             Kind::Hero => format!("heroes/game/{game}?{SAFE}&limit=5"),
             Kind::Header => format!("grids/game/{game}?dimensions=920x430,460x215&{SAFE}&limit=5"),
+            Kind::Square => format!("grids/game/{game}?dimensions=1024x1024,512x512&{SAFE}&limit=5"),
         };
         let Some(pictures) = self.get(&path)? else { return Ok(None) };
         let safe = |picture: &&Value| {
@@ -166,39 +161,59 @@ impl Service {
 
     /// A picture's bytes, from its own address: no key goes with it.
     pub fn download(&self, url: &str) -> Result<Vec<u8>, Error> {
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
-            return Err(Error::Failed("a picture's address is not a web address".into()));
-        }
-        let mut response = self.agent.get(url).call().map_err(transport)?;
-        match response.status().as_u16() {
-            200..=299 => {}
-            429 | 503 => return Err(Error::Busy(retry_after(&response))),
-            status => return Err(Error::Failed(format!("a picture's server answered {status}"))),
-        }
-        response.body_mut().with_config().limit(MOST_BYTES).read_to_vec().map_err(transport)
+        download(&self.agent, url)
     }
 }
 
+/// The service's name, as the log says it.
+pub const NAME: &str = "SteamGridDB";
+
+/// An agent as every request for art is made with: a time limit, the program's name, and an answer of any status
+/// given back to be read.
+pub fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(Duration::from_secs(30)))
+        .user_agent(concat!("xbox-series-dashboard/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into()
+}
+
+/// A picture's bytes, from its own address, with nothing else sent: at most [`MOST_BYTES`].
+pub fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, Error> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(Error::Failed("a picture's address is not a web address".into()));
+    }
+    let mut response = agent.get(url).call().map_err(|e| transport(e, "a picture's server"))?;
+    match response.status().as_u16() {
+        200..=299 => {}
+        429 | 503 => return Err(Error::Busy(retry_after(&response))),
+        status => return Err(Error::Failed(format!("a picture's server answered {status}"))),
+    }
+    let body = response.body_mut().with_config().limit(MOST_BYTES).read_to_vec();
+    body.map_err(|e| transport(e, "a picture's server"))
+}
+
 /// How long a reply asks to be waited for: `Retry-After` in seconds (a date is not read, and waits the default).
-fn retry_after(response: &ureq::http::Response<ureq::Body>) -> Option<Duration> {
+pub fn retry_after(response: &ureq::http::Response<ureq::Body>) -> Option<Duration> {
     let value = response.headers().get("retry-after")?.to_str().ok()?;
     value.trim().parse::<u64>().ok().map(Duration::from_secs)
 }
 
-/// What went wrong on the way, in words that name no address: ureq's own may carry the request's.
-fn transport(error: ureq::Error) -> Error {
+/// What went wrong on the way to `who`, in words that name no address: ureq's own may carry the request's.
+pub fn transport(error: ureq::Error, who: &str) -> Error {
     let what = match error {
-        ureq::Error::Timeout(_) => "SteamGridDB took too long to answer",
-        ureq::Error::HostNotFound => "SteamGridDB could not be found: is the PC online?",
-        ureq::Error::ConnectionFailed | ureq::Error::Io(_) => "SteamGridDB could not be reached",
-        ureq::Error::BodyExceedsLimit(_) => "a picture was too large",
-        _ => "SteamGridDB's answer could not be read",
+        ureq::Error::Timeout(_) => format!("{who} took too long to answer"),
+        ureq::Error::HostNotFound => format!("{who} could not be found: is the PC online?"),
+        ureq::Error::ConnectionFailed | ureq::Error::Io(_) => format!("{who} could not be reached"),
+        ureq::Error::BodyExceedsLimit(_) => "a picture was too large".to_string(),
+        _ => format!("{who}'s answer could not be read"),
     };
-    Error::Failed(what.into())
+    Error::Failed(what)
 }
 
 /// Text as one part of an address's path: every byte but letters, digits and `-._~` as `%XX`.
-fn segment(text: &str) -> String {
+pub(crate) fn segment(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for byte in text.bytes() {
         if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {

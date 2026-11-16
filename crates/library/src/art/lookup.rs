@@ -1,61 +1,87 @@
-//! Looking up the art a store gave none for, off the UI thread: a game's missing pictures are taken from our own
-//! cache if it has them, else asked of SteamGridDB, a few games at a time, and kept in the cache for every start
-//! after. What was looked for and not found is remembered for a week, so a start does not ask again.
+//! Looking up the art a store's files on the PC gave none for, off the UI thread: a game's missing pictures are taken
+//! from our own cache if it has them, else asked of the store's own art online (its CDN or public catalogue, no key),
+//! else of SteamGridDB (with the user's key), a few games at a time, and kept in the cache for every start after.
+//! What was looked for and not found is remembered for a week, in each place apart, so a start does not ask again.
 //!
-//! The service is asked politely: one request at a time per worker, two workers, a gap between any two requests,
-//! and when it says to wait (429, `Retry-After`) every worker waits that long, longer each time it says so again.
-//! A key it refuses (401) stops every lookup at once, and is told once.
-use std::collections::VecDeque;
+//! Every host is asked politely: one request at a time per worker, two workers, a gap between any two requests to
+//! the same host, and when one says to wait (429 or 503, `Retry-After`) every worker waits that long before asking
+//! it again, longer each time it says so again. A key SteamGridDB refuses (401) stops every lookup at once, and is
+//! told once.
+use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use model::Library;
+use model::{Library, OnlineArt};
 
-use super::cache::{ArtDir, Kind};
-use super::steamgriddb::{Error, Service};
+use super::cache::{ArtDir, Kind, Online};
+use super::steamgriddb::{Error, Service, NAME};
+use super::store_online::StoreArt;
 
-/// A game whose store gave it less than every picture, and which of them it lacks.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A game of a store, the pictures it has, and which it lacks.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Want {
     pub source: String,
     pub source_id: String,
     pub name: String,
+    /// The kinds it has no picture of.
     pub kinds: Vec<Kind>,
+    /// The pictures it has: its store's files', or our cache's (`ArtDir`) that a snapshot filled in.
+    pub has: Vec<PathBuf>,
+    /// What its client said of its art online.
+    pub online: OnlineArt,
 }
 
-/// The games of the library that lack a picture, in its order (the most recently played first, so what Home shows
-/// comes first). A made-up game, of no source, is not looked up.
+/// Every game of the library that is a store's, with the pictures it lacks, in its order (the most recently played
+/// first, so what Home shows comes first). A made-up game, of no source, is not looked up.
 pub fn wanted(library: &Library) -> Vec<Want> {
     library
         .games
         .iter()
         .filter(|game| !game.source.is_empty() && !game.source_id.is_empty())
-        .filter_map(|game| {
-            let has = [game.cover.is_some(), game.hero.is_some(), game.header.is_some()];
-            let kinds: Vec<Kind> = Kind::ALL.into_iter().zip(has).filter(|(_, has)| !has).map(|(k, _)| k).collect();
-            (!kinds.is_empty()).then(|| Want {
+        .map(|game| {
+            let pictures = [&game.cover, &game.hero, &game.header, &game.square];
+            let kinds = Kind::ALL.into_iter().zip(pictures).filter(|(_, has)| has.is_none()).map(|(k, _)| k).collect();
+            Want {
                 source: game.source.clone(),
                 source_id: game.source_id.clone(),
                 name: game.name.clone(),
                 kinds,
-            })
+                has: pictures.into_iter().flatten().cloned().collect(),
+                online: game.online.clone(),
+            }
         })
         .collect()
 }
 
-/// How hard the service is asked.
+/// Where the missing pictures are asked for: either may be off. With neither, nothing is asked.
+#[derive(Debug, Default)]
+pub struct Services {
+    /// The stores' own art online: on unless Settings' Download art online is off.
+    pub stores: Option<StoreArt>,
+    /// SteamGridDB, with the user's key: only with one, and with art online on.
+    pub steamgriddb: Option<Service>,
+}
+
+impl Services {
+    pub fn any(&self) -> bool {
+        self.stores.is_some() || self.steamgriddb.is_some()
+    }
+}
+
+/// How hard each host is asked.
 #[derive(Debug, Clone, Copy)]
 pub struct Pace {
     /// Games looked up at once.
     pub workers: usize,
-    /// The least time between two requests, whichever worker makes them.
+    /// The least time between two requests to one host, whichever worker makes them.
     pub gap: Duration,
-    /// The wait when the service says to wait and not for how long; doubled each time it says so again in a row.
+    /// The wait when a host says to wait and not for how long; doubled each time it says so again in a row.
     pub wait: Duration,
     /// The longest wait.
     pub most_wait: Duration,
-    /// How many times one request is made while the service says to wait, before the game is passed over.
+    /// How many times one request is made while the host says to wait, before the picture is passed over.
     pub tries: u32,
 }
 
@@ -76,34 +102,58 @@ impl Default for Pace {
 pub enum Event {
     /// A game has a new picture in the cache: the library's next snapshot shows it.
     Found { source: String, source_id: String },
-    /// The service refused the key: nothing more is asked until it changes.
+    /// SteamGridDB refused the key: nothing more is asked of it until it changes.
     KeyRefused,
     /// The run is over.
     Done(Summary),
 }
 
+/// Where the pictures of the games a run looked at came from, in counts.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pictures {
+    /// The stores' own files on the PC.
+    pub store_files: usize,
+    /// Our own cache, from earlier runs.
+    pub cache: usize,
+    /// The stores' own art online, in this run.
+    pub store_online: usize,
+    /// SteamGridDB, in this run.
+    pub steamgriddb: usize,
+}
+
 /// What a run did, in counts: what the log says of it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Summary {
-    /// Games the service was asked about.
+    /// Games something was asked about online.
     pub looked_up: usize,
     /// Of those, the games that got a picture.
     pub found: usize,
-    /// The games it had nothing for.
+    /// The games nothing was found for.
     pub none: usize,
     /// The games a request failed for, to be asked about again next time.
     pub failed: usize,
     pub millis: u128,
+    pub pictures: Pictures,
 }
 
 impl std::fmt::Display for Summary {
-    /// `12 looked up, 9 found, 3 none, in 2.1 s`, with `, 1 failed` before the time when one did.
+    /// `12 looked up, 9 found, 3 none, in 2.1 s; pictures: 40 store files, 12 cache, 9 store online, 3 SteamGridDB`,
+    /// with `, 1 failed` before the time when one did.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} looked up, {} found, {} none", self.looked_up, self.found, self.none)?;
         if self.failed > 0 {
             write!(f, ", {} failed", self.failed)?;
         }
-        write!(f, ", in {:.1} s", self.millis as f64 / 1000.0)
+        let p = &self.pictures;
+        write!(
+            f,
+            ", in {:.1} s; pictures: {} store files, {} cache, {} store online, {} SteamGridDB",
+            self.millis as f64 / 1000.0,
+            p.store_files,
+            p.cache,
+            p.store_online,
+            p.steamgriddb
+        )
     }
 }
 
@@ -120,7 +170,7 @@ impl Lookup {
     /// `now` is the time, in Unix seconds, that remembered misses are counted from.
     pub fn start(
         dir: ArtDir,
-        service: Service,
+        services: Services,
         wants: Vec<Want>,
         now: u64,
         pace: Pace,
@@ -128,14 +178,14 @@ impl Lookup {
         tell: impl Fn(Event) + Send + Sync + 'static,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
-        let run = Run::new(dir, service, wants, now, pace, log, Box::new(tell), stop.clone());
+        let run = Run::new(dir, services, wants, now, pace, log, Box::new(tell), stop.clone());
         std::thread::spawn(move || run.run());
         Self { stop }
     }
 
     /// Looks up `wants` here and now, and gives what it did: for a picture drawn offscreen, and tests.
-    pub fn run_now(dir: ArtDir, service: Service, wants: Vec<Want>, now: u64, pace: Pace, log: Log) -> Summary {
-        let run = Run::new(dir, service, wants, now, pace, log, Box::new(|_| {}), Arc::new(AtomicBool::new(false)));
+    pub fn run_now(dir: ArtDir, services: Services, wants: Vec<Want>, now: u64, pace: Pace, log: Log) -> Summary {
+        let run = Run::new(dir, services, wants, now, pace, log, Box::new(|_| {}), Arc::new(AtomicBool::new(false)));
         run.run()
     }
 
@@ -150,7 +200,7 @@ impl Drop for Lookup {
     }
 }
 
-/// When the next request may be made, and how many times in a row the service has said to wait.
+/// When a host may next be asked, and how many times in a row it has said to wait.
 struct Gate {
     next: Instant,
     busy: u32,
@@ -158,9 +208,10 @@ struct Gate {
 
 struct Run {
     dir: ArtDir,
-    service: Service,
+    services: Services,
     queue: Mutex<VecDeque<Want>>,
-    gate: Mutex<Gate>,
+    /// Each host's gate, by its name.
+    gates: Mutex<HashMap<String, Gate>>,
     now: u64,
     pace: Pace,
     log: Log,
@@ -180,20 +231,21 @@ enum Halt {
 }
 
 /// How one game went.
-enum Outcome {
-    /// Our cache had everything, or it was all missed lately: nothing was asked.
-    Cached,
-    Found,
-    None,
-    Failed,
-    Stopped,
+#[derive(Default)]
+struct Outcome {
+    /// Something was asked online.
+    asked: bool,
+    store_online: usize,
+    steamgriddb: usize,
+    failed: bool,
+    stopped: bool,
 }
 
 impl Run {
     #[allow(clippy::too_many_arguments)]
     fn new(
         dir: ArtDir,
-        service: Service,
+        services: Services,
         wants: Vec<Want>,
         now: u64,
         pace: Pace,
@@ -201,11 +253,19 @@ impl Run {
         tell: Box<dyn Fn(Event) + Send + Sync>,
         stop: Arc<AtomicBool>,
     ) -> Self {
+        let mut pictures = Pictures::default();
+        for path in wants.iter().flat_map(|want| &want.has) {
+            if path.starts_with(dir.root()) {
+                pictures.cache += 1;
+            } else {
+                pictures.store_files += 1;
+            }
+        }
         Self {
             dir,
-            service,
+            services,
             queue: Mutex::new(wants.into()),
-            gate: Mutex::new(Gate { next: Instant::now(), busy: 0 }),
+            gates: Mutex::new(HashMap::new()),
             now,
             pace,
             log,
@@ -213,17 +273,19 @@ impl Run {
             stop,
             refused: AtomicBool::new(false),
             failed_said: AtomicBool::new(false),
-            summary: Mutex::new(Summary::default()),
+            summary: Mutex::new(Summary { pictures, ..Summary::default() }),
         }
     }
 
     fn run(self) -> Summary {
         let started = Instant::now();
-        std::thread::scope(|scope| {
-            for _ in 0..self.pace.workers.max(1) {
-                scope.spawn(|| self.work());
-            }
-        });
+        if self.services.any() {
+            std::thread::scope(|scope| {
+                for _ in 0..self.pace.workers.max(1) {
+                    scope.spawn(|| self.work());
+                }
+            });
+        }
         let mut summary = self.summary.lock().unwrap().clone();
         summary.millis = started.elapsed().as_millis();
         (self.log)(&format!("art: {summary}"));
@@ -239,96 +301,185 @@ impl Run {
         while !self.stopped() {
             let Some(want) = self.queue.lock().unwrap().pop_front() else { return };
             let outcome = self.look_up(&want);
+            let found = outcome.store_online + outcome.steamgriddb > 0;
+            if found {
+                (self.tell)(Event::Found { source: want.source.clone(), source_id: want.source_id.clone() });
+            }
             let mut summary = self.summary.lock().unwrap();
-            match outcome {
-                Outcome::Cached | Outcome::Stopped => {}
-                Outcome::Found => {
-                    summary.looked_up += 1;
-                    summary.found += 1;
+            summary.pictures.store_online += outcome.store_online;
+            summary.pictures.steamgriddb += outcome.steamgriddb;
+            if !outcome.asked || (outcome.stopped && !found) {
+                continue;
+            }
+            summary.looked_up += 1;
+            if found {
+                summary.found += 1;
+            } else if outcome.failed {
+                summary.failed += 1;
+            } else {
+                summary.none += 1;
+            }
+        }
+    }
+
+    /// The kinds of `want` that our cache does not have now and that were not missed `there` lately.
+    fn still_wanted(&self, want: &Want, kinds: &[Kind], there: Online) -> Vec<Kind> {
+        let (source, id) = (want.source.as_str(), want.source_id.as_str());
+        kinds
+            .iter()
+            .copied()
+            .filter(|&kind| {
+                self.dir.find(source, id, kind).is_none() && !self.dir.missed(source, id, kind, there, self.now)
+            })
+            .collect()
+    }
+
+    fn miss(&self, want: &Want, kind: Kind, there: Online) {
+        if let Err(e) = self.dir.miss(&want.source, &want.source_id, kind, there, self.now) {
+            self.failed(&format!("the art folder: {e:#}"));
+        }
+    }
+
+    /// Downloads a picture and keeps it: whether it was kept. Bytes that are not a picture this program draws are
+    /// as good as none.
+    fn fetch(&self, want: &Want, kind: Kind, url: &str, there: Online, out: &mut Outcome) -> bool {
+        let download = |url: &str| match there {
+            Online::Store => self.services.stores.as_ref().map(|stores| stores.download(url)),
+            Online::SteamGridDb => self.services.steamgriddb.as_ref().map(|service| service.download(url)),
+        };
+        match self.ask(&host(url), || download(url).unwrap_or(Err(Error::Failed("no service".into())))) {
+            Ok(bytes) => match self.dir.save(&want.source, &want.source_id, kind, &bytes) {
+                Ok(_) => true,
+                Err(_) => {
+                    self.miss(want, kind, there);
+                    false
                 }
-                Outcome::None => {
-                    summary.looked_up += 1;
-                    summary.none += 1;
-                }
-                Outcome::Failed => {
-                    summary.looked_up += 1;
-                    summary.failed += 1;
-                }
+            },
+            Err(Halt::Stop) => {
+                out.stopped = true;
+                false
+            }
+            Err(Halt::Failed) => {
+                out.failed = true;
+                false
             }
         }
     }
 
     fn look_up(&self, want: &Want) -> Outcome {
-        let (source, id) = (want.source.as_str(), want.source_id.as_str());
-        let kinds: Vec<Kind> = want
-            .kinds
-            .iter()
-            .copied()
-            .filter(|&kind| self.dir.find(source, id, kind).is_none() && !self.dir.missed(source, id, kind, self.now))
-            .collect();
+        let mut out = Outcome::default();
+        if let Some(stores) = &self.services.stores {
+            self.ask_store(stores, want, &mut out);
+            if out.stopped {
+                return out;
+            }
+        }
+        if let Some(service) = &self.services.steamgriddb {
+            self.ask_steamgriddb(service, want, &mut out);
+        }
+        out
+    }
+
+    /// The store's own art online, for what the store offers of what the game lacks.
+    fn ask_store(&self, stores: &StoreArt, want: &Want, out: &mut Outcome) {
+        let offered = stores.offers(want);
+        let kinds: Vec<Kind> = want.kinds.iter().copied().filter(|kind| offered.contains(kind)).collect();
+        let kinds = self.still_wanted(want, &kinds, Online::Store);
         if kinds.is_empty() {
-            return Outcome::Cached;
+            return;
         }
-        let miss = |kind| {
-            if let Err(e) = self.dir.miss(source, id, kind, self.now) {
-                self.failed(&format!("the art folder: {e:#}"));
-            }
-        };
-        let game = match self.ask(|| self.service.find_game(source, id, &want.name)) {
-            Ok(Some(game)) => game,
-            Ok(None) => {
-                kinds.into_iter().for_each(miss);
-                return Outcome::None;
-            }
-            Err(Halt::Stop) => return Outcome::Stopped,
-            Err(Halt::Failed) => return Outcome::Failed,
-        };
-        let (mut found, mut failed) = (false, false);
-        for kind in kinds {
-            let url = match self.ask(|| self.service.picture(game, kind)) {
-                Ok(Some(url)) => url,
-                Ok(None) => {
-                    miss(kind);
-                    continue;
+        out.asked = true;
+        let answer = match stores.ask(want, &kinds) {
+            None => None,
+            Some(ask) => match self.ask(ask.name, || stores.get(&ask)) {
+                Ok(answer) => answer,
+                Err(Halt::Stop) => {
+                    out.stopped = true;
+                    return;
                 }
-                Err(Halt::Stop) => return Outcome::Stopped,
                 Err(Halt::Failed) => {
-                    failed = true;
-                    continue;
+                    out.failed = true;
+                    return;
                 }
-            };
-            match self.ask(|| self.service.download(&url)) {
-                Ok(bytes) => match self.dir.save(source, id, kind, &bytes) {
-                    Ok(_) => found = true,
-                    // Not a picture this program draws: as good as none.
-                    Err(_) => miss(kind),
-                },
-                Err(Halt::Stop) => return Outcome::Stopped,
-                Err(Halt::Failed) => failed = true,
+            },
+        };
+        let pictures = stores.pictures(want, &kinds, answer.as_ref());
+        for kind in kinds {
+            match pictures.iter().find(|(k, _)| *k == kind) {
+                Some((_, url)) => {
+                    if self.fetch(want, kind, url, Online::Store, out) {
+                        out.store_online += 1;
+                    }
+                }
+                None => self.miss(want, kind, Online::Store),
             }
-        }
-        if found {
-            (self.tell)(Event::Found { source: source.into(), source_id: id.into() });
-            Outcome::Found
-        } else if failed {
-            Outcome::Failed
-        } else {
-            Outcome::None
+            if out.stopped {
+                return;
+            }
         }
     }
 
-    /// Makes a request when the gate lets it, again while the service says to wait.
-    fn ask<T>(&self, request: impl Fn() -> Result<T, Error>) -> Result<T, Halt> {
+    /// SteamGridDB, for what the game still lacks.
+    fn ask_steamgriddb(&self, service: &Service, want: &Want, out: &mut Outcome) {
+        let kinds = self.still_wanted(want, &want.kinds, Online::SteamGridDb);
+        if kinds.is_empty() {
+            return;
+        }
+        out.asked = true;
+        let game = match self.ask(NAME, || service.find_game(&want.source, &want.source_id, &want.name)) {
+            Ok(Some(game)) => game,
+            Ok(None) => {
+                kinds.into_iter().for_each(|kind| self.miss(want, kind, Online::SteamGridDb));
+                return;
+            }
+            Err(Halt::Stop) => {
+                out.stopped = true;
+                return;
+            }
+            Err(Halt::Failed) => {
+                out.failed = true;
+                return;
+            }
+        };
+        for kind in kinds {
+            let url = match self.ask(NAME, || service.picture(game, kind)) {
+                Ok(Some(url)) => url,
+                Ok(None) => {
+                    self.miss(want, kind, Online::SteamGridDb);
+                    continue;
+                }
+                Err(Halt::Stop) => {
+                    out.stopped = true;
+                    return;
+                }
+                Err(Halt::Failed) => {
+                    out.failed = true;
+                    continue;
+                }
+            };
+            if self.fetch(want, kind, &url, Online::SteamGridDb, out) {
+                out.steamgriddb += 1;
+            }
+            if out.stopped {
+                return;
+            }
+        }
+    }
+
+    /// Makes a request of `host` when its gate lets it, again while it says to wait.
+    fn ask<T>(&self, host: &str, request: impl Fn() -> Result<T, Error>) -> Result<T, Halt> {
         for _ in 0..self.pace.tries.max(1) {
-            if !self.pass_gate() {
+            if !self.pass_gate(host) {
                 return Err(Halt::Stop);
             }
             match request() {
                 Ok(answer) => {
-                    self.gate.lock().unwrap().busy = 0;
+                    if let Some(gate) = self.gates.lock().unwrap().get_mut(host) {
+                        gate.busy = 0;
+                    }
                     return Ok(answer);
                 }
-                Err(Error::Busy(after)) => self.busy(after),
+                Err(Error::Busy(after)) => self.busy(host, after),
                 Err(Error::KeyRefused) => {
                     self.stop.store(true, Ordering::Relaxed);
                     if !self.refused.swap(true, Ordering::Relaxed) {
@@ -343,19 +494,20 @@ impl Run {
                 }
             }
         }
-        self.failed("SteamGridDB kept asking to wait");
+        self.failed(&format!("{host} kept asking to wait"));
         Err(Halt::Failed)
     }
 
-    /// Waits for the gate to open, and closes it behind; false if the run stopped meanwhile.
-    fn pass_gate(&self) -> bool {
+    /// Waits for the host's gate to open, and closes it behind; false if the run stopped meanwhile.
+    fn pass_gate(&self, host: &str) -> bool {
         loop {
             if self.stopped() {
                 return false;
             }
             let wait = {
-                let mut gate = self.gate.lock().unwrap();
+                let mut gates = self.gates.lock().unwrap();
                 let now = Instant::now();
+                let gate = gates.entry(host.to_string()).or_insert(Gate { next: now, busy: 0 });
                 if gate.next <= now {
                     gate.next = now + self.pace.gap;
                     return true;
@@ -366,9 +518,11 @@ impl Run {
         }
     }
 
-    /// The service said to wait: every worker waits what it said, or the wait doubled each time in a row.
-    fn busy(&self, after: Option<Duration>) {
-        let mut gate = self.gate.lock().unwrap();
+    /// The host said to wait: every worker waits what it said before asking it again, or the wait doubled each
+    /// time in a row.
+    fn busy(&self, host: &str, after: Option<Duration>) {
+        let mut gates = self.gates.lock().unwrap();
+        let gate = gates.entry(host.to_string()).or_insert(Gate { next: Instant::now(), busy: 0 });
         gate.busy += 1;
         let doubled = self.pace.wait.saturating_mul(1 << (gate.busy - 1).min(16));
         // What it said the first time; after that, never less than the doubled wait.
@@ -379,12 +533,32 @@ impl Run {
         }
         .min(self.pace.most_wait);
         gate.next = gate.next.max(Instant::now() + wait);
-        (self.log)(&format!("art: SteamGridDB asked to wait; waiting {:.0} s", wait.as_secs_f64()));
+        (self.log)(&format!("art: {host} asked to wait; waiting {:.0} s", wait.as_secs_f64()));
     }
 
     fn failed(&self, why: &str) {
         if !self.failed_said.swap(true, Ordering::Relaxed) {
             (self.log)(&format!("art: {why}"));
         }
+    }
+}
+
+/// A picture's host, by its address: what its gate is kept by. Never more of the address than the host's name.
+fn host(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    rest.split(['/', '?', '#']).next().unwrap_or_default().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pictures_host_is_its_name_alone() {
+        assert_eq!(
+            host("https://shared.steamstatic.com/store_item_assets/steam/apps/620/x.jpg?t=1"),
+            "shared.steamstatic.com"
+        );
+        assert_eq!(host("http://127.0.0.1:4000/pictures/1/cover.png"), "127.0.0.1:4000");
     }
 }
