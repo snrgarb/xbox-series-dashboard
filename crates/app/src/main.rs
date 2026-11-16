@@ -14,6 +14,11 @@ pub use shell::since_start;
 pub struct Args {
     library: Option<PathBuf>,
     steam: Option<PathBuf>,
+    /// Fake stores to read in place of this machine's (the end-to-end tests'): each a folder with its own
+    /// `registry.json` (docs/sources.md).
+    ea: Option<PathBuf>,
+    ubisoft: Option<PathBuf>,
+    battlenet: Option<PathBuf>,
     /// The folder the library database is in, in place of the user's own.
     data_dir: Option<PathBuf>,
     launch_screen: bool,
@@ -63,6 +68,7 @@ pub fn focus_presses(tile: Option<usize>) -> Vec<ui::Button> {
 }
 
 const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.json>] [--data-dir <dir>] [--windowed]
+                 [--ea <dir>] [--ubisoft <dir>] [--battlenet <dir>]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
@@ -112,6 +118,9 @@ fn parse_args() -> Result<Args, String> {
             "--launch-screen" => args.launch_screen = true,
             "--guide" => args.guide = true,
             "--steam" => args.steam = Some(value()?.into()),
+            "--ea" => args.ea = Some(value()?.into()),
+            "--ubisoft" => args.ubisoft = Some(value()?.into()),
+            "--battlenet" => args.battlenet = Some(value()?.into()),
             "--data-dir" => args.data_dir = Some(value()?.into()),
             "--screenshot" => args.screenshot = Some(value()?.into()),
             "--size" => {

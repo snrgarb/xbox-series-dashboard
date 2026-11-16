@@ -21,6 +21,9 @@ pub fn cover_art(game: &Game, px: f32) -> Option<ArtKey> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Source {
     Steam,
+    Ea,
+    Ubisoft,
+    BattleNet,
 }
 
 impl Source {
@@ -28,6 +31,9 @@ impl Source {
     pub fn name(self) -> &'static str {
         match self {
             Source::Steam => "Steam",
+            Source::Ea => "EA app",
+            Source::Ubisoft => "Ubisoft Connect",
+            Source::BattleNet => "Battle.net",
         }
     }
 }
@@ -37,16 +43,39 @@ impl Source {
 pub fn source(game: &Game) -> Option<Source> {
     match game.source.as_str() {
         "steam" | "" => Some(Source::Steam),
+        "ea" => Some(Source::Ea),
+        "ubisoft" => Some(Source::Ubisoft),
+        "battlenet" => Some(Source::BattleNet),
         _ => None,
     }
 }
 
 /// A source's mark, filling `mark`. The marks are the stores' own logos, which are not this project's to ship:
-/// until they are loaded from somewhere they may be, a plain white disc stands in for the mark. This is the one
-/// place to draw the real thing.
+/// until they are loaded from somewhere they may be, a plain white shape stands in for each, a different one for
+/// each store. This is the one place to draw the real thing.
 pub fn source_mark(ui: &mut Ui, mark: Rect, source: Source) {
-    let Source::Steam = source;
-    ui.fill(mark, Color::WHITE, 999.0);
+    match source {
+        Source::Steam => ui.fill(mark, Color::WHITE, 999.0),
+        Source::Ea => ea_mark(ui, mark),
+        Source::Ubisoft => ubisoft_mark(ui, mark),
+        Source::BattleNet => battlenet_mark(ui, mark),
+    }
+}
+
+/// The EA app's placeholder: a white square with soft corners. The hook for its real mark.
+fn ea_mark(ui: &mut Ui, mark: Rect) {
+    ui.fill(mark.grow(-mark.w * 0.1), Color::WHITE, mark.w * 0.15);
+}
+
+/// Ubisoft Connect's placeholder: a white ring. The hook for its real mark.
+fn ubisoft_mark(ui: &mut Ui, mark: Rect) {
+    ui.ring(mark.grow(-mark.w * 0.05), Color::WHITE, 999.0, mark.w * 0.2);
+}
+
+/// Battle.net's placeholder: a white bar across the middle, half as tall as it is wide. The hook for its real mark.
+fn battlenet_mark(ui: &mut Ui, mark: Rect) {
+    let bar = Rect::new(mark.x, mark.y + mark.h * 0.25, mark.w, mark.h * 0.5);
+    ui.fill(bar, Color::WHITE, mark.h * 0.25);
 }
 
 /// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow.

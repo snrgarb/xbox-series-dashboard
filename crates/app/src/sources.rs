@@ -11,6 +11,10 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
     vec![
         // `--steam` names the install; else the registry does.
         Arc::new(source_steam::Steam::at(args.steam.clone())),
+        // `--ea`, `--ubisoft` and `--battlenet` name a fake store; else this machine's are read.
+        Arc::new(source_ea::Ea::at(args.ea.clone())),
+        Arc::new(source_ubisoft::Ubisoft::at(args.ubisoft.clone())),
+        Arc::new(source_battlenet::BattleNet::at(args.battlenet.clone())),
     ]
 }
 

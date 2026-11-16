@@ -347,4 +347,37 @@ function Test-Suspended([int] $Id) {
     -not @($threads | Where-Object { $_.ThreadState -ne 'Wait' -or $_.WaitReason -ne 'Suspended' }).Count
 }
 
+# ------------------------------------------------------------------------------------- EA, Ubisoft and Battle.net
+
+# Gives the Dashboard a fake of another store to read, beside the fake Steam: `standin make-<Store> <Root>`, $Store being
+# ea, ubisoft or battlenet (crates/source-<store>/src/fixture.rs: made-up games, each installed one's game.exe a copy of
+# standin.exe titled with its name). The Dashboard reads it when started with `--<Store> <Root>`, in place of this
+# machine's (which has none). The fake Ubisoft's games start through uplay://, so standin.exe is registered as this
+# user's uplay:// handler for it; the fake Battle.net's client, Battle.net.exe in <Root>, is a copy of standin.exe; an
+# EA game is started by its own game.exe.
+#
+# Returns the Library the Dashboard's own reader read back (also fake-<Store>.json in the test's output): games, each
+# with source_id, name, installed, install_dir.
+function Initialize-FakeStore([string] $Store, [string] $Root) {
+    $standin = Join-Path $script:Payload 'standin.exe'
+    if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
+    $json = Join-Path $script:Out "fake-$Store.json"
+    $made = Start-Process $standin -ArgumentList @("make-$Store", "`"$Root`"", '--json', "`"$json`"") -Wait -PassThru
+    if ($made.ExitCode -ne 0) {
+        $why = Get-Content (Join-Path (Split-Path $Root -Parent) 'standin-error.txt') -Raw -ErrorAction SilentlyContinue
+        throw "standin make-$Store exited with $($made.ExitCode): $why"
+    }
+    if ($Store -eq 'ubisoft') {
+        $class = 'HKCU:\Software\Classes\uplay'
+        New-Item "$class\shell\open\command" -Force | Out-Null
+        Set-ItemProperty $class '(default)' 'URL:uplay protocol'
+        Set-ItemProperty $class 'URL Protocol' ''
+        Set-ItemProperty "$class\shell\open\command" '(default)' "`"$standin`" uplay-url `"$Root`" `"%1`""
+    }
+    $library = Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json
+    $games = @($library.games)
+    Say "fake $Store at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed: $(@($games | ForEach-Object name) -join ', ')"
+    $library
+}
+
 Export-ModuleMember -Function * -Variable Out, Payload, DashboardLog

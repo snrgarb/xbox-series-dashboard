@@ -44,4 +44,20 @@ A source holds no state that changes: one is made at start and shared, as `Arc<d
 2. One line in `crates/app/src/sources.rs` (`sources::all`), which is the list, in order, and one dependency in `crates/app/Cargo.toml`.
 3. Its mark on tiles: a variant of `screens::home::Source` by its key, with the name the Game hub writes. Until it has one its games carry no mark. The mark is a plain-shape placeholder (`source_mark` is the one place to draw a real one): no store's logo comes into this repository.
 
-Nothing in `library` or `shell` changes. A capability a later ticket needs from every source (installs in progress for the Queue, #78) is a new method on the trait with a default, so the sources that have nothing to say need no change.
+4. Its fake, for the VM: a `fixture` module that writes a made-up install whose installed games' `game.exe` is the stand-in game (`standin make-<store> <dir>`), and a way for the Dashboard to read it in place of the machine's (`--steam <dir>`; `--ea`, `--ubisoft`, `--battlenet <dir>`). A source that reads the registry reads it through `source_kit::registry::Registry`, which is Windows' or, for a fake and the tests, a `registry.json` of keys and values in the fake's folder.
+
+Nothing in `library` or `shell` changes.
+
+## The stores
+
+Each from docs/research/stores.md, where the reasons are. What only a signed-in PC can confirm is listed under "Needs a human" in #14.
+
+**Steam** (`source-steam`, key `steam`): see its crate's header.
+
+**EA app** (`source-ea`, key `ea`). Installed games only: the Uninstall keys (`HKLM` and `HKCU`, both views) whose `UninstallString` runs EA's `EAInstaller\...\Cleanup.exe`, each with its folder's `__Installer\installerdata.xml` (UTF-8 or UTF-16, either of its two shapes), which gives the content id (`source_id`) and the program that starts the game. No local file lists owned games. Start: that program, in the game's folder (it brings the EA app up itself when it needs it); with none, `origin2://game/launch?offerIds=<id>&autoDownload=1`. Install: nothing. Uninstall: the key's `UninstallString`. No art: EA keeps none on disk. Not installed: no `HKLM\SOFTWARE\Electronic Arts\EA Desktop` and no such key. The encrypted `IS` file is not read.
+
+**Ubisoft Connect** (`source-ubisoft`, key `ubisoft`). Installed: `HKLM\SOFTWARE\WOW6432Node\Ubisoft\Launcher\Installs\<id>\InstallDir`. Owned: the client's `cache\configuration\configurations` (under `%LOCALAPPDATA%\Ubisoft Game Launcher`, else under the client's folder), protobuf around YAML; the games are the products that are not DLC, not another store's copy, have something to start and are no other product's addon. A game is its `uplay_id`; an `Installs` key matches it by its `uplay_id` or its `install_id`, as the readers disagree on which. With no cache, or one that can't be read (said in the log), the installed games are listed by their folders' names. Cover and background from the client's `cache\assets` where they are there. Start, install, uninstall: `uplay://launch/<id>`, `uplay://install/<id>`, `uplay://uninstall/<id>`.
+
+**Battle.net** (`source-battlenet`, key `battlenet`). Installed games only: the products in `%PROGRAMDATA%\Battle.net\Agent\product.db` (protobuf) that its agent marks installed and whose folder is there, less the client's own (agent, beta, battle.net). A game is its product code (`source_id`). Names from `aggregate.json` beside it, else the game's Uninstall key (`--uid=<uid>` in its `UninstallString`), else the uid. No local file lists owned games. The client is the Uninstall key with `-uid=battle.net`, whose folder has `Battle.net.exe`. Start: `Battle.net.exe "--exec=launch <code>"`. Install: `Battle.net.exe --game=<uid>`, the game's page. Uninstall: the game's key's `UninstallString`.
+
+For all three, `running` is the default: the game's windows tell, under its install folder. A capability a later ticket needs from every source (installs in progress for the Queue, #78) is a new method on the trait with a default, so the sources that have nothing to say need no change.
