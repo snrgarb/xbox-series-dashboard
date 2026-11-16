@@ -18,10 +18,12 @@
 //!   owned in two stores is two games.
 //! - Games added by hand and Apps (`by_hand`): the games a source of their own, `manual`, each a row of `games`
 //!   keyed by its program's path; the Apps a table of their own, `apps`, as they are not games.
+//! - Profiles (`profiles`): a table of their own, their pictures as files in the data folder.
 pub mod art;
 pub mod by_hand;
 pub mod filters;
 pub mod history;
+pub mod profiles;
 pub mod queue;
 pub mod sources;
 
@@ -103,6 +105,8 @@ const MIGRATIONS: &[&str] = &[
     by_hand::MIGRATION,
     // 5: the Queue, and the games it held that finished installing.
     queue::MIGRATION,
+    // 6: the Profiles (docs/spec/profiles.md).
+    profiles::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -120,6 +124,8 @@ pub struct Database {
     /// Our own art cache, which a snapshot fills in from what a source gave no picture for. A database in a data
     /// folder has that folder's; one in memory has none unless it is given one.
     art: Option<art::ArtDir>,
+    /// The data folder the database is in, which keeps the Profiles' pictures. None for one in memory.
+    folder: Option<PathBuf>,
 }
 
 /// Where the database lives when nothing says otherwise: `%LOCALAPPDATA%\XboxSeriesDashboard` on Windows;
@@ -148,6 +154,7 @@ impl Database {
         }
         let mut database = Self::set_up(Connection::open(path)?)?;
         database.art = path.parent().map(art::ArtDir::under);
+        database.folder = path.parent().map(Path::to_path_buf);
         Ok(database)
     }
 
@@ -180,7 +187,7 @@ impl Database {
             tx.pragma_update(None, "user_version", done as i64 + 1)?;
             tx.commit()?;
         }
-        Ok(Self { conn, art: None })
+        Ok(Self { conn, art: None, folder: None })
     }
 
     /// The schema's version.
@@ -447,6 +454,7 @@ impl Database {
             queue: self.queue()?,
             apps: self.apps()?,
             store_apps: None,
+            profiles: self.profiles()?,
         })
     }
 

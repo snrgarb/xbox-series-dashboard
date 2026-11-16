@@ -96,7 +96,7 @@ Style `XboxTopBarProfile`, T/Views/Main.xaml:179-295. Left-aligned at x = 105.
 | Picture | 56 x 56 circle (x 105..161, y 86..142). Under it: ellipse `#FF107C10` (GlyphBrush) with glyph U+E77B (Contact) in the icon font, 26 px, white. Over it: the profile picture, `UniformToFill`, clipped to a circle r = 28. A picture that fails to load leaves the glyph. A Profile with no picture of its own shows the Windows account's (C/ExtensionCore.Startup.cs:425), and an account with none shows Windows' default, `user-192.png` (E/WindowsUserAccount.cs:90-115): a grey figure, head and shoulders, on a pale disc. That, not the green disc, is what the pictures show. | 190-198 |
 | Focus ring | Round border `Margin="-7"`, `BorderThickness="3"`, `CornerRadius="999"`, brush `#FF2CA243`, no fill. So ring outer diameter 70, inner 64: 4 px clear of the picture. Glow: `XboxFocusGlowRound` with `Margin="-7"` (section 4.3). Hidden unless focused. | 199-206 |
 | Name block | 16 px right of the picture (`Margin="16,0,0,0"`), translated Y -2 | 212-215 |
-| Gamertag | Segoe UI 26, white (`XboxText`, lines 23-27). Text = profile gamertag, fallback the Windows user name. | 218-219 |
+| Gamertag | Segoe UI 26, white (`XboxText`, lines 23-27). Text = profile gamertag, fallback the Windows user name. The port's is the signed-in Profile's (profiles.md 3). | 218-219 |
 | Score line (under the gamertag, same stack) | A 19 x 19 white disc with a black "G" (Segoe UI **Bold** 13, centred); then the score, Segoe UI 26 white, `Margin="6,0,0,0"`, formatted `{0:N0}` (thousands separators). Collapsed when there are no achievement totals. | 220-228, 243-246 |
 | Real name | Segoe UI 26 white, same place, `Opacity="0"` at rest | 230-231 |
 

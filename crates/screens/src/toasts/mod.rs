@@ -39,6 +39,8 @@ pub struct Toast {
     pub text: String,
     /// Whether its line takes turns with "Press (Guide) to view": not a greeting's, and none with the Guide off.
     pub prompt: bool,
+    /// The greeting's tile: the picture of the Profile it greets.
+    pub picture: Option<model::Picture>,
 }
 
 /// A notification, as the Notifications Flyout lists it.
@@ -253,7 +255,7 @@ mod tests {
     use super::*;
 
     fn toast(text: &str) -> Toast {
-        Toast { kind: ToastKind::Notification, text: text.into(), prompt: true }
+        Toast { kind: ToastKind::Notification, text: text.into(), prompt: true, picture: None }
     }
 
     fn showing(toasts: &Toasts) -> Option<&str> {

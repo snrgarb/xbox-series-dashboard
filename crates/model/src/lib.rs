@@ -2,6 +2,7 @@
 pub mod audio;
 pub mod by_hand;
 pub mod post;
+pub mod profile;
 pub mod queue;
 pub mod sound;
 pub mod source;
@@ -11,6 +12,7 @@ use std::path::PathBuf;
 
 pub use audio::{Audio, AudioDevice, Flow};
 pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
+pub use profile::{Picture, Profile, ProfileChange, Profiles};
 pub use queue::{Install, InstallState, Installed, Queue, Queued};
 pub use sound::Sound;
 pub use source::{Ask, Found, Source, Start};
@@ -389,6 +391,9 @@ pub struct Library {
     /// but Windows).
     #[serde(default)]
     pub store_apps: Option<Vec<StoreApp>>,
+    /// Who plays here (`profile`), and who is signed in. Only a snapshot of the library database has any.
+    #[serde(default)]
+    pub profiles: Profiles,
 }
 
 impl Library {

@@ -17,6 +17,7 @@ mod group;
 pub mod groups;
 mod guide;
 pub mod options;
+mod profiles;
 mod theme_settings;
 
 use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
@@ -111,6 +112,12 @@ pub trait Pane {
     /// What the pane asks of the shell that no press answered: a name text entry kept, to save.
     fn asks(&mut self) -> Vec<Effect> {
         Vec::new()
+    }
+
+    /// Whether what text entry had to say finished the pane, which then steps back as B would: the Picture page,
+    /// once a picture's path is kept.
+    fn closes(&mut self) -> bool {
+        false
     }
 }
 
@@ -266,7 +273,12 @@ impl Page for Settings {
     }
 
     fn asks(&mut self) -> Vec<Effect> {
-        self.panes.iter_mut().flat_map(|pane| pane.asks()).collect()
+        let asks = self.panes.iter_mut().flat_map(|pane| pane.asks()).collect();
+        // A pane that is done steps back, once what it asked has been taken.
+        if self.panes.len() > 1 && self.panes.last_mut().is_some_and(|pane| pane.closes()) {
+            self.panes.pop();
+        }
+        asks
     }
 
     fn draw(&mut self, ui: &mut Ui, around: Around) {

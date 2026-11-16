@@ -23,7 +23,7 @@ pub use self::tile::{
     art_for, cover_art, game_at as tile_at, source, source_badge_at, source_mark, square_art, status_band_at,
     title_band_at, Source,
 };
-pub use self::top_bar::{profile_picture, Status, TopButton};
+pub use self::top_bar::{Status, TopButton};
 use crate::hint_bar::{self, Hint};
 use crate::pages::Open;
 use crate::theme::ROW_SCALE as S;

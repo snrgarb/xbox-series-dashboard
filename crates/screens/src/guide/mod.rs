@@ -161,9 +161,9 @@ pub struct Around<'a> {
     pub notifications: &'a [Notification],
 }
 
-/// What the Guide shows that is not its own: the user's name, the clock, the Status area's values.
+/// What the Guide shows that is not its own: the Profile signed in, the clock, the Status area's values.
 pub struct Face<'a> {
-    pub user: &'a str,
+    pub profile: &'a model::Profile,
     pub clock: &'a str,
     /// Whether a pad is connected.
     pub pad: bool,
@@ -611,7 +611,7 @@ impl Guide {
     fn panel(&self, ui: &mut Ui, behind: f32, around: Around, face: &Face) {
         panel::background(ui);
         ui.with_offset(behind, 0.0, |ui| {
-            panel::tabs(ui, &self.tabs, self.tab);
+            panel::tabs(ui, &self.tabs, self.tab, &face.profile.picture);
             self.content(ui, around, face);
         });
     }
@@ -647,7 +647,7 @@ impl Guide {
                     Focus::Entry(at) => Some(at),
                     Focus::Utility(_) => None,
                 };
-                let faces = entries::Faces { library: around.library, user: face.user };
+                let faces = entries::Faces { library: around.library, profile: face.profile };
                 ui.with_clip(viewport, |ui| {
                     ui.with_offset(0.0, -self.scroll, |ui| {
                         let unfocused = (0..placed.len()).filter(|&at| Some(at) != focus);
@@ -681,6 +681,8 @@ fn select(entry: &Entry) -> Option<GuideAction> {
         Kind::Power => Some(GuideAction::Asked),
         Kind::MyGames => Some(GuideAction::MyGames),
         Kind::Settings => Some(GuideAction::Settings),
+        // Switch profile closes the Guide and asks Who's playing today? (#127), which signs the Profile chosen in
+        // with `Dashboard::sign_in`. Until then it does nothing, as the Profile entry never does.
         Kind::Profile | Kind::SwitchProfile => None,
     }
 }

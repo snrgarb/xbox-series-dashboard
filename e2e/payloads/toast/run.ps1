@@ -147,7 +147,13 @@ try {
     if (-not $strip) { throw 'The Toast strip was not made' }
 
     # The greeting, with the notification --toast posted waiting behind it.
-    $name = if ($library.user) { $library.user.Split(' ')[0] } else { 'Player' }
+    # The greeting is the signed-in Profile's first name (docs/spec/profiles.md, 1): the real name's first word, else
+    # the gamertag, as the `profile:` line has them.
+    $profileLine = Wait-DashboardLog '^profile: ' 10
+    $name = 'Player'
+    if ($profileLine -match '^profile: "(.*)", real name "(.*)", ') {
+        $name = if ($Matches[2].Trim()) { $Matches[2].Trim().Split(' ')[0] } else { $Matches[1] }
+    }
     $greeting = Wait-Toast "Hi $name!" 'Greeting'
     Save-Screen 'greeting'
     Say "greeting: $(if ($greeting) { $greeting } else { 'none' }); foreground $(Front)"

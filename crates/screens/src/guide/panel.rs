@@ -3,7 +3,7 @@ use ui::{Color, Gradient, Rect, Ui};
 
 use super::marks;
 use super::Tab;
-use crate::home::profile_picture;
+use crate::profile;
 use crate::theme::ACCENT_LIGHT;
 
 /// The panel: x 78..614, y 33..1045.
@@ -60,7 +60,7 @@ pub fn background(ui: &mut Ui) {
 
 /// The tabs' icons, and the green bar under the one showing. Tabs take no focus: the bumpers change them, and the
 /// bar moves at once.
-pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab) {
+pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture) {
     const UNSELECTED: Color = Color::rgb(0x8C8C8C);
     for (i, &tab) in tabs.iter().enumerate() {
         let bounds = Rect::new(FIRST_TAB + i as f32 * TAB.0, PANEL.y, TAB.0, TAB.1);
@@ -74,7 +74,7 @@ pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab) {
             Tab::ProfileAndSystem => {
                 // The disc shows where there is no picture; the picture is the same selected or not.
                 ui.fill(square(54.0), Color::rgb(0x4A4A4A), 999.0);
-                profile_picture(ui, square(54.0));
+                profile::picture(ui, square(54.0), picture);
             }
         }
         if selected {

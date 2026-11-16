@@ -327,10 +327,6 @@ impl MyGames {
     fn note(&mut self, around: Around) {
         self.state = self.pane(self.showing).state(around);
     }
-
-    fn user<'a>(around: Around<'a>) -> &'a str {
-        around.library.user.as_deref().unwrap_or("Player")
-    }
 }
 
 impl Page for MyGames {
@@ -459,8 +455,8 @@ impl MyGames {
             let game = around.library.game(entry.game)?;
             Some((game.name.as_str(), crate::manage_queue::figures::Figures::of(entry)))
         });
-        let face =
-            nav::Face { user: Self::user(around), showing, focused, count: &count, queued: queue.len(), download };
+        let profile = crate::profile::signed_in(around.library);
+        let face = nav::Face { profile: &profile, showing, focused, count: &count, queued: queue.len(), download };
         nav::draw(ui, &face);
 
         // The pane that came by the nav slides the 50 to its rest and fades in as it does; the grid of games
