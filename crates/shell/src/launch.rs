@@ -123,6 +123,9 @@ mod win {
         source: Arc<dyn Source>,
         /// The game's folder, lower case with backslashes and a trailing one.
         dir: String,
+        /// What a program's path begins with when it is the game's: the folder, and where it really is when the
+        /// folder is a link (`freeze::prefixes`).
+        prefixes: Vec<String>,
         /// Home's window.
         home: HWND,
         state: State,
@@ -194,6 +197,7 @@ mod win {
             Some(Self {
                 playing: game.clone(),
                 source,
+                prefixes: crate::freeze::prefixes_here(&dir),
                 dir,
                 home,
                 state: State::Starting,
@@ -227,7 +231,7 @@ mod win {
             }
             self.next_look = now + LOOK_EVERY;
             let since_last = now - std::mem::replace(&mut self.looked, now);
-            let look = look(&self.dir, self.home);
+            let look = look(&self.prefixes, self.home);
             let running = self.source.running(&self.playing);
             self.seen |= running || look.any;
             self.game = look.largest;
@@ -477,7 +481,7 @@ mod win {
     }
 
     struct Search<'a> {
-        dir: &'a str,
+        prefixes: &'a [String],
         screen: f64,
         best: f64,
         largest: f64,
@@ -485,11 +489,11 @@ mod win {
     }
 
     /// The visible windows of programs that live in the game's folder. `home` is the size of the screen.
-    fn look(dir: &str, home: HWND) -> Look {
+    fn look(prefixes: &[String], home: HWND) -> Look {
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe { GetWindowRect(home, &mut rect) };
         let screen = ((rect.right - rect.left) as f64 * (rect.bottom - rect.top) as f64).max(1.0);
-        let mut search = Search { dir, screen, best: 0.0, largest: 0.0, look: Look::default() };
+        let mut search = Search { prefixes, screen, best: 0.0, largest: 0.0, look: Look::default() };
         unsafe { EnumWindows(Some(each), &mut search as *mut Search as LPARAM) };
         search.look
     }
@@ -514,7 +518,8 @@ mod win {
         let mut len = path.len() as u32;
         let ok = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut len);
         CloseHandle(process);
-        if ok == 0 || !String::from_utf16_lossy(&path[..len as usize]).to_lowercase().starts_with(search.dir) {
+        let path = String::from_utf16_lossy(&path[..len as usize]).to_lowercase();
+        if ok == 0 || !search.prefixes.iter().any(|prefix| path.starts_with(prefix.as_str())) {
             return 1;
         }
         search.look.any = true;
