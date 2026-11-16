@@ -107,10 +107,11 @@ fn facts(game: &Game) -> String {
 
 impl GameHub {
     /// The hub for a game, on its Game hub page with focus on the main action: it remembers nothing from the last
-    /// time one was up.
-    pub fn open(entry: Entry) -> Self {
+    /// time one was up. The main action is what the game can do now, Queued or Installing for one in the Queue,
+    /// from the moment it opens.
+    pub fn open(entry: Entry, around: Around) -> Self {
         static SERIAL: AtomicU64 = AtomicU64::new(0);
-        Self {
+        let mut hub = Self {
             main: if entry.installed { Main::Play } else { Main::Install },
             queued: false,
             entry,
@@ -118,7 +119,11 @@ impl GameHub {
             focus: Focus::Action(Action::Main),
             toggle_width: 269.0,
             serial: SERIAL.fetch_add(1, Ordering::Relaxed),
+        };
+        if let Some((game, place)) = hub.entry.find(around.library) {
+            hub.follow(game, place, around);
         }
+        hub
     }
 
     /// Takes in the game as it is now: what the main action is, whether Queue shows, and focus off a card or Queue
@@ -197,6 +202,14 @@ impl Page for GameHub {
             Focus::Card(card) => format!("{card:?}"),
         };
         format!("{} {:?} {at}", self.entry.game.source_id, self.view)
+    }
+
+    /// A new library, or a new Queue: the main action reads what the game can do now (Queued, Installing...)
+    /// at once, not at the next press.
+    fn library_changed(&mut self, around: Around) {
+        if let Some((game, place)) = self.entry.find(around.library) {
+            self.follow(game, place, around);
+        }
     }
 
     fn press(&mut self, press: Press, around: Around) -> Option<PageAction> {
@@ -304,7 +317,20 @@ mod tests {
             let library = library();
             let game =
                 library.games.iter().chain(&library.hidden).find(|game| game.source_id == appid.to_string()).unwrap();
-            Self { hub: GameHub::open(Entry::of(game)), library, playing: None }
+            let around = Around { library: &library, playing: None, options: Default::default(), now: Instant::now() };
+            let hub = GameHub::open(Entry::of(game), around);
+            Self { hub, library, playing: None }
+        }
+
+        /// The hub opened anew on `entry`, in this library.
+        fn reopen(&mut self, entry: Entry) {
+            let around = Around {
+                library: &self.library,
+                playing: self.playing,
+                options: Default::default(),
+                now: Instant::now(),
+            };
+            self.hub = GameHub::open(entry, around);
         }
 
         fn press(&mut self, button: Button) -> Option<PageAction> {
@@ -405,7 +431,7 @@ mod tests {
         assert_eq!(hub.press(Button::A), Some(PageAction::Close));
         // One that is in one asks its store for it.
         hub.library.games[1].id = 7;
-        hub.hub = GameHub::open(Entry::of(&hub.library.games[1]));
+        hub.reopen(Entry::of(&hub.library.games[1]));
         assert_eq!(hub.press(Button::A), Some(PageAction::CloseWith(Effect::Install(7))));
     }
 

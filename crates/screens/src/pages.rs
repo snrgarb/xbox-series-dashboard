@@ -56,7 +56,7 @@ impl Open {
     fn page(self, under: Option<&dyn Page>, around: Around) -> Option<Box<dyn Page>> {
         Some(match self {
             Open::MyGames(entry) => Box::new(my_games::MyGames::opened(entry, around)),
-            Open::GameHub(entry) => Box::new(game_hub::GameHub::open(entry)),
+            Open::GameHub(entry) => Box::new(game_hub::GameHub::open(entry, around)),
             Open::Search => Box::new(search::Search::open(around.library)),
             Open::Settings(entry) => Box::new(settings::Settings::open(entry)),
             Open::TextEntry(entry) => {

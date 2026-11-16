@@ -7,8 +7,8 @@
 #
 # What it walks:
 # - Install from a game's hub: the hub closes, Steam's client is asked, the game joins the Queue (`queue: <name>
-#   joined, asked for`) and its tile reads Queued; downloading, it reads Installing... (`queue: <name> downloading,
-#   25% of 100 bytes`). Its hub reads Installing, A does nothing there, and Queue stands between Manage and the toggle.
+#   joined, asked for`, then `queue: <name> queued` as Steam takes it on) and its tile reads Queued; downloading, it
+#   reads Installing... (`queue: <name> downloading, 25% of 100 bytes`). Its hub reads Installing, A does nothing there, and Queue stands between Manage and the toggle.
 # - The ways into Manage Queue that #79 will finish, as far as they go now (until then each opens My games & apps on
 #   Manage, focus on its Queue box): the hub's Queue action, B back to the hub on Queue; Home's Downloads tile, which
 #   counts the Queue, B back to it; and Manage's Queue box itself, where A does nothing yet.
@@ -182,6 +182,7 @@ try {
     Expect-Logged "^store: asked Steam to install ${firstName}: .*steam\.exe -silent \+app_install $($first.source_id)$" $mark 'Install from the hub' | Out-Null
     Expect-Steam "steam: asked to install $($first.source_id): -silent \+app_install $($first.source_id)" $steamMark 'Install from the hub'
     Expect-Logged "^queue: $firstName joined, asked for$" $mark 'Install from the hub, the Queue' | Out-Null
+    Expect-Logged "^queue: $firstName queued$" $mark 'Install from the hub, Steam took it on' | Out-Null
     In-Front
     Start-Sleep -Milliseconds 3000
     Save-Screen '02-tile-queued'
@@ -265,6 +266,8 @@ try {
     Expect-Logged "^store: asked Steam to install ${secondName}: .*steam\.exe -silent \+app_install $($second.source_id)$" $mark 'Install from the menu' | Out-Null
     Expect-Steam "steam: asked to install $($second.source_id)" $steamMark 'Install from the menu'
     Expect-Logged "^queue: $secondName joined, asked for$" $mark 'Install from the menu, the Queue' | Out-Null
+    # Dropped once Steam has taken it on (its manifest seen, Queued): as a player cancels it in Steam.
+    Expect-Logged "^queue: $secondName queued$" $mark 'Steam took it on' | Out-Null
     $mark = Get-DashboardLogLength
     Advance $second.source_id @('--drop')
     Expect-Logged "^queue: $secondName dropped$" $mark 'Dropped' | Out-Null

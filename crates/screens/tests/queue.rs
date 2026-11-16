@@ -79,17 +79,29 @@ fn the_hubs_main_action_reads_queued_then_installing_and_does_nothing() {
     let mut dashboard = hub_on(UNINSTALLED);
     let game = id_on(&dashboard, UNINSTALLED);
     dashboard.set_queue(queue(game, InstallState::Queued));
-    // The focus line follows the Queue as soon as the hub next hears of the library: a press that goes nowhere.
-    press(&mut dashboard, &[Left]);
+    // The focus line follows the Queue the moment the hub hears of it, with no press.
     assert!(dashboard.focus_line().ends_with("Hub Queued"), "{}", dashboard.focus_line());
     press(&mut dashboard, &[A]);
     assert_eq!(asked(&mut dashboard), []);
     assert_eq!(dashboard.page(), Some("GameHub"));
     dashboard.set_queue(queue(game, InstallState::Downloading { done: 1, total: 4 }));
-    press(&mut dashboard, &[Left]);
     assert!(dashboard.focus_line().ends_with("Hub Installing"), "{}", dashboard.focus_line());
     press(&mut dashboard, &[A]);
     assert_eq!(asked(&mut dashboard), []);
+}
+
+#[test]
+fn a_hub_opened_on_a_game_in_the_queue_reads_installing_from_its_first_focus_line() {
+    let mut dashboard = on_tile(UNINSTALLED);
+    let game = id_on(&dashboard, UNINSTALLED);
+    dashboard.set_queue(queue(game, InstallState::Downloading { done: 1, total: 4 }));
+    a_alone(&mut dashboard);
+    assert_eq!(dashboard.page(), Some("GameHub"));
+    assert!(dashboard.focus_line().ends_with("Hub Installing"), "{}", dashboard.focus_line());
+    press(&mut dashboard, &[B]);
+    dashboard.set_queue(queue(game, InstallState::Queued));
+    a_alone(&mut dashboard);
+    assert!(dashboard.focus_line().ends_with("Hub Queued"), "{}", dashboard.focus_line());
 }
 
 #[test]

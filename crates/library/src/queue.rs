@@ -299,7 +299,9 @@ impl Follower {
                     Some(row) if row.reported && row.state == install.state => {}
                     Some(row) => {
                         db.set_state(game, install.state)?;
-                        if moved(row.state, install.state) {
+                        // Its first report is told of even as it stays Queued: from here, the store has taken
+                        // it on, and the moment it reports it no more it has ended.
+                        if !row.reported || moved(row.state, install.state) {
                             polled.changes.push(Change::State { game, state: install.state });
                         }
                     }
@@ -646,7 +648,9 @@ mod tests {
         assert!(world.follower.busy(&world.db).unwrap());
 
         // The client takes it on, then downloads it.
+        // Its first report says the store has it, Queued.
         world.fake.report(&[("1", QUEUED)]);
+        assert_eq!(world.poll(1).changes, [Change::State { game: moss, state: QUEUED }]);
         assert!(world.poll(1).changes.is_empty());
         let downloading = InstallState::Downloading { done: 250, total: 1000 };
         world.fake.report(&[("1", downloading)]);
@@ -742,6 +746,19 @@ mod tests {
         assert_eq!(world.queue(), named(&[("Moss", QUEUED)]));
         assert!(world.poll(GIVE_UP_AFTER - 1).changes.is_empty());
         assert_eq!(world.poll(GIVE_UP_AFTER).changes, [Change::Dropped(moss)]);
+        assert!(world.queue().is_empty());
+    }
+
+    #[test]
+    fn an_install_asked_for_that_its_store_takes_on_then_drops_leaves_at_once() {
+        let mut world = World::new();
+        let moss = world.id("Moss");
+        world.ask("Moss", 0);
+        world.fake.report(&[("1", QUEUED)]);
+        assert_eq!(world.poll(1).changes, [Change::State { game: moss, state: QUEUED }]);
+        // Dropped in the client: gone at the next look, not a minute after it was asked for.
+        world.fake.report(&[]);
+        assert_eq!(world.poll(2).changes, [Change::Dropped(moss)]);
         assert!(world.queue().is_empty());
     }
 
