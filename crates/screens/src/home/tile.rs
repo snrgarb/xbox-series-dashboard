@@ -26,6 +26,7 @@ pub enum Source {
     Ea,
     Ubisoft,
     BattleNet,
+    Xbox,
 }
 
 impl Source {
@@ -38,6 +39,7 @@ impl Source {
             Source::Ea => "EA app",
             Source::Ubisoft => "Ubisoft Connect",
             Source::BattleNet => "Battle.net",
+            Source::Xbox => "Xbox",
         }
     }
 }
@@ -52,6 +54,7 @@ pub fn source(game: &Game) -> Option<Source> {
         "ea" => Some(Source::Ea),
         "ubisoft" => Some(Source::Ubisoft),
         "battlenet" => Some(Source::BattleNet),
+        "xbox" => Some(Source::Xbox),
         _ => None,
     }
 }
@@ -67,6 +70,7 @@ pub fn source_mark(ui: &mut Ui, mark: Rect, source: Source) {
         Source::Ea => ea_mark(ui, mark),
         Source::Ubisoft => ubisoft_mark(ui, mark),
         Source::BattleNet => battlenet_mark(ui, mark),
+        Source::Xbox => xbox_mark(ui, mark),
     }
 }
 
@@ -109,6 +113,15 @@ fn ubisoft_mark(ui: &mut Ui, mark: Rect) {
 fn battlenet_mark(ui: &mut Ui, mark: Rect) {
     let bar = Rect::new(mark.x, mark.y + mark.h * 0.25, mark.w, mark.h * 0.5);
     ui.fill(bar, Color::WHITE, mark.h * 0.25);
+}
+
+/// Xbox's stand-in: a white plus, two bars a third as thick as the mark is wide, crossed.
+fn xbox_mark(ui: &mut Ui, mark: Rect) {
+    let thick = mark.w * 0.34;
+    let across = Rect::new(mark.x, mark.y + (mark.h - thick) / 2.0, mark.w, thick);
+    let down = Rect::new(mark.x + (mark.w - thick) / 2.0, mark.y, thick, mark.h);
+    ui.fill(across, Color::WHITE, thick * 0.2);
+    ui.fill(down, Color::WHITE, thick * 0.2);
 }
 
 /// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow.
