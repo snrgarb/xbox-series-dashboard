@@ -9,8 +9,10 @@ use model::{Library, Picture, Profile};
 use ui::art::{ArtKey, Kind};
 use ui::{Color, Crop, Rect, Ui};
 
-/// What is drawn for one picture file, whatever size it is shown at: the Picture page's are the largest, 148.
+/// What is drawn for one picture file, whatever size it is shown at up to the Picture page's, 148.
 const DECODED: u32 = 192;
+/// What is drawn for one shown larger: Start-up's, 380 (docs/spec/start-up.md).
+const DECODED_LARGE: u32 = 400;
 
 /// The picture, filling the circle `rect` is.
 pub fn picture(ui: &mut Ui, rect: Rect, picture: &Picture) {
@@ -18,7 +20,8 @@ pub fn picture(ui: &mut Ui, rect: Rect, picture: &Picture) {
         Picture::Shape(n) => shape(ui, rect, *n),
         Picture::File(path) => {
             shape(ui, rect, 0);
-            let key = ArtKey { path: path.clone(), kind: Kind::Thumb(DECODED) };
+            let decoded = if rect.w > DECODED as f32 { DECODED_LARGE } else { DECODED };
+            let key = ArtKey { path: path.clone(), kind: Kind::Thumb(decoded) };
             ui.art(rect, &key, Crop::Center, 1.0, rect.w / 2.0);
         }
     }

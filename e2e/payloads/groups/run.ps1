@@ -138,11 +138,12 @@ try {
     Say "Home's Groups: $($initial -join ', ')"
     if ($initial.Count -lt 3) { throw "the fixture should give Home three Groups at least, and it has: $($initial -join ', ')" }
 
-    # Settings by the top bar's button, Personalisation, Groups under its first box, Boot video.
+    # Settings by the top bar's button, Personalisation, Groups under Profiles, its second box.
     Walk Right 'TopBar\(Settings\)' 5
     Press A 'Settings: Rail: Theme settings'
     Press Right 'Settings: Theme settings: Personalisation'
     Press A 'Settings: Personalisation: Boot video'
+    Press Right 'Settings: Personalisation: Profiles'
     Press Down 'Settings: Personalisation: Groups' '01-personalisation-groups'
     Press A 'Settings: Groups: .+; (not )?shown' '02-groups-page'
 

@@ -287,7 +287,7 @@ C/ExtensionCore.cs:2040-2154.
 | Running game | Closes the Guide, gives the game the foreground |
 | Recent game | With nothing running: closes the Guide and launches it (Launch screen as from Home). With a game running, quitting or launching: the prompt of section 6.4 |
 | Profile | Nothing, no sound |
-| Switch profile | Who's playing (M5); disabled while a game runs |
+| Switch profile | Closes the Guide at once, with no slide, and Who's playing today? asks, without the Boot video, whatever Settings says of asking (start-up.md 7). Disabled while a game runs: nothing, no sound |
 | Settings | Closes the Guide, opens Settings (M3) |
 | Power | Opens Power (section 6.2) |
 | Notifications, Audio | Opens the Flyout |

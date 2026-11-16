@@ -53,6 +53,10 @@
 //!   standin toast <text>
 //!       Posts a notification to the running Dashboard, which shows its Toast (`model::post`). Exits 1 when no
 //!       Dashboard took it: none is running, or it has no Toast strip yet.
+//!   standin wake
+//!       Tells the running Dashboard the machine has woken from sleep, as Windows would (`model::post::WAKE_ID`):
+//!       Who's playing today? asks, if it asks on waking. Taken, as a notification is, only by a Dashboard started
+//!       with --allow-toast-posts. Exits 1 when none took it.
 //!   standin steam-url steam://install/<appid> | steam://uninstall/<appid>
 //!       Says in the log which it was asked, the address with it, and does nothing more: a test reads the line.
 //!   standin make-ea <dir> [--json <file>] | make-ubisoft <dir> [--json <file>] | make-battlenet <dir> [--json <file>]
@@ -119,6 +123,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>]
        standin toast <text>
+       standin wake
        standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
                      [--no-previous] [--seconds <n>]
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
@@ -644,8 +649,14 @@ fn toast(_: &str) -> i32 {
     2
 }
 
+#[cfg(not(windows))]
+fn wake() -> i32 {
+    note("wake: Windows only");
+    2
+}
+
 #[cfg(windows)]
-use win::{game, steam_url, toast};
+use win::{game, steam_url, toast, wake};
 
 fn run(args: &[String]) -> i32 {
     let parsed_game = |args: &[String]| match GameArgs::parse(args) {
@@ -747,6 +758,7 @@ fn run(args: &[String]) -> i32 {
                 2
             }
         },
+        Some("wake") => wake(),
         Some("steam-install") => {
             let parsed = match &args[1..] {
                 [root, appid, rest @ ..] => appid.parse::<u32>().ok().zip(progress_of(rest)).map(|got| (root, got)),

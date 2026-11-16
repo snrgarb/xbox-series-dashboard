@@ -21,6 +21,7 @@ pub mod idle;
 pub mod options;
 mod profiles;
 mod theme_settings;
+mod whos_playing;
 
 use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
@@ -150,8 +151,9 @@ impl Settings {
             Entry::Rail => Self { on_rail: true, panes: vec![boxes] },
             Entry::Tile | Entry::Discord => Self { on_rail: false, panes: vec![boxes] },
             // Personalisation is Theme settings' first box, where focus is as its boxes are made; on its own boxes
-            // focus is on Groups, the box that customises Home (docs/spec/settings.md, 16.3).
-            Entry::Personalisation => Self::showing(Box::new(theme_settings::personalisation().with_focus(1, 0))),
+            // focus is on Groups, the box that customises Home (docs/spec/settings.md, 16.3), beside Who's playing
+            // today?.
+            Entry::Personalisation => Self::showing(Box::new(theme_settings::personalisation().with_focus(1, 1))),
         }
     }
 

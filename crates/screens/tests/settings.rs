@@ -354,6 +354,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         use_guide: false,
         art_online: true,
         art_key: false,
+        ask_whos_playing: true,
         boot_video: BootVideo::XboxSeriesX,
         boot_videos: Found::NONE,
         idle: screens::idle::Times { dim_after: ten, show_after: ten },

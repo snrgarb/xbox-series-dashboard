@@ -27,10 +27,12 @@ pub enum Sound {
     PowerOff,
     /// A Toast shows.
     Notification,
+    /// A Profile signs in: Signing you in shows (docs/spec/start-up.md).
+    Login,
 }
 
 impl Sound {
-    pub const ALL: [Sound; 9] = [
+    pub const ALL: [Sound; 10] = [
         Sound::Move,
         Sound::Activate,
         Sound::GuideOpen,
@@ -40,6 +42,7 @@ impl Sound {
         Sound::PromptClose,
         Sound::PowerOff,
         Sound::Notification,
+        Sound::Login,
     ];
 
     /// The sound's files, by the Bundle's names: one, or several that take turns in this order. The first two are
@@ -55,6 +58,7 @@ impl Sound {
             Sound::PromptClose => &["PromptClose.wav"],
             Sound::PowerOff => &["PowerOff.wav"],
             Sound::Notification => &["Notification.wav"],
+            Sound::Login => &["Login.wav"],
         }
     }
 

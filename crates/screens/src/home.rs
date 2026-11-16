@@ -5,7 +5,7 @@
 pub(crate) mod background;
 pub(crate) mod groups;
 mod recent;
-mod swirl;
+pub(crate) mod swirl;
 mod tile;
 mod top_bar;
 mod wide;

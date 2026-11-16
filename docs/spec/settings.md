@@ -250,8 +250,8 @@ E/PersonalisationPane.xaml:119-278; a grid of two auto columns and six auto rows
 | Box | (c, r) | Rectangle at rest | Kind | Icon / checkbox |
 |---|---|---|---|---|
 | Boot video | (0, 0) | 520, 210, 437, 131 | opens a page (6.3, built in #126) | U+E714 |
-| Profiles | (1, 0) | 975, 210, 437, 131 | opens a page (6.5, **M5**) | U+E716 |
-| Who's playing today? | (0, 1) | 520, 359, 437, 131 | opens a page (6.4, **M5**) | U+E748 |
+| Profiles | (1, 0) | 975, 210, 437, 131 | opens a page (6.5, built in #125) | U+E716 |
+| Who's playing today? | (0, 1) | 520, 359, 437, 131 | opens a page (6.4, built in #127) | U+E748 |
 | Background delay | (0, 2) | 520, 508, 437, 131 | checkbox box | U+E73A on (default) |
 | Reduce motion | (0, 3) | 520, 657, 437, 131 | checkbox box | U+E739 off (default) |
 | Show Play history | (0, 4) | 520, 806, 437, 131 | checkbox box | U+E73A on (default) |
@@ -288,9 +288,11 @@ E/PersonalisationPane.xaml:281-286; names at E/PersonalisationPane.xaml.cs:29-40
 
 The port's page (start-up.md 2): the line is "Plays as the Dashboard starts. Any button skips it.", and the Rows are Off and the videos **found** in the media folder, in this order; with none found the line says so and Off is alone.
 
-### 6.4 ... > Personalisation > Who's playing today? - **M5** (layout only)
+### 6.4 ... > Personalisation > Who's playing today? - built in #127 (start-up.md 9)
 
 E/PersonalisationPane.xaml:289-294; E/PersonalisationPane.xaml.cs:194-200. As Boot video: "Choose who's playing as Playnite starts in Fullscreen and wakes from sleep." then two Rows at y 270.58 and 344.58: **Ask every time** (the default) and **Sign in the last profile**. Opens with focus on the ticked one.
+
+The port's line is "Choose who's playing as the Dashboard starts and wakes from sleep."
 
 ### 6.5 ... > Personalisation > Profiles, and one Profile - built in #125 (profiles.md 4)
 
@@ -740,7 +742,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 | Pane | Boxes |
 |---|---|
 | Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Art on the row under them. |
-| Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Groups** (0, 1) (filters.md 6.1), in Who's playing today?'s place until #127 brings it, when Groups takes the Bundle's empty slot, (1, 1); then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
+| Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Who's playing today?** (0, 1) (start-up.md 9), at the Bundle's place, and **Groups** (1, 1) (filters.md 6.1), in the Bundle's empty slot; then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
 | Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
 | Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
 
@@ -749,7 +751,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 ### 16.2 A pane that would run off the screen scrolls
 
-Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With six rows (Boot video and Profiles, Groups, then the four checkbox boxes) the last box's foot is at 1086 and its info text runs lower: the pane scrolls with focus on it, which the Bundle's page could not (6.2).
+Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With six rows (Boot video and Profiles, Who's playing today? and Groups, then the four checkbox boxes) the last box's foot is at 1086 and its info text runs lower: the pane scrolls with focus on it, which the Bundle's page could not (6.2).
 
 The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (x 520), which its picture 29 of Theme settings has not: a clipping accident of that pane's grid, not copied.
 
@@ -779,6 +781,7 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Boot video (start-up.md 2) | `startup.boot_video` | `XboxSeriesX`; a name, not `true` or `false`, saved by `Effect::BootVideo` |
 | Idle > Dim after (6.7) | `idle.dim_after` | `120` (seconds, or `never`) |
 | Idle > Show things after (6.7) | `idle.show_things_after` | `300` |
+| Who's playing today? (start-up.md 9) | `startup.ask_whos_playing` | on: Ask every time; off is Sign in the last profile |
 
 The same table keeps `profile.last`, the id of the Profile signed in last (profiles.md 1); the Profiles themselves are the `profiles` table's (profiles.md 2).
 

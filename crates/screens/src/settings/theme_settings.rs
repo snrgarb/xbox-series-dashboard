@@ -1,5 +1,5 @@
 //! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). The boxes of
-//! features still to come (Who's playing today?, Discord) come with them, and those that are here close up in the
+//! features still to come (Discord) come with them, and those that are here close up in the
 //! grid meanwhile. Games & apps and Art are the port's own.
 use super::added::{self, Added};
 use super::art::Art;
@@ -9,6 +9,7 @@ use super::groups::Groups;
 use super::guide::Guide;
 use super::idle::Idle;
 use super::profiles::Profiles;
+use super::whos_playing::WhosPlayingPage;
 use super::Setting;
 
 /// Theme settings' boxes.
@@ -25,20 +26,25 @@ pub fn theme_settings() -> Boxes {
 }
 
 /// Personalisation's boxes: Boot video (docs/spec/start-up.md) and Profiles (docs/spec/profiles.md) on the first
-/// row, at the Bundle's places; Groups (docs/spec/filters.md, 6.1) under Boot video, in Who's playing today?'s
-/// place until it comes (#127) and Groups moves to the Bundle's empty column 1 of row 1; then a checkbox box a row,
-/// the second column's place kept for the focused one's info.
+/// row, Who's playing today? under Boot video, all three at the Bundle's places; Groups (docs/spec/filters.md, 6.1)
+/// in the Bundle's empty column 1 of row 1, beside it; then a checkbox box a row, the second column's place kept for
+/// the focused one's info.
 pub fn personalisation() -> Boxes {
     let check = |setting, name, info| vec![Item::Check { setting, name, info }];
     let groups = Item::Opens { icon: '\u{E8FD}', name: "Groups", pane: |around| Box::new(Groups::open(around)) };
     let profiles = Item::Opens { icon: '\u{E716}', name: "Profiles", pane: |around| Box::new(Profiles::open(around)) };
     let boot_video =
         Item::Opens { icon: '\u{E714}', name: "Boot video", pane: |around| Box::new(BootVideoPage::open(around)) };
+    let whos_playing = Item::Opens {
+        icon: '\u{E748}',
+        name: "Who's playing today?",
+        pane: |around| Box::new(WhosPlayingPage::open(around)),
+    };
     Boxes::new(
         "Personalisation",
         vec![
             vec![boot_video, profiles],
-            vec![groups],
+            vec![whos_playing, groups],
             check(
                 Setting::BackgroundDelay,
                 "Background delay",

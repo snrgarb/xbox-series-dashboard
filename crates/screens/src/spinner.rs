@@ -1,6 +1,7 @@
 //! The Spinner, the console's loading spinner: a white arc with a green tail that grows clockwise from a dot at the
 //! top, its tail chasing its head round, resting as the dot before the next turn. docs/spec/home.md section 10.1 has
-//! the Bundle's formula, which this is.
+//! the Bundle's formula, which this is. Round a Profile's picture on Signing you in it turns on without a rest, its
+//! ends cut square (the Bundle's `Spinner.Unbroken`, `LoadingSpinner` with `Unbroken` and `LineCap="Flat"`).
 use ui::{Color, Rect, Ui};
 
 use crate::theme;
@@ -9,6 +10,12 @@ use crate::theme;
 pub const PERIOD: f64 = 1.2;
 /// How long the dot is that the Spinner starts and rests as, in degrees.
 const DOT: f64 = 6.0;
+/// When in a turn the head is back at the top.
+const HEAD_END: f64 = 0.80;
+/// How many times longer the unbroken spinning takes over each part of a turn.
+const UNBROKEN_SLOWING: f64 = 1.25;
+/// One turn of the unbroken spinning: each turn's head sets off as the last's reaches the top.
+pub const UNBROKEN_PERIOD: f64 = HEAD_END * UNBROKEN_SLOWING;
 
 /// Where the Spinner's arcs are at one moment, in degrees clockwise from the top: white from `white_tail` to
 /// `head`, green from `green_tail` to `white_tail`.
@@ -21,10 +28,26 @@ pub struct Arcs {
 
 /// The arcs `seconds` into the spinning, which repeats each [`PERIOD`].
 pub fn arcs(seconds: f64) -> Arcs {
-    let t = seconds.rem_euclid(PERIOD);
+    turn(seconds.rem_euclid(PERIOD))
+}
+
+/// The arcs `seconds` into the unbroken spinning, which repeats each [`UNBROKEN_PERIOD`]: while a turn's tail is
+/// still where it starts, the last turn's, catching up to the top, is the tail (the Bundle's `Spinner.Unbroken`).
+pub fn unbroken(seconds: f64) -> Arcs {
+    let t = seconds.rem_euclid(UNBROKEN_PERIOD) / UNBROKEN_SLOWING;
+    let this = turn(t);
+    if this.white_tail > 0.0 {
+        return this;
+    }
+    let last = turn(t + HEAD_END);
+    Arcs { head: this.head, white_tail: last.white_tail - 360.0, green_tail: last.green_tail - 360.0 }
+}
+
+/// The arcs `t` seconds into a turn, resting as the dot once it is done.
+fn turn(t: f64) -> Arcs {
     // Each end eases round once over its own stretch of the turn: the head first, then where white turns green,
     // then the green's end, each later and steeper, so the arc grows long and shrinks back to the dot.
-    let head = DOT + 360.0 * bezier(progress(t, 0.00, 0.80), 0.70, 0.20, 0.25, 0.95);
+    let head = DOT + 360.0 * bezier(progress(t, 0.00, HEAD_END), 0.70, 0.20, 0.25, 0.95);
     let white_tail = (360.0 * bezier(progress(t, 0.15, 0.85), 0.75, 0.20, 0.15, 0.60)).min(head - DOT);
     let green_tail = (360.0 * bezier(progress(t, 0.25, 0.90), 0.70, 0.10, 0.15, 0.75)).min(white_tail);
     Arcs { head: head as f32, white_tail: white_tail as f32, green_tail: green_tail as f32 }
@@ -75,6 +98,17 @@ pub fn spinner(ui: &mut Ui, cx: f32, cy: f32, size: f32) {
     ui.arc(ring, at.white_tail, at.head, stroke, Color::WHITE);
 }
 
+/// The Spinner round a Profile's picture on Signing you in: in the circle `ring` holds, a stroke `stroke` wide just
+/// inside it, turning on without a rest, its ends cut square. It turns for as long as it is drawn.
+pub fn unbroken_ring(ui: &mut Ui, ring: Rect, stroke: f32) {
+    let at = unbroken(ui.time());
+    if at.white_tail - at.green_tail > 0.01 {
+        let end = (at.white_tail + 1.0).min(at.head);
+        ui.arc_square(ring, at.green_tail, end, stroke, theme::ACCENT_LIGHT);
+    }
+    ui.arc_square(ring, at.white_tail, at.head, stroke, Color::WHITE);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +137,19 @@ mod tests {
             longest = longest.max(at.head - at.green_tail);
         }
         assert!(longest > 180.0 && longest < 360.0, "the arc grows long, never to a whole ring: {longest}");
+    }
+
+    #[test]
+    fn unbroken_it_never_rests_and_each_turn_follows_the_last() {
+        // No dot at the top between turns: at any moment there is more than a dot of arc.
+        for step in 0..1000 {
+            let at = unbroken(step as f64 * UNBROKEN_PERIOD / 1000.0);
+            assert!(at.head - at.green_tail > DOT as f32 + 1.0, "{step}: {at:?}");
+            assert!(at.green_tail <= at.white_tail && at.white_tail <= at.head, "{step}: {at:?}");
+        }
+        // It runs the same either side of a turn's start.
+        let (a, b) = (unbroken(0.3), unbroken(0.3 + UNBROKEN_PERIOD * 3.0));
+        assert!((a.head - b.head).abs() < 0.01 && (a.green_tail - b.green_tail).abs() < 0.01);
     }
 
     #[test]

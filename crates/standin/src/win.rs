@@ -196,17 +196,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
 /// Posts a notification to the running Dashboard: its text, to the Toast strip's window. 0 when the Dashboard took
 /// it.
 pub fn toast(text: &str) -> i32 {
+    post(model::post::COPYDATA_ID, text, "toast")
+}
+
+/// Tells the running Dashboard the machine has woken from sleep, as Windows would: Who's playing today? asks, if it
+/// asks on waking. 0 when the Dashboard took it.
+pub fn wake() -> i32 {
+    post(model::post::WAKE_ID, "wake", "wake")
+}
+
+/// Sends `text` to the Toast strip's window as `id`, and says so as `what`.
+fn post(id: usize, text: &str, what: &str) -> i32 {
     let class = wide(model::post::WINDOW_CLASS);
-    let data = COPYDATASTRUCT {
-        dwData: model::post::COPYDATA_ID,
-        cbData: text.len() as u32,
-        lpData: text.as_ptr() as *mut c_void,
-    };
+    let data = COPYDATASTRUCT { dwData: id, cbData: text.len() as u32, lpData: text.as_ptr() as *mut c_void };
     let mut taken = 0usize;
     let sent = unsafe {
         let window = FindWindowW(class.as_ptr(), null());
         if window.is_null() {
-            note("toast: no Dashboard with a Toast strip is running");
+            note(&format!("{what}: no Dashboard with a Toast strip is running"));
             return 1;
         }
         // Waited for, but not for ever: a Dashboard that has hung answers nothing.
@@ -214,10 +221,10 @@ pub fn toast(text: &str) -> i32 {
         SendMessageTimeoutW(window, WM_COPYDATA, 0, data, SMTO_ABORTIFHUNG, 5000, &mut taken)
     };
     if sent == 0 || taken == 0 {
-        note(&format!("toast: the Dashboard did not take {text:?}"));
+        note(&format!("{what}: the Dashboard did not take {text:?}"));
         return 1;
     }
-    note(&format!("toast: posted {text:?}"));
+    note(&format!("{what}: posted {text:?}"));
     0
 }
 

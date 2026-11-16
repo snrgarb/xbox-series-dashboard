@@ -22,16 +22,20 @@ pub enum Setting {
     /// Art is downloaded for the games that have none on the PC: the stores' own online, and SteamGridDB's with a
     /// key (Settings > Art). Off, nothing is asked of any service.
     DownloadArtOnline,
+    /// Who's playing today? asks on every start and on waking from sleep; off, the Profile signed in last signs in
+    /// by itself (Settings > Personalisation > Who's playing today?, docs/spec/start-up.md).
+    AskWhosPlaying,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 6] = [
+    pub const ALL: [Setting; 7] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
         Setting::ShowBatteryPercent,
         Setting::UseGuide,
         Setting::DownloadArtOnline,
+        Setting::AskWhosPlaying,
     ];
 
     /// The option's key in the settings table. Never changed: a database has it.
@@ -44,6 +48,7 @@ impl Setting {
             Setting::UseGuide => "guide.enabled",
             // `library::art::ONLINE_SETTING`.
             Setting::DownloadArtOnline => "art.online",
+            Setting::AskWhosPlaying => "startup.ask_whos_playing",
         }
     }
 
@@ -96,6 +101,8 @@ pub struct Options {
     pub art_online: bool,
     /// A SteamGridDB key has been entered (Settings > Art): with art online on, SteamGridDB is asked too.
     pub art_key: bool,
+    /// Who's playing today? asks on every start and on waking from sleep: on by default, as the Bundle's.
+    pub ask_whos_playing: bool,
     /// The Boot video chosen (docs/spec/start-up.md), which plays as the Dashboard starts if it is found.
     pub boot_video: BootVideo,
     /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
@@ -116,6 +123,7 @@ impl Default for Options {
             use_guide: of(Setting::UseGuide),
             art_online: of(Setting::DownloadArtOnline),
             art_key: false,
+            ask_whos_playing: of(Setting::AskWhosPlaying),
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),
@@ -149,6 +157,7 @@ impl Options {
             Setting::ShowBatteryPercent => self.show_battery_percent,
             Setting::UseGuide => self.use_guide,
             Setting::DownloadArtOnline => self.art_online,
+            Setting::AskWhosPlaying => self.ask_whos_playing,
         }
     }
 
@@ -160,6 +169,7 @@ impl Options {
             Setting::ShowBatteryPercent => &mut self.show_battery_percent,
             Setting::UseGuide => &mut self.use_guide,
             Setting::DownloadArtOnline => &mut self.art_online,
+            Setting::AskWhosPlaying => &mut self.ask_whos_playing,
         } = on;
     }
 }
@@ -181,7 +191,7 @@ mod tests {
     fn the_defaults_are_the_bundles() {
         let options = Options::default();
         assert!(options.background_delay && options.show_play_history && options.show_battery_percent);
-        assert!(options.use_guide && !options.reduce_motion);
+        assert!(options.use_guide && !options.reduce_motion && options.ask_whos_playing);
         // The port's own: art online is on until it is turned off.
         assert!(options.art_online && !options.art_key);
     }

@@ -26,7 +26,7 @@ Toasts neither wake the screen nor count as input. A game stopping changes nothi
 
 ## 3. Holding off
 
-- The count **waits during Start-up and while a Launch screen is up**. It starts again from zero once they are gone: a game launched counts from its Launch screen going. A launch while dimmed wakes the screen. Start-up is the Boot video's (#126) for now, and Who's playing today?'s when that comes (#127). While it shows it has the pad to itself, so nothing of it reaches the Idle screen.
+- The count **waits during Start-up and while a Launch screen is up**. It starts again from zero once they are gone: a game launched counts from its Launch screen going. A launch while dimmed wakes the screen. Start-up is the Boot video, Who's playing today? and Signing you in (start-up.md), however long Who's playing today? waits for someone; the count starts from zero as Home shows after. While it shows it has the pad to itself, so nothing of it reaches the Idle screen. Who's playing today? asked on waking from sleep (start-up.md 8) takes the Idle screen down at once if it was up.
 - **There is no media or video hold-off**, as the Bundle has none. A film playing in another app is dimmed after Dim after just the same. (Windows' own display-off timers respect `ES_DISPLAY_REQUIRED`; the Bundle's Idle screen does not ask, and nor does the port.)
 
 ## 4. The panel (Showing things)

@@ -174,15 +174,15 @@ fn a_on_a_recent_game_closes_the_guide_and_launches_it_with_homes_focus_on_its_t
 }
 
 #[test]
-fn entries_whose_dialogs_are_yet_to_come_are_there_and_do_nothing() {
+fn the_profile_entry_is_there_and_does_nothing() {
     let mut guide = at_home();
-    // (The Utilities' Flyouts are tests/flyouts.rs; what opens a page is tests/pages.rs.)
+    // (The Utilities' Flyouts are tests/flyouts.rs; what opens a page is tests/pages.rs; Switch profile, which asks
+    // Who's playing today?, is tests/startup.rs.)
     press(&mut guide, &[Down, Down, Down, Down, Down, Down, Right]);
     assert_eq!(guide.guide().focus(), (LANDING, utility(1)));
-    // The Profile entry, which never does anything, and Switch profile.
-    press(&mut guide, &[RightBumper, A, Down, A]);
-    assert_eq!(guide.guide().focus(), (PROFILE, entry(1)));
-    assert!(guide.guide_open());
+    press(&mut guide, &[RightBumper, A]);
+    assert_eq!(guide.guide().focus(), (PROFILE, entry(0)));
+    assert!(guide.guide_open() && !guide.starting_up());
     assert!(guide.take_effects().iter().all(|effect| *effect == Effect::Sound(screens::Sound::GuideMove)));
 }
 
