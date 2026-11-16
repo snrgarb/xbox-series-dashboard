@@ -1505,11 +1505,18 @@ fn guide_long_names() {
     stage.check_image("guide-long-names-profile", image);
 }
 
-/// With Discord connected its tab stands between the two; its entries come with Discord.
+/// With Discord connected its tab stands between the two: out of a Call, who is signed in. The tab's other states
+/// are tests/discord.rs's.
 #[test]
 fn guide_discord_tab() {
     let mut stage = Stage::on_row(library_with_art(), HD);
-    stage.dashboard.set_status(Status { discord: true, ..Status::default() });
+    let signed_in = model::discord::Discord {
+        connected: true,
+        has_tokens: true,
+        user: Some("E2E Tester".into()),
+        ..Default::default()
+    };
+    stage.dashboard.set_discord(&signed_in);
     stage.press(&[Button::Guide, Button::RightBumper]);
     stage.check("guide-discord");
 }

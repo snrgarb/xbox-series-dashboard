@@ -79,18 +79,50 @@ Nothing secret is ever in a log line, a `Debug`, the screens or the focus log: t
 public) and only `Saved` or `Not set` for the Secret; `Ask`'s `Debug` hides what was typed; the token endpoint's
 answer bodies are never logged. The library database is not used: no migration.
 
-## For the Discord tab (#144, #145)
+## The Call (#144)
+
+The Discord tab itself is docs/spec/discord-tab.md. What it shows comes from `voice::Follower`
+(`crates/discord/src/voice.rs`, ported from the Bundle's `ExtensionCore.DiscordCall.cs` and `DiscordCall.cs`),
+which the `Connection` hands every event the client takes in:
+
+- Signed in, it asks GET_SELECTED_VOICE_CHANNEL and GET_VOICE_SETTINGS. VOICE_CHANNEL_SELECT names the channel the
+  user is in (null: none); a new one is fetched with GET_CHANNEL, and the Call begins once it arrives, if it is still
+  the one selected. A GET_SELECTED_VOICE_CHANNEL answer after a VOICE_CHANNEL_SELECT is ignored.
+- Each Call's channel is followed with SUBSCRIBE (VOICE_STATE_CREATE, _UPDATE, _DELETE, SPEAKING_START, _STOP) and
+  given up with UNSUBSCRIBE as the Call ends or moves. The same channel fetched afresh keeps who was speaking; a
+  refused GET_CHANNEL for another channel drops the old Call rather than show it as the current one.
+- A person is named by nickname, else display name, else username; is muted or deafened whether they or the server
+  did it; comes in Discord's order with the user first. A DM or group with no name is named after the other people
+  in it, else the last seen, else "Call".
+- Mute and Deafen send SET_VOICE_SETTINGS `{mute|deaf: !now}`, Leave SELECT_VOICE_CHANNEL `{channel_id: null}`. What
+  shows is only ever what Discord said: VOICE_SETTINGS_UPDATE for the switches, VOICE_CHANNEL_SELECT for Leave. A
+  refused command changes nothing and leaves the connection up.
+- Discord closing ends the Call and forgets the voice settings; signed in again, it is all asked afresh.
+
+`Discord.voice` (`Voice { call, mute, deaf }`, `Call { id, title, people }`, `Person { id, name, avatar, speaking,
+muted, deafened, me }`) is the screens' copy. `Ask::Call(CallAsk::Mute|Deafen|Leave)` is what the tab asks.
+
+### Avatars
+
+`https://cdn.discordapp.com/avatars/<id>/<hash>.png?size=64`, else Discord's default
+`embed/avatars/<(id >> 22) % 6>.png`, fetched off the frame by `avatars::Avatars` (a thread of its own, lazily
+started) into `<data>/art/discord/avatars/<id>/<hash>.png` and `.../embed/<n>.png`, and kept: a kept file is used
+at once ever after, as art is. Until one is there the tab draws a grey disc with a figure. At most 1 MB, written
+beside its place then moved there. With a test's pipe there is no CDN at all unless `--discord-cdn-url` names one.
+
+## For the Shortcuts and Servers (#145)
 
 - `Discord::has_tab()`: the Guide has a Discord tab (signed in, or tokens saved). `Discord::tab_line()`: what the tab
   says in Discord's place while it can't show it (`Connecting to Discord`, `Discord isn't running`, `Reconnect
   Discord in settings`), None while signed in.
-- `Connection::client()` gives the `Client`: `send(cmd, args, evt)` sends a command while signed in and returns its
-  nonce (None while not); `take_events()` gives `Event::SignedIn(User)`, `Event::Dispatch { evt, data }` (Discord's
-  events: the voice ones are subscribed already), `Event::Reply { cmd, nonce, data }`, `Event::Refused { cmd, nonce,
-  message }` (a refused command leaves the connection up) and `Event::Closed`. The window drains them each turn and
-  drops them for now (`follow_discord`): #144 hands them to the Guide.
-- `Dashboard::set_discord` / `Dashboard::discord()`: the screens' copy of `Discord`. Home's Discord tile still goes by
-  `status.discord`, which nothing sets yet: #144 sets it from `has_tab()`.
+- The client's events now belong to the `Connection` (`Connection::follow`): #145 hands them to its own follower
+  beside `voice::Follower`, from the same loop. The places #145 hooks into are marked `#145` in `voice.rs` (the
+  GET_CHANNEL answers for the Shortcuts' occupants and rings, VOICE_STATE_CREATE for a ring, the known channel on
+  show, a ring's own subscriptions on UNSUBSCRIBE).
+- The tab's entries: `guide::discord::entries` ends where the Shortcuts then Servers (under a divider) go;
+  `first_focus` goes to the first Shortcut, else Servers, out of a Call, as the Bundle's does.
+- `Dashboard::set_discord` sets `status.discord` from `has_tab()`: Home's Discord tile opens the tab then, Settings
+  otherwise.
 
 ## Testing
 
@@ -98,14 +130,22 @@ answer bodies are never logged. The library database is not used: no migration.
   fake transport, token endpoint and secret store, on a clock the test moves.
 - `crates/discord/tests/fake.rs`: the real `Connection` (pipe, threads, HTTP) against `FakeDiscord`: connects, is
   lost as the fake goes away, tries again and signs in by itself as it comes back; starting again signs in with the
-  saved tokens.
+  saved tokens. A Call arrives with everyone's avatar from the fake's stand-in CDN; people join, speak and leave;
+  Mute and Leave, held by the fake, show only once it confirms; a refused one changes nothing.
+- `crates/discord/tests/voice.rs`: the Bundle's DiscordCallTests, the follower against a recording of what it sends.
 - `standin discord --pipe <name> [--port <n>]` runs the fake; `standin discord-say <name> go-away | come-back | close
-  <message> | call <channel> <person>... | join <person> | leave <person> | hang-up` steers it.
-- `dashboard --discord-pipe <name> [--discord-token-url <url>]` points the Dashboard at it: only that pipe is tried,
-  and with no token URL there is no token endpoint at all, so a test never reaches discord.com. The e2e helpers add
+  <message> | call <channel> <person>... | join <person> | leave <person> | speak|hush <who> |
+  mute|unmute|deafen|undeafen <who> | hold | confirm | refuse [message] | hang-up` steers it (`<who>` a name, or
+  `me`). `hold` keeps SET_VOICE_SETTINGS and SELECT_VOICE_CHANNEL waiting until `confirm` carries them out or
+  `refuse` errors them. Its HTTP port serves every avatar asked as a plain picture of one colour: nobody's real one.
+- `dashboard --discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]` points the Dashboard at
+  it: only that pipe is tried, and with no token URL or CDN URL there is none at all, so a test never reaches
+  discord.com. The e2e helpers add
   `--discord-pipe e2e-no-discord` to every safe-mode run that names none, so the user's own Discord on the TV PC is
   never touched.
 - `e2e/payloads/discord/run.ps1`: Settings > Discord with the pad, against `standin discord`.
+- `e2e/payloads/discord-tab/run.ps1`: the Guide's Discord tab against it: the Call arriving, a speaker's ring, Mute
+  and Leave only once the fake confirms, and the tab's line as the fake goes away.
 
 The log, prefixed `discord: `: `client id set|forgotten`, `client secret saved|forgotten`, `connecting`, `not
 running`, `retry in <n> s`, `asking Discord to authorize: approve the request in Discord`, `approved in Discord:
@@ -115,10 +155,20 @@ again: reconnect in Settings`; and `pipe <name> open`, `asking the token endpoin
 answered HTTP <n>`. The focus log on the page: `Settings: Discord: <Client ID Type|Client ID Paste|Client Secret
 Type|Client Secret Paste|Connect|Disconnect>; client id <set|not set>, secret <saved|not set>, "<status>"`.
 
+The Call's lines: `in a call in "<title>" with <people>`, `<name> joined the call`, `<name> left the call`, `out of
+the call` (`: Discord has gone` as it closes), `Discord says mute on|off, deafen on|off` (as they change), `asking
+Discord to mute|unmute|deafen|undeafen|leave the call` (as sent), `Discord refused <CMD>: <message>`, `avatar of <name>
+fetched`, `avatar of <name> couldn't be fetched: <why>`. With `--log-focus` the Guide's line on the tab says the
+entry focus is on and what Discord says: `guide: Discord Entry(5) Mute; in "General" with E2E Tester, Ana
+(speaking), Bo (muted, deafened); mute off, deafen off`, `guide: Discord Entry(0) Account; not in a call; mute off,
+deafen off`, `guide: Discord Entry(0) Unavailable; "Discord isn't running"`.
+
 ## Left for a human
 
 - A real Discord application (Client ID and Secret, the redirect, the user as App Tester) and a signed-in Discord on
-  the TV PC: the fake stands in for both in every test here.
+  the TV PC: the fake stands in for both in every test here. Real avatars from Discord's CDN, and a real Call's
+  Mute, Deafen and Leave, are only seen there.
+- Discord's mark on the account card is a plain stand-in shape (`marks::discord_mark`), as on the tab strip.
 - The QR code: the page draws a plain stand-in (`portal_qr` in the page), a white square with the corner marks'
   places outlined, so nobody takes it for a code to scan. The Bundle's `DiscordPortalQr.png` is not copied. A real
   code of `PORTAL_URL` can be drawn there at run time (a QR encoder crate, nearest-neighbour squares).

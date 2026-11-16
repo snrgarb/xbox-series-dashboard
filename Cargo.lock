@@ -482,6 +482,7 @@ dependencies = [
 name = "discord"
 version = "0.0.0"
 dependencies = [
+ "image",
  "model",
  "serde_json",
  "tempfile",

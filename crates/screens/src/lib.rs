@@ -436,10 +436,14 @@ impl Dashboard {
         self.refresh_guide();
     }
 
-    /// The Discord connection as it is now (docs/discord.md): Settings > Discord shows it.
+    /// The Discord connection as it is now (docs/discord.md): Settings > Discord shows it, the Guide has its
+    /// Discord tab while it has one (docs/spec/discord-tab.md), and Home's Discord tile opens that tab then.
     pub fn set_discord(&mut self, discord: &model::discord::Discord) {
-        if self.discord != *discord {
+        if self.discord != *discord || self.status.discord != discord.has_tab() {
             self.discord = discord.clone();
+            self.status.discord = discord.has_tab();
+            self.guide.set_discord(discord);
+            self.refresh_guide();
         }
     }
 
@@ -1284,9 +1288,11 @@ impl Dashboard {
             Some((which, at)) => format!(", flyout {which:?} {at:?}"),
             None => String::new(),
         };
+        // On the Discord tab, the entry focus is on and what Discord says (`Entry(4) Mute; in "General" with ...`).
+        let discord = self.guide.discord_line().unwrap_or_default();
         match self.guide.dialog() {
             Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}{title}{quitting}"),
-            None => format!("{tab:?} {focus:?}{panel}{flyout}{quitting}"),
+            None => format!("{tab:?} {focus:?}{discord}{panel}{flyout}{quitting}"),
         }
     }
 
@@ -1358,6 +1364,8 @@ impl Dashboard {
             // With a game running the Guide stays, under the question.
             GuideAction::Launch(game) => self.play(game),
             GuideAction::Asked => {}
+            // Asked of Discord: the tab shows it done once Discord says so.
+            GuideAction::Discord(ask) => self.effects.push(Effect::Discord(model::discord::Ask::Call(ask))),
             // The level shows at once; the shell's next reading says what the system made of it.
             GuideAction::Volume(level) => {
                 self.audio.volume = level;

@@ -8,6 +8,7 @@
 //!
 //! This file is where focus is and where it goes, and how the Guide comes and goes; each part draws itself in its
 //! own module.
+mod discord;
 mod entries;
 mod flyout;
 mod hints;
@@ -16,9 +17,11 @@ mod panel;
 mod status;
 mod utilities;
 
+use model::discord::{CallAsk, Discord};
 use model::{Audio, Flow, Library, MediaCommand, PowerCommand};
 use ui::{Button, Color, Ease, Gradient, Press, Rect, TextStyle, Ui};
 
+pub use self::discord::Item as DiscordItem;
 pub use self::entries::{Entry, Kind};
 pub use self::flyout::{AudioItem, Flyout, FlyoutFocus, MediaControl};
 pub(crate) use self::status::pad_battery;
@@ -50,7 +53,7 @@ const BEHIND_BLUR: f32 = 12.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Landing,
-    /// Only while Discord is connected (M6). Its entries come with it.
+    /// From the first Connect until Disconnect (docs/spec/discord-tab.md).
     Discord,
     ProfileAndSystem,
 }
@@ -100,6 +103,8 @@ pub enum GuideAction {
     Media(MediaCommand),
     /// A Power option was chosen: close, then carry it out.
     Power(PowerChoice),
+    /// Mute, Deafen or Leave on the Discord tab: asked of Discord, and shown done only once Discord says so.
+    Discord(CallAsk),
 }
 
 /// Power's options.
@@ -201,6 +206,9 @@ pub struct Guide {
     lag: f32,
     /// How far the entries are scrolled.
     scroll: f32,
+    /// Discord as it last said, and as it was when the lists were last made: the Discord tab's entries.
+    discord: Discord,
+    listed_discord: Discord,
 }
 
 impl Default for Guide {
@@ -221,6 +229,8 @@ impl Default for Guide {
             turns: (0, 0.0),
             lag: 0.0,
             scroll: 0.0,
+            discord: Discord::default(),
+            listed_discord: Discord::default(),
         }
     }
 }
@@ -383,12 +393,28 @@ impl Guide {
         }
     }
 
-    /// Shows a tab from its top, focus on its first entry.
+    /// Shows a tab from its top, focus on its first entry: on the Discord tab, the first that A does something on.
     fn show(&mut self, tab: Tab, around: Around) {
         self.tab = tab;
         self.list(around);
-        self.focus = Focus::Entry(0);
         self.scroll = 0.0;
+        let first = if self.tab == Tab::Discord { discord::first_focus(&self.entries) } else { 0 };
+        self.focus = Focus::Entry(first);
+        self.scroll_to_focus();
+    }
+
+    /// Discord as it says now. The Discord tab follows it as `refresh` makes the lists again.
+    pub fn set_discord(&mut self, discord: &Discord) {
+        self.discord = discord.clone();
+    }
+
+    /// The Discord tab's part of `--log-focus`'s Guide line: the entry focus is on, and what Discord says.
+    pub fn discord_line(&self) -> Option<String> {
+        let focus = match self.focus {
+            Focus::Entry(at) => Some(at),
+            Focus::Utility(_) => None,
+        };
+        (self.tab == Tab::Discord).then(|| discord::line(&self.entries, focus, &self.discord))
     }
 
     /// Makes the tabs and the showing tab's lists from what is around now.
@@ -401,18 +427,26 @@ impl Guide {
         if !self.tabs.contains(&self.tab) {
             self.tab = Tab::Landing;
         }
-        self.entries = entries::of(self.tab, around);
+        self.entries = entries::of(self.tab, around, &self.discord);
+        self.listed_discord = self.discord.clone();
         // Only the landing tab has Utilities.
         self.utilities = if self.tab == Tab::Landing { Utility::LANDING.to_vec() } else { Vec::new() };
     }
 
     /// What is around changed while the Guide is open (a game started or stopped, a new snapshot of the library):
     /// the lists are made again, and focus stays at the same place in them.
+    /// On the Discord tab focus follows its entry through Discord's changes (`discord::focus_after`).
     pub fn refresh(&mut self, around: Around) {
+        let before = (self.tab, std::mem::take(&mut self.entries), std::mem::take(&mut self.listed_discord));
         self.list(around);
         if let Focus::Entry(at) = self.focus {
-            self.focus = Focus::Entry(at.min(self.entries.len().saturating_sub(1)));
+            self.focus = Focus::Entry(if before.0 == Tab::Discord && self.tab == Tab::Discord {
+                discord::focus_after((&before.1, &before.2), (&self.entries, &self.discord), at)
+            } else {
+                at.min(self.entries.len().saturating_sub(1))
+            });
         }
+
         // A menu or a prompt is about the running game: when that has stopped it goes, in silence. Power is about
         // the PC, and stays.
         if matches!(self.dialog, Some(Dialog::Menu(_))) && around.playing.is_none() {
@@ -659,7 +693,8 @@ impl Guide {
                     Focus::Entry(at) => Some(at),
                     Focus::Utility(_) => None,
                 };
-                let faces = entries::Faces { library: around.library, profile: face.profile };
+                let faces =
+                    entries::Faces { library: around.library, profile: face.profile, discord: &self.listed_discord };
                 ui.with_clip(viewport, |ui| {
                     ui.with_offset(0.0, -self.scroll, |ui| {
                         let unfocused = (0..placed.len()).filter(|&at| Some(at) != focus);
@@ -696,6 +731,7 @@ fn select(entry: &Entry) -> Option<GuideAction> {
         // Switch profile closes the Guide and asks Who's playing today? (docs/spec/start-up.md, 7).
         Kind::SwitchProfile if entry.enabled => Some(GuideAction::SwitchProfile),
         Kind::Profile | Kind::SwitchProfile => None,
+        Kind::Discord(item) => discord::select(item),
     }
 }
 

@@ -2,11 +2,14 @@
 //! naming, never Discord's own, and answers the handshake, AUTHORIZE (approved at once, as if the user had pressed
 //! Authorize), AUTHENTICATE, SUBSCRIBE and the voice commands; with its own OAuth2 token endpoint on 127.0.0.1, which
 //! grants what it gave codes and refresh tokens for. It can be told (`control`, or over the pipe `<name>-control`
-//! with `standin discord-say`) to put the user in a Call, change who is in it, close the connection, and go away and
-//! come back as Discord quitting and starting again does.
+//! with `standin discord-say`) to put the user in a Call, change who is in it, who speaks and who is muted or
+//! deafened, hold the voice commands until told to carry them out or refuse them, close the connection, and go away
+//! and come back as Discord quitting and starting again does. Its HTTP server is also the CDN the avatars come from
+//! ([`FakeDiscord::cdn_url`]): a plain picture of one colour for each address asked.
 //!
-//! The made-up world: the user "E2E Tester" (`e2e-tester`), one server, "Stand-in Server", with two voice channels,
-//! General and Late night, and people met by name as they are first named.
+//! The made-up world: the user "E2E Tester" (`e2e-tester`, with no avatar of their own: Discord's default one), one
+//! server, "Stand-in Server", with two voice channels, General and Late night, and people met by name as they are
+//! first named, each with an avatar.
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -45,11 +48,20 @@ struct World {
     selected: Option<String>,
     mute: bool,
     deaf: bool,
+    /// The others' mute and deafen, by id: set by the server, as far as the user can tell.
+    marks: BTreeMap<String, (bool, bool)>,
     /// What the client subscribed to: the event, and the channel for the per-channel ones.
     subscriptions: Vec<(String, Option<String>)>,
     /// Codes, access tokens and refresh tokens given out.
     issued: u64,
+    /// The voice commands (SET_VOICE_SETTINGS, SELECT_VOICE_CHANNEL) wait to be confirmed or refused.
+    holding: bool,
+    /// Those waiting: the command, its args and its nonce.
+    held: Vec<(String, Value, Value)>,
 }
+
+/// The commands `hold` keeps waiting.
+const VOICE_COMMANDS: [&str; 2] = ["SET_VOICE_SETTINGS", "SELECT_VOICE_CHANNEL"];
 
 impl World {
     fn person(&mut self, name: &str) -> String {
@@ -59,6 +71,20 @@ impl World {
         let id = format!("{}", 200000000000000000u64 + self.people.len() as u64 + 2);
         self.people.insert(id.clone(), name.to_string());
         id
+    }
+
+    /// Who `who` is: `me` the user, anyone else by name.
+    fn who(&mut self, who: &str) -> String {
+        if who == "me" {
+            USER_ID.to_string()
+        } else {
+            self.person(who)
+        }
+    }
+
+    /// A person's avatar hash: made up from their id, 32 hex digits as Discord's are.
+    fn avatar(id: &str) -> String {
+        format!("{:032x}", id.parse::<u128>().unwrap_or(0))
     }
 
     fn subscribed(&self, evt: &str, channel: Option<&str>) -> bool {
@@ -74,15 +100,17 @@ impl World {
             (DISPLAY_NAME.to_string(), self.user())
         } else {
             let name = self.people.get(id).cloned().unwrap_or_default();
-            (name.clone(), json!({ "id": id, "username": name.to_lowercase(), "global_name": name, "avatar": null }))
+            let avatar = World::avatar(id);
+            (name.clone(), json!({ "id": id, "username": name.to_lowercase(), "global_name": name, "avatar": avatar }))
         };
         let me = id == USER_ID;
+        let (mute, deaf) = self.marks.get(id).copied().unwrap_or_default();
         json!({
             "nick": name,
             "mute": false,
             "volume": 100,
             "user": user,
-            "voice_state": { "mute": false, "deaf": false, "self_mute": me && self.mute, "self_deaf": me && self.deaf },
+            "voice_state": { "mute": mute, "deaf": deaf, "self_mute": me && self.mute, "self_deaf": me && self.deaf },
         })
     }
 
@@ -233,35 +261,67 @@ impl Shared {
                 drop(world);
                 self.reply(cmd, nonce, settings, None);
             }
-            "SET_VOICE_SETTINGS" => {
-                if let Some(mute) = args["mute"].as_bool() {
-                    world.mute = mute;
-                }
-                if let Some(deaf) = args["deaf"].as_bool() {
-                    world.deaf = deaf;
-                }
-                let (settings, tell) = (world.voice_settings(), world.subscribed("VOICE_SETTINGS_UPDATE", None));
+            _ if VOICE_COMMANDS.contains(&cmd) && world.holding => {
+                world.held.push((cmd.to_string(), args.clone(), nonce.clone()));
                 drop(world);
-                self.reply(cmd, nonce, settings.clone(), None);
-                if tell {
-                    self.dispatch("VOICE_SETTINGS_UPDATE", settings);
-                }
+                self.say(&format!("{cmd} held: waiting for confirm or refuse"));
             }
-            "SELECT_VOICE_CHANNEL" => {
-                let id = args["channel_id"].as_str().map(str::to_string);
-                if id.as_deref().is_some_and(|id| world.channel(id).is_none()) {
-                    drop(world);
-                    self.error(cmd, nonce, 4005, "Invalid channel");
-                    return;
-                }
+            _ if VOICE_COMMANDS.contains(&cmd) => {
                 drop(world);
-                let channel = self.select(id);
-                self.reply(cmd, nonce, channel, None);
+                self.voice_command(cmd, args, nonce);
             }
             _ => {
                 drop(world);
                 self.error(cmd, nonce, 4000, "Unknown command");
             }
+        }
+    }
+
+    /// SET_VOICE_SETTINGS or SELECT_VOICE_CHANNEL carried out: Discord answers, and tells whoever subscribed.
+    fn voice_command(&self, cmd: &str, args: &Value, nonce: &Value) {
+        let mut world = self.world.lock().unwrap();
+        if cmd == "SET_VOICE_SETTINGS" {
+            if let Some(mute) = args["mute"].as_bool() {
+                world.mute = mute;
+            }
+            if let Some(deaf) = args["deaf"].as_bool() {
+                world.deaf = deaf;
+            }
+            drop(world);
+            let settings = self.world.lock().unwrap().voice_settings();
+            self.reply(cmd, nonce, settings, None);
+            self.settings_changed(USER_ID);
+            return;
+        }
+        let id = args["channel_id"].as_str().map(str::to_string);
+        if id.as_deref().is_some_and(|id| world.channel(id).is_none()) {
+            drop(world);
+            self.error(cmd, nonce, 4005, "Invalid channel");
+            return;
+        }
+        drop(world);
+        let channel = self.select(id);
+        self.reply(cmd, nonce, channel, None);
+    }
+
+    /// The user's voice settings, or someone's marks, changed: VOICE_SETTINGS_UPDATE for the user's own, and the
+    /// person's VOICE_STATE_UPDATE in the Call they are in, to whoever subscribed.
+    fn settings_changed(&self, id: &str) {
+        let world = self.world.lock().unwrap();
+        let settings =
+            (id == USER_ID && world.subscribed("VOICE_SETTINGS_UPDATE", None)).then(|| world.voice_settings());
+        let channel = world.selected.clone().filter(|channel| {
+            id == USER_ID || world.members.get(channel).is_some_and(|members| members.iter().any(|m| m == id))
+        });
+        let state = channel
+            .filter(|channel| world.subscribed("VOICE_STATE_UPDATE", Some(channel)))
+            .map(|_| world.voice_state(id));
+        drop(world);
+        if let Some(settings) = settings {
+            self.dispatch("VOICE_SETTINGS_UPDATE", settings);
+        }
+        if let Some(state) = state {
+            self.dispatch("VOICE_STATE_UPDATE", state);
         }
     }
 
@@ -329,6 +389,72 @@ impl Shared {
             }
             ["join", person] => self.member(person, true),
             ["leave", person] => self.member(person, false),
+            [verb @ ("speak" | "hush"), who] => {
+                let mut world = self.world.lock().unwrap();
+                let Some(channel) = world.selected.clone() else { return Err("the user is in no Call".into()) };
+                let id = world.who(who);
+                let present = id == USER_ID || world.members.get(&channel).is_some_and(|m| m.contains(&id));
+                if !present {
+                    return Err(format!("{who} is not in the Call"));
+                }
+                let evt = if *verb == "speak" { "SPEAKING_START" } else { "SPEAKING_STOP" };
+                let tell = world.subscribed(evt, Some(&channel));
+                drop(world);
+                if tell {
+                    self.dispatch(evt, json!({ "user_id": id, "channel_id": channel }));
+                }
+                Ok(format!("{who} {}", if *verb == "speak" { "speaks" } else { "stopped speaking" }))
+            }
+            [verb @ ("mute" | "unmute" | "deafen" | "undeafen"), who] => {
+                let on = !verb.starts_with("un");
+                let mut world = self.world.lock().unwrap();
+                let id = world.who(who);
+                if id == USER_ID {
+                    if verb.ends_with("mute") {
+                        world.mute = on;
+                    } else {
+                        world.deaf = on;
+                    }
+                } else {
+                    let marks = world.marks.entry(id.clone()).or_default();
+                    if verb.ends_with("mute") {
+                        marks.0 = on;
+                    } else {
+                        marks.1 = on;
+                    }
+                }
+                drop(world);
+                self.settings_changed(&id);
+                let done = if verb.ends_with("mute") { format!("{verb}d") } else { format!("{verb}ed") };
+                Ok(format!("{who} {done}"))
+            }
+            ["hold"] => {
+                self.world.lock().unwrap().holding = true;
+                Ok("the voice commands wait for confirm or refuse".into())
+            }
+            ["confirm"] => {
+                let held = {
+                    let mut world = self.world.lock().unwrap();
+                    world.holding = false;
+                    std::mem::take(&mut world.held)
+                };
+                for (cmd, args, nonce) in &held {
+                    self.voice_command(cmd, args, nonce);
+                }
+                Ok(format!("{} carried out", held.len()))
+            }
+            ["refuse", message @ ..] => {
+                let held = {
+                    let mut world = self.world.lock().unwrap();
+                    world.holding = false;
+                    std::mem::take(&mut world.held)
+                };
+                let message = if message.is_empty() { "Refused".to_string() } else { message.join(" ") };
+                for (cmd, _, nonce) in &held {
+                    self.error(cmd, nonce, 4000, &message);
+                }
+                Ok(format!("{} refused", held.len()))
+            }
             ["hang-up"] => {
                 self.select(None);
                 Ok("the user left the Call".into())
@@ -390,7 +516,9 @@ impl FakeDiscord {
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        shared.say(&format!("listening on {name}, tokens at http://127.0.0.1:{token_port}/api/oauth2/token"));
+        shared.say(&format!(
+            "listening on {name}, tokens at http://127.0.0.1:{token_port}/api/oauth2/token, avatars at http://127.0.0.1:{token_port}"
+        ));
         Ok(FakeDiscord { shared, token_port })
     }
 
@@ -399,8 +527,14 @@ impl FakeDiscord {
         format!("http://127.0.0.1:{}/api/oauth2/token", self.token_port)
     }
 
-    /// Does a control command (`call General Ana Bo`, `join Cy`, `leave Ana`, `hang-up`, `go-away`, `come-back`,
-    /// `close <message>`): what it did, or why it didn't.
+    /// The stand-in CDN's address, for `dashboard --discord-cdn-url`: the avatars are there.
+    pub fn cdn_url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.token_port)
+    }
+
+    /// Does a control command (`call General Ana Bo`, `join Cy`, `leave Ana`, `speak Ana`, `hush Ana`, `mute me`,
+    /// `undeafen Bo`, `hold`, `confirm`, `refuse <message>`, `hang-up`, `go-away`, `come-back`, `close <message>`):
+    /// what it did, or why it didn't.
     pub fn control(&self, line: &str) -> Result<String, String> {
         let done = self.shared.control(line);
         self.shared.say(&format!("{line}: {}", done.as_ref().unwrap_or_else(|e| e)));
@@ -546,6 +680,25 @@ pub fn say_to(name: &str, line: &str) -> io::Result<String> {
 
 // ------------------------------------------------------------------------------------------------ token endpoint
 
+/// An avatar for `path`: 64 across, of one colour picked by the address, with a lighter disc in its middle, so a
+/// picture shows where one is drawn and two people's differ. Nobody's real avatar.
+pub fn avatar_picture(path: &str) -> Vec<u8> {
+    let hash = path.bytes().fold(2166136261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16777619));
+    let channel = |shift: u32| 60 + ((hash >> shift) & 0x7F) as u8;
+    let (r, g, b) = (channel(0), channel(8), channel(16));
+    let picture = image::RgbImage::from_fn(64, 64, |x, y| {
+        let (dx, dy) = (x as f32 - 31.5, y as f32 - 31.5);
+        if dx * dx + dy * dy < 14.0 * 14.0 {
+            image::Rgb([r.saturating_add(90), g.saturating_add(90), b.saturating_add(90)])
+        } else {
+            image::Rgb([r, g, b])
+        }
+    });
+    let mut png = Vec::new();
+    picture.write_to(&mut io::Cursor::new(&mut png), image::ImageFormat::Png).expect("a PNG in memory");
+    png
+}
+
 fn serve_tokens(shared: &Shared, listener: TcpListener) {
     while !shared.stop.load(Ordering::SeqCst) {
         match listener.accept() {
@@ -619,6 +772,20 @@ fn token_request(shared: &Shared, stream: TcpStream) -> io::Result<()> {
     }
     let mut body = vec![0u8; length.min(64 * 1024)];
     reader.read_exact(&mut body)?;
+    // The stand-in CDN: an avatar, a plain picture of one colour for each address.
+    let path = request_line.strip_prefix("GET ").and_then(|rest| rest.split_whitespace().next());
+    if let Some(path) = path.filter(|path| path.starts_with("/avatars/") || path.starts_with("/embed/avatars/")) {
+        let picture = avatar_picture(path);
+        shared.say(&format!("cdn: {path} served"));
+        let mut stream = stream;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            picture.len()
+        )?;
+        stream.write_all(&picture)?;
+        return stream.flush();
+    }
     let form = form(&String::from_utf8_lossy(&body));
     let grant = form.get("grant_type").cloned().unwrap_or_default();
     let (status, answer) = if !request_line.starts_with("POST /api/oauth2/token") {

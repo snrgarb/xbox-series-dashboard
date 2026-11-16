@@ -99,16 +99,22 @@
 //!       http://127.0.0.1:<n>` and then a line a request (its path, and whether it had the key), until it is killed.
 //!   standin discord --pipe <name> [--port <n>]
 //!       A fake Discord (`discord::fake`), for `dashboard --discord-pipe <name> --discord-token-url
-//!       http://127.0.0.1:<n>/api/oauth2/token`: listens on the named pipe <name> (never Discord's own
-//!       `discord-ipc-N`), answers the handshake and AUTHORIZE at once, as if the user had approved, signs the user
-//!       in as "E2E Tester", and grants tokens at its own endpoint on 127.0.0.1 at <n> (any free port without one).
-//!       Says `discord fake: listening on <name>, tokens at <url>`, then a line a command, until it is killed.
-//!   standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | hang-up | go-away |
-//!                       come-back | close <message>
+//!       http://127.0.0.1:<n>/api/oauth2/token --discord-cdn-url http://127.0.0.1:<n>`: listens on the named pipe
+//!       <name> (never Discord's own `discord-ipc-N`), answers the handshake and AUTHORIZE at once, as if the user had
+//!       approved, signs the user in as "E2E Tester", and grants tokens at its own endpoint on 127.0.0.1 at <n> (any
+//!       free port without one), where it also serves every avatar asked as a plain picture of one colour. Says
+//!       `discord fake: listening on <name>, tokens at <url>, avatars at <url>`, then a line a command, until it is
+//!       killed.
+//!   standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | speak <who> |
+//!                       hush <who> | mute <who> | unmute <who> | deafen <who> | undeafen <who> | hold | confirm |
+//!                       refuse [message] | hang-up | go-away | come-back | close <message>
 //!       Tells the fake Discord on <name> to put the user in a Call in the voice channel <channel> (General or
-//!       Late_night) with those people, to have someone join or leave it, to leave it, to go away as Discord quitting
-//!       does (the connection dropped, nothing listening) and come back, or to close the connection with <message>.
-//!       Says what it answered. Exits 1 when no fake is on <name> or it refused.
+//!       Late_night) with those people, to have someone join or leave it, start or stop speaking, or be muted or
+//!       deafened (<who> is a name, or `me` for the user, whose mute and deafen are their voice settings), to hold
+//!       the voice commands (Mute, Deafen, Leave) until told to confirm (carry them out) or refuse them, to leave the
+//!       Call, to go away as Discord quitting does (the connection dropped, nothing listening) and come back, or to
+//!       close the connection with <message>. Says what it answered. Exits 1 when no fake is on <name> or it
+//!       refused.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -135,8 +141,9 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>]
        standin discord --pipe <name> [--port <n>]
-       standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | hang-up
-                               | go-away | come-back | close <message>
+       standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | speak <who>
+                               | hush <who> | mute|unmute|deafen|undeafen <who> | hold | confirm
+                               | refuse [message] | hang-up | go-away | come-back | close <message>
        standin toast <text>
        standin wake
        standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]

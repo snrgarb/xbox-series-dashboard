@@ -1,7 +1,7 @@
 //! The Guide: where its focus goes and what a press asks for (docs/spec/guide.md, section 3). No picture, so no
 //! GPU; what it looks like is tests/shots.rs, and what it sounds like tests/sounds.rs.
 use model::Library;
-use screens::guide::{Focus, Kind, Status, Tab};
+use screens::guide::{Focus, Kind, Tab};
 use screens::{Dashboard, Effect};
 use ui::Button::{self, Down, Guide, Left, LeftBumper, Menu, Right, RightBumper, Up, A, B};
 use ui::Press;
@@ -310,18 +310,25 @@ fn a_game_starting_with_the_guide_open_appears_as_running() {
 #[test]
 fn with_discord_connected_its_tab_stands_between_the_two() {
     let mut guide = Dashboard::new(screens::fake_library());
-    guide.set_status(Status { discord: true, ..Status::default() });
+    let signed_in = model::discord::Discord {
+        connected: true,
+        has_tokens: true,
+        user: Some("E2E Tester".into()),
+        ..Default::default()
+    };
+    guide.set_discord(&signed_in);
     press(&mut guide, &[Guide]);
     assert_eq!(guide.guide().tabs(), [LANDING, Tab::Discord, PROFILE]);
+    // Out of a Call: who is signed in, and that they are in no voice channel; A on either does nothing.
     assert_eq!(after(&mut guide, &[RightBumper]), (Tab::Discord, entry(0)));
-    // Its entries come with Discord: until then there is nothing on it to move to or choose.
-    press(&mut guide, &[Down, Up, A]);
-    assert!(kinds(&guide).is_empty() && guide.guide_open());
+    press(&mut guide, &[Down, A]);
+    assert_eq!(guide.guide().focus(), (Tab::Discord, entry(1)));
+    assert!(asked(&mut guide).is_empty() && guide.guide_open());
     assert_eq!(after(&mut guide, &[RightBumper]), (PROFILE, entry(0)));
     assert_eq!(after(&mut guide, &[LeftBumper, LeftBumper]), (LANDING, entry(0)));
-    // Discord going while its tab shows: back to the landing tab.
+    // Disconnect while its tab shows: back to the landing tab.
     press(&mut guide, &[RightBumper]);
-    guide.set_status(Status::default());
+    guide.set_discord(&model::discord::Discord::default());
     assert_eq!(guide.guide().tabs(), [LANDING, PROFILE]);
     assert_eq!(guide.guide().focus().0, LANDING);
 }
