@@ -446,8 +446,13 @@ mod tests {
         assert!(find(&library, &absent).is_none());
         // The same store's id from another store is another game.
         assert!(find(&library, &Game { source: "gog".into(), ..other.clone() }.key()).is_none());
-        let around =
-            Around { library: &library, playing: None, options: Default::default(), now: std::time::Instant::now() };
+        let around = Around {
+            library: &library,
+            playing: None,
+            options: Default::default(),
+            now: std::time::Instant::now(),
+            now_playing: crate::now_playing::none(),
+        };
         assert!(TileMenu::open(Entry { game: absent, opener: Opener::Home }, around).is_none());
     }
 }

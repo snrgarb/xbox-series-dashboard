@@ -317,7 +317,13 @@ mod tests {
             let library = library();
             let game =
                 library.games.iter().chain(&library.hidden).find(|game| game.source_id == appid.to_string()).unwrap();
-            let around = Around { library: &library, playing: None, options: Default::default(), now: Instant::now() };
+            let around = Around {
+                library: &library,
+                playing: None,
+                options: Default::default(),
+                now: Instant::now(),
+                now_playing: crate::now_playing::none(),
+            };
             let hub = GameHub::open(Entry::of(game), around);
             Self { hub, library, playing: None }
         }
@@ -329,6 +335,7 @@ mod tests {
                 playing: self.playing,
                 options: Default::default(),
                 now: Instant::now(),
+                now_playing: crate::now_playing::none(),
             };
             self.hub = GameHub::open(entry, around);
         }
@@ -339,6 +346,7 @@ mod tests {
                 playing: self.playing,
                 options: Default::default(),
                 now: Instant::now(),
+                now_playing: crate::now_playing::none(),
             };
             self.hub.press(Press { button, repeat: false }, around)
         }
@@ -406,7 +414,13 @@ mod tests {
         let mut hub = Hub::open(10);
         assert_eq!(hub.press(Button::A), Some(PageAction::Effect(Effect::Launch(0))));
         // A held A is one A.
-        let around = Around { library: &hub.library, playing: None, options: Default::default(), now: Instant::now() };
+        let around = Around {
+            library: &hub.library,
+            playing: None,
+            options: Default::default(),
+            now: Instant::now(),
+            now_playing: crate::now_playing::none(),
+        };
         assert_eq!(hub.hub.press(Press { button: Button::A, repeat: true }, around), None);
         assert_eq!(hub.go(&[Button::Up, Button::A]), "10 Hub Cover");
         hub.playing = Some(0);

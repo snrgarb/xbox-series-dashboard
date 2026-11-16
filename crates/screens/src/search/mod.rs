@@ -382,6 +382,7 @@ mod tests {
             playing: None,
             options: crate::settings::Options::default(),
             now: std::time::Instant::now(),
+            now_playing: crate::now_playing::none(),
         };
         let mut last = None;
         for &button in buttons {

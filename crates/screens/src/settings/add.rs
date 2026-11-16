@@ -296,7 +296,13 @@ mod tests {
         assert_eq!(page.change(), None);
         let library = model::Library::default();
         let options = crate::settings::Options::default();
-        let around = Around { library: &library, playing: None, options, now: std::time::Instant::now() };
+        let around = Around {
+            library: &library,
+            playing: None,
+            options,
+            now: std::time::Instant::now(),
+            now_playing: crate::now_playing::none(),
+        };
         page.entry(Event::Kept(" \"C:\\Games\\Tern\\tern.exe\" ".into()), around);
         assert_eq!(page.name, "tern");
         assert_eq!(

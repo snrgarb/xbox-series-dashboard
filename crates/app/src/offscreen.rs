@@ -24,6 +24,10 @@ pub fn run(args: &Args, library: Library, options: screens::Options) {
         dashboard.record(text);
     }
     dashboard.set_clock(args.clock.clone());
+    // A made-up media session for the Audio Flyout's Now Playing card: Windows' are not read offscreen.
+    if let Some(media) = args.fake_media().and_then(|mut fake| shell::media::MediaSessions::take(&mut fake)) {
+        dashboard.set_media(media);
+    }
     let press = |dashboard: &mut Dashboard, host: &mut Host, button| {
         dashboard.press(Press { button, repeat: false });
         // An A on a game's tile (or a Play history row): its Game hub opens when the double tap's time is up, over

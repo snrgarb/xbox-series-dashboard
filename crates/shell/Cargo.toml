@@ -16,6 +16,11 @@ pollster = "1"
 # DirectComposition is COM, which windows-sys leaves out. wgpu's DX12 backend already builds this crate.
 # Core Audio is COM too: the Audio Flyout's devices, volume and mute.
 windows = { version = "0.62", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Media",
+    "Media_Control",
+    "Storage_Streams",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Foundation",
     "Win32_Graphics_DirectComposition",

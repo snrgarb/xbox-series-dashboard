@@ -13,7 +13,7 @@ use super::Setting;
 pub fn theme_settings() -> Boxes {
     let personalisation =
         Item::Opens { icon: '\u{E771}', name: "Personalisation", pane: |_| Box::new(personalisation()) };
-    let guide = Item::Opens { icon: '\u{E7FC}', name: "Guide", pane: |_| Box::new(Guide) };
+    let guide = Item::Opens { icon: '\u{E7FC}', name: "Guide", pane: |_| Box::new(Guide::new()) };
     let added = Item::Opens { icon: '\u{E71D}', name: added::TITLE, pane: |around| Box::new(Added::open(around)) };
     // The port's own (docs/spec/settings.md, 16.8): beside Games & apps, where the Bundle has Discord.
     let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |_| Box::new(Art::default()) };

@@ -1,15 +1,19 @@
 //! The Flyouts: a second panel a Utility opens over the Guide's own (docs/spec/guide.md, section 5). Notifications
 //! lists what has been posted, newest first; Audio has the system's sound: the output and input devices, each a
-//! dropdown with its list, the master volume and mute.
+//! dropdown with its list, the master volume and mute, and last Now Playing: the card of the media Windows' own
+//! flyout shows, with Previous, Play/Pause and Next under it (docs/spec/now-playing.md).
 //!
 //! This file is which Flyout is open and where focus is in it, and how it is drawn. What it shows is the
 //! Dashboard's (`Around`), and what a press changes of the system's sound is asked of the Dashboard
 //! (`GuideAction`), which asks the shell.
-use model::{Audio, Flow};
-use ui::{Button, Color, Ease, HAlign, Press, Rect, Ui, VAlign};
+use std::path::PathBuf;
+
+use model::{Audio, Flow, MediaCommand};
+use ui::{ArtKey, Button, Color, Crop, Ease, HAlign, Kind, Press, Rect, Ui, VAlign};
 
 use super::panel::PANEL;
 use super::{entries, focus_ring, Around, GuideAction, HEADING};
+use crate::now_playing::Card;
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 use crate::Notification;
 
@@ -45,6 +49,10 @@ mod icon {
     pub const CHEVRON_DOWN: char = '\u{E70D}';
     pub const CHEVRON_UP: char = '\u{E70E}';
     pub const TICK: char = '\u{E73E}';
+    pub const PREVIOUS: char = '\u{E892}';
+    pub const PLAY: char = '\u{E768}';
+    pub const PAUSE: char = '\u{E769}';
+    pub const NEXT: char = '\u{E893}';
 }
 
 /// Which Flyout.
@@ -63,6 +71,53 @@ pub enum FlyoutFocus {
     Item(usize),
     /// A device in a dropdown's open list, from the top.
     Device(Flow, usize),
+    /// One of the Now Playing card's controls, under it.
+    Control(MediaControl),
+}
+
+/// The Now Playing card's controls, left to right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaControl {
+    Previous,
+    PlayPause,
+    Next,
+}
+
+impl MediaControl {
+    pub const ALL: [MediaControl; 3] = [MediaControl::Previous, MediaControl::PlayPause, MediaControl::Next];
+
+    fn command(self) -> MediaCommand {
+        match self {
+            MediaControl::Previous => MediaCommand::Previous,
+            MediaControl::PlayPause => MediaCommand::PlayPause,
+            MediaControl::Next => MediaCommand::Next,
+        }
+    }
+
+    /// Whether the app has it on now. One it has off is dimmed, and A does nothing on it.
+    fn enabled(self, session: &model::MediaSession) -> bool {
+        match self {
+            MediaControl::Previous => session.can_previous,
+            MediaControl::PlayPause => session.can_play_pause,
+            MediaControl::Next => session.can_next,
+        }
+    }
+
+    /// Its glyph: Play/Pause is play while paused and pause while playing.
+    fn glyph(self, playing: bool) -> char {
+        match self {
+            MediaControl::Previous => icon::PREVIOUS,
+            MediaControl::PlayPause if playing => icon::PAUSE,
+            MediaControl::PlayPause => icon::PLAY,
+            MediaControl::Next => icon::NEXT,
+        }
+    }
+
+    /// The one `by` along, held at either end.
+    fn step(self, by: isize) -> Self {
+        let at = Self::ALL.iter().position(|&control| control == self).unwrap_or(1) as isize;
+        Self::ALL[(at + by).clamp(0, Self::ALL.len() as isize - 1) as usize]
+    }
 }
 
 /// Audio's entries, top to bottom.
@@ -72,14 +127,14 @@ pub enum AudioItem {
     Input,
     Volume,
     Mute,
-    /// "No music app is running", under a divider: where Now Playing will be (M5). It takes focus and does
-    /// nothing.
-    NothingPlaying,
+    /// Now Playing, under a divider: the card of the media the Now Playing source has playing, or with none "No
+    /// music app is running". Either takes focus, and A on it does nothing; the card's controls are under it.
+    NowPlaying,
 }
 
 impl AudioItem {
     pub const ALL: [AudioItem; 5] =
-        [AudioItem::Output, AudioItem::Input, AudioItem::Volume, AudioItem::Mute, AudioItem::NothingPlaying];
+        [AudioItem::Output, AudioItem::Input, AudioItem::Volume, AudioItem::Mute, AudioItem::NowPlaying];
 
     fn flow(self) -> Option<Flow> {
         match self {
@@ -89,12 +144,14 @@ impl AudioItem {
         }
     }
 
-    /// The box's height, and the room under it.
-    fn height(self) -> (f32, f32) {
+    /// The box's height, and the room under it. Now Playing's card is its 150, and under it its row of controls,
+    /// 52 with 16 below.
+    fn height(self, card: bool) -> (f32, f32) {
         match self {
             AudioItem::Output | AudioItem::Input => (128.0, 3.0),
             AudioItem::Volume => (96.0, 3.0),
-            AudioItem::Mute | AudioItem::NothingPlaying => (75.0, 3.0),
+            AudioItem::NowPlaying if card => (CARD_HEIGHT + CONTROLS_HEIGHT, 3.0),
+            AudioItem::Mute | AudioItem::NowPlaying => (75.0, 3.0),
         }
     }
 }
@@ -115,6 +172,11 @@ pub(super) struct State {
     item: usize,
     /// The dropdown whose list is open, and the device focus is on in it.
     list: Option<(Flow, usize)>,
+    /// The Now Playing card's control focus is on, under the card.
+    control: Option<MediaControl>,
+    /// The album art the card last drew: it stays up while the next track's is decoded, so a track change swaps it
+    /// once.
+    art: Option<PathBuf>,
     scroll: f32,
     /// Which opening this is, of all the Guide's: each comes in once.
     opening: u32,
@@ -123,7 +185,7 @@ pub(super) struct State {
 impl State {
     /// Opens with focus on the first entry.
     pub fn new(which: Flyout, opening: u32) -> Self {
-        Self { which, item: 0, list: None, scroll: 0.0, opening }
+        Self { which, item: 0, list: None, control: None, art: None, scroll: 0.0, opening }
     }
 
     fn count(&self, around: Around) -> usize {
@@ -137,7 +199,7 @@ impl State {
         match self.list {
             Some((flow, at)) => FlyoutFocus::Device(flow, at),
             None if self.count(around) == 0 => FlyoutFocus::Nothing,
-            None => FlyoutFocus::Item(self.item),
+            None => self.control.map_or(FlyoutFocus::Item(self.item), FlyoutFocus::Control),
         }
     }
 
@@ -148,6 +210,11 @@ impl State {
         if let Some((flow, at)) = self.list {
             let devices = around.audio.devices(flow).0.len();
             self.list = (devices > 0).then(|| (flow, at.min(devices - 1)));
+        }
+        // The card gone, focus on one of its controls is on "No music app is running" in its place; a card for
+        // another session keeps it on the same control.
+        if around.now_playing.is_none() {
+            self.control = None;
         }
     }
 
@@ -167,9 +234,27 @@ impl State {
             }
             return Outcome::Nothing;
         }
+        if let (Some(control), Some(card)) = (self.control, around.now_playing) {
+            // Along the card's row and back up onto the card; down from it stays, at the Flyout's end.
+            match press.button {
+                Button::Up => self.control = None,
+                Button::Left => self.control = Some(control.step(-1)),
+                Button::Right => self.control = Some(control.step(1)),
+                Button::A if control.enabled(card.session) => {
+                    return Outcome::Chose(GuideAction::Media(control.command()));
+                }
+                Button::B => return Outcome::Close,
+                _ => {}
+            }
+            return Outcome::Nothing;
+        }
         let last = self.count(around).saturating_sub(1);
         let audio = (self.which == Flyout::Audio).then(|| AudioItem::ALL[self.item]);
         match (press.button, audio) {
+            // Down from the card is Play/Pause, under it.
+            (Button::Down, Some(AudioItem::NowPlaying)) if around.now_playing.is_some() => {
+                self.control = Some(MediaControl::PlayPause);
+            }
             (Button::Up, _) => self.item = self.item.saturating_sub(1),
             (Button::Down, _) => self.item = (self.item + 1).min(last),
             (Button::B, _) => return Outcome::Close,
@@ -218,7 +303,7 @@ impl State {
                 ui.paragraph(line, title, &HEADING, HAlign::Left, VAlign::Top, 1);
                 match self.which {
                     Flyout::Notifications => self.notifications(ui, around.notifications),
-                    Flyout::Audio => self.audio(ui, around.audio),
+                    Flyout::Audio => self.audio(ui, around.audio, around.now_playing),
                 }
             });
         });
@@ -267,16 +352,16 @@ impl State {
     }
 
     /// Audio's entries, and over them the open dropdown's list.
-    fn audio(&self, ui: &mut Ui, audio: &Audio) {
+    fn audio(&mut self, ui: &mut Ui, audio: &Audio, card: Option<Card>) {
         let mut y = FIRST_TOP;
         let mut placed = Vec::with_capacity(AudioItem::ALL.len());
         for item in AudioItem::ALL {
             // A divider is 1 high, 14 under what is above it and 26 over the box.
-            if item == AudioItem::NothingPlaying {
+            if item == AudioItem::NowPlaying {
                 ui.fill(Rect::new(FLYOUT.x + 30.0, y + 14.0, FLYOUT.w - 60.0, 1.0), DIVIDER, 0.0);
                 y += 41.0;
             }
-            let (height, below) = item.height();
+            let (height, below) = item.height(card.is_some());
             placed.push(Rect::new(FLYOUT.x + INSET, y, FLYOUT.w - 2.0 * INSET, height));
             y += height + below;
         }
@@ -286,14 +371,20 @@ impl State {
         for at in unfocused.chain([self.item]) {
             let (item, rect) = (AudioItem::ALL[at], placed[at]);
             let expanded = item.flow().is_some() && item.flow() == open;
-            let focused = at == self.item && open.is_none();
+            let focused = at == self.item && open.is_none() && self.control.is_none();
             if focused || expanded {
                 ui.fill(rect, FOCUSED, 4.0);
             }
             if focused {
                 focus_ring(ui, rect);
             }
-            audio_item(ui, item, rect, audio, expanded);
+            match (item, card) {
+                (AudioItem::NowPlaying, Some(card)) => {
+                    let focus = self.control.filter(|_| at == self.item);
+                    self.art = now_playing(ui, rect, card, focus, self.art.take());
+                }
+                _ => audio_item(ui, item, rect, audio, expanded),
+            }
         }
         if let Some((flow, at)) = self.list {
             // Over the entries it hangs across, their text too.
@@ -341,7 +432,7 @@ fn audio_item(ui: &mut Ui, item: AudioItem, rect: Rect, audio: &Audio, expanded:
             ui.label_middle(text_x, cy, "Mute", &BODY);
             switch(ui, Rect::new(rect.right() - 24.0 - 48.0, cy - 12.0, 48.0, 24.0), audio.muted);
         }
-        AudioItem::NothingPlaying => {
+        AudioItem::NowPlaying => {
             ui.icon(icon_x, cy, icon::MUSIC, 26.0, TEXT_DIM);
             ui.label_middle(text_x, cy, "No music app is running", &BODY.color(TEXT_DIM));
         }
@@ -403,4 +494,106 @@ fn device_list(ui: &mut Ui, dropdown: Rect, audio: &Audio, flow: Flow, focused: 
         let name = Rect::new(rect.x + 52.0, rect.y, rect.w - 52.0 - 16.0, rect.h);
         ui.paragraph(name, &devices[at].name, &BODY, HAlign::Left, VAlign::Center, 1);
     }
+}
+
+/// The card's own height, and its row of controls' with the room under it.
+const CARD_HEIGHT: f32 = 150.0;
+const CONTROLS_HEIGHT: f32 = 68.0;
+/// The album art's square, and the grey one under it for none.
+const ART: f32 = 120.0;
+const NO_ART: Color = Color::rgb(0x4A4A4A);
+/// A control: 72 by 52 with 10 either side, the three centred under the card.
+const CONTROL: (f32, f32) = (72.0, 52.0);
+const CONTROL_GAP: f32 = 20.0;
+
+/// The Now Playing card in its entry's box, as Windows' media flyout shows the media (the Bundle's `Media` grid):
+/// the album art on a rounded square, 18 in, and beside it the title, the artist in grey, a thin bar of how far in
+/// it is, and the play or pause mark with the app and the time; under all of it the controls, `focus` on one of
+/// them. `last` is the art drawn last time, kept up while this track's is decoded. Gives the art drawn now.
+fn now_playing(
+    ui: &mut Ui,
+    rect: Rect,
+    card: Card,
+    focus: Option<MediaControl>,
+    last: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let session = card.session;
+    let art = Rect::new(rect.x + 18.0, rect.y + (CARD_HEIGHT - ART) / 2.0, ART, ART);
+    ui.fill(art, NO_ART, 4.0);
+    ui.icon(art.center().0, art.center().1, icon::MUSIC, 44.0, TEXT_DIM);
+    let key = |path: &PathBuf| ArtKey { path: path.clone(), kind: Kind::Thumb(240) };
+    let shown = match &session.art {
+        Some(path) if ui.art(art, &key(path), Crop::Center, 1.0, 4.0) => Some(path.clone()),
+        // Still being decoded: the last track's stays up until it is.
+        Some(_) => last.filter(|last| ui.art(art, &key(last), Crop::Center, 1.0, 4.0)),
+        None => None,
+    };
+
+    // The text column: 22 right of the art, 16 short of the box's right, its lines together in the card's middle.
+    let text_x = art.right() + 22.0;
+    let width = rect.right() - 16.0 - text_x;
+    // A title that fits two lines is set with no limit, as the Guide's entries set theirs.
+    let lines = if ui.measure_wrapped(&BODY, &session.title, width, 0).lines <= 2 { 0 } else { 2 };
+    let title = ui.measure_wrapped(&BODY, &session.title, width, lines);
+    let line = title.line_height;
+    let taken = title.height.min(68.0);
+    let length = !session.length.is_zero();
+    // The title, the artist, the bar (10 above it, 4 high) and the app's line (8 above it).
+    let height = taken + line + if length { 14.0 } else { 0.0 } + 8.0 + line;
+    // A column taller than the card (a title on two lines over all the rest) is centred all the same, and cut to
+    // the card's 150, as WPF lays it out and clips it to its row.
+    ui.with_clip(Rect::new(text_x, rect.y, width, CARD_HEIGHT), |ui| {
+        let mut y = rect.y + (CARD_HEIGHT - height) / 2.0;
+        let box_ = Rect::new(text_x, y, width, title.height);
+        ui.with_clip(Rect::new(text_x, y, width, taken), |ui| {
+            ui.paragraph(box_, &session.title, &BODY, HAlign::Left, VAlign::Top, lines);
+        });
+        y += taken;
+        let artist = session.artist.as_deref().unwrap_or("");
+        ui.paragraph(Rect::new(text_x, y, width, line), artist, &BODY.color(TEXT_DIM), HAlign::Left, VAlign::Top, 1);
+        y += line;
+        if length {
+            let bar = Rect::new(text_x, y + 10.0, width, 4.0);
+            ui.fill(bar, Color::argb(0x40FFFFFF), 2.0);
+            let share = (card.position.as_secs_f32() / session.length.as_secs_f32()).clamp(0.0, 1.0);
+            if share > 0.0 {
+                ui.fill(Rect::new(bar.x, bar.y, bar.w * share, bar.h), ACCENT_LIGHT, 2.0);
+            }
+            y += 14.0;
+        }
+        y += 8.0;
+        // The play mark while it plays, the pause mark while paused, in a column 20 wide; the app 8 past it, cut short
+        // before the time, which is at the right, 12 clear of it: "1:05 / 3:20".
+        let mid = y + line / 2.0;
+        ui.icon(text_x + 10.0, mid, if session.playing { icon::PLAY } else { icon::PAUSE }, 16.0, TEXT_DIM);
+        let time =
+            length.then(|| format!("{} / {}", model::media::time(card.position), model::media::time(session.length)));
+        let time_width = time.as_ref().map_or(0.0, |time| ui.measure(&BODY, time).width + 12.0);
+        if let Some(time) = &time {
+            ui.label_right(text_x + width, mid, time, &BODY.color(TEXT_DIM));
+        }
+        let app = Rect::new(text_x + 28.0, y, (width - 28.0 - time_width).max(0.0), line);
+        ui.paragraph(app, &session.app(), &BODY.color(TEXT_DIM), HAlign::Left, VAlign::Top, 1);
+    });
+
+    // The controls, centred under the card across its width. The focused one last, so its glow is over the others.
+    let row = CONTROL.0 * 3.0 + CONTROL_GAP * 2.0;
+    let first = rect.x + 18.0 + (rect.w - 18.0 - 16.0 - row) / 2.0;
+    let unfocused = MediaControl::ALL.into_iter().filter(|&control| Some(control) != focus);
+    for control in unfocused.chain(focus) {
+        let at = MediaControl::ALL.iter().position(|&c| c == control).unwrap_or(0) as f32;
+        let place = Rect::new(first + at * (CONTROL.0 + CONTROL_GAP), rect.y + CARD_HEIGHT, CONTROL.0, CONTROL.1);
+        let focused = Some(control) == focus;
+        // One the app has off: its fill at half and its glyph at 0.35.
+        let enabled = control.enabled(session);
+        let fill = if focused { FOCUSED } else { CARD };
+        ui.fill(place, if enabled { fill } else { fill.fade(0.5) }, 4.0);
+        if focused {
+            focus_ring(ui, place);
+        }
+        let colour = if enabled { Color::WHITE } else { Color::WHITE.fade(0.35) };
+        let (cx, cy) = place.center();
+        ui.icon(cx, cy, control.glyph(session.playing), 22.0, colour);
+    }
+    shown
 }

@@ -325,7 +325,7 @@ A 560-wide column at x 520, **from y 190** (this pane has no 20 top margin), two
   - A choice the rule forbids changes nothing and saves nothing.
 - Both are shared by every Profile, saved at once, and count from the moment they are set (CT/IdleSettingsTests.cs:35-189).
 
-### 6.8 Theme settings > Guide - the checkbox is **M3** (the Guide is M2); the Now Playing source is **M5**
+### 6.8 Theme settings > Guide - the checkbox is **M3** (the Guide is M2); the Now Playing source is #129's
 
 E/SettingsControl.xaml:405-441; C/SettingsState.cs:141-195; C/ExtensionCore.NowPlayingSource.cs:48-70. A 560-wide column at x 520 from y 190:
 
@@ -342,7 +342,7 @@ E/SettingsControl.xaml:405-441; C/SettingsState.cs:141-195; C/ExtensionCore.NowP
 With L1 and L2 lines in the two descriptions: checkbox top = 246.58 + 34.58 L1; dropdown top = checkbox top + 154.58 + 34.58 L2.
 
 - **Use the Guide**: on by default. Off, the Guide never shows: the Guide button is left alone, Home's profile and Achievements tile do nothing, its Discord tile opens Settings on Discord (section 8.2), and a Toast has no "Press ... to view" (C/SettingsState.cs:155-160). In force at once, saved, shared by every Profile.
-- **Now Playing source** choices: **Any**, **Spotify** (the default), then every other app that has had a media session this run (C/ExtensionCore.NowPlayingSource.cs:48-59, 107-108).
+- **Now Playing source** choices: **Any**, **Spotify** (the default), then every other app that has had a media session this run (C/ExtensionCore.NowPlayingSource.cs:48-59, 107-108). A source saved in an earlier run whose app has had no session yet is among them, first after Spotify, so that the list always holds what the box shows. What it does: docs/spec/now-playing.md.
 
 ### 6.9 Theme settings > Discord - **M6** (layout only)
 
@@ -413,7 +413,7 @@ A box either opens its page (focus on its first box) or acts and stays.
 | ... > Idle > Show things after | dropdown | the same steps not shorter than Dim after (**5 min**) | How long before the Idle screen shows things over the dim | `Idle` | **Bundle's own: M5** |
 | Theme settings > Guide | box, opens a page | - | - | - | **M3** |
 | ... > Guide > Use the Guide | checkbox row | **on**, off | Section 6.8 | `Guide`.IsGuideOn, only once set (C/SettingsState.cs:19, 155-161) | **Bundle's own: M3** |
-| ... > Guide > Now Playing source | dropdown | Any, **Spotify**, other apps seen | Which app the Audio flyout's Now Playing follows | `Guide`.NowPlayingSource | **Bundle's own: M5** |
+| ... > Guide > Now Playing source | dropdown | Any, **Spotify**, other apps seen | Which app the Audio flyout's Now Playing follows | `Guide`.NowPlayingSource | **Bundle's own: built (#129)** |
 | Theme settings > Discord | box, opens a page | - | Connect one's own Discord application | - | **M6** |
 | ... > Discord > Client ID: Type / Paste | text entry / action | text (**Not set**) | The application's Client ID | `Discord.ClientId` (C/ExtensionCore.Discord.cs:17-21) | **Bundle's own: M6** |
 | ... > Discord > Client Secret: Type / Paste | text entry (dots) / action | text (**Not set**) | The application's Secret, never shown | `Discord.ClientSecret` | **Bundle's own: M6** |
@@ -738,7 +738,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 |---|---|
 | Theme settings | Personalisation (0, 0), Guide (1, 0). Idle (M5) and Discord (M6) come back to the Bundle's places with their features. |
 | Personalisation | **Groups** (0, 0) (filters.md 6.1) and **Profiles** (1, 0), at the Bundle's place (#125, profiles.md 4); then four checkbox boxes, a row each: Background delay (y 359), Reduce motion (508), Show Play history (657), Show battery percentages (806). Boot video and Who's playing today? are M5's and go over them when they come, and Groups then takes the Bundle's empty slot, (1, 1). |
-| Guide | "Guide", its description and Use the Guide, as 6.8. The Now Playing source under it is M5's. |
+| Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
 
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
 - **No hint bar** (open question 13): as the Bundle.

@@ -8,6 +8,7 @@ pub mod account;
 pub mod audio;
 pub mod freeze;
 mod launch;
+pub mod media;
 pub mod overlay;
 pub mod power;
 pub mod steam;

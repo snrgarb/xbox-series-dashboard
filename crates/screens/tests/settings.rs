@@ -140,9 +140,12 @@ fn b_climbs_one_level_at_a_time_and_a_page_gives_focus_back_to_the_box_that_open
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right, Right, A]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Use the Guide");
-    // The Guide page has the one control: nowhere to move, and Right does nothing.
-    press(&mut dashboard, &[Up, Down, Right]);
+    // The Guide page has two controls: Use the Guide, and the Now Playing source under it. Right does nothing.
+    press(&mut dashboard, &[Up, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Use the Guide");
+    press(&mut dashboard, &[Down, Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Guide: Now Playing source");
+    press(&mut dashboard, &[Up]);
     for back in [B, Left] {
         press(&mut dashboard, &[back]);
         assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
@@ -268,6 +271,55 @@ fn use_the_guide_off_leaves_the_guide_button_and_homes_profile_alone() {
     assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::UseGuide, on: true }]);
     press(&mut dashboard, &[Guide]);
     assert!(dashboard.guide_open());
+}
+
+/// Settings > Guide's Now Playing source, as the Dashboard is told of it and of the apps with a session.
+fn now_playing_apps(dashboard: &mut Dashboard, apps: &[&str]) {
+    let sessions = apps
+        .iter()
+        .map(|app| model::MediaSession { app_id: (*app).into(), title: "t".into(), ..Default::default() })
+        .collect();
+    dashboard.set_media(model::Media { sessions, current: None });
+}
+
+/// The Now Playing sources Settings asked to save since the last call.
+fn sources(dashboard: &mut Dashboard) -> Vec<String> {
+    let effects = dashboard.take_effects().into_iter();
+    effects
+        .filter_map(|effect| if let Effect::NowPlayingSource(source) = effect { Some(source) } else { None })
+        .collect()
+}
+
+#[test]
+fn the_now_playing_source_lists_any_spotify_and_every_app_seen_and_a_choice_is_saved() {
+    let database = database();
+    let mut dashboard = settings(&database);
+    now_playing_apps(&mut dashboard, &["chrome.exe", "Spotify.exe"]);
+    now_playing_apps(&mut dashboard, &["vlc.exe"]);
+    press(&mut dashboard, &[Right, Right, A, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Guide: Now Playing source");
+    // The list opens on the source set now, Spotify until one is chosen.
+    press(&mut dashboard, &[A]);
+    assert_eq!(dashboard.focus_line(), r#"Settings: Guide: Now Playing source, list on "Spotify""#);
+    press(&mut dashboard, &[Down, Down]);
+    assert_eq!(dashboard.focus_line(), r#"Settings: Guide: Now Playing source, list on "VLC""#);
+    press(&mut dashboard, &[Up, Up, Up]);
+    assert_eq!(dashboard.focus_line(), r#"Settings: Guide: Now Playing source, list on "Any""#);
+    press(&mut dashboard, &[Down, Down, A]);
+    assert_eq!(dashboard.focus_line(), "Settings: Guide: Now Playing source");
+    assert_eq!(sources(&mut dashboard), ["Chrome"]);
+    assert_eq!(dashboard.now_playing().source(), "Chrome");
+    // The same again saves nothing; B closes the list as it was.
+    press(&mut dashboard, &[A, A]);
+    assert!(sources(&mut dashboard).is_empty());
+    press(&mut dashboard, &[A, Down, B]);
+    assert_eq!(dashboard.focus_line(), "Settings: Guide: Now Playing source");
+    assert_eq!(dashboard.now_playing().source(), "Chrome");
+
+    // As it was left, the next time: a choice before its app has a session.
+    let mut again = start(&database);
+    again.set_now_playing_source(Some("Chrome"));
+    assert_eq!(again.now_playing().choices(), ["Any", "Spotify", "Chrome"]);
 }
 
 #[test]
@@ -407,8 +459,13 @@ impl Stage {
     fn check_pane(&mut self, name: &str, pane: Box<dyn Pane>) {
         let mut page = Settings::showing(pane);
         let library = Library::default();
-        let around =
-            Around { library: &library, playing: None, options: Options::default(), now: std::time::Instant::now() };
+        let around = Around {
+            library: &library,
+            playing: None,
+            options: Options::default(),
+            now: std::time::Instant::now(),
+            now_playing: screens::now_playing::none(),
+        };
         let Self { gpu, host, target, .. } = self;
         let pixels = target.still(gpu, host, |ui| page.draw(ui, around));
         compare(name, &image::RgbaImage::from_raw(HD.0, HD.1, pixels).unwrap());
@@ -453,12 +510,21 @@ fn settings_personalisation_checkbox_focused() {
     stage.check("settings-personalisation-play-history-off");
 }
 
-/// The Bundle's picture 35, without the Now Playing source: the Guide page, focus on Use the Guide.
+/// The Bundle's picture 35: the Guide page, focus on Use the Guide, the Now Playing source Spotify under it.
 #[test]
 fn settings_guide() {
     let mut stage = settings_stage();
     stage.press(&[Right, Right, A]);
     stage.check("settings-guide");
+}
+
+/// The Now Playing source's list open, focus on the source set now.
+#[test]
+fn settings_guide_now_playing_source_list() {
+    let mut stage = settings_stage();
+    now_playing_apps(&mut stage.dashboard, &["chrome.exe", "vlc.exe"]);
+    stage.press(&[Right, Right, A, Down, A]);
+    stage.check("settings-guide-now-playing-source-list");
 }
 
 /// Idle's page as the Bundle's pictures 33 and 34 have it, built from the controls: a label over each of two
@@ -514,7 +580,13 @@ impl Pane for Idle {
 }
 
 fn around(library: &Library) -> Around<'_> {
-    Around { library, playing: None, options: Options::default(), now: std::time::Instant::now() }
+    Around {
+        library,
+        playing: None,
+        options: Options::default(),
+        now: std::time::Instant::now(),
+        now_playing: screens::now_playing::none(),
+    }
 }
 
 /// The Bundle's pictures 33 and 34: a dropdown box with focus, and its list open on the choice that is set.

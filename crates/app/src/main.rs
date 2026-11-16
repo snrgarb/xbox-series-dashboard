@@ -51,6 +51,11 @@ pub struct Args {
     log_focus: bool,
     /// Turning off, restarting and sleeping are said in the log and not done.
     dry_power: bool,
+    /// A media session made up in place of Windows' (`shell::media::FakeMedia::stand_in`): the Now Playing card
+    /// drawn on a machine with none, as a picture of it offscreen is.
+    fake_media: bool,
+    /// The fake session's album art.
+    fake_media_art: Option<PathBuf>,
     /// The program every store's address is given to, as `<program> open-address <address>`, in place of the one
     /// Windows has registered for it: a test machine whose registry is left alone (`standin.exe`).
     open_addresses_with: Option<PathBuf>,
@@ -76,6 +81,11 @@ impl Args {
     pub fn focus_presses(&self) -> Vec<ui::Button> {
         focus_presses(self.focus)
     }
+
+    /// With --fake-media, the media session made up in place of Windows'.
+    pub fn fake_media(&self) -> Option<shell::media::FakeMedia> {
+        self.fake_media.then(|| shell::media::FakeMedia::stand_in(self.fake_media_art.clone()))
+    }
 }
 
 /// The presses that take focus from the profile, where Home starts, to this Recent tile: Down, then along.
@@ -88,11 +98,13 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--epic <dir>] [--gog <dir>] [--ea <dir>] [--ubisoft <dir>] [--battlenet <dir>]
                  [--xbox <dir>]
                  [--media <dir>] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
+                 [--fake-media [--fake-media-art <picture>]]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>]
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
+                 [--fake-media [--fake-media-art <picture>]]
        either with [--page keyboard]: start on the page that opens text entry, until Full library and Settings do";
 
 /// A page by its name, for `--page`.
@@ -160,6 +172,8 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--log-frames" => args.log_frames = true,
             "--log-focus" => args.log_focus = true,
             "--dry-power" => args.dry_power = true,
+            "--fake-media" => args.fake_media = true,
+            "--fake-media-art" => args.fake_media_art = Some(value()?.into()),
             "--open-addresses-with" => args.open_addresses_with = Some(value()?.into()),
             "--page" => args.page = Some(page(&value()?)?),
             "--toast" => args.toasts.push(value()?),

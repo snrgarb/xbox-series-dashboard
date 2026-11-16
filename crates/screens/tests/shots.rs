@@ -2276,6 +2276,101 @@ fn guide_audio_with_no_devices() {
     stage.check("guide-audio-none");
 }
 
+/// Album art for the Now Playing card, drawn here: a square in two colours with a white frame and a diagonal, so
+/// that a crop or a stretch shows.
+fn album_art() -> PathBuf {
+    static ART: OnceLock<PathBuf> = OnceLock::new();
+    ART.get_or_init(|| {
+        let path = art_dir().join("album.png");
+        let image = image::RgbImage::from_fn(300, 300, |x, y| {
+            let edge = x < 8 || y < 8 || x >= 292 || y >= 292;
+            if edge {
+                image::Rgb([255, 255, 255])
+            } else if x > y {
+                image::Rgb([200, 70, 90])
+            } else {
+                image::Rgb([40, 90, 170])
+            }
+        });
+        shots::save_shared(&image, &path);
+        path
+    })
+    .clone()
+}
+
+/// A song 3:20 long, 1:05 in, by an app called "Standin", its Previous off.
+fn song() -> model::MediaSession {
+    model::MediaSession {
+        app_id: "standin.exe".into(),
+        title: "Stand-in Song".into(),
+        artist: Some("The Stand-ins".into()),
+        playing: true,
+        can_play_pause: true,
+        can_previous: false,
+        can_next: true,
+        position: std::time::Duration::from_secs(65),
+        length: std::time::Duration::from_secs(200),
+        art: Some(album_art()),
+    }
+}
+
+/// The Audio Flyout open with this session playing, focus `down` from Output.
+fn now_playing(session: model::MediaSession, down: usize) -> Stage {
+    let mut stage = on_utility(1);
+    stage.dashboard.set_media(model::Media { sessions: vec![session], current: Some(0) });
+    stage.press(&[Button::A]);
+    stage.press(&vec![Button::Down; down]);
+    // The Flyout's slide-in played out, so that its first frame, which asks for the album art, has been drawn.
+    stage.run(0.5, 0.1);
+    stage
+}
+
+/// Nothing playing, focus on the line that says so: the Bundle's words, and nothing to go down to.
+#[test]
+fn guide_audio_nothing_playing() {
+    let mut stage = on_utility(1);
+    stage.press(&[Button::A]);
+    stage.press(&[Button::Down; 5]);
+    stage.check("guide-audio-nothing-playing");
+}
+
+/// Now Playing's card, playing, with focus on it: the art, the title and the artist, the bar 1:05 of 3:20 along,
+/// the play mark (its state) beside the app's name, and under it the controls, Pause among them, Previous dimmed.
+#[test]
+fn guide_audio_now_playing() {
+    let mut stage = now_playing(song(), 4);
+    stage.check("guide-audio-now-playing");
+}
+
+/// Paused, with no art and a title too long for two lines, focus on Play/Pause: the art's grey stand-in with its
+/// note, the pause mark in the row and Play on the button.
+#[test]
+fn guide_audio_now_playing_paused() {
+    let session = model::MediaSession {
+        title: "A Stand-in Song With a Title Far Too Long to Fit on the Card in Two Lines of Text".into(),
+        playing: false,
+        art: None,
+        ..song()
+    };
+    let mut stage = now_playing(session, 5);
+    stage.check("guide-audio-now-playing-paused");
+}
+
+/// A stream with no length: no bar and no time, the app's name alone in the row; focus on Next.
+#[test]
+fn guide_audio_now_playing_no_length() {
+    let session = model::MediaSession {
+        title: "Live Stand-in Radio".into(),
+        artist: None,
+        length: std::time::Duration::ZERO,
+        position: std::time::Duration::ZERO,
+        ..song()
+    };
+    let mut stage = now_playing(session, 5);
+    stage.press(&[Button::Right]);
+    stage.check("guide-audio-now-playing-no-length");
+}
+
 /// A Flyout comes in from 48 to the left, fading in, over 120 ms; closing it is at once.
 #[test]
 fn a_flyout_slides_in_from_the_left() {
