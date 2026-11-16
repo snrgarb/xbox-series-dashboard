@@ -1,7 +1,7 @@
 # CI: every pull request and every push to main, on the repository's own runner (self-hosted, Linux): it keeps its
 # checkout and `target/` between runs, which is the cache. One runner takes one job at a time.
 # Before the repository goes public, back to GitHub's runners: a public repository's pull requests must not run on it.
-#   Test      formatting, clippy, the unit tests and the screenshot tests, on Linux. The screenshot tests draw offscreen
+#   Test      formatting, clippy, the unit tests and the screenshot tests, on Linux (cargo-nextest: many at once). The screenshot tests draw offscreen
 #             through lavapipe and compare with the committed reference images (crates/shots); a failed run uploads
 #             what it drew and where it differs.
 #   Windows   the release build for x86_64-pc-windows-gnullvm, cross-compiled with llvm-mingw as on the development
@@ -52,8 +52,18 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets
+      - name: cargo-nextest, fetched once and kept on the runner
+        env:
+          NEXTEST: 0.9.100
+        run: |
+          if ! cargo nextest --version 2>/dev/null | grep -q "$NEXTEST"; then
+            curl -fsSL "https://get.nexte.st/$NEXTEST/linux" | tar -xzf - -C "$HOME/.cargo/bin"
+          fi
+          cargo nextest --version
       - name: Test
-        run: cargo test --workspace
+        run: |
+          cargo nextest run --workspace --profile ci --cargo-profile ci
+          cargo test --workspace --doc --profile ci
       - name: Upload what the screenshot tests drew
         if: failure()
         uses: actions/upload-artifact@v4

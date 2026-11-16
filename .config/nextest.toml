@@ -1,0 +1,10 @@
+# cargo-nextest runs every test in a process of its own, many at once: the screenshot tests, which within one
+# process draw one at a time (crates/shots), then use all the runner's cores. `cargo test` still works as before.
+[profile.default]
+fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# CI's: the runner has 56 cores; a screenshot test's software renderer uses several threads itself.
+[profile.ci]
+test-threads = 20
+failure-output = "immediate-final"
