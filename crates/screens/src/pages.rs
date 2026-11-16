@@ -18,7 +18,7 @@ use ui::{Button, Press, Repeat, Snapshot, Ui};
 
 use crate::hint_bar::{self, Hint};
 use crate::keyboard::{self, Typed};
-use crate::{game_hub, my_games, search, settings, tile_menu, Effect};
+use crate::{game_hub, manage_queue, my_games, search, settings, tile_menu, Effect};
 
 /// What a page is told of the world each time it is pressed or drawn. It keeps none of it.
 #[derive(Clone, Copy)]
@@ -47,6 +47,8 @@ pub enum Open {
     KeyboardStandIn,
     /// A game's Tile menu, over whatever asked for it (`tile_menu::open`).
     TileMenu(tile_menu::Entry),
+    /// Manage Queue, over whatever asked for it (`manage_queue::open`).
+    ManageQueue,
 }
 
 impl Open {
@@ -65,6 +67,7 @@ impl Open {
             }
             Open::KeyboardStandIn => Box::new(keyboard::stand_in::StandIn::open()),
             Open::TileMenu(entry) => Box::new(tile_menu::TileMenu::open(entry, around)?),
+            Open::ManageQueue => Box::new(manage_queue::ManageQueue::open(around)),
         })
     }
 }

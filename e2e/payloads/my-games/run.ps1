@@ -182,9 +182,10 @@ try {
     Press Down (Nav 'Manage')
     Press-Stays Down 'Manage is the last item'
 
-    # Manage: its one box, which opens nothing until there is a Queue.
+    # Manage: its one box, which opens Manage Queue (the queue test walks it); B comes back to the box.
     Press Right 'MyGames: Manage: Queue' '08-my-games-manage'
-    Press-Stays A 'no Manage Queue yet'
+    Press A 'ManageQueue: (Cover\(0\) of .+|Nothing); 0 installing, \d+ recently installed'
+    Press B 'MyGames: Manage: Queue'
     Press-Stays Right 'nothing is beside the box'
     Press Left 'MyGames: Manage: Nav\(Manage\)'
 

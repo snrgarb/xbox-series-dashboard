@@ -545,11 +545,11 @@ Box (style `Box`, :237-270; the same box as Settings'):
 
 Buttons (E/MyGamesControl.xaml.cs:1736-1759): A opens Manage Queue (M4); Left to the Manage nav item; Right, Up, Down nothing; B Home. Right or A on the Manage nav item puts focus on the box. No hint bar.
 
-For M3, with no Queue: the box is there and focusable; what A does until Manage Queue exists is open question 6.
+Since #79 A opens Manage Queue, empty or not ([manage-queue.md](manage-queue.md)).
 
 ### 9.2 Manage Queue (M4)
 
-Slot and entry points only (E/MyGamesControl.xaml:818-950; CONTEXT.md:38-39).
+Its own document since #79: [manage-queue.md](manage-queue.md). Slot and entry points in short (E/MyGamesControl.xaml:818-950; CONTEXT.md:38-39).
 
 - **Slot**: a page of its own over the whole of My games & apps: the same `#FF1F1F1F` fill across all 1920 x 1080, **the nav, its foot and the divider hidden**. Title "Manage Queue", Bahnschrift SemiLight 42, at x 96, y 72. Under it a vertical scroller with content x 96..1824: "Recently installed" (a row of 200 x 200 Home tiles), then "Installing" (rows 250 tall), or with nothing queued an outlined empty box 330 tall. The Manage nav item counts as showing while it is up.
 - **Entry points**: Manage's Queue box (B returns to Manage, focus on the box); Home's Downloads tile (B returns to Home, on the tile); a Game hub's Queue action (B returns to the hub, focus on Queue); the Guide button during a Queued Toast (C/ExtensionCore.Queue.cs:110-171; C/ExtensionCore.cs:1013-1014, 1732-1736).
@@ -764,7 +764,7 @@ What the port does where section 15 asked, each settled as this document recomme
 3. **Play history scrolling (question 3).** As the Bundle: the least that brings the focused row in, not animated. A section's first row brings its header in with it, and the last row brings the 80 of end padding under it; a row in the middle rests against the viewport's edge with nothing kept clear. The viewport runs to the foot of the screen.
 4. **A (question 4, and the issue).** A on a grid tile opens the Game hub at once: no double tap there. Play history's rows keep the Bundle's rule: A opens the Game hub and a second A within 300 ms plays the game instead. The wait is the page's own (`Page::tick`, asked by the Dashboard's `tick`): the hub opens over the page, and B there is the page again with focus on the game.
 5. **Edges (question 5, and the issue).** Every edge stops and nothing wraps. Right at a row's last tile and Up from the first row do nothing; Left from the first column is the nav; Down onto a shorter last row goes to its last tile; Down from the last row is SEE FULL LIBRARY, and Up from there is the last row's first tile. In Play history Up from the first row and Down from the last do nothing, Right nothing, Left the nav.
-6. **Manage (question 6).** Manage is in the nav in M3 with its one box, Queue, which takes focus and does nothing on A until M4 brings Manage Queue. Home's Downloads tile opens the page on Manage with focus on the box.
+6. **Manage (question 6).** Manage is in the nav in M3 with its one box, Queue, which takes focus and does nothing on A until M4 brings Manage Queue. Home's Downloads tile opens the page on Manage with focus on the box. (Since #79 the box and the Downloads tile open Manage Queue: [manage-queue.md](manage-queue.md) 7.)
 7. **Play history's second line (question 7).** The date, two spaces, a bullet, two spaces, the platform, as pictured. The platform is "PC (Windows)" for any game a source found, since every source the port has is a Windows store; a game with no source keeps the bullet alone, as the Bundle's games with no platform do.
 8. **The date and the week.** The date is written M/D/YYYY and the week starts on Sunday, as in the Bundle's pictures (US English). The user's own regional settings are not read yet: `my_games::history::short_date` and `library::history::WEEK_STARTS` are where they go.
 9. **What Play history lists.** Every game that is not hidden and has been played: the later of the time its source says it was last played and the newest of its Play sessions, newest first. Sections are worked out when the library is read, so a page left open over midnight keeps yesterday's sections until the library is next read, as the filters' day counts do.

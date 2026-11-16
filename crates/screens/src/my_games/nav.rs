@@ -2,10 +2,11 @@
 //! shows it (docs/spec/my-games.md, 2.4 to 2.6 and section 4).
 use std::time::{Duration, Instant};
 
-use ui::{Color, Rect, Ui};
+use ui::{Color, HAlign, Rect, Ui, VAlign};
 
-use super::look::{self, glyph as page_glyph, DIVIDER, NAV_LABEL, SELECTED, TEXT, TEXT_DIM};
+use super::look::{self, glyph as page_glyph, DIVIDER, LINE as TEXT_LINE, NAV_LABEL, SELECTED, TEXT, TEXT_DIM};
 use crate::home::profile_picture;
+use crate::manage_queue::figures::Figures;
 use crate::theme::{glyph, ACCENT};
 
 /// The nav's column, and the divider's two units right of it.
@@ -28,6 +29,17 @@ const LABEL: f32 = 137.0;
 const COUNT_RIGHT: f32 = 398.0;
 /// The bar at the right edge of the item whose content is up.
 const BAR: f32 = 6.0;
+/// Manage's second line while anything is queued, under its first 58: 40 tall, 10 above the item's foot, from
+/// the label's x.
+const QUEUE_LINE: f32 = 40.0;
+const QUEUE_FOOT: f32 = 10.0;
+/// The nav's foot: its left edge, and its bottom 66 off the screen's. The current download's block is 301 wide
+/// with 34 under it, where the storage ring would be; its lines 2 apart.
+const FOOT_LEFT: f32 = 75.0;
+const FOOT_BOTTOM: f32 = 66.0;
+const BLOCK_WIDTH: f32 = 301.0;
+const BLOCK_UNDER: f32 = 34.0;
+const BLOCK_GAP: f32 = 2.0;
 
 /// A nav item, and so what the page shows beside the nav.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,6 +96,17 @@ impl Item {
     fn rect(self) -> Rect {
         let under_line = if self == Item::Manage { LINE_GAP.0 + 2.0 + LINE_GAP.1 - (PITCH - HEIGHT) } else { 0.0 };
         Rect::new(0.0, TOP + self.place() as f32 * PITCH + under_line, WIDTH, HEIGHT)
+    }
+
+    /// The item's box as it is drawn: Manage grows by its second line while anything is queued.
+    fn drawn(self, queued: usize) -> Rect {
+        let rect = self.rect();
+        let grows = self == Item::Manage && queued > 0;
+        if grows {
+            Rect { h: HEIGHT + QUEUE_LINE + QUEUE_FOOT, ..rect }
+        } else {
+            rect
+        }
     }
 
     /// Whether `self` is lower on the nav than `other`: the pane then flies up from below.
@@ -150,6 +173,11 @@ pub struct Face<'a> {
     pub focused: Option<Item>,
     /// The number at an item's right, for those that count.
     pub count: &'a dyn Fn(Item) -> Option<usize>,
+    /// How many games the Queue holds: Manage's second line, while there are any.
+    pub queued: usize,
+    /// The current download, at the nav's foot, while the Queue's first is downloading: its name, and what its
+    /// row on Manage Queue says.
+    pub download: Option<(&'a str, Figures)>,
 }
 
 /// Draws the nav and the divider beside it. On a screen wider than the canvas the items' fills and the nav's
@@ -160,14 +188,14 @@ pub fn draw(ui: &mut Ui, face: &Face) {
     ui.label_middle(PICTURE.right() + 14.0, PICTURE.center().1, face.user, &TEXT_DIM);
 
     let full = |rect: Rect| Rect::new(screen.x, rect.y, rect.right() - screen.x, rect.h);
-    let showing = face.showing.rect();
+    let showing = face.showing.drawn(face.queued);
     if face.focused != Some(face.showing) {
         ui.fill(full(showing), SELECTED, 0.0);
     }
     // The focused item is drawn over its neighbours, and its glow over the divider's place: the divider is drawn
     // after it.
     if let Some(focused) = face.focused {
-        look::slab(ui, full(focused.rect()), 0.0);
+        look::slab(ui, full(focused.drawn(face.queued)), 0.0);
     }
     // The bar is on what is showing, focused or not: on the accent fill it is the same green.
     ui.fill(Rect::new(showing.right() - BAR, showing.y, BAR, showing.h), ACCENT, 0.0);
@@ -185,13 +213,40 @@ pub fn draw(ui: &mut Ui, face: &Face) {
             ui.label_right(COUNT_RIGHT, middle, &count.to_string(), &TEXT);
         }
     }
-    foot(ui);
+    // Manage's second line: Queue and the Queue's count, dim.
+    if face.queued > 0 {
+        let middle = Item::Manage.rect().bottom() + QUEUE_LINE / 2.0;
+        ui.label_middle(LABEL, middle, "Queue", &TEXT_DIM);
+        ui.label_right(COUNT_RIGHT, middle, &face.queued.to_string(), &TEXT_DIM);
+    }
+    foot(ui, face.download.as_ref());
 }
 
-/// **M4's hook, and the storage ring's.** The nav's foot, bottom left (x 75, its bottom 66 off the screen's): the
-/// current download's block over the storage ring (docs/spec/my-games.md, 2.6). Neither is drawn yet: the block
-/// is the Queue's, and the ring needs the drives' free space, which nothing reads (open question 9).
-fn foot(_ui: &mut Ui) {}
+/// The nav's foot, bottom left (x 75, its bottom 66 off the screen's): the current download's block, over where
+/// the storage ring goes (docs/spec/my-games.md, 2.6). **The storage ring's hook:** it needs the drives' free space,
+/// which nothing reads (open question 9), and is not drawn; the block keeps the 34 above it all the same.
+fn foot(ui: &mut Ui, download: Option<&(&str, Figures)>) {
+    let Some((name, figures)) = download else { return };
+    // Its name; its state with the speed at the right; then how much is down of the whole and the share, a line
+    // that is not there while the client does not know the whole.
+    let amount = figures.amount.as_ref().map(|amount| format!("{amount}, {}", figures.percent));
+    let lines = if amount.is_some() { 3.0 } else { 2.0 };
+    let height = lines * TEXT_LINE + (lines - 1.0) * BLOCK_GAP;
+    let top = ui.screen().bottom() - FOOT_BOTTOM - BLOCK_UNDER - height;
+    let line = |at: f32| Rect::new(FOOT_LEFT, top + at * (TEXT_LINE + BLOCK_GAP), BLOCK_WIDTH, TEXT_LINE);
+    ui.paragraph(line(0.0), name, &TEXT, HAlign::Left, VAlign::Top, 1);
+    let state = line(1.0);
+    let speed = figures.speed.as_deref().unwrap_or("");
+    let speed_width = ui.measure(&TEXT, speed).width;
+    if !speed.is_empty() {
+        ui.label(state.right() - speed_width, state.y, speed, &TEXT);
+    }
+    let state = Rect { w: state.w - speed_width, ..state };
+    ui.paragraph(state, figures.state, &TEXT, HAlign::Left, VAlign::Top, 1);
+    if let Some(amount) = amount {
+        ui.paragraph(line(2.0), &amount, &TEXT, HAlign::Left, VAlign::Top, 1);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -204,6 +259,9 @@ mod tests {
         assert_eq!(tops, [190.0, 262.0, 334.0, 406.0, 516.0]);
         assert_eq!(Item::FullLibrary.rect().bottom() + LINE_GAP.0, 482.0, "the line");
         assert!(Item::ALL.iter().all(|item| item.rect().h == 58.0 && item.rect().right() == 441.0));
+        // Manage grows by its Queue line while anything is queued: y 516..624.
+        assert_eq!(Item::Manage.drawn(1).bottom(), 624.0);
+        assert_eq!((Item::Manage.drawn(0).h, Item::FullLibrary.drawn(2).h), (58.0, 58.0));
     }
 
     #[test]

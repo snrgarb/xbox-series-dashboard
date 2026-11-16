@@ -181,11 +181,15 @@ fn fail(message: &str) -> ! {
 fn main() {
     since_start();
     let args = parse_args(std::env::args().skip(1)).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
-    let (library, store) = store::open(&args);
+    let (library, mut store) = store::open(&args);
     if args.screenshot.is_some() {
         // Art for the games a store's files gave none for, before the picture is taken, where there is a data
         // folder for it and art online is not turned off.
-        let library = store.art_now(library);
+        let mut library = store.art_now(library);
+        // An install under way in a store's client shows as it would once the Queue's thread had looked.
+        if let Some(queue) = store.queue_now() {
+            library.queue = queue;
+        }
         offscreen::run(&args, library, store.options());
     } else if args.bench || args.size.is_some() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));

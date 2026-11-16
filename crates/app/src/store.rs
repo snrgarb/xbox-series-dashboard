@@ -246,6 +246,15 @@ impl Store {
         self.queue = Some(library::queue::spawn(self.path.clone(), self.sources.clone(), wake));
     }
 
+    /// The Queue as the sources have it now, from one look at what they have under way: what `--screenshot` shows,
+    /// having no thread to follow it. None with no database.
+    pub fn queue_now(&mut self) -> Option<model::Queue> {
+        let database = self.database.as_mut()?;
+        let mut follower = library::queue::Follower::new(self.sources.clone());
+        let looked = follower.poll(database, library::now()).and_then(|_| follower.queue(database));
+        looked.map_err(|e| eprintln!("queue: {e:#}")).ok()
+    }
+
     /// Tells the thread that follows the Queue what was asked of a store, or that it should look now.
     pub fn tell_queue(&self, ask: library::queue::Ask) {
         if let Some(queue) = &self.queue {

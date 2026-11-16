@@ -1,4 +1,4 @@
-# Install, uninstall and the Queue (#78), walked with the virtual pad on a fake Steam library. Nothing is ever
+# Install, uninstall and the Queue (#78), and Manage Queue (#79), walked with the virtual pad on a fake Steam library. Nothing is ever
 # downloaded or uninstalled but the fake's own files: the Dashboard asks Steam's client as the Bundle does
 # (`steam.exe -silent +app_install <appid>`), here the stand-in client in the fake's folder, which writes the game's
 # app manifest as Steam does as it takes an install on; then this test moves the install along by rewriting that
@@ -9,24 +9,30 @@
 # - Install from a game's hub: the hub closes, Steam's client is asked, the game joins the Queue (`queue: <name>
 #   joined, asked for`, then `queue: <name> queued` as Steam takes it on) and its tile reads Queued; downloading, it
 #   reads Installing... (`queue: <name> downloading, 25% of 100 bytes`). Its hub reads Installing, A does nothing there, and Queue stands between Manage and the toggle.
-# - The ways into Manage Queue that #79 will finish, as far as they go now (until then each opens My games & apps on
-#   Manage, focus on its Queue box): the hub's Queue action, B back to the hub on Queue; Home's Downloads tile, which
-#   counts the Queue, B back to it; and Manage's Queue box itself, where A does nothing yet.
+# - Manage Queue from all three ways in, and B back to each with focus where it was: the hub's Queue action (B back
+#   to the hub on Queue), Home's Downloads tile, which counts the Queue (B back to the tile), and Manage's Queue box
+#   on My games & apps (B back to the box). On it: Recently installed's covers first (`focus: ManageQueue: Cover(0)
+#   of <name>; 1 installing, <n> recently installed`), Down to the download's row (`... Row(0) of <name>; 1
+#   installing, <n> recently installed; Installing... 25.0%`), whose share follows the fake's bytes as they move
+#   with the page up; View on it opens the game's Tile menu, and B there comes back to the row.
 # - Install from the Tile menu of a game already queued asks nothing more.
 # - Paused (`queue: <name> paused, 50% of 100 bytes`); meanwhile an install started in Steam's own client, of a game
 #   the Dashboard was not asked for, joins as Steam reports it (`queue: <name> joined, from its store's client`),
 #   Downloads counts two, and it leaves as Steam drops it (`queue: <name> dropped`).
-# - Done: the game leaves the Queue installed (`queue: <name> installed`), and its hub reads Play.
+# - Done, with Manage Queue up and focus on the game's row: the game leaves the Queue installed (`queue: <name>
+#   installed`), heads Recently installed, and focus goes with it to its cover; its hub reads Play.
 # - Install from the Tile menu of another game, which Steam then drops.
 # - Uninstall from the Tile menu: the question, cancelled first; then yes, and Steam's client is asked (`steam.exe
 #   -silent -console +app_uninstall <appid>`); the stand-in removes the fake's manifest, and the Dashboard sees the
 #   game go (`queue: <name> uninstalled`).
 #
 # Judged by --log-focus a press at a time (`focus: GameHub: 9100040 Hub Queued`, `... Hub Installing`, `... Hub
-# Queue`), the Dashboard's `store:` and `queue:` lines, and the stand-in client's `steam: asked to install <appid>`.
+# Queue`, `focus: ManageQueue: Row(0) of <name>; ...`), the Dashboard's `store:` and `queue:` lines, and the stand-in
+# client's `steam: asked to install <appid>`.
 # Runs on the VM and in safe mode on the TV PC: the fake and the stand-in client are in the test's own folder either
 # way, and no handler is involved. The screenshots are to look at: the Queued and Installing... tiles, the hub's Queue
-# action, Downloads' count.
+# action, Downloads' count, Manage Queue's row (speed, amount, share and bar), Manage with the nav's Queue line and
+# the current download at its foot, and Recently installed once the game is done.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
@@ -204,10 +210,20 @@ try {
     Press Right "$hub Hub Toggle" | Out-Null
     Press Left "$hub Hub Queue" | Out-Null
 
-    # --- The first way into Manage Queue: the hub's Queue action, and B back to it.
-    Press A 'MyGames: Manage: Queue' '06-manage-from-the-hub' | Out-Null
-    # The third way, Manage's Queue box itself, where A opens nothing until #79.
-    Press-Nothing A 'Manage Queue is #79s'
+    # --- The first way into Manage Queue: the hub's Queue action. Recently installed's first cover has focus; Down
+    # is the download's row, whose share follows the bytes as Steam writes them, with the page up. View is the
+    # game's Tile menu, B back to the row; B again is the hub, on Queue.
+    Press A "ManageQueue: Cover\(0\) of .+; 1 installing, \d+ recently installed" | Out-Null
+    $row = "ManageQueue: Row\(0\) of $firstName; 1 installing, \d+ recently installed"
+    Press Down "$row; Installing\.\.\. 25\.0%" | Out-Null
+    $mark = Get-DashboardLogLength
+    Advance $first.source_id @('--bytes', '50/100')
+    Expect-Logged "^queue: $firstName downloading, 50% of 100 bytes$" $mark 'Downloading, with Manage Queue up' | Out-Null
+    Expect-Logged "^focus: $row; Installing\.\.\. 50\.0%$" $mark 'Manage Queue follows the bytes' | Out-Null
+    Start-Sleep -Milliseconds 4500
+    Save-Screen '06-manage-queue-from-the-hub'
+    Press Back "TileMenu: Menu\(Install\) of $firstName" | Out-Null
+    Press B "$row; Installing\.\.\. 50\.0%" | Out-Null
     Press B "$hub Hub Queue" | Out-Null
     Press B $tilePattern | Out-Null
 
@@ -216,9 +232,23 @@ try {
     Walk Right 'Wide\(3\)' 4
     Start-Sleep -Milliseconds 3000
     Save-Screen '07-downloads-1-in-queue'
-    Press A 'MyGames: Manage: Queue' | Out-Null
+    Press A "ManageQueue: Cover\(0\) of .+; 1 installing, \d+ recently installed" | Out-Null
+    Press Down "$row; Installing\.\.\. 50\.0%" | Out-Null
     Press B 'Wide\(3\)' | Out-Null
     Press Up 'Recent\(\d+\)' | Out-Null
+
+    # --- The third way: Manage's Queue box on My games & apps, by the top bar and the nav. Manage counts the Queue
+    # in its box and on the nav, and the current download stands at the nav's foot. B back to the box, then Home.
+    Press Up 'TopBar\(Profile\)' | Out-Null
+    Walk Right 'TopBar\(MyGames\)' 2
+    Press A 'MyGames: Games: Tile\(0\)' | Out-Null
+    Press Left 'MyGames: Games: Nav\(Games\)' | Out-Null
+    Walk Down 'MyGames: .+: Nav\(Manage\)(; .*)?' 6
+    Press Right 'MyGames: Manage: Queue' '08-manage-queued' | Out-Null
+    Press A "ManageQueue: Cover\(0\) of .+; 1 installing, \d+ recently installed" | Out-Null
+    Press Right "ManageQueue: Cover\(1\) of .+" | Out-Null
+    Press B 'MyGames: Manage: Queue' | Out-Null
+    Press B 'Recent\(\d+\)' | Out-Null
 
     # --- Install from the Tile menu of the game already queued: the menu closes and nothing more is asked.
     $menu = Open-MenuOf $first.name
@@ -242,19 +272,29 @@ try {
     Press Down 'Wide\(\d\)' | Out-Null
     Walk Right 'Wide\(3\)' 4
     Start-Sleep -Milliseconds 3000
-    Save-Screen '09-downloads-2-in-queue'
+    Save-Screen '10-downloads-2-in-queue'
     Press Up 'Recent\(\d+\)' | Out-Null
     $mark = Get-DashboardLogLength
     Advance $client.source_id @('--drop')
     Expect-Logged "^queue: $clientName dropped$" $mark 'Started in the client, dropped' | Out-Null
 
+    # Done with Manage Queue up, focus on the game's row (paused, it reads Queued): it leaves for Recently
+    # installed, first there, and focus goes with it to its cover.
+    Press Down 'Wide\(\d\)' | Out-Null
+    Walk Right 'Wide\(3\)' 4
+    Press A "ManageQueue: Cover\(0\) of .+; 1 installing, \d+ recently installed" | Out-Null
+    Press Down "$row; Queued 0\.0%" | Out-Null
     $mark = Get-DashboardLogLength
     Advance $first.source_id @('--done')
     Expect-Logged "^queue: $firstName installed$" $mark 'Done' | Out-Null
-    Start-Sleep -Milliseconds 2000
+    Expect-Logged "^focus: ManageQueue: Cover\(0\) of $firstName; 0 installing, \d+ recently installed$" $mark 'Done, its cover heads Recently installed' | Out-Null
+    Start-Sleep -Milliseconds 4500
+    Save-Screen '12-recently-installed'
+    Press B 'Wide\(3\)' | Out-Null
+    Press Up 'Recent\(\d+\)' | Out-Null
     Open-MenuOf $first.name | Out-Null
     Press B 'Recent\(\d+\)' | Out-Null
-    Press A "$hub Hub Play" '08-hub-play-once-installed' | Out-Null
+    Press A "$hub Hub Play" '09-hub-play-once-installed' | Out-Null
     Press B 'Recent\(\d+\)' | Out-Null
 
     # --- Install from the Tile menu of another game, which Steam drops: it leaves the Queue at once.
@@ -278,7 +318,7 @@ try {
     $menu = Open-MenuOf $first.name
     if ($menu -and (Menu-Row $menu) -ne 'Play game') { $failures += "$($first.name)'s menu starts with $(Menu-Row $menu) once installed" }
     Walk Down "TileMenu: Menu\(Uninstall\) of $firstName" 6
-    Press A "TileMenu: Prompt\(Uninstall\) of $firstName" '10-uninstall-question' | Out-Null
+    Press A "TileMenu: Prompt\(Uninstall\) of $firstName" '11-uninstall-question' | Out-Null
     Press Down "TileMenu: Prompt\(Cancel\) of $firstName" | Out-Null
     $mark = Get-DashboardLogLength
     Press A "TileMenu: Menu\(Uninstall\) of $firstName" | Out-Null
@@ -292,7 +332,7 @@ try {
     Expect-Logged "^queue: $firstName uninstalled$" $mark 'Uninstalled' 30 | Out-Null
     In-Front
     Start-Sleep -Milliseconds 2000
-    Save-Screen '11-uninstalled'
+    Save-Screen '13-uninstalled'
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }

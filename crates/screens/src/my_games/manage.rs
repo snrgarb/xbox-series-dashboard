@@ -1,5 +1,6 @@
 //! Manage: the page under the nav's line, which holds one box, the Queue's, with its count while something is
-//! queued (docs/spec/my-games.md, 9.1). Manage Queue is #79's: until then A on the box does nothing.
+//! queued (docs/spec/my-games.md, 9.1). A on the box opens Manage Queue over the page (`crate::manage_queue`), and
+//! B there comes back to the box.
 use ui::{Button, Color, Press, Rect, Ui};
 
 use super::look::{self, BOX, BOX_FOCUSED, TEXT};
@@ -12,12 +13,6 @@ const QUEUE: Rect = Rect::new(520.0, 194.0, 437.0, 131.0);
 /// Its glyph is centred in its first 100 across, and its label starts after them.
 const ICON: f32 = 100.0;
 const ICON_SIZE: f32 = 34.0;
-
-/// **#79's hook.** A on the Queue box opens Manage Queue, the page over the whole of My games & apps that lists
-/// what is installing (docs/spec/my-games.md, 9.2); B there comes back to the box. Nothing until there is a Queue.
-fn open_manage_queue() -> Option<PageAction> {
-    None
-}
 
 #[derive(Default)]
 pub struct Manage;
@@ -39,7 +34,7 @@ impl Pane for Manage {
     fn press(&mut self, press: Press, _around: Around) -> Outcome {
         match press.button {
             Button::Left => Outcome::Nav,
-            Button::A if !press.repeat => open_manage_queue().map_or(Outcome::Stay, Outcome::Action),
+            Button::A if !press.repeat => Outcome::Action(PageAction::Open(crate::manage_queue::open())),
             // Right, Up and Down are nothing: the box is alone.
             _ => Outcome::Stay,
         }

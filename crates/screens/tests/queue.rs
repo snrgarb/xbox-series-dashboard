@@ -1,5 +1,5 @@
 //! The Queue on the screens (docs/spec/home.md 3.4, game-hub.md 6, tile-menu.md 13): what reads Queued and
-//! Installing..., Install asked once, the hub's Queue action, and the ways into Manage Queue (#79's hook).
+//! Installing..., Install asked once, the hub's Queue action, and the ways into Manage Queue.
 use model::{InstallState, Library, Queue, Queued};
 use screens::home::Focus;
 use screens::{Dashboard, Effect};
@@ -42,7 +42,7 @@ fn id_on(dashboard: &Dashboard, tile: usize) -> i64 {
 }
 
 fn queue(game: i64, state: InstallState) -> Queue {
-    Queue::new(vec![Queued { game, state, started: 1 }], Vec::new())
+    Queue::new(vec![Queued { game, state, started: 1, speed: None }], Vec::new())
 }
 
 /// Home with focus on the Recent row's tile `tile`.
@@ -118,9 +118,8 @@ fn the_hubs_queue_action_shows_while_the_game_is_in_the_queue_and_opens_manage_q
     press(&mut dashboard, &[Right]);
     assert!(dashboard.focus_line().ends_with("Hub Toggle"), "{}", dashboard.focus_line());
     press(&mut dashboard, &[Left, A]);
-    // Until #79, Manage Queue is My games & apps on Manage, its Queue box; B comes back to the hub, on Queue.
-    assert_eq!(dashboard.page(), Some("MyGames"));
-    assert!(dashboard.focus_line().contains("Queue"), "{}", dashboard.focus_line());
+    // Manage Queue over the hub, its row of the game: B comes back to the hub, on Queue.
+    assert_eq!(dashboard.page(), Some("ManageQueue"));
     press(&mut dashboard, &[B]);
     assert_eq!(dashboard.page(), Some("GameHub"));
     assert!(dashboard.focus_line().ends_with("Hub Queue"), "{}", dashboard.focus_line());
@@ -152,8 +151,7 @@ fn homes_downloads_tile_opens_manage_queue_and_b_comes_back_to_it() {
     press(&mut dashboard, &[Down, Right, Right, Right]);
     assert_eq!(dashboard.home_focus(), Focus::Wide(DOWNLOADS));
     press(&mut dashboard, &[A]);
-    assert_eq!(dashboard.page(), Some("MyGames"));
-    assert!(dashboard.focus_line().contains("Queue"), "{}", dashboard.focus_line());
+    assert_eq!((dashboard.page(), dashboard.pages_up()), (Some("ManageQueue"), 1));
     press(&mut dashboard, &[B]);
     assert_eq!(dashboard.page(), None);
     assert_eq!(dashboard.home_focus(), Focus::Wide(DOWNLOADS));

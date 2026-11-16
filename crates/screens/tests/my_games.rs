@@ -171,7 +171,7 @@ fn sounds(dashboard: &mut Dashboard) -> Vec<Sound> {
 fn every_way_in_gives_focus_to_the_content() {
     assert_eq!(after(&mut page(Entry::Games), &[]), "Games: Tile(0)");
     assert_eq!(after(&mut page(Entry::PlayHistory), &[]), "PlayHistory: Row(0)");
-    assert_eq!(after(&mut page(Entry::Queue), &[]), "Manage: Queue");
+    assert_eq!(after(&mut page(Entry::Manage), &[]), "Manage: Queue");
     assert_eq!(place(&after(&mut page(Entry::FullLibrary { filter: None }), &[])), "FullLibrary: Tile(0)");
 }
 
@@ -416,12 +416,15 @@ fn one_a_on_a_play_history_row_opens_its_game_hub_when_the_double_taps_time_is_o
 }
 
 #[test]
-fn manage_has_its_queue_box_which_does_nothing_yet() {
-    let mut page = page(Entry::Queue);
+fn manages_queue_box_opens_manage_queue_and_b_there_comes_back_to_it() {
+    let mut page = page(Entry::Manage);
     page.take_effects();
-    assert_eq!(after(&mut page, &[A, Right, Up, Down]), "Manage: Queue");
-    assert!(page.take_effects().is_empty());
+    assert_eq!(after(&mut page, &[Right, Up, Down]), "Manage: Queue");
     assert_eq!(page.hints(), hint_bar::NONE);
+    press(&mut page, &[A]);
+    assert_eq!((page.page(), page.pages_up()), (Some("ManageQueue"), 2));
+    press(&mut page, &[B]);
+    assert_eq!((page.page(), page.focus_line().as_str()), (Some("MyGames"), "MyGames: Manage: Queue"));
     assert_eq!(after(&mut page, &[Left]), "Manage: Nav(Manage)");
     assert_eq!(after(&mut page, &[A]), "Manage: Queue");
 }
@@ -435,7 +438,7 @@ fn b_is_home_from_anywhere_on_the_page() {
         (Entry::Games, &[Left, Down, Down]),
         (Entry::PlayHistory, &[Down]),
         (Entry::FullLibrary { filter: None }, &[]),
-        (Entry::Queue, &[]),
+        (Entry::Manage, &[]),
     ];
     for (entry, presses) in reach {
         let mut page = page(entry);
@@ -971,12 +974,12 @@ fn my_games_full_library_scrolled() {
 /// The Bundle's 08: Manage, focus on its Queue box.
 #[test]
 fn my_games_manage() {
-    Stage::new(library(), Entry::Queue, HD).check("my_games_manage");
+    Stage::new(library(), Entry::Manage, HD).check("my_games_manage");
 }
 
 #[test]
 fn my_games_manage_nav_focused() {
-    let mut stage = Stage::new(library(), Entry::Queue, HD);
+    let mut stage = Stage::new(library(), Entry::Manage, HD);
     stage.press(&[Left]);
     stage.check("my_games_manage_nav_focused");
 }

@@ -19,7 +19,10 @@ use self::background::Background;
 pub use self::background::{hero_art, DELAY_SECONDS, FADE_SECONDS, LEAVE_SECONDS, SETTLE_SECONDS};
 use self::groups::Group;
 use self::recent::Row;
-pub use self::tile::{art_for, cover_art, source, source_badge_at, source_mark, square_art, Source};
+pub use self::tile::{
+    art_for, cover_art, game_at as tile_at, source, source_badge_at, source_mark, square_art, status_band_at,
+    title_band_at, Source,
+};
 pub use self::top_bar::{profile_picture, Status, TopButton};
 use crate::hint_bar::{self, Hint};
 use crate::pages::Open;
@@ -305,9 +308,7 @@ impl Home {
             (Focus::Wide(wide::SETTINGS), Button::A) => return open(Open::Settings(settings::Entry::Tile)),
             // As the profile: the achievements are the Guide's.
             (Focus::Wide(wide::ACHIEVEMENTS), Button::A) => return Some(HomeAction::OpenGuide),
-            (Focus::Wide(wide::DOWNLOADS), Button::A) => {
-                return open(my_games::manage_queue(my_games::QueueFrom::Downloads))
-            }
+            (Focus::Wide(wide::DOWNLOADS), Button::A) => return open(crate::manage_queue::open()),
 
             // The Groups: along a Group's cards; up and down to the same place in the next Group, or its last
             // card if it is shorter; up from the first to the wide tile last focused; B back to the Recent row.
