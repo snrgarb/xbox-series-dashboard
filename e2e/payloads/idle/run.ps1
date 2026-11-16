@@ -105,8 +105,13 @@ try {
     if (-not (Wait-DashboardLog '^overlay: configured' 15)) { throw 'The Overlay was not made' }
 
     # ---- 1. Over Home.
+    # The greeting takes longer than the 3 s, so the screen may have dimmed already: the first Down then only wakes it.
     Push-Button Down
-    if (-not (Wait-DashboardLog '^focus: Recent\(0\)' 10)) { throw "Down did not put focus on the Recent row's first tile" }
+    if (-not (Wait-DashboardLog '^focus: Recent\(0\)' 1)) {
+        Say 'note: the first Down woke the screen; pressing again'
+        Push-Button Down
+        if (-not (Wait-DashboardLog '^focus: Recent\(0\)' 10)) { throw "Down did not put focus on the Recent row's first tile" }
+    }
     if (Wait-Idle 'home') {
         Wake 'Right'
         $mark = Get-DashboardLogLength

@@ -118,7 +118,7 @@ function Expect-Asked([int] $After, [int] $Count, [string] $Focus, [string] $Wha
         Save-Screen $Name
     }
     if ($shown -and (Focus-Now) -notmatch "^focus: Startup: WhosPlaying `"$tag`"$") {
-        $script:failures += "$What: the focus line should be on $Focus, and is '$(Focus-Now)'"
+        $script:failures += "${What}: the focus line should be on $Focus, and is '$(Focus-Now)'"
     }
     [bool] $shown
 }
@@ -137,7 +137,7 @@ function Sign-In([string] $Gamertag, [string] $What, [string] $Name = '') {
     if ($signing -and $signed) {
         $took = [double] ($signed -replace '^.* at (\d+) ms$', '$1') - [double] ($signing -replace '^.* at (\d+) ms$', '$1')
         Say "Signing you in showed for $took ms"
-        if ($took -lt 2500) { $script:failures += "$What: Signing you in should show about 3 s, and showed $took ms" }
+        if ($took -lt 2500) { $script:failures += "${What}: Signing you in should show about 3 s, and showed $took ms" }
     }
     Expect-Log "^profile: `"$tag`", " "the Profile signed in $What" 10 $mark | Out-Null
     $hi = Expect-Log '^toasts: shown "Hi .+!".*\(Greeting\)' "the greeting $What" 30 $mark
