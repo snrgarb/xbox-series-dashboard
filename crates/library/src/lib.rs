@@ -1,8 +1,9 @@
 //! The library database: every game the user has, in one SQLite file, so the Dashboard's first frame comes from disk
 //! without reading any store.
 //!
-//! A source (Steam, later the other stores) is read into a `model::Library` and `Database::sync` merges that in:
-//! what the source knows (name, installed, art, its own play history, its collections) follows the source, and what
+//! Every source (a store, behind `model::Source`: docs/sources.md) is read into a `model::Library`, and
+//! `Database::sync` merges each in under the source's key (`sources::refresh` does both for a list of them): what
+//! the source knows (name, installed, art, its own play history, its collections) follows the source, and what
 //! is the user's own (Play sessions, hidden, favourite, which filters show and in what order) is never touched by
 //! a sync. A game a source no longer lists is kept, marked gone, and comes back with everything it had if the
 //! source lists it again. The screens are given a snapshot (`Database::snapshot`, a `model::Library`) and never
@@ -13,11 +14,13 @@
 //!
 //! The schema has a version (`PRAGMA user_version`) and grows by migrations: `MIGRATIONS[n]` takes a database from
 //! version `n` to `n + 1`, and one is never edited once released. What is still to come has its place:
-//! - More sources: a game is keyed by `(source, source_id)`, both text, so each store keeps its own ids.
+//! - More sources: a game is keyed by `(source, source_id)`, both text, so each store keeps its own ids, and a game
+//!   owned in two stores is two games.
 //! - Games added by hand (#12): a source of their own, `manual`, with a table beside `games` for the program, its
 //!   arguments and working folder.
 pub mod filters;
 pub mod history;
+pub mod sources;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,9 +33,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 /// The database's file name in the data folder.
 pub const FILE: &str = "library.db";
-
-/// Steam, as `games.source` has it.
-pub const STEAM: &str = "steam";
 
 /// The setting that holds a source's signed-in user is `<source>.user`.
 const USER: &str = "user";
@@ -278,7 +278,7 @@ impl Database {
             Ok(())
         };
         for game in &found.games {
-            let source_id = game.appid.to_string();
+            let source_id = game.source_id.clone();
             let mut art: Vec<(String, String)> =
                 [("cover", &game.cover), ("background", &game.hero), ("header", &game.header)]
                     .into_iter()
@@ -387,7 +387,7 @@ impl Database {
                     tx.execute(
                         "UPDATE games SET favourite = MAX(favourite, ?3), hidden = MAX(hidden, ?4)
                          WHERE source = ?1 AND source_id = ?2",
-                        params![source, game.appid.to_string(), game.favourite, game.hidden],
+                        params![source, game.source_id, game.favourite, game.hidden],
                     )?;
                 }
                 tx.execute("INSERT INTO settings (key, value) VALUES (?1, 'taken')", [&key])?;
@@ -399,7 +399,7 @@ impl Database {
 
     /// What the screens are given: every game that is neither hidden nor gone, most recently played first and then
     /// by name; the hidden ones apart, in the same order; every filter with its games; Play history; and the
-    /// user's name.
+    /// user's name, as the source with the most games says it.
     pub fn snapshot(&self) -> Result<Library> {
         self.snapshot_at(now())
     }
@@ -408,13 +408,33 @@ impl Database {
     /// of then.
     pub fn snapshot_at(&self, now: u64) -> Result<Library> {
         Ok(Library {
-            user: self.setting(&format!("{STEAM}.{USER}"))?,
+            user: self.user()?,
             games: self.games("hidden = 0 AND gone = 0", &[], None)?,
             hidden: self.games("hidden = 1 AND gone = 0", &[], None)?,
             filters: self.filters_at(now)?,
             history: history::rows(&self.conn, now)?,
             collections: None,
         })
+    }
+
+    /// The signed-in user's name, as a source last said it (`<source>.user`): that of the source with the most
+    /// games the library shows, and of two with as many the first by name.
+    fn user(&self) -> Result<Option<String>> {
+        let user = self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT value FROM settings
+                     WHERE key LIKE '%.{USER}'
+                     ORDER BY (SELECT COUNT(*) FROM games
+                               WHERE gone = 0 AND source || '.{USER}' = settings.key) DESC, key
+                     LIMIT 1"
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(user)
     }
 
     /// The Recent row: the `n` most recently played games.
@@ -451,9 +471,8 @@ impl Database {
             place.insert(id, games.len());
             games.push(Game {
                 id,
-                // Only Steam's games have an appid; another source's are launched by its own id.
-                appid: if source == STEAM { source_id.parse().unwrap_or(0) } else { 0 },
                 source,
+                source_id,
                 name: row.get(3)?,
                 installed: row.get(4)?,
                 install_dir: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
@@ -586,12 +605,13 @@ mod tests {
     use source_steam::fixture::{self, Fixture};
 
     const NOW: u64 = 1_800_000_000;
+    pub(crate) const STEAM: &str = source_steam::SOURCE;
 
     fn game(appid: u32, name: &str, last_played: u64) -> Game {
         Game {
             id: 0,
-            appid,
             source: STEAM.into(),
+            source_id: appid.to_string(),
             name: name.into(),
             last_played,
             playtime_minutes: if last_played > 0 { 30 } else { 0 },
@@ -664,10 +684,10 @@ mod tests {
         let mut db = Database::in_memory().unwrap();
         db.sync(STEAM, &found(), NOW).unwrap();
         let before = db.snapshot().unwrap();
-        let bramble = before.games.iter().find(|g| g.appid == 20).unwrap().id;
+        let bramble = before.games.iter().find(|g| g.source_id == "20").unwrap().id;
 
         let mut next = found();
-        let changed = next.games.iter_mut().find(|g| g.appid == 20).unwrap();
+        let changed = next.games.iter_mut().find(|g| g.source_id == "20").unwrap();
         changed.name = "Bramble: Director's Cut".into();
         changed.installed = false;
         changed.install_dir = None;
@@ -686,7 +706,7 @@ mod tests {
     fn a_sync_takes_what_the_source_says_of_a_game_and_follows_it() {
         let mut db = Database::in_memory().unwrap();
         let mut first = found();
-        let told = first.games.iter_mut().find(|g| g.appid == 20).unwrap();
+        let told = first.games.iter_mut().find(|g| g.source_id == "20").unwrap();
         told.released = 1_552_348_800;
         told.developers = vec!["Tin Lantern".into(), "Second Kettle".into()];
         told.publishers = vec!["Harbour & Hull".into()];
@@ -694,16 +714,16 @@ mod tests {
         (told.critic_score, told.community_score) = (Some(87), Some(0));
         let told = told.clone();
         db.sync(STEAM, &first, NOW).unwrap();
-        let read = |db: &Database| db.snapshot().unwrap().games.into_iter().find(|g| g.appid == 20).unwrap();
+        let read = |db: &Database| db.snapshot().unwrap().games.into_iter().find(|g| g.source_id == "20").unwrap();
         let game = read(&db);
         assert_eq!(Game { id: 0, added: 0, ..game.clone() }, told);
         // A game the source says nothing of has nothing.
-        let untold = db.snapshot().unwrap().games.into_iter().find(|g| g.appid == 10).unwrap();
+        let untold = db.snapshot().unwrap().games.into_iter().find(|g| g.source_id == "10").unwrap();
         assert!(untold.released == 0 && untold.developers.is_empty() && untold.critic_score.is_none());
         assert_eq!(db.sync(STEAM, &first, NOW).unwrap(), Synced::default());
 
         // A fact that changes is an update; one the source no longer has is gone.
-        let changed = first.games.iter_mut().find(|g| g.appid == 20).unwrap();
+        let changed = first.games.iter_mut().find(|g| g.source_id == "20").unwrap();
         changed.developers.pop();
         changed.critic_score = None;
         changed.size_on_disk = 50_000_000_000;
@@ -751,17 +771,52 @@ mod tests {
         assert_eq!((after.released, after.added), (1_552_348_800, 1_600_000_000));
     }
 
+    /// The rows a database had before there was more than one source were already keyed `(source, source_id)`:
+    /// Steam's are taken in by the Steam source as the same games, with all the user did with them.
+    #[test]
+    fn a_database_from_before_the_sources_keeps_its_games_and_what_the_user_did() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        {
+            let conn = Connection::open(&path).unwrap();
+            for migration in MIGRATIONS {
+                conn.execute_batch(migration).unwrap();
+            }
+            conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64).unwrap();
+            conn.execute_batch(
+                "INSERT INTO games (id, source, source_id, name, sort_name, installed, last_played, playtime_minutes,
+                                    added, hidden, favourite)
+                 VALUES (7, 'steam', '20', 'Bramble', 'bramble', 1, 1700000000, 90, 1600000000, 0, 1),
+                        (8, 'steam', '30', 'Cinder', 'cinder', 1, 0, 0, 1600000000, 1, 0);
+                 INSERT INTO play_sessions (game, started, ended) VALUES (7, 1700000000 - 5400, 1700000000);
+                 INSERT INTO settings (key, value) VALUES ('steam.user', 'Tester'), ('steam.marks', 'taken');",
+            )
+            .unwrap();
+        }
+        let mut db = Database::open(&path).unwrap();
+        assert_eq!(db.version().unwrap(), MIGRATIONS.len());
+        assert_eq!(db.sync(STEAM, &found(), NOW).unwrap(), Synced { added: 1, updated: 2, gone: 0 });
+        let bramble = db.game(7).unwrap().unwrap();
+        assert_eq!((bramble.source.as_str(), bramble.source_id.as_str()), (STEAM, "20"));
+        assert!(bramble.favourite);
+        assert_eq!((bramble.added, bramble.last_played, bramble.play_count), (1_600_000_000, 1_700_000_000, 1));
+        assert!(db.game(8).unwrap().unwrap().hidden);
+        let snapshot = db.snapshot().unwrap();
+        assert_eq!(snapshot.user.as_deref(), Some("Tester"));
+        assert_eq!(names(&snapshot.hidden), ["Cinder"]);
+    }
+
     #[test]
     fn a_game_the_source_drops_is_kept_but_not_shown_and_comes_back_as_it_was() {
         let mut db = Database::in_memory().unwrap();
         db.sync(STEAM, &found(), NOW).unwrap();
-        let anchor = db.snapshot().unwrap().games.iter().find(|g| g.appid == 10).unwrap().id;
+        let anchor = db.snapshot().unwrap().games.iter().find(|g| g.source_id == "10").unwrap().id;
         db.set_favourite(anchor, true).unwrap();
         let session = db.session_started(anchor, NOW).unwrap();
         db.session_ended(session, NOW + 600).unwrap();
 
         let mut without = found();
-        without.games.retain(|g| g.appid != 10);
+        without.games.retain(|g| g.source_id != "10");
         assert_eq!(db.sync(STEAM, &without, NOW + 700).unwrap(), Synced { added: 0, updated: 0, gone: 1 });
         assert_eq!(db.sync(STEAM, &without, NOW + 800).unwrap(), Synced::default());
         assert_eq!(names(&db.snapshot().unwrap().games), ["Cinder", "Bramble"]);
@@ -781,7 +836,8 @@ mod tests {
     fn a_sync_leaves_what_is_the_users_own() {
         let mut db = Database::in_memory().unwrap();
         db.sync(STEAM, &found(), NOW).unwrap();
-        let id = |appid: u32| db.snapshot().unwrap().games.iter().find(|g| g.appid == appid).unwrap().id;
+        let id =
+            |appid: u32| db.snapshot().unwrap().games.iter().find(|g| g.source_id == appid.to_string()).unwrap().id;
         let (cinder, bramble) = (id(30), id(20));
         db.set_hidden(cinder, true).unwrap();
         db.set_favourite(bramble, true).unwrap();
@@ -801,7 +857,7 @@ mod tests {
 
         // When the source has counted more, its count is taken.
         let mut later = found();
-        later.games.iter_mut().find(|g| g.appid == 20).unwrap().playtime_minutes = 50;
+        later.games.iter_mut().find(|g| g.source_id == "20").unwrap().playtime_minutes = 50;
         assert_eq!(db.sync(STEAM, &later, NOW + 7200).unwrap(), Synced { added: 0, updated: 1, gone: 0 });
         assert_eq!(db.game(bramble).unwrap().unwrap().playtime_minutes, 50);
     }
@@ -810,7 +866,7 @@ mod tests {
     fn a_play_session_is_recorded_with_its_last_played_and_playtime() {
         let mut db = Database::in_memory().unwrap();
         db.sync(STEAM, &found(), NOW).unwrap();
-        let bramble = db.snapshot().unwrap().games.iter().find(|g| g.appid == 20).unwrap().id;
+        let bramble = db.snapshot().unwrap().games.iter().find(|g| g.source_id == "20").unwrap().id;
 
         let session = db.session_started(bramble, NOW).unwrap();
         assert_eq!(db.sessions(bramble).unwrap(), [PlaySession { game: bramble, started: NOW, ended: None }]);

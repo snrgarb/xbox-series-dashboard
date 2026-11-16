@@ -82,8 +82,8 @@ function Move-ToEntry([int] $Entry) {
 # Where the Guide lists $Game while $Running runs: Home, My games & apps, the running game, then the games played,
 # most recently first, the running one left out; four games at most. $null if it is not among them.
 function Get-GuideEntry($Game, $Running, $Played) {
-    $listed = @($Running) + @($Played | Where-Object { $_.appid -ne $Running.appid }) | Select-Object -First 4
-    for ($i = 0; $i -lt $listed.Count; $i++) { if ($listed[$i].appid -eq $Game.appid) { return 2 + $i } }
+    $listed = @($Running) + @($Played | Where-Object { $_.source_id -ne $Running.source_id }) | Select-Object -First 4
+    for ($i = 0; $i -lt $listed.Count; $i++) { if ($listed[$i].source_id -eq $Game.source_id) { return 2 + $i } }
     $null
 }
 
@@ -112,7 +112,7 @@ function Expect-Front([string] $Title, [string] $When) {
 
 # Waits for the game named $Name, started by the Dashboard, to be the one stand-in game running and in front.
 function Wait-Game($Game, [int] $Mark) {
-    if (-not (Wait-DashboardLog "^launch: $([regex]::Escape($Game.name)) \($($Game.appid)\) asked of Steam" 15 $Mark)) {
+    if (-not (Wait-DashboardLog "^launch: $([regex]::Escape($Game.name)) \($($Game.source_id)\) asked of Steam" 15 $Mark)) {
         throw "$($Game.name) was not asked of Steam (launch log: $((Get-DashboardLog | Select-Object -Skip $Mark | Where-Object { $_ -match '^launch:' }) -join ' | '))"
     }
     if (-not (Wait-DashboardLog 'the game has booted' 60 $Mark)) { throw "$($Game.name) never counted as booted" }
@@ -130,11 +130,11 @@ try {
     $library = Initialize-FakeSteam
     $played = @($library.games | Where-Object last_played -gt 0)
     $x = $played[0]
-    $y = @($played | Where-Object { $_.installed -and $_.appid -ne $x.appid })[0]
+    $y = @($played | Where-Object { $_.installed -and $_.source_id -ne $x.source_id })[0]
     if (-not $x -or -not $x.installed -or -not $y) { throw "The library has no two installed games that were played, the first of them the Recent row's first" }
     $yEntry = Get-GuideEntry $y $x $played
     if ($null -eq $yEntry) { throw "$($y.name) is not among the four games the Guide lists while $($x.name) runs" }
-    Say "X: $($x.name) ($($x.appid)); Y: $($y.name) ($($y.appid)), the Guide's entry $yEntry while X runs"
+    Say "X: $($x.name) ($($x.source_id)); Y: $($y.name) ($($y.source_id)), the Guide's entry $yEntry while X runs"
     # Nothing in this test is a question put to the user, however slow the VM.
     $env:DASHBOARD_NEEDS_USER_MS = '120000'
 

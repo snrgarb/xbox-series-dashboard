@@ -702,7 +702,7 @@ mod tests {
 
         for (game, want) in library.games.iter().zip(&spec.games) {
             let name = &game.name;
-            assert_eq!(game.appid, want.appid, "{name}");
+            assert_eq!(game.source_id, want.appid.to_string(), "{name}");
             assert_eq!(game.installed, want.installed, "{name}");
             assert_eq!(game.last_played, want.last_played, "{name}");
             assert_eq!(game.playtime_minutes, want.playtime_minutes, "{name}");
@@ -774,9 +774,10 @@ mod tests {
         spec.games.iter_mut().for_each(|g| g.art = Art::None);
         write(&root, &spec).unwrap();
         let library = load(&root).unwrap();
-        let named = |names: &[&str]| -> Vec<u32> {
+        let appids = |names: &[&str]| -> Vec<u32> {
             names.iter().map(|n| spec.games.iter().find(|g| g.name == *n).unwrap().appid).collect()
         };
+        let named = |names: &[&str]| -> Vec<String> { appids(names).iter().map(u32::to_string).collect() };
 
         // Those made by hand, by name: not the dynamic one, nor the deleted one. The DLC's appid is still there:
         // which appids are games is for whoever takes the collections in.
@@ -785,17 +786,17 @@ mod tests {
         assert_eq!(names, ["Couch co-op", "Short sessions"]);
         assert_eq!(collections[0].source_id, "uc-Vj9aG3fT6uXo");
         let couch = ["Brass Meridian", "Saltwind Rally", "Glasswing Atlas", "Marrow Street"];
-        assert_eq!(collections[0].appids, named(&couch));
+        assert_eq!(collections[0].games, named(&couch));
         let mut short = named(&["Lanternfish Deep", "Thimble & Thorn", "Copperhead Station"]);
-        short.push(DLC);
-        assert_eq!(collections[1].appids, short);
+        short.push(DLC.to_string());
+        assert_eq!(collections[1].games, short);
 
         let favourites: Vec<&str> = library.games.iter().filter(|g| g.favourite).map(|g| g.name.as_str()).collect();
         assert_eq!(favourites, ["Brass Meridian", "Ember Choir"]);
         assert!(library.games.iter().all(|g| !g.hidden && g.source == crate::SOURCE));
 
         // Steam's hidden games are marked, and still read: hiding is the library's to do.
-        spec.collections.as_mut().unwrap().hidden = named(&["Quiet Orbit"]);
+        spec.collections.as_mut().unwrap().hidden = appids(&["Quiet Orbit"]);
         write(&root, &spec).unwrap();
         let library = load(&root).unwrap();
         let hidden: Vec<&str> = library.games.iter().filter(|g| g.hidden).map(|g| g.name.as_str()).collect();

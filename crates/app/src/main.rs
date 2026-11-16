@@ -2,6 +2,7 @@
 mod games;
 mod offscreen;
 mod sounds;
+mod sources;
 mod store;
 mod window;
 

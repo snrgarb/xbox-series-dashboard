@@ -51,7 +51,7 @@ try {
 
     # A: the game's Game hub, after the double tap's 300 ms. A on its Play: the Launch screen over the launcher.
     Push-Button A
-    if (-not (Wait-DashboardLog "^focus: GameHub: $($game.appid) Hub Play`$" 10)) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
+    if (-not (Wait-DashboardLog "^focus: GameHub: $($game.source_id) Hub Play`$" 10)) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
     Push-Button A
     $up = Wait-DashboardLog 'Launch screen up' 10
     Say "after A on Play: $(if ($up) { $up } else { 'no Launch screen up line' })"

@@ -265,7 +265,7 @@ function Stop-Dashboard {
 # With -FullShelf twelve more are installed, twenty in all, which is rows enough for My games & apps to scroll.
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-steam.json in the test's output): user, and
-# games, most recently played first, each with appid, name, installed, install_dir, last_played, cover, hero, header.
+# games, most recently played first, each with source_id (its appid), name, installed, install_dir, last_played, cover, hero, header.
 function Initialize-FakeSteam([string] $Root = 'C:\e2e\steam', [switch] $FullShelf) {
     $standin = Join-Path $script:Payload 'standin.exe'
     if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }

@@ -267,11 +267,10 @@ pub(crate) fn sync_collections(conn: &Connection, source: &str, found: &[Collect
                 id
             }
         };
-        // An appid that is no game of the library's (a tool, DLC, a game no longer owned) is passed over.
+        // An id that is no game of the library's (a tool, DLC, a game no longer owned) is passed over.
         let mut games = Vec::new();
-        for appid in &collection.appids {
-            let game: Option<i64> =
-                game_of.query_row(params![source, appid.to_string()], |row| row.get(0)).optional()?;
+        for source_id in &collection.games {
+            let game: Option<i64> = game_of.query_row(params![source, source_id], |row| row.get(0)).optional()?;
             games.extend(game);
         }
         games.sort_unstable();
@@ -398,7 +397,7 @@ fn filter_name(name: &str) -> Result<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::STEAM;
+    use crate::tests::STEAM;
     use model::{Game, Library};
     use source_steam::fixture::{self, Fixture};
 
@@ -407,7 +406,7 @@ mod tests {
 
     fn game(appid: u32, name: &str, played_days_ago: Option<u64>, playtime_minutes: u32, installed: bool) -> Game {
         Game {
-            appid,
+            source_id: appid.to_string(),
             name: name.into(),
             last_played: played_days_ago.map_or(0, |days| NOW - days * DAYS),
             playtime_minutes,
@@ -482,7 +481,7 @@ mod tests {
     }
 
     fn collection(id: &str, name: &str, appids: &[u32]) -> Collection {
-        Collection { source_id: id.into(), name: name.into(), appids: appids.to_vec() }
+        Collection { source_id: id.into(), name: name.into(), games: appids.iter().map(u32::to_string).collect() }
     }
 
     /// The woods' Steam games as Steam would be read again, with these collections.
@@ -862,7 +861,8 @@ mod tests {
         let marked = |favourites: &[u32], hidden: &[u32]| {
             let mut steam = steam_with(Some(Vec::new()));
             for game in &mut steam.games {
-                (game.favourite, game.hidden) = (favourites.contains(&game.appid), hidden.contains(&game.appid));
+                let appid: u32 = game.source_id.parse().unwrap();
+                (game.favourite, game.hidden) = (favourites.contains(&appid), hidden.contains(&appid));
             }
             steam
         };

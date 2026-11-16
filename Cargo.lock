@@ -1101,6 +1101,7 @@ dependencies = [
 name = "model"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "serde",
 ]
 
@@ -2011,6 +2012,7 @@ dependencies = [
 name = "shell"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "log",
  "model",
  "pollster",

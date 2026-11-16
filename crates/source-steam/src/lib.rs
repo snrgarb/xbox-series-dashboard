@@ -9,13 +9,16 @@
 //! - `appcache/librarycache/<appid>/`: cover, hero and header art.
 //! - `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json`: the user's collections, Steam's Favourites
 //!   and its hidden games (`collections`).
+//!
+//! [`Steam`] is the source the library reads (`model::Source`): it finds the install, reads it with [`load`], and
+//! starts, installs and uninstalls a game through Steam's own `steam://` addresses.
 pub mod appcache;
 pub mod collections;
 pub mod fixture;
 pub mod vdf;
 
 use anyhow::{Context, Result};
-use model::{Game, Library};
+use model::{Ask, Found, Game, Library, Source, Start};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,6 +26,59 @@ use vdf::Value;
 
 /// Steam, as a game's `source` names it.
 pub const SOURCE: &str = "steam";
+
+/// Steam, as the library reads it and the shell starts its games.
+#[derive(Debug, Clone, Default)]
+pub struct Steam {
+    /// The install to read; with none, the one the registry names.
+    root: Option<PathBuf>,
+}
+
+impl Steam {
+    /// The Steam install at `root`, or with none the one the registry names (`--steam` on the command line).
+    pub fn at(root: Option<PathBuf>) -> Self {
+        Self { root }
+    }
+
+    fn root(&self) -> Option<PathBuf> {
+        self.root.clone().or_else(find_steam_root)
+    }
+}
+
+impl Source for Steam {
+    fn key(&self) -> &'static str {
+        SOURCE
+    }
+
+    fn name(&self) -> &'static str {
+        "Steam"
+    }
+
+    fn read(&self) -> Result<Option<Found>> {
+        let Some(root) = self.root() else { return Ok(None) };
+        let library = load(&root).with_context(|| root.display().to_string())?;
+        Ok(Some(Found { library, from: root.display().to_string() }))
+    }
+
+    fn start(&self, game: &Game) -> Option<Start> {
+        appid(game).map(|appid| Start::Address(format!("steam://rungameid/{appid}")))
+    }
+
+    /// `steam://install/<appid>` and `steam://uninstall/<appid>`: Steam shows its own window and does the rest.
+    fn ask(&self, game: &Game, ask: Ask) -> Option<Start> {
+        appid(game).map(|appid| Start::Address(format!("steam://{}/{appid}", ask.verb())))
+    }
+
+    /// Steam's own word: `HKCU\Software\Valve\Steam\Apps\<appid>\Running`.
+    fn running(&self, game: &Game) -> bool {
+        appid(game).is_some_and(registry::running)
+    }
+}
+
+/// The game's appid, if it is one of Steam's.
+fn appid(game: &Game) -> Option<u32> {
+    (game.source == SOURCE).then(|| game.source_id.parse().ok()).flatten().filter(|&appid| appid != 0)
+}
 
 /// Read the Steam install at `steam_root`.
 pub fn load(steam_root: &Path) -> Result<Library> {
@@ -52,7 +108,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
     owned.extend(installed.keys().copied());
 
     let art_root = child(&appcache, "librarycache");
-    let mut games: Vec<Game> = owned
+    let mut games: Vec<(u32, Game)> = owned
         .into_iter()
         .filter_map(|appid| {
             let info = appinfo.get(&appid)?;
@@ -67,37 +123,41 @@ pub fn load(steam_root: &Path) -> Result<Library> {
             let art = art_root.as_deref().and_then(|r| child(r, &appid.to_string())).map(|d| ArtDir::scan(&d));
             let find =
                 |asset: &str, legacy: Option<&str>, names: &[&str]| art.as_ref()?.find(common, asset, legacy, names);
-            Some(Game {
-                id: 0,
+            Some((
                 appid,
-                source: SOURCE.to_string(),
-                name,
-                last_played: played.max(manifest_played.unwrap_or(0)),
-                playtime_minutes: minutes,
-                added: 0,
-                installed: manifest_played.is_some(),
-                install_dir: manifest.and_then(|m| m.folder.clone()),
-                cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),
-                hero: find("library_hero", None, &["library_hero.jpg"]),
-                header: find("library_header", Some("header_image"), &["header.jpg", "library_header.jpg"]),
-                favourite: marked(favourites, appid),
-                hidden: marked(hidden, appid),
-                released: released(common),
-                developers: credits(info, "developer"),
-                publishers: credits(info, "publisher"),
-                size_on_disk: manifest.map_or(0, |m| m.size),
-                critic_score: score(common, "metacritic_score"),
-                community_score: score(common, "review_percentage"),
-                play_count: 0,
-            })
+                Game {
+                    id: 0,
+                    source: SOURCE.to_string(),
+                    source_id: appid.to_string(),
+                    name,
+                    last_played: played.max(manifest_played.unwrap_or(0)),
+                    playtime_minutes: minutes,
+                    added: 0,
+                    installed: manifest_played.is_some(),
+                    install_dir: manifest.and_then(|m| m.folder.clone()),
+                    cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),
+                    hero: find("library_hero", None, &["library_hero.jpg"]),
+                    header: find("library_header", Some("header_image"), &["header.jpg", "library_header.jpg"]),
+                    favourite: marked(favourites, appid),
+                    hidden: marked(hidden, appid),
+                    released: released(common),
+                    developers: credits(info, "developer"),
+                    publishers: credits(info, "publisher"),
+                    size_on_disk: manifest.map_or(0, |m| m.size),
+                    critic_score: score(common, "metacritic_score"),
+                    community_score: score(common, "review_percentage"),
+                    play_count: 0,
+                },
+            ))
         })
         .collect();
-    games.sort_by(|a, b| {
+    games.sort_by(|(a_id, a), (b_id, b)| {
         b.last_played
             .cmp(&a.last_played)
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-            .then(a.appid.cmp(&b.appid))
+            .then(a_id.cmp(b_id))
     });
+    let games = games.into_iter().map(|(_, game)| game).collect();
     let collections = collections.map(|c| c.collections);
     Ok(Library { user: local.persona, games, collections, ..Library::default() })
 }
@@ -304,6 +364,7 @@ mod registry {
 
     const HKEY_CURRENT_USER: isize = 0x8000_0001u32 as i32 as isize;
     const RRF_RT_REG_SZ: u32 = 0x0000_0002;
+    const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
 
     #[link(name = "advapi32")]
     extern "system" {
@@ -346,12 +407,35 @@ mod registry {
         let end = chars.iter().position(|&c| c == 0).unwrap_or(chars.len());
         Some(String::from_utf16_lossy(&chars[..end]))
     }
+
+    /// `HKCU\Software\Valve\Steam\Apps\<appid>\Running`, which Steam keeps at 1 while the game runs.
+    pub fn running(appid: u32) -> bool {
+        let (key, value) = (wide(&format!("Software\\Valve\\Steam\\Apps\\{appid}")), wide("Running"));
+        let (mut data, mut len) = (0u32, 4u32);
+        // SAFETY: all pointers are valid for the call; `len` is the size of `data` in bytes.
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_DWORD,
+                std::ptr::null_mut(),
+                (&mut data as *mut u32).cast(),
+                &mut len,
+            )
+        };
+        rc == 0 && data != 0
+    }
 }
 
 #[cfg(not(windows))]
 mod registry {
     pub fn steam_path() -> Option<String> {
         None
+    }
+
+    pub fn running(_appid: u32) -> bool {
+        false
     }
 }
 
@@ -433,5 +517,40 @@ mod tests {
         assert_eq!(score(&scores, "metacritic_score"), Some(87));
         assert_eq!(score(&scores, "review_percentage"), None);
         assert_eq!(score(&scores, "review_score"), None);
+    }
+
+    #[test]
+    fn steam_as_a_source_reads_its_install_and_names_its_games_by_appid() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        fixture::write(&root, &fixture::Fixture::standard()).unwrap();
+        let steam = Steam::at(Some(root.clone()));
+        assert_eq!((steam.key(), steam.name()), ("steam", "Steam"));
+        let found = steam.read().unwrap().expect("an install");
+        assert_eq!(found.from, root.display().to_string());
+        assert_eq!(found.library, load(&root).unwrap());
+
+        let game = Game { source: SOURCE.into(), source_id: "9100040".into(), ..Game::default() };
+        assert_eq!(steam.start(&game), Some(Start::Address("steam://rungameid/9100040".into())));
+        let ask = |ask| steam.ask(&game, ask).map(|start| start.to_string());
+        assert_eq!(ask(Ask::Install).as_deref(), Some("steam://install/9100040"));
+        assert_eq!(ask(Ask::Uninstall).as_deref(), Some("steam://uninstall/9100040"));
+        // Not Steam's, or no appid: nothing to ask Steam for.
+        for other in [Game { source: "gog".into(), ..game.clone() }, Game { source_id: "x".into(), ..game.clone() }] {
+            assert_eq!((steam.start(&other), steam.ask(&other, Ask::Install)), (None, None));
+            assert!(!steam.running(&other));
+        }
+    }
+
+    #[test]
+    fn an_install_that_is_not_there_is_an_error_and_no_install_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("no steam here");
+        let error = Steam::at(Some(missing.clone())).read().unwrap_err();
+        assert!(format!("{error:#}").starts_with(&missing.display().to_string()), "{error:#}");
+        // Off Windows no registry names one.
+        if cfg!(not(windows)) {
+            assert_eq!(Steam::at(None).read().unwrap(), None);
+        }
     }
 }

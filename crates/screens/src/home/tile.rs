@@ -16,7 +16,8 @@ pub fn cover_art(game: &Game, px: f32) -> Option<ArtKey> {
     Some(ArtKey { path: path.clone(), kind: Kind::Thumb(width) })
 }
 
-/// Where a game comes from: the store whose mark its tile carries.
+/// Where a game comes from: the store whose mark its tile carries. A source the library reads (docs/sources.md)
+/// has its variant here, by its key, for its mark and the name the Game hub writes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Source {
     Steam,
@@ -31,9 +32,13 @@ impl Source {
     }
 }
 
-/// The game's source. Every game is Steam's until the library has other sources and says which.
-pub fn source(_game: &Game) -> Option<Source> {
-    Some(Source::Steam)
+/// The game's source, by `Game::source`; none for a store the screens have no mark for. A made-up game, of no
+/// source, carries Steam's, as every game did before there were other sources.
+pub fn source(game: &Game) -> Option<Source> {
+    match game.source.as_str() {
+        "steam" | "" => Some(Source::Steam),
+        _ => None,
+    }
 }
 
 /// A source's mark, filling `mark`. The marks are the stores' own logos, which are not this project's to ship:

@@ -85,7 +85,7 @@ fn from_database(library: Library, seed: impl FnOnce(&mut library::Database)) ->
         return library;
     }
     let mut database = library::Database::in_memory().unwrap();
-    database.sync(library::STEAM, &library, ADDED).unwrap();
+    database.sync("steam", &library, ADDED).unwrap();
     seed(&mut database);
     database.snapshot().unwrap()
 }
@@ -109,11 +109,12 @@ fn library_with_a_collection() -> Library {
         for game in [&games[3], &games[11]] {
             database.set_favourite(game.id, true).unwrap();
         }
-        let appids = [0, 2, 5, 8, 12].map(|i| games[i].appid).to_vec();
-        let collection = model::Collection { source_id: "uc-Vj9aG3fT6uXo".into(), name: "Couch co-op".into(), appids };
+        let appids = [0, 2, 5, 8, 12].map(|i| games[i].source_id.clone()).to_vec();
+        let collection =
+            model::Collection { source_id: "uc-Vj9aG3fT6uXo".into(), name: "Couch co-op".into(), games: appids };
         let mut found = Library { user: Some("Player One".into()), games, ..Library::default() };
         found.collections = Some(vec![collection]);
-        database.sync(library::STEAM, &found, ADDED).unwrap();
+        database.sync("steam", &found, ADDED).unwrap();
     })
 }
 
@@ -1280,7 +1281,7 @@ fn a_hidden_games_card_opens_its_hub_and_a_double_tap_on_it_plays_nothing() {
             database.set_filter_shown(filter.id, filter.key.as_deref() == Some("hidden")).unwrap();
         }
     });
-    let hidden = library.hidden[0].appid;
+    let hidden = library.hidden[0].source_id.clone();
     let mut home = on_row(library);
     press(&mut home, &[Down, Down]);
     assert_eq!((home.home_focus(), home.focused_game()), (card(0, 0), None));

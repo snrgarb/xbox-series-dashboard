@@ -39,7 +39,7 @@ struct Row {
     /// Its games' places in the library they were found in.
     games: Vec<usize>,
     /// Which games they are, whatever library comes next: a row is only replaced when these change.
-    ids: Vec<(i64, u32)>,
+    ids: Vec<model::GameKey>,
     /// Their names, for the focus log.
     names: Vec<String>,
     /// The tile focus was last on in this row: where Up and Down onto it land.
@@ -104,10 +104,10 @@ impl Search {
         let typed = self.seen.as_ref().is_none_or(|was| was.text != seen.text);
         let rows = find::rows(library, &seen.text);
         self.seen = Some(seen);
-        let id = |&at: &usize| (library.games[at].id, library.games[at].appid);
+        let id = |&at: &usize| library.games[at].key();
         let same = rows.len() == self.rows.len()
             && rows.iter().zip(&self.rows).all(|((kind, games), row)| {
-                *kind == row.kind && games.len() == row.ids.len() && games.iter().map(id).eq(row.ids.iter().copied())
+                *kind == row.kind && games.len() == row.ids.len() && games.iter().map(id).eq(row.ids.iter().cloned())
             });
         if same {
             // The same games, perhaps at other places in the new library.
@@ -118,7 +118,7 @@ impl Search {
             return;
         }
         let was = match self.focus {
-            Focus::Tile { row, at } => self.rows.get(row).and_then(|row| row.ids.get(at)).copied(),
+            Focus::Tile { row, at } => self.rows.get(row).and_then(|row| row.ids.get(at)).cloned(),
             _ => None,
         };
         self.rows = rows
@@ -137,7 +137,7 @@ impl Search {
             return;
         }
         let same_game = was.filter(|_| !typed).and_then(|was| {
-            self.rows.iter().enumerate().find_map(|(row, r)| r.ids.iter().position(|&id| id == was).map(|at| (row, at)))
+            self.rows.iter().enumerate().find_map(|(row, r)| r.ids.iter().position(|id| *id == was).map(|at| (row, at)))
         });
         match same_game {
             Some((row, at)) => self.focus_tile(row, at),
@@ -368,7 +368,7 @@ mod tests {
         let names = ["Hades", "Halo Infinite", "Celeste", "Shadow of the Colossus"];
         let games = names.iter().enumerate().map(|(i, name)| Game {
             id: i as i64 + 1,
-            appid: i as u32 + 10,
+            source_id: (i + 10).to_string(),
             name: name.to_string(),
             added: 100 - i as u64,
             ..Game::default()

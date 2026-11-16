@@ -2,12 +2,14 @@
 pub mod audio;
 pub mod post;
 pub mod sound;
+pub mod source;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub use audio::{Audio, AudioDevice, Flow};
 pub use sound::Sound;
+pub use source::{Ask, Found, Source, Start};
 
 /// What Power can do to the machine (`docs/spec/guide.md`, section 6.2). The Dashboard's core only ever asks for
 /// one; carrying it out is the shell's, behind `shell::Power`. Leaving to the desktop is not one of them: that is
@@ -25,10 +27,14 @@ pub struct Game {
     /// no database: one a source has just read, or a made-up one.
     #[serde(default)]
     pub id: i64,
-    pub appid: u32,
-    /// Which store the game is from (`"steam"`), as the library database has it. Empty for a made-up game.
+    /// Which store the game is from, by its source's key (`"steam"`), as the library database has it. Empty for a
+    /// made-up game.
     #[serde(default)]
     pub source: String,
+    /// The store's own id for the game (Steam's appid, `"440"`): with `source`, what tells it from every other
+    /// game, in the library database and across its snapshots.
+    #[serde(default)]
+    pub source_id: String,
     pub name: String,
     /// Unix seconds; 0 = never played.
     pub last_played: u64,
@@ -79,6 +85,27 @@ pub struct Game {
     /// snapshot counts them; a source reads 0.
     #[serde(default)]
     pub play_count: u32,
+}
+
+/// What tells one game from another across snapshots of the library: its row in the library database, and its
+/// store and the store's id for it, which tell apart the games of a library that is in no database (all of whose
+/// rows are 0). A game owned in two stores is two games.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct GameKey {
+    pub id: i64,
+    pub source: String,
+    pub source_id: String,
+}
+
+impl Game {
+    pub fn key(&self) -> GameKey {
+        GameKey { id: self.id, source: self.source.clone(), source_id: self.source_id.clone() }
+    }
+
+    /// Whether this is the game `key` names.
+    pub fn is(&self, key: &GameKey) -> bool {
+        self.id == key.id && self.source == key.source && self.source_id == key.source_id
+    }
 }
 
 /// One run of a game, from its window coming up to its ending.
@@ -265,13 +292,14 @@ pub struct Collection {
     /// The store's own id for it (Steam's `uc-...`), the same however it is renamed.
     pub source_id: String,
     pub name: String,
-    /// The store's ids of its games. Some may be of no game the library has: a tool, DLC, a game no longer owned.
-    pub appids: Vec<u32>,
+    /// The store's ids of its games, as `Game::source_id` has them. Some may be of no game the library has: a
+    /// tool, DLC, a game no longer owned.
+    pub games: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Library {
-    /// Steam persona name of the signed-in user, if found.
+    /// The signed-in user's name at a store, if one says it: in a snapshot, that of the source with the most games.
     pub user: Option<String>,
     /// Every owned game (no tools, DLC, or soundtracks) that is not hidden, most recently played first.
     pub games: Vec<Game>,

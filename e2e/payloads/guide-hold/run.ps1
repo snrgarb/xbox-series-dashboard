@@ -53,7 +53,7 @@ try {
     $library = Initialize-FakeSteam
     $game = @($library.games | Where-Object last_played -gt 0)[0]
     if (-not $game -or -not $game.installed) { throw "The Recent row's first game isn't an installed one" }
-    Say "the game: $($game.name) ($($game.appid)), in $($game.install_dir)"
+    Say "the game: $($game.name) ($($game.source_id)), in $($game.install_dir)"
     # Nothing in this test is a question put to the user, however slow the VM.
     $env:DASHBOARD_NEEDS_USER_MS = '120000'
     if (Test-Path $record) { Remove-Item $record -Force; Say "note: a record of a frozen game was there before the test: removed" }

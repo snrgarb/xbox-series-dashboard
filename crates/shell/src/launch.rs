@@ -1,10 +1,13 @@
-//! Launching a game through Steam and following it: asked of Steam, its window up, booted, ended. While the game
-//! starts the Launch screen is over everything, on the Overlay; this says when it should go, hides Home's window
+//! Launching a game through its source and following it: asked of its store (or its program run), its window up,
+//! booted, ended. While the game starts the Launch screen is over everything, on the Overlay; this says when it should go, hides Home's window
 //! behind the game, and brings Home back when the game ends. Home's window is otherwise left as it is: it is never
 //! made topmost, layered or clipped.
 use std::ffi::c_void;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
+
+use model::{Game, Source};
 
 use crate::{Freezer, Overlay};
 
@@ -24,8 +27,8 @@ pub struct Launch(());
 
 #[cfg(not(windows))]
 impl Launch {
-    pub fn start(_: u32, name: &str, _: &Path, _: *mut c_void, _: bool) -> Option<Self> {
-        eprintln!("launch: {name} can only be started on Windows");
+    pub fn start(game: &Game, _: Arc<dyn Source>, _: &Path, _: *mut c_void, _: bool) -> Option<Self> {
+        eprintln!("launch: {} can only be started on Windows", game.name);
         None
     }
 
@@ -67,16 +70,14 @@ pub use win::Launch;
 
 #[cfg(windows)]
 mod win {
-    use super::{c_void, Duration, Freezer, Overlay, Path, Step};
-    use crate::{take_foreground, wide};
+    use super::{c_void, Arc, Duration, Freezer, Game, Overlay, Path, Source, Step};
+    use crate::take_foreground;
     use std::time::Instant;
     use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
     use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
-    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
     use windows_sys::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
     };
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
     /// How often the desktop is looked at.
@@ -91,15 +92,15 @@ mod win {
     /// A look this long after the one before came late: the machine is not keeping up.
     const LATE: Duration = Duration::from_millis(500);
     const GIVE_UP: Duration = Duration::from_secs(120);
-    /// The game is over once Steam and the desktop have shown nothing of it for this long.
+    /// The game is over once its store and the desktop have shown nothing of it for this long.
     const GONE: Duration = Duration::from_secs(2);
     /// The game's own window covers at least this much of the screen; a launcher's or a splash doesn't.
     const GAME_COVERS: f64 = 0.6;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum State {
-        /// Asked of Steam. The Launch screen is over whatever Steam and the game put up; Home's window is under
-        /// it all, as it was.
+        /// Asked of its store. The Launch screen is over whatever the store and the game put up; Home's window is
+        /// under it all, as it was.
         Starting,
         /// The Launch screen is fading away, Home's window hidden: what shows through is the game, or the window
         /// that wants the user.
@@ -109,7 +110,9 @@ mod win {
     }
 
     pub struct Launch {
-        appid: u32,
+        /// The game, and its source, which is asked whether it runs.
+        playing: Game,
+        source: Arc<dyn Source>,
         /// The game's folder, lower case with backslashes and a trailing one.
         dir: String,
         /// Home's window.
@@ -132,7 +135,7 @@ mod win {
         said_up: bool,
         /// Since when nothing of the game has shown.
         gone_since: Option<Instant>,
-        /// Whether Steam or the desktop has shown anything of the game yet.
+        /// Whether its store or the desktop has shown anything of the game yet.
         seen: bool,
         /// The game's largest window when last looked for.
         game: Option<HWND>,
@@ -147,40 +150,42 @@ mod win {
     }
 
     impl Launch {
-        /// Asks Steam for the game. `home` is Home's window, which has the foreground; `launch_screen` is whether
-        /// there is an Overlay to show the Launch screen on. None, having said why, when Steam can't be asked.
+        /// Asks the game's source for it: its store's address opened, or its program run. `dir` is the folder it is
+        /// installed in, whose windows are the game's; `home` is Home's window, which has the foreground;
+        /// `launch_screen` is whether there is an Overlay to show the Launch screen on. None, having said why, when
+        /// the game can't be started.
         // An HWND is a handle Windows looks up, never a pointer this code follows.
         #[allow(clippy::not_unsafe_ptr_arg_deref)]
-        pub fn start(appid: u32, name: &str, dir: &Path, home: *mut c_void, launch_screen: bool) -> Option<Self> {
+        pub fn start(
+            game: &Game,
+            source: Arc<dyn Source>,
+            dir: &Path,
+            home: *mut c_void,
+            launch_screen: bool,
+        ) -> Option<Self> {
             if home.is_null() {
                 return None;
             }
+            let Some(start) = source.start(game) else {
+                eprintln!("launch: {} can't start {}", source.name(), game.name);
+                return None;
+            };
             let mut dir = dir.to_string_lossy().replace('/', "\\").to_lowercase();
             if !dir.ends_with('\\') {
                 dir.push('\\');
             }
-            unsafe {
-                // Home has the foreground, and with it the right to let Steam and the game take it.
-                AllowSetForegroundWindow(ASFW_ANY);
-                let url = wide(&format!("steam://rungameid/{appid}"));
-                let result = ShellExecuteW(
-                    std::ptr::null_mut(),
-                    wide("open").as_ptr(),
-                    url.as_ptr(),
-                    std::ptr::null(),
-                    std::ptr::null(),
-                    SW_SHOWNORMAL,
-                );
-                if result as isize <= 32 {
-                    eprintln!("launch: Steam didn't take steam://rungameid/{appid} ({})", result as isize);
-                    return None;
-                }
+            // Home has the foreground, and with it the right to let the store and the game take it.
+            let result = crate::shell_open(&start);
+            if result <= 32 {
+                eprintln!("launch: {} didn't take {start} ({result})", source.name());
+                return None;
             }
             let screen = if launch_screen { "Launch screen up" } else { "no Overlay, so no Launch screen" };
-            log(&format!("{name} ({appid}) asked of Steam, {screen}"));
+            log(&format!("{} ({}) asked of {}, {screen}", game.name, game.source_id, source.name()));
             let now = Instant::now();
             Some(Self {
-                appid,
+                playing: game.clone(),
+                source,
                 dir,
                 home,
                 state: State::Starting,
@@ -215,7 +220,7 @@ mod win {
             self.next_look = now + LOOK_EVERY;
             let since_last = now - std::mem::replace(&mut self.looked, now);
             let look = look(&self.dir, self.home);
-            let running = steam_says_running(self.appid);
+            let running = self.source.running(&self.playing);
             self.seen |= running || look.any;
             self.game = look.largest;
 
@@ -451,25 +456,6 @@ mod win {
         if !take_foreground(home) {
             log("Windows did not give Home the foreground");
         }
-    }
-
-    /// Steam's own word on whether the game runs: HKCU\Software\Valve\Steam\Apps\<appid>\Running.
-    fn steam_says_running(appid: u32) -> bool {
-        let key = wide(&format!("Software\\Valve\\Steam\\Apps\\{appid}"));
-        let mut value = 0u32;
-        let mut size = 4u32;
-        let status = unsafe {
-            RegGetValueW(
-                HKEY_CURRENT_USER,
-                key.as_ptr(),
-                wide("Running").as_ptr(),
-                RRF_RT_REG_DWORD,
-                std::ptr::null_mut(),
-                &mut value as *mut u32 as *mut c_void,
-                &mut size,
-            )
-        };
-        status == 0 && value != 0
     }
 
     #[derive(Default)]

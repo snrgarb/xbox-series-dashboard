@@ -49,7 +49,7 @@ pub struct Background {
     pub in_front: bool,
     swirl: Swirl,
     /// The Recent row's game focus was on when last drawn.
-    focused: Option<(i64, u32)>,
+    focused: Option<model::GameKey>,
     /// Focus has moved since: it may have gone and come back between two frames.
     moved: bool,
     /// What the background is to show: a game's art, or with none the swirl.
@@ -142,9 +142,13 @@ impl Background {
     /// decoded.
     fn follow(&mut self, ui: &mut Ui, game: Option<&Game>) {
         let now = ui.store.time();
-        let focused = game.map(|game| (game.id, game.appid));
-        if std::mem::take(&mut self.moved) || focused != self.focused {
-            self.focused = focused;
+        let same = match (game, &self.focused) {
+            (Some(game), Some(focused)) => game.is(focused),
+            (None, None) => true,
+            _ => false,
+        };
+        if std::mem::take(&mut self.moved) || !same {
+            self.focused = game.map(Game::key);
             // Every move starts the wait again. A game with no art at all asks for nothing: what is up stays.
             self.next = match game {
                 Some(game) => hero_art(game, ui.px()).map(|art| {

@@ -1,5 +1,5 @@
 //! Windows itself: the Overlay, the window above every other that the Launch screen and the Guide are drawn on,
-//! the Toast strip above it, launching a game through Steam and following it until it ends, and holding it still
+//! the Toast strip above it, launching a game through its source and following it until it ends, and holding it still
 //! under the Guide. Anywhere but Windows there is no Overlay or strip, nothing can be launched and nothing is
 //! frozen, and the same calls say so or do nothing.
 //! Turning the machine off is behind a trait, so that only a run that means it can do it, and so is asking a store
@@ -56,6 +56,31 @@ pub fn log_wgpu() {
 #[cfg(windows)]
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
+}
+
+/// Opens what a source gave as Windows opens it: an address with the program registered for it, a program with
+/// its command line in its folder. Home has the foreground, and with it the right to let what opens take it, which
+/// it gives. Gives ShellExecute's answer, which is over 32 when it worked.
+#[cfg(windows)]
+fn shell_open(start: &model::Start) -> isize {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY, SW_SHOWNORMAL};
+    let (verb, file) = (wide("open"), wide(&start.target()));
+    let parameters = start.parameters().map(|parameters| wide(&parameters));
+    let folder = start.folder().map(|folder| wide(&folder.to_string_lossy()));
+    let or_null = |text: &Option<Vec<u16>>| text.as_ref().map_or(std::ptr::null(), |text| text.as_ptr());
+    unsafe {
+        AllowSetForegroundWindow(ASFW_ANY);
+        let result = ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            or_null(&parameters),
+            or_null(&folder),
+            SW_SHOWNORMAL,
+        );
+        result as isize
+    }
 }
 
 /// A window, for the log: its handle, process, class and title.

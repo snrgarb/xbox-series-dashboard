@@ -34,7 +34,7 @@ pub struct Around<'a> {
 }
 
 /// A page to open, and how: each page's own `Entry` says where on it to open and where focus lands.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Open {
     MyGames(my_games::Entry),
     GameHub(game_hub::Entry),

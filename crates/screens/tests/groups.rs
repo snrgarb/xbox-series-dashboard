@@ -32,7 +32,7 @@ struct Shell {
 impl Shell {
     fn new() -> Self {
         let mut database = library::Database::in_memory().unwrap();
-        database.sync(library::STEAM, &screens::fake_library(), ADDED).unwrap();
+        database.sync("steam", &screens::fake_library(), ADDED).unwrap();
         let dashboard = Dashboard::new(database.snapshot().unwrap());
         Self { database, dashboard, effects: Vec::new() }
     }
