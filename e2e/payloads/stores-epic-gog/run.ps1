@@ -5,7 +5,7 @@
 # opened, and Play starts it: an Epic game through the launcher's link, which the stand-in launcher takes; a GOG game as
 # its own program. The Launch screen comes up, the stand-in game starts, it is ended, and Home comes back.
 #
-# Judged by the Dashboard's log: each source's line as it is read (`epic: 3 games from C:\e2e\epic in 4 ms`), the
+# Judged by the Dashboard's log: each source's line as it is read (`epic: 3 games from C:\e2e\epic (...) in 4 ms`), the
 # focus log after each press (`focus: Search: Games(0) Kiteborne; "K" away, Games 1`, `focus: GameHub: <id> Hub Play`),
 # the launch's lines (`launch: Kiteborne (<id>) asked of Epic Games, Launch screen up at ...`, `launch: the game has
 # booted, ...`, `launch: the game has ended, Home back at ...`); and for Epic the stand-in launcher's own line in
@@ -84,12 +84,13 @@ function Walk-ToKey([string] $Button, [string] $Back, [string] $Key, [int] $Most
 
 # The source's line as it was read, `<key>: <n> games from <dir> in <ms> ms`, which must say as many games as the fake
 # was read back with, from $Root (unless $Games is -1: any number, from anywhere); and no other line of the source's,
-# which would be one saying it could not be read.
+# which would be one saying it could not be read. After <dir> a source may say which of its files gave what, in
+# brackets (Epic: `C:\e2e\epic (InstallHelper 1 of 2, manifests 1 of 3, catcache 3 of 5)`).
 function Expect-Read([string] $Key, [string] $Root, [int] $Games) {
     $line = Wait-DashboardLog "^${Key}: \d+ games from .+ in \d+ ms`$" 60
     if (-not $line) { $script:failures += "the Dashboard never said it read ${Key}: no '${Key}: <n> games from' line"; return }
     Say "read: $line"
-    if ($Games -ge 0 -and $line -notmatch "^${Key}: $Games games from $([regex]::Escape($Root)) in \d+ ms`$") {
+    if ($Games -ge 0 -and $line -notmatch "^${Key}: $Games games from $([regex]::Escape($Root))( \(.+\))? in \d+ ms`$") {
         $script:failures += "${Key} should have been read as $Games games from ${Root}: '$line'"
     }
     $other = @(Get-DashboardLog | Where-Object { $_ -match "^${Key}: " -and $_ -notmatch "^${Key}: \d+ games from " })
