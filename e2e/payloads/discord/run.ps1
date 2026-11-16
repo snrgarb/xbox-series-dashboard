@@ -117,7 +117,6 @@ try {
     }
 
     # --- To Settings > Discord.
-    Walk Up 'TopBar\(.+\)' 4
     Walk Right 'TopBar\(Settings\)' 6
     Press A 'Settings: Rail: Theme settings' | Out-Null
     Press Right 'Settings: Theme settings: Personalisation' | Out-Null
