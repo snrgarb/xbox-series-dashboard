@@ -335,6 +335,9 @@ function Start-Dashboard([string[]] $Arguments = @()) {
     if ($script:Safe) {
         $Arguments = @($Arguments) + @(Get-SafeArguments $Arguments)
     }
+    # No test asks a store's real services for art (docs/sources.md, "Art"): where a test has no stand-in for them,
+    # an address that answers nothing.
+    if (@($Arguments) -notcontains '--store-art-service') { $Arguments = @($Arguments) + @('--store-art-service', 'http://127.0.0.1:9') }
     $start = @{ FilePath = $exe; WorkingDirectory = $script:Payload; RedirectStandardError = $script:DashboardLog
                 NoNewWindow = $true; PassThru = $true }
     if ($Arguments.Count) { $start.ArgumentList = $Arguments }  # Start-Process refuses an empty list

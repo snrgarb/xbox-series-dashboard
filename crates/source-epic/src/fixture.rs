@@ -159,7 +159,8 @@ fn manifest(game: &FixtureGame, dir: &Path, guid: &str) -> Value {
     })
 }
 
-/// The item in the catalogue cache. Its pictures' addresses go nowhere: nothing may fetch them.
+/// The item in the catalogue cache. Its pictures' addresses go nowhere: `.invalid` never resolves, so the art
+/// lookup's request for one fails at once (a failure, not a miss) and SteamGridDB is asked as for a game with none.
 fn catalogue_item(game: &FixtureGame) -> Value {
     let categories = match game.kind {
         Kind::Game => json!([{ "path": "games" }, { "path": "applications" }]),

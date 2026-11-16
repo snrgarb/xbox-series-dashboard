@@ -12,10 +12,12 @@
 //!   `ShellVisuals`, else the manifest's (an `ms-resource:` name looked up in the package's resources); its install
 //!   folder the package's root, where its processes' programs are, which is how the shell follows its windows. Size on
 //!   disk is not known without walking the whole folder, and is left at 0.
-//! - **Art,** from the package's own logos (the largest scale where the plain file is absent): **cover** the largest
-//!   square logo (the config's `Square480x480Logo`, the manifest's `Square310x310Logo`, then the 150, the store logo
-//!   and the 44); **hero** the config's `SplashScreenImage` (1920x1080 in a GDK game), else the manifest's splash
-//!   screen; **header** the manifest's `Wide310x150Logo`. Square logos are small for a tile: #80's art takes over.
+//! - **Art,** from the package's own logos (the largest scale where the plain file is absent): **square** the large
+//!   tile's logo (the config's `Square480x480Logo`, else the manifest's `Square310x310Logo`); the 150, the store logo
+//!   and the 44 are icons, taken only for a game with no product in the Store; **hero** the config's
+//!   `SplashScreenImage` (1920x1080 in a GDK game), else the manifest's splash screen; **header** the manifest's
+//!   `Wide310x150Logo`; no **cover**: a package has nothing portrait. The config's `StoreId` is `OnlineArt::product`,
+//!   by which the art lookup asks the Microsoft Store's catalogue for the rest (#110; docs/sources.md, "Art").
 //! - **Not installed:** nothing. What the user owns, and the Game Pass catalogue, are Xbox's servers' to say.
 //! - **Start:** the app user model ID, `<family name>!<application id>`, as an address: `shell:AppsFolder\<AUMID>`,
 //!   which Windows activates as the Start menu does. Never the game's exe, which would skip its app-launch.
@@ -37,7 +39,7 @@ mod packaged;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
-use model::{Ask, Found, Game, Library, Source, Start};
+use model::{Ask, Found, Game, Library, OnlineArt, Source, Start};
 
 use manifest::{asset, plain};
 
@@ -118,16 +120,16 @@ pub fn game_at(root: &Path, registered: Option<&Registered>) -> Result<Option<Ga
         .or_else(|| names.iter().find_map(|name| looked_up(registered, &manifest.name, name.as_deref()?)))
         .unwrap_or_else(|| manifest.name.clone());
     let first = |logos: &[&Option<String>]| logos.iter().find_map(|logo| asset(root, logo.as_deref()?));
-    let cover = first(&[
-        &config.square480,
-        &app.square310,
-        &config.square150,
-        &app.square150,
-        &config.store_logo,
-        &manifest.logo,
-        &config.square44,
-        &app.square44,
-    ]);
+    let product = config.store_id.clone().filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric()));
+    // The large tile's logo is the game's square art; the smaller ones are icons, left to the Store's box art
+    // online where the game has a product there, and the art only of a game that has none.
+    let large = first(&[&config.square480, &app.square310]);
+    let small = || {
+        let icons =
+            [&config.square150, &app.square150, &config.store_logo, &manifest.logo, &config.square44, &app.square44];
+        first(&icons)
+    };
+    let square = large.or_else(|| if product.is_none() { small() } else { None });
     let publishers = plain(&config.publisher_display_name)
         .or(plain(&manifest.publisher_display_name))
         .map(|p| vec![p.trim().to_string()])
@@ -138,9 +140,12 @@ pub fn game_at(root: &Path, registered: Option<&Registered>) -> Result<Option<Ga
         name: name.trim().to_string(),
         installed: true,
         install_dir: Some(root.to_path_buf()),
-        cover,
+        // No portrait picture in a package: the Store's poster online, else SteamGridDB's, else the square cropped.
+        cover: None,
         hero: first(&[&config.splash, &app.splash]),
         header: first(&[&app.wide310]),
+        square,
+        online: OnlineArt { product, ..OnlineArt::default() },
         publishers,
         ..Game::default()
     }))
@@ -335,20 +340,27 @@ mod tests {
         assert!(tidewater.installed);
         assert_eq!(tidewater.publishers, ["Made Up Studio"]);
         let assets = content.join("Assets");
-        assert_eq!(tidewater.cover.as_deref(), Some(assets.join("Logo480.png").as_path()));
+        assert_eq!(tidewater.square.as_deref(), Some(assets.join("Logo480.png").as_path()));
+        assert_eq!(tidewater.cover, None);
+        assert_eq!(tidewater.online.product.as_deref(), Some("9ZZZMADEUP01"));
         assert_eq!(tidewater.hero.as_deref(), Some(assets.join("Splash.png").as_path()));
         assert_eq!(tidewater.header.as_deref(), Some(assets.join("Wide310.png").as_path()));
 
         // Its logos only at scales, its config's name the one to show over the manifest's ms-resource: name.
         let lumen = games.iter().find(|g| g.name == "Lumen Hollow").unwrap();
         let assets = root.join("XboxGames").join("Lumen Hollow").join("Content").join("Assets");
-        assert_eq!(lumen.cover.as_deref(), Some(assets.join("Logo150.scale-200.png").as_path()));
+        // Its logos are icons, and it has a product in the Store: its square is the Store's box art, online.
+        assert_eq!((lumen.square.as_deref(), lumen.cover.as_deref()), (None, None));
+        assert_eq!(lumen.online.product.as_deref(), Some("9ZZZMADEUP02"));
+        assert!(assets.join("Logo150.scale-200.png").is_file());
         // No splash screen in its config: the manifest's, and no wide tile.
         assert_eq!(lumen.hero.as_deref(), Some(assets.join("Splash620.scale-100.png").as_path()));
         assert_eq!(lumen.header, None);
 
-        // The one under ModifiableWindowsApps.
-        assert!(games.iter().any(|g| g.name == "Pebble Courier"));
+        // The one under ModifiableWindowsApps, with no product in the Store: its own large logo.
+        let pebble = games.iter().find(|g| g.name == "Pebble Courier").unwrap();
+        assert!(pebble.square.as_deref().is_some_and(|logo| logo.ends_with("Logo480.png")));
+        assert_eq!(pebble.online.product, None);
     }
 
     #[test]

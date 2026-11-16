@@ -287,6 +287,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         show_play_history: false,
         show_battery_percent: false,
         use_guide: false,
+        art_online: true,
         art_key: false,
     };
     assert_eq!(dashboard.options(), left);

@@ -1,7 +1,9 @@
 //! Our own art cache: the pictures downloaded for games their store gives none for, in the data folder, one folder a
-//! game: `art/<source>/<source_id>/{cover,hero,header}.{png,jpg,webp}`. A picture that was looked for and not found
-//! leaves `<kind>.none` in its place, holding when (Unix seconds), so that it is not asked for again until
-//! [`MISS_DAYS`] have passed. Nothing here is a store's: clearing the cache removes this folder and nothing else.
+//! game: `art/<source>/<source_id>/{cover,hero,header,square}.{png,jpg,webp}`. A picture that was looked for and not
+//! found leaves a mark in its place holding when (Unix seconds), one for each place it was looked for in
+//! (`<kind>.store.none` for the store's own art online, `<kind>.none` for SteamGridDB), so that it is not asked for
+//! there again until [`MISS_DAYS`] have passed. Nothing here is a store's: clearing the cache removes this folder and
+//! nothing else.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -10,7 +12,7 @@ use anyhow::{Context, Result};
 /// How long a picture that was not found is not asked for again.
 pub const MISS_DAYS: u64 = 7;
 
-/// A game's three pictures, as a tile, Home's background and the Game hub use them.
+/// A game's four pictures, as tiles, Home's background and the Game hub use them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
     /// Portrait, 600x900: a tile's face.
@@ -19,10 +21,12 @@ pub enum Kind {
     Hero,
     /// Landscape, 920x430 or 460x215.
     Header,
+    /// Square, 1:1: a square tile's face (Home's Recent row), else the cover cropped.
+    Square,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Cover, Kind::Hero, Kind::Header];
+    pub const ALL: [Kind; 4] = [Kind::Cover, Kind::Hero, Kind::Header, Kind::Square];
 
     /// Its file's name without the extension.
     pub fn name(self) -> &'static str {
@@ -30,11 +34,31 @@ impl Kind {
             Kind::Cover => "cover",
             Kind::Hero => "hero",
             Kind::Header => "header",
+            Kind::Square => "square",
         }
     }
 
     fn index(self) -> usize {
         self as usize
+    }
+}
+
+/// Where online a picture was looked for: what a remembered miss is a miss of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Online {
+    /// The store's own art online: its CDN or public catalogue.
+    Store,
+    /// SteamGridDB, with the user's key.
+    SteamGridDb,
+}
+
+impl Online {
+    /// The mark's file name for a kind: `cover.store.none`, `cover.none` (SteamGridDB's, as #80 named it).
+    fn miss_file(self, kind: Kind) -> String {
+        match self {
+            Online::Store => format!("{}.store.none", kind.name()),
+            Online::SteamGridDb => format!("{}.none", kind.name()),
+        }
     }
 }
 
@@ -57,8 +81,8 @@ pub struct ArtDir {
     root: PathBuf,
 }
 
-/// The pictures the cache has of each game, by `(source, source_id)`: cover, hero, header.
-pub type Index = HashMap<(String, String), [Option<PathBuf>; 3]>;
+/// The pictures the cache has of each game, by `(source, source_id)`: cover, hero, header, square.
+pub type Index = HashMap<(String, String), [Option<PathBuf>; 4]>;
 
 impl ArtDir {
     pub fn new(root: impl Into<PathBuf>) -> Self {
@@ -95,7 +119,7 @@ impl ArtDir {
             for game in games.flatten() {
                 let Some(id) = game.file_name().to_str().and_then(unescape) else { continue };
                 let Ok(files) = std::fs::read_dir(game.path()) else { continue };
-                let mut found: [Option<PathBuf>; 3] = Default::default();
+                let mut found: [Option<PathBuf>; 4] = Default::default();
                 for file in files.flatten() {
                     let path = file.path();
                     let (Some(stem), Some(ext)) = (path.file_stem().and_then(|s| s.to_str()), path.extension()) else {
@@ -116,19 +140,19 @@ impl ArtDir {
         index
     }
 
-    /// Whether the picture was looked for and not found less than [`MISS_DAYS`] before `now`.
-    pub fn missed(&self, source: &str, source_id: &str, kind: Kind, now: u64) -> bool {
-        let file = self.game_dir(source, source_id).join(format!("{}.none", kind.name()));
+    /// Whether the picture was looked for `there` and not found less than [`MISS_DAYS`] before `now`.
+    pub fn missed(&self, source: &str, source_id: &str, kind: Kind, there: Online, now: u64) -> bool {
+        let file = self.game_dir(source, source_id).join(there.miss_file(kind));
         let Ok(text) = std::fs::read_to_string(file) else { return false };
         let Ok(when) = text.trim().parse::<u64>() else { return false };
         now < when.saturating_add(MISS_DAYS * 24 * 60 * 60)
     }
 
-    /// Remembers that the picture was looked for at `now` and not found.
-    pub fn miss(&self, source: &str, source_id: &str, kind: Kind, now: u64) -> Result<()> {
+    /// Remembers that the picture was looked for `there` at `now` and not found.
+    pub fn miss(&self, source: &str, source_id: &str, kind: Kind, there: Online, now: u64) -> Result<()> {
         let dir = self.game_dir(source, source_id);
         std::fs::create_dir_all(&dir).with_context(|| format!("making {}", dir.display()))?;
-        std::fs::write(dir.join(format!("{}.none", kind.name())), now.to_string())?;
+        std::fs::write(dir.join(there.miss_file(kind)), now.to_string())?;
         Ok(())
     }
 
@@ -142,8 +166,8 @@ impl ArtDir {
         let part = dir.join(format!("{}.part", kind.name()));
         std::fs::write(&part, bytes)?;
         std::fs::rename(&part, &path)?;
-        // One picture of a kind: an older one of another format, and the remembered miss, go.
-        for other in ["png", "jpg", "webp", "none"].into_iter().filter(|&other| other != ext) {
+        // One picture of a kind: an older one of another format, and the remembered misses, go.
+        for other in ["png", "jpg", "webp", "none", "store.none"].into_iter().filter(|&other| other != ext) {
             let _ = std::fs::remove_file(dir.join(format!("{}.{other}", kind.name())));
         }
         Ok(path)
@@ -222,7 +246,13 @@ mod tests {
         assert!(saved.ends_with("art/epic/Moss/cover.png"));
         assert_eq!(art.find("epic", "Moss", Kind::Cover), Some(saved.clone()));
         let index = art.index();
-        assert_eq!(index[&("epic".into(), "Moss".into())], [Some(saved), None, None]);
+        assert_eq!(index[&("epic".into(), "Moss".into())], [Some(saved), None, None, None]);
+        let square = art.save("epic", "Moss", Kind::Square, PNG).unwrap();
+        assert!(square.ends_with("art/epic/Moss/square.png"));
+        assert_eq!(art.index()[&("epic".into(), "Moss".into())][3], Some(square));
+        assert_eq!(art.clear().unwrap(), 2);
+        let saved = art.save("epic", "Moss", Kind::Cover, PNG).unwrap();
+        assert_eq!(art.find("epic", "Moss", Kind::Cover), Some(saved));
         assert_eq!(art.clear().unwrap(), 1);
         assert!(!art.root().exists() && art.index().is_empty());
         assert_eq!(art.clear().unwrap(), 0);
@@ -233,13 +263,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let art = ArtDir::under(dir.path());
         let now = 1_800_000_000;
-        assert!(!art.missed("gog", "1", Kind::Hero, now));
-        art.miss("gog", "1", Kind::Hero, now).unwrap();
-        assert!(art.missed("gog", "1", Kind::Hero, now + 6 * 86_400));
-        assert!(!art.missed("gog", "1", Kind::Hero, now + 7 * 86_400));
-        assert!(!art.missed("gog", "1", Kind::Cover, now));
-        // A picture found later takes the miss's place.
+        let (store, sgdb) = (Online::Store, Online::SteamGridDb);
+        assert!(!art.missed("gog", "1", Kind::Hero, sgdb, now));
+        art.miss("gog", "1", Kind::Hero, sgdb, now).unwrap();
+        assert!(art.missed("gog", "1", Kind::Hero, sgdb, now + 6 * 86_400));
+        assert!(!art.missed("gog", "1", Kind::Hero, sgdb, now + 7 * 86_400));
+        assert!(!art.missed("gog", "1", Kind::Cover, sgdb, now));
+        // A miss at the store is not one at SteamGridDB: a key entered tomorrow looks there.
+        art.miss("gog", "1", Kind::Square, store, now).unwrap();
+        assert!(art.missed("gog", "1", Kind::Square, store, now) && !art.missed("gog", "1", Kind::Square, sgdb, now));
+        // A picture found later takes the misses' place.
         art.save("gog", "1", Kind::Hero, PNG).unwrap();
-        assert!(!art.missed("gog", "1", Kind::Hero, now));
+        art.save("gog", "1", Kind::Square, PNG).unwrap();
+        assert!(!art.missed("gog", "1", Kind::Hero, sgdb, now) && !art.missed("gog", "1", Kind::Square, store, now));
     }
 }

@@ -209,7 +209,8 @@ try {
     Press B "Search: Games\(0\) .+; `"$letter`" away, Games \d+" | Out-Null
     if (-not (Walk-To Right Left "^focus: Search: Games\(\d+\) $escaped; " $gameName ($found + 1))) { throw "$gameName is not among the games Search found" }
 
-    # A: its Game hub, focus on Play. Its cover is the package's largest square logo; the mark beside it, Xbox's plus.
+    # A: its Game hub, focus on Play. Its cover is the package's large square logo, cropped (#110: a package has
+    # nothing portrait); the mark beside it, Xbox's plus.
     $hub = Press A "GameHub: $([regex]::Escape($id)) Hub Play"
     if (-not $hub) { throw "$gameName's Game hub did not open" }
     Start-Sleep -Milliseconds 4500

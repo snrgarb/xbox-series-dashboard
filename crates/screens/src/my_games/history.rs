@@ -9,7 +9,7 @@ use super::look::{self, LINE, ROW, SECTION, TEXT_DIM, TEXT_SEMIBOLD};
 use super::nav;
 use super::{open_game_hub, open_tile_menu, Look, Outcome, Pane};
 use crate::hint_bar::{self, Hint};
-use crate::home::cover_art;
+use crate::home::square_art;
 use crate::pages::{Around, PageAction, Tick};
 use crate::{theme, Effect};
 
@@ -216,7 +216,7 @@ impl Pane for History {
                     let cover = Rect::new(back.x, back.y, back.h, back.h);
                     ui.fill(cover, theme::TILE, 0.0);
                     let Some(game) = around.library.games.iter().find(|game| game.id == row.game) else { continue };
-                    if let Some(key) = cover_art(game, ui.px()) {
+                    if let Some(key) = square_art(game, ui.px()) {
                         ui.art(cover, &key, Crop::Top, 1.0, 0.0);
                     }
                     let lines = 2.0 * LINE + LINES_APART;

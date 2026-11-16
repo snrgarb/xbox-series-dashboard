@@ -705,7 +705,16 @@ impl App {
                     self.audio_read = None;
                 }
                 // In force already: saved, so that it is still so the next time.
-                Effect::Set(change) => self.store.set(change),
+                Effect::Set(change) => {
+                    self.store.set(change);
+                    // Settings > Art's Download art online: off stops a lookup under way; on starts one.
+                    if change.setting == Setting::DownloadArtOnline {
+                        self.art = None;
+                        if change.on && self.art_started {
+                            self.start_art();
+                        }
+                    }
+                }
                 // The user's marks go to the library database, and what it says then is what the screens show.
                 Effect::Favourite { game, on } => {
                     let marked = self.store.set_favourite(game, on);

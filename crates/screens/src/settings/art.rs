@@ -1,7 +1,7 @@
-//! Theme settings > Art (docs/spec/settings.md, 16.8): the user's own SteamGridDB key, which art for the games a
-//! store gives none for is looked up with, and "Clear downloaded art". The Bundle has no such page (Playnite's
-//! metadata sources did this); it is laid out as the Bundle's Discord page is (section 6.9): a label, its
-//! description, a value with its pane buttons, then the next group 40 under.
+//! Theme settings > Art (docs/spec/settings.md, 16.8): the user's own SteamGridDB key, which art no store has for a
+//! game is looked up with, "Clear downloaded art", and "Download art online", which turns every download of art off
+//! and on. The Bundle has no such page (Playnite's metadata sources did this); it is laid out as the Bundle's Discord
+//! page is (section 6.9): a label, its description, a value with its pane buttons, then the next group 40 under.
 //!
 //! The key is typed on the Console keyboard, shown as dots, and goes to the shell as `Effect::ArtKey` the moment it
 //! is kept. Nothing here ever has it again: the page shows dots while there is one, "Not set" while there is not.
@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use ui::{Button, Color, HAlign, Press, Rect, Ui, VAlign};
 
-use super::controls::{self, FIELD_HEIGHT, LEFT, ROW_WIDTH, TOP};
-use super::{Pane, Step};
+use super::controls::{self, FIELD_HEIGHT, FIELD_WIDTH, LEFT, ROW_WIDTH, TOP};
+use super::{Change, Pane, Setting, Step};
 use crate::keyboard::{self, Event};
 use crate::menu_panel::{self, icon, Answer, MenuPanel, Row, DIM, FLY};
 use crate::pages::{Around, Dialog, Open, PageAction};
@@ -18,14 +18,18 @@ use crate::theme::{BODY, TEXT_DIM};
 use crate::{Effect, Secret};
 
 const KEY_LABEL: &str = "SteamGridDB key";
-const KEY_ABOUT: &str =
-    "Art for games their store has none for comes from SteamGridDB, with your own API key: make one \
-                         at steamgriddb.com, under Preferences and API. Only a game's store id or name is sent.";
+const KEY_ABOUT: &str = "Art that no store has for a game comes from SteamGridDB, with your own API key: make one at \
+                         steamgriddb.com, under Preferences and API. Only a game's store id or name is sent.";
 const ART_LABEL: &str = "Downloaded art";
 const ART_ABOUT: &str =
     "Art downloaded for your games is kept on this PC. Clearing it removes only that: a store's own \
                          art stays.";
 const CLEAR_ART: &str = "Clear downloaded art";
+const ONLINE_LABEL: &str = "Art online";
+const ONLINE_ABOUT: &str =
+    "Downloads art for games that have none on this PC: first from the game's own store, which needs \
+                            no key, then from SteamGridDB. Turn it off to use only what is on this PC.";
+const ONLINE: &str = "Download art online";
 /// What the value reads while a key is kept: as many dots whatever its length.
 pub const DOTS: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
 const NOT_SET: &str = "Not set";
@@ -43,6 +47,7 @@ enum Focus {
     Type,
     Clear,
     ClearArt,
+    Online,
 }
 
 impl Focus {
@@ -51,6 +56,7 @@ impl Focus {
             Focus::Type => "Type",
             Focus::Clear => "Clear",
             Focus::ClearArt => CLEAR_ART,
+            Focus::Online => ONLINE,
         }
     }
 }
@@ -100,8 +106,8 @@ impl Pane for Art {
         "Art".into()
     }
 
-    /// `Art: Type`, `Art: Clear`, `Art: Clear downloaded art`; with the question up, `Art: Prompt(Clear) of Clear
-    /// downloaded art`.
+    /// `Art: Type`, `Art: Clear`, `Art: Clear downloaded art`, `Art: Download art online`; with the question up,
+    /// `Art: Prompt(Clear) of Clear downloaded art`.
     fn focus(&self) -> String {
         match &self.prompt {
             Some(prompt) => {
@@ -124,9 +130,15 @@ impl Pane for Art {
             (Button::Right, Type) => self.focus = Clear,
             (Button::Left, Clear) => self.focus = Type,
             (Button::Down, Type | Clear) => self.focus = ClearArt,
+            (Button::Down, ClearArt) => self.focus = Online,
             (Button::Up, ClearArt) => self.focus = Type,
+            (Button::Up, Online) => self.focus = ClearArt,
             // Left from the first column is B, as on Discord's page.
-            (Button::B, _) | (Button::Left, Type | ClearArt) => return Step::Back,
+            (Button::B, _) | (Button::Left, Type | ClearArt | Online) => return Step::Back,
+            (Button::A, Online) => {
+                let change = Change { setting: Setting::DownloadArtOnline, on: !around.options.art_online };
+                return Step::Do(PageAction::Effect(Effect::Set(change)));
+            }
             (Button::A, Type) => return Step::Do(PageAction::Open(Open::TextEntry(ENTRY))),
             (Button::A, Clear) if around.options.art_key => {
                 return Step::Do(PageAction::Effect(Effect::ArtKey(None)));
@@ -190,6 +202,12 @@ impl Pane for Art {
         y += controls::label(ui, LEFT, y, ART_LABEL) + 4.0;
         y += controls::description(ui, LEFT, y, ROW_WIDTH, ART_ABOUT) + 18.0;
         let clear_art_box = Rect::new(LEFT, y, controls::pane_button_width(ui, CLEAR_ART), FIELD_HEIGHT);
+        y += FIELD_HEIGHT + 40.0;
+        // Art online: its label, description, and the checkbox 18 under.
+        y += controls::label(ui, LEFT, y, ONLINE_LABEL) + 4.0;
+        y += controls::description(ui, LEFT, y, ROW_WIDTH, ONLINE_ABOUT) + 18.0;
+        let online = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
+        controls::checkbox_row(ui, online, ONLINE, around.options.art_online, has(Focus::Online));
         // The focused button last, its ring over its neighbours.
         let buttons = [
             (Focus::Type, type_box, "Type", true),
