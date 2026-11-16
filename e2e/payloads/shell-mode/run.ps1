@@ -95,7 +95,7 @@ function Invoke-Exe([string] $Exe, [string] $Name, [string[]] $Arguments) {
     $p = Start-Process -FilePath $Exe -ArgumentList $Arguments -NoNewWindow -PassThru -RedirectStandardError $log `
         -RedirectStandardOutput (Join-Path $Out "$Name.out.log")
     $p.Handle | Out-Null
-    if (-not $p.WaitForExit(90000)) { Stop-Process -Id $p.Id -Force; throw "$Name didn't end within 90 s" }
+    if (-not $p.WaitForExit(90000)) { & taskkill.exe /PID $p.Id /T /F 2>&1 | Out-Null; throw "$Name didn't end within 90 s" }
     $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
     Say "$Name ($($Arguments -join ' ')): exit $($p.ExitCode)"
     $lines | ForEach-Object { Say "  $_" }
@@ -195,17 +195,20 @@ function Finish {
     try {
         if (Test-Path (Join-Path $data 'shell\record.json')) { Invoke-Exe $installed 'shell-off-at-end' @('--shell-off') | Out-Null }
     } catch { Say "couldn't turn it off at the end: $_" }
-    Unregister-ScheduledTask -TaskName xbox-e2e-shell-next -Confirm:$false -ErrorAction SilentlyContinue
-    if (Test-Path $logs) { Copy-Item $logs (Join-Path $Out 'shell-logs') -Recurse -Force }
+    # Each step on its own: none failing keeps the output from going back.
+    try { Unregister-ScheduledTask -TaskName xbox-e2e-shell-next -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+    try { if (Test-Path $logs) { Copy-Item $logs (Join-Path $Out 'shell-logs') -Recurse -Force } } catch { Say "couldn't copy the logs: $_" }
     $failures | ForEach-Object { Say "failed: $_" }
     $result = if ($failures.Count -eq 0) { 'PASS' } else { 'FAIL' }
     Say "result: $result"
     Set-Content (Join-Path $Out 'exitcode.txt') $(if ($result -eq 'PASS') { 0 } else { 1 })
-    Disconnect-Pad
+    try { Disconnect-Pad } catch {}
     if ($state.phase -gt 1 -and $state.upload) {
-        $zip = 'C:\e2e\out.zip'
-        Compress-Archive (Join-Path $Out '*') $zip -Force
-        Invoke-WebRequest -UseBasicParsing -Method Put -InFile $zip -ContentType application/zip $state.upload | Out-Null
+        try {
+            $zip = 'C:\e2e\out.zip'
+            Compress-Archive (Join-Path $Out '*') $zip -Force
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Method Put -InFile $zip -ContentType application/zip $state.upload | Out-Null
+        } catch { Say "couldn't send the output: $_" }
     }
     exit $(if ($result -eq 'PASS') { 0 } else { 1 })
 }

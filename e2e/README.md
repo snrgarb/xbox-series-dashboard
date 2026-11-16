@@ -24,7 +24,9 @@ What comes back:
 - `standin.log`: what the stand-in Steam and games did.
 - `fake-steam.json`: the fake library as the Dashboard's Steam reader read it.
 - `*.png`: the screen at each step. `error.png` is the screen when the test threw.
-- `boot.log`, `exitcode.txt`: the harness's own.
+- `boot.log`, `exitcode.txt`: the harness's own. On the VM, run.ps1's own output is in `run.out.log` and
+  `run.err.log`, and `boot-error.txt` says so if run.ps1 was ended for running past the limit (the timeout less two
+  minutes; exit code 124): out.zip goes back either way.
 
 The VM's settings and API token are in `~/.config/xbox-e2e/proxmox.env`, outside the repository; `proxmox/vm.sh`'s header
 says what goes in it.
@@ -232,7 +234,8 @@ Two payloads (docs/spec/shell-mode.md):
   `Shell` line exactly, no line says it wrote, and `reg query` and `schtasks /Query` read every place the same before
   and after. Then it starts `dashboard.exe --from-shell --dry-shell` (the window as the shell starts it, topmost for
   Start-up, the shell's events left alone) and needs `first frame presented` in `<data>\shell\logs\dashboard-*.log`
-  with no `window: ERROR`: run it before `shell-mode`. `e2e/run.sh shell-dry`, or `e2e/htpc/run.sh shell-dry`.
+  with no `window: ERROR`: run it before `shell-mode`. It ends within 170 s whatever happens: every process it starts
+  has its output in files of its own, is waited on with a limit, and is ended with its whole tree, by pid. `e2e/run.sh shell-dry`, or `e2e/htpc/run.sh shell-dry`.
 - **`shell-mode`**, the VM only: it turns shell mode on for real and restarts the VM five times. In safe mode it
   throws at once (`Assert-VmOnly`). It needs longer than the default wait:
 

@@ -232,8 +232,18 @@ try {
     \$env:E2E_OUT = \$out
     # Where out.zip goes: a payload that restarts the VM (shell-mode) sends it from its last phase itself.
     \$env:E2E_UPLOAD = "\$base/out.zip"
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "\$root\\payload\\run.ps1"
-    \$code = \$LASTEXITCODE
+    # Its output in files, not a pipe this script reads to the end (which anything it started could hold open), and
+    # waited on with a limit short of the task's, so out.zip goes back whatever run.ps1 does.
+    \$run = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "\$root\\payload\\run.ps1" \`
+        -NoNewWindow -PassThru -RedirectStandardOutput "\$out\\run.out.log" -RedirectStandardError "\$out\\run.err.log"
+    \$run.Handle | Out-Null
+    if (\$run.WaitForExit($(( timeout > 240 ? timeout - 120 : timeout / 2 )) * 1000)) {
+        \$code = \$run.ExitCode
+    } else {
+        "run.ps1 didn't end within $(( timeout > 240 ? timeout - 120 : timeout / 2 )) s; ended with its process tree" | Set-Content "\$out\\boot-error.txt"
+        & taskkill.exe /PID \$run.Id /T /F 2>&1 | Out-Null
+        \$code = 124
+    }
 } catch {
     \$_ | Out-String | Set-Content "\$out\\boot-error.txt"
 } finally {

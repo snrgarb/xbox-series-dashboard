@@ -8,49 +8,99 @@
 #     TV PC with the Bundle's Boot shell set up), says each refusal and that nothing was written. Either way its exit
 #     code goes with what it said (0 or 3);
 #   - off's dry run says off already, or what it would put back, and exits 0;
-#   - the four places shell mode writes, and the record, are exactly as they were before (read with reg.exe and
-#     schtasks.exe, which this test only reads with);
+#   - the four places shell mode writes, and the record, are exactly as they were before (read from the registry, and
+#     with schtasks.exe, which this test only reads with);
 #   - no line of either says it wrote anything (`shell: set `, `shell: register`, `shell: saved`, `shell: renamed`);
 #   - `--from-shell --dry-shell`, the window's path as the shell starts it with the shell's events left alone, logs to
 #     <data>\shell\logs\dashboard-<stamp>.log, says it is a dry run, and presents its first frame (`first frame
 #     presented`) with no `window: ERROR` and no panic: checked here, on any machine, before shell-mode restarts one.
+#
+# Bounded: the whole payload ends within $Budget seconds whatever happens. Every process it starts has its stdout and
+# stderr in files of its own (none holds this script's output, which the harness reads to its end), is waited on with
+# a limit, and is ended with everything it started, by pid, on every path out.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
 $failures = @()
+$Budget = 170
+$clock = [Diagnostics.Stopwatch]::StartNew()
+$Since = (Get-Date).AddSeconds(-2)
+$started = @()
 
-# What shell mode would touch, as text: each value with its type, or "none"; the task's XML, or "none"; the record.
-function Get-ShellPlaces([string] $Data) {
+# Seconds left of $Want, within what is left of the budget (a few kept for the end).
+function Get-Limit([double] $Want) { [Math]::Max(1, [Math]::Min($Want, $Budget - 10 - $clock.Elapsed.TotalSeconds)) }
+
+# Ends $Id and every process under it, children whose parent has already gone included (they keep its pid). Only
+# processes made since this test began count, so a pid Windows has given to something else since is never touched.
+function Stop-Tree([int] $Id) {
+    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CreationDate -ge $script:Since })
+    $tree = @($all | Where-Object ProcessId -eq $Id | ForEach-Object { [int] $_.ProcessId })
+    if (-not $tree.Count) { $tree = @($Id) }  # gone already: its children may not be
+    for ($i = 0; $i -lt $tree.Count; $i++) {
+        $tree += @($all | Where-Object { $_.ParentProcessId -eq $tree[$i] -and $_.ProcessId -ne $tree[$i] -and $tree -notcontains $_.ProcessId } |
+            ForEach-Object { [int] $_.ProcessId })
+    }
+    if (-not ($all | Where-Object ProcessId -eq $Id)) { $tree = @($tree | Select-Object -Skip 1) }
+    [array]::Reverse($tree)
+    foreach ($p in $tree) {
+        $name = ($all | Where-Object ProcessId -eq $p | Select-Object -First 1).Name
+        if (Get-Process -Id $p -ErrorAction SilentlyContinue) {
+            Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
+            Say "stopped pid $p ($name)"
+        }
+    }
+}
+
+# Starts $Exe with its output in <name>.log and <name>.out.log; the process, held, its tree ended at the end.
+function Start-Logged([string] $Exe, [string] $Name, [string[]] $Arguments) {
+    $p = Start-Process -FilePath $Exe -ArgumentList $Arguments -WorkingDirectory $Payload -NoNewWindow -PassThru `
+        -RedirectStandardError (Join-Path $Out "$Name.log") -RedirectStandardOutput (Join-Path $Out "$Name.out.log")
+    $p.Handle | Out-Null
+    $script:started += $p.Id
+    $p
+}
+
+# Runs $Exe and waits at most $Seconds (within the budget); its exit code (or 'timeout') and its lines.
+function Invoke-Bounded([string] $Exe, [string] $Name, [string[]] $Arguments, [double] $Seconds = 30) {
+    $p = Start-Logged $Exe $Name $Arguments
+    $limit = Get-Limit $Seconds
+    $code = if ($p.WaitForExit([int] ($limit * 1000))) { $p.ExitCode } else {
+        Say "$Name didn't end within $([int] $limit) s"
+        Stop-Tree $p.Id
+        'timeout'
+    }
+    $lines = @(Get-Content (Join-Path $Out "$Name.log") -ErrorAction SilentlyContinue) +
+             @(Get-Content (Join-Path $Out "$Name.out.log") -ErrorAction SilentlyContinue)
+    [pscustomobject]@{ Code = $code; Lines = $lines }
+}
+
+# What shell mode would touch, as text: each value, or "none"; the task's XML, or "none"; the record.
+function Get-ShellPlaces([string] $Data, [string] $When) {
     $values = @(
-        @('HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon', 'Shell'),
-        @('HKCU\Software\Microsoft\Windows\CurrentVersion\Run', 'XboxSeriesDashboardSentinel'),
-        @('HKCU\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement', 'ScoobeSystemSettingEnabled'),
-        @('HKLM\Software\Microsoft\Windows NT\CurrentVersion\Winlogon', 'Shell')
+        @('CurrentUser', 'Software\Microsoft\Windows NT\CurrentVersion\Winlogon', 'Shell'),
+        @('CurrentUser', 'Software\Microsoft\Windows\CurrentVersion\Run', 'XboxSeriesDashboardSentinel'),
+        @('CurrentUser', 'Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement', 'ScoobeSystemSettingEnabled'),
+        @('LocalMachine', 'Software\Microsoft\Windows NT\CurrentVersion\Winlogon', 'Shell')
     )
     $lines = foreach ($v in $values) {
-        $said = & cmd.exe /c "reg query `"$($v[0])`" /v $($v[1]) 2>nul"
-        $line = $said | Where-Object { $_ -match "^\s+$($v[1])\s" } | Select-Object -First 1
-        "$($v[0])\$($v[1]) = $(if ($line) { $line.Trim() } else { 'none' })"
+        $key = [Microsoft.Win32.Registry]::$($v[0]).OpenSubKey($v[1])
+        $value = if ($key) { try { $key.GetValue($v[2]) } finally { $key.Dispose() } } else { $null }
+        "$($v[0])\$($v[1])\$($v[2]) = $(if ($null -ne $value) { "$value" } else { 'none' })"
     }
-    $task = & cmd.exe /c 'schtasks /Query /TN XboxSeriesDashboard.SafetyNet /XML 2>nul'
-    $lines += "Task XboxSeriesDashboard.SafetyNet = $(if ($LASTEXITCODE -eq 0) { ($task -join ' ').Trim() } else { 'none' })"
+    $schtasks = Join-Path $env:SystemRoot 'System32\schtasks.exe'
+    $task = Invoke-Bounded $schtasks "schtasks-$When" @('/Query', '/TN', 'XboxSeriesDashboard.SafetyNet', '/XML') 20
+    $lines += "Task XboxSeriesDashboard.SafetyNet = $(if ($task.Code -eq 0) { ($task.Lines -join ' ').Trim() } elseif ($task.Code -eq 'timeout') { 'timeout' } else { 'none' })"
     $record = Join-Path $Data 'shell\record.json'
     $lines += "record = $(if (Test-Path $record) { (Get-Content $record -Raw).Trim() } else { 'none' })"
     $lines
 }
 
-# Runs dashboard.exe with $Arguments, its lines (stderr and stdout) in <name>.log; returns the exit code and the lines.
+# Runs dashboard.exe with $Arguments; its exit code and lines, said.
 function Invoke-Dashboard([string] $Name, [string[]] $Arguments) {
-    $exe = Join-Path $Payload 'dashboard.exe'
-    $log = Join-Path $Out "$Name.log"
-    $p = Start-Process -FilePath $exe -ArgumentList $Arguments -WorkingDirectory $Payload -NoNewWindow -PassThru `
-        -RedirectStandardError $log -RedirectStandardOutput (Join-Path $Out "$Name.out.log")
-    $p.Handle | Out-Null
-    if (-not $p.WaitForExit(60000)) { Stop-Process -Id $p.Id -Force; throw "$Name didn't end within 60 s" }
-    $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
-    Say "$Name ($($Arguments -join ' ')): exit $($p.ExitCode), $($lines.Count) lines"
-    $lines | ForEach-Object { Say "  $_" }
-    [pscustomobject]@{ Code = $p.ExitCode; Lines = $lines }
+    $run = Invoke-Bounded (Join-Path $Payload 'dashboard.exe') $Name $Arguments 30
+    Say "$Name ($($Arguments -join ' ')): exit $($run.Code), $($run.Lines.Count) lines"
+    $run.Lines | ForEach-Object { Say "  $_" }
+    $run
 }
 
 function Expect([bool] $Ok, [string] $What) {
@@ -58,11 +108,18 @@ function Expect([bool] $Ok, [string] $What) {
     if (-not $Ok) { $script:failures += $What }
 }
 
+# The lines of a file another process may still be writing.
+function Read-Shared([string] $Path) {
+    $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+    $file = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+    try { @((New-Object IO.StreamReader $file).ReadToEnd() -split "\r?\n" | Where-Object { $_ }) } finally { $file.Dispose() }
+}
+
 try {
     $data = Get-DashboardDataDir
     New-Item $data -ItemType Directory -Force | Out-Null
     $exe = Join-Path $Payload 'dashboard.exe'
-    $before = Get-ShellPlaces $data
+    $before = Get-ShellPlaces $data 'before'
     $before | Set-Content (Join-Path $Out 'places-before.txt') -Encoding UTF8
 
     $on = Invoke-Dashboard 'shell-on-dry' @('--shell-on', '--dry-shell', '--as-installed', '--data-dir', "`"$data`"")
@@ -103,39 +160,43 @@ try {
 
     # The window as the shell starts it, without being the shell: --from-shell --dry-shell makes the window plain,
     # configures its swap chain, puts it topmost for Start-up, and presents, leaving the shell's events alone. Its
-    # lines go to <data>\shell\logs\dashboard-<stamp>.log, as under the shell.
+    # lines go to <data>\shell\logs\dashboard-<stamp>.log, as under the shell; what comes before that, and stdout, to
+    # from-shell.early.log and from-shell.out.log. It is ended, with anything it started, as soon as it has presented.
     $logs = Join-Path $data 'shell\logs'
     $had = @(Get-ChildItem $logs -Filter 'dashboard-*.log' -ErrorAction SilentlyContinue | ForEach-Object FullName)
-    $dashboard = Start-Dashboard @('--from-shell', '--dry-shell', '--data-dir', "`"$data`"") -Startup
+    $arguments = @('--from-shell', '--dry-shell', '--data-dir', "`"$data`"", '--store-art-service', 'http://127.0.0.1:9')
+    if (Test-SafeMode) { $arguments += @(Get-SafeArguments $arguments) }
+    $dashboard = Start-Logged $exe 'from-shell.early' $arguments
+    Say "started the Dashboard, pid $($dashboard.Id): $($arguments -join ' ')"
     $fromShell = $null
     $lines = @()
+    $limit = Get-Limit 60
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    while ($watch.Elapsed.TotalSeconds -lt 60) {
+    while ($watch.Elapsed.TotalSeconds -lt $limit) {
         if (-not $fromShell) {
             $fromShell = Get-ChildItem $logs -Filter 'dashboard-*.log' -ErrorAction SilentlyContinue |
                 Where-Object { $had -notcontains $_.FullName } | Sort-Object LastWriteTime | Select-Object -Last 1
         }
         if ($fromShell) {
-            $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
-            $file = [IO.File]::Open($fromShell.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
-            try { $lines = @((New-Object IO.StreamReader $file).ReadToEnd() -split "\r?\n" | Where-Object { $_ }) }
-            finally { $file.Dispose() }
+            $lines = @(Read-Shared $fromShell.FullName)
             if ($lines -match '^first frame presented') { break }
         }
         if ($dashboard.HasExited) { break }
         Start-Sleep -Milliseconds 250
     }
-    if (-not $dashboard.HasExited) { Stop-Process -Id $dashboard.Id -Force; $dashboard.WaitForExit(10000) | Out-Null }
-    Say "from-shell (--from-shell --dry-shell): $(if ($fromShell) { $fromShell.Name } else { 'no log' }), exit $($dashboard.ExitCode)"
-    @(Get-DashboardLog) + $lines | ForEach-Object { Say "  $_" }
-    if ($fromShell) { Copy-Item $fromShell.FullName (Join-Path $Out 'from-shell.log') }
+    $exited = $dashboard.HasExited
+    Stop-Tree $dashboard.Id
+    $dashboard.WaitForExit(5000) | Out-Null
+    Say "from-shell (--from-shell --dry-shell): $(if ($fromShell) { $fromShell.Name } else { 'no log' }), $(if ($exited) { "exited by itself with $($dashboard.ExitCode)" } else { "ended by this test after $([int] $watch.Elapsed.TotalSeconds) s" })"
+    @(Get-Content (Join-Path $Out 'from-shell.early.log') -ErrorAction SilentlyContinue) + $lines | ForEach-Object { Say "  $_" }
+    if ($fromShell) { $lines | Set-Content (Join-Path $Out 'from-shell.log') -Encoding UTF8 }
     Expect ([bool] $fromShell) 'the --from-shell Dashboard logs to shell\logs'
     Expect ([bool] ($lines -match '^shell: started by the shell; --dry-shell: the events are left alone')) '--from-shell --dry-shell says the events are left alone'
-    Expect ([bool] ($lines -match '^first frame presented')) 'the --from-shell window presents its first frame'
+    Expect ([bool] ($lines -match '^first frame presented')) "the --from-shell window presents its first frame (within $([int] $limit) s)"
     Expect (-not ($lines -match '^window: ERROR')) 'its swap chain was made the first time'
     Expect (-not ($lines -match 'panicked')) 'it did not panic'
 
-    $after = Get-ShellPlaces $data
+    $after = Get-ShellPlaces $data 'after'
     $after | Set-Content (Join-Path $Out 'places-after.txt') -Encoding UTF8
     $changed = @(Compare-Object $before $after)
     Expect ($changed.Count -eq 0) 'every place shell mode writes is as it was'
@@ -146,8 +207,9 @@ try {
 } catch {
     $failures += "error: $_"
 } finally {
-    if ($dashboard -and -not $dashboard.HasExited) { Stop-Process -Id $dashboard.Id -Force -ErrorAction SilentlyContinue }
+    # Whatever happened: nothing this test started outlives it.
+    foreach ($id in $started) { try { Stop-Tree $id } catch { Say "couldn't stop pid ${id}: $_" } }
     $failures | ForEach-Object { Say "failed: $_" }
-    Say "result: $result"
+    Say "result: $result ($([int] $clock.Elapsed.TotalSeconds) s)"
 }
 exit $(if ($result -eq 'PASS') { 0 } else { 1 })
