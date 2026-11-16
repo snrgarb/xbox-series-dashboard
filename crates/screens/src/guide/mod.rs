@@ -417,6 +417,17 @@ impl Guide {
         (self.tab == Tab::Discord).then(|| discord::line(&self.entries, focus, &self.discord))
     }
 
+    /// On Profile & system, the entry focus is on by name, after its place: ` Power`, ` SwitchProfile`, ` Achievement
+    /// "Ash Runner"`. Its places move with the achievements under Switch profile; its names do not.
+    pub fn profile_line(&self) -> Option<String> {
+        let Focus::Entry(at) = self.focus else { return None };
+        let entry = self.entries.get(at).filter(|_| self.tab == Tab::ProfileAndSystem)?;
+        Some(match entry.kind {
+            Kind::RecentAchievement(_) => format!(" Achievement {:?}", entry.title),
+            kind => format!(" {kind:?}"),
+        })
+    }
+
     /// Makes the tabs and the showing tab's lists from what is around now.
     fn list(&mut self, around: Around) {
         self.tabs = if around.discord {
@@ -730,7 +741,7 @@ fn select(entry: &Entry) -> Option<GuideAction> {
         Kind::Settings => Some(GuideAction::Settings),
         // Switch profile closes the Guide and asks Who's playing today? (docs/spec/start-up.md, 7).
         Kind::SwitchProfile if entry.enabled => Some(GuideAction::SwitchProfile),
-        Kind::Profile | Kind::SwitchProfile => None,
+        Kind::Profile | Kind::SwitchProfile | Kind::RecentAchievement(_) => None,
         Kind::Discord(item) => discord::select(item),
     }
 }

@@ -3,6 +3,7 @@
 use ui::{Color, Gradient, HAlign, Rect, Ui, VAlign};
 
 use super::{recent, tile};
+use crate::achievement;
 use crate::theme::{self, glyph, BODY, BODY_SEMIBOLD, MARGIN, ROW_SCALE as S};
 
 const WIDTH: f32 = 359.0;
@@ -37,8 +38,9 @@ const TILES: [WideTile; 4] = [
         to: Color::rgb(0x2B323C),
         glyph: glyph::SETTINGS,
     },
-    // Its subtitle is the Score, once there are achievements to count (M6). Until then it is the Bundle's line for
-    // none recorded; its other, "Needs PlayniteAchievements", names a dependency there is none of here.
+    // Its subtitle is the Score total once there are achievements to count (`subtitle`); this one, the Bundle's
+    // line for none recorded, is for none. Its other, "Needs PlayniteAchievements", names a dependency there is
+    // none of here.
     WideTile {
         title: "Achievements",
         subtitle: Some("Nothing recorded yet"),
@@ -74,17 +76,20 @@ pub fn nearest(x: f32) -> usize {
     (0..COUNT).min_by(|a, b| distance(a).total_cmp(&distance(b))).unwrap_or(0)
 }
 
-/// A tile's subtitle, with `queued` games in the Queue: Downloads counts them, `{n} in queue` (the Bundle's
-/// PromoRow.xaml), or says "Nothing queued".
-fn subtitle(i: usize, queued: usize) -> Option<String> {
-    match i {
-        DOWNLOADS if queued > 0 => Some(format!("{queued} in queue")),
+/// A tile's subtitle, with `queued` games in the Queue and `score` the Score total if there are achievement totals:
+/// Downloads counts the Queue, `{n} in queue` (the Bundle's PromoRow.xaml), or says "Nothing queued"; Achievements
+/// says the Score, `{Score:N0} Score`, or "Nothing recorded yet".
+fn subtitle(i: usize, queued: usize, score: Option<u64>) -> Option<String> {
+    match (i, score) {
+        (DOWNLOADS, _) if queued > 0 => Some(format!("{queued} in queue")),
+        (ACHIEVEMENTS, Some(score)) => Some(format!("{} Score", achievement::thousands(score))),
         _ => TILES[i].subtitle.map(String::from),
     }
 }
 
-/// The tiles, with focus on this one if on any, and `queued` games in the Queue.
-pub fn draw(ui: &mut Ui, focused: Option<usize>, queued: usize) {
+/// The tiles, with focus on this one if on any, `queued` games in the Queue, and `score` the Score total if there
+/// are achievement totals.
+pub fn draw(ui: &mut Ui, focused: Option<usize>, queued: usize, score: Option<u64>) {
     for (i, tile) in TILES.iter().enumerate() {
         let rect = rect(i);
         ui.gradient(rect, tile.from, tile.to, Gradient::Diagonal, tile::RADIUS * S);
@@ -93,7 +98,7 @@ pub fn draw(ui: &mut Ui, focused: Option<usize>, queued: usize) {
         // The caption stands on the tile's foot: the title, and under it the subtitle if there is one.
         let line = ui.measure(&BODY_SEMIBOLD, tile.title).height;
         let mut caption = Rect::new(rect.x + 18.0 * S, rect.bottom() - 14.0 * S - line, rect.w - 36.0 * S, line);
-        if let Some(subtitle) = subtitle(i, queued) {
+        if let Some(subtitle) = subtitle(i, queued, score) {
             ui.paragraph(caption, &subtitle, &BODY.color(theme::TEXT_DIM), HAlign::Left, VAlign::Top, 1);
             caption.y -= line;
         }

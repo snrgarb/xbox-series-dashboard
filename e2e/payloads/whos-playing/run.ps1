@@ -200,9 +200,9 @@ try {
     Push-Button Guide
     $guide = Expect-Log '^guide: Landing ' 'the Guide' 10 $mark
     Push-Button RightShoulder
-    Expect-Log '^guide: ProfileAndSystem Entry\(0\)$' 'Profile & system' 10 $mark | Out-Null
+    Expect-Log '^guide: ProfileAndSystem Entry\(0\) Profile$' 'Profile & system' 10 $mark | Out-Null
     Push-Button Down
-    Expect-Log '^guide: ProfileAndSystem Entry\(1\)$' 'Switch profile' 10 $mark | Out-Null
+    Expect-Log '^guide: ProfileAndSystem Entry\(1\) SwitchProfile$' 'Switch profile' 10 $mark | Out-Null
     Start-Sleep -Milliseconds 1500
     Save-Screen '05-switch-profile'
     $mark = Get-DashboardLogLength

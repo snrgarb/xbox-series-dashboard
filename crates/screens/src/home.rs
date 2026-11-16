@@ -408,7 +408,8 @@ impl Home {
             if rows > 0.0 {
                 ui.with_alpha(rows, |ui| {
                     recent::draw(ui, &row, &library.queue, on_recent);
-                    wide::draw(ui, on_wide, library.queue.len());
+                    let score = library.achievements.totals.map(|totals| totals.score);
+                    wide::draw(ui, on_wide, library.queue.len(), score);
                 });
             }
             groups::draw(ui, &groups, &library.queue, on_group);

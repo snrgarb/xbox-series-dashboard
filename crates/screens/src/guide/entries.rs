@@ -7,8 +7,8 @@ use ui::{Color, Crop, HAlign, Rect, Ui, VAlign};
 use super::panel::{PANEL, STRIP};
 use super::{discord, focus_ring, marks, Around, Tab};
 use crate::home::square_art;
-use crate::profile;
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
+use crate::{achievement, profile};
 
 /// How many games the landing tab lists, the running one among them.
 const GAMES: usize = 4;
@@ -23,6 +23,8 @@ pub enum Kind {
     Recent(usize),
     Profile,
     SwitchProfile,
+    /// One of the last achievements unlocked, by its place among the library's last unlocks, newest first.
+    RecentAchievement(usize),
     Settings,
     Power,
     /// One of the Discord tab's.
@@ -38,11 +40,13 @@ pub struct Entry {
     pub divider: bool,
     /// A disabled entry is greyed out; it still takes focus, and A does nothing on it.
     pub enabled: bool,
+    /// Whether the achievements' totals stand under it, with their divider: Switch profile's, while there are any.
+    pub totals: bool,
 }
 
 impl Entry {
     pub(super) fn new(kind: Kind, title: &str) -> Self {
-        Self { kind, title: title.into(), divider: false, enabled: true }
+        Self { kind, title: title.into(), divider: false, enabled: true, totals: false }
     }
 
     pub(super) fn under_a_divider(self) -> Self {
@@ -59,26 +63,45 @@ impl Entry {
         match self.kind {
             Kind::Home | Kind::MyGames => (105.0, 3.0),
             Kind::Running(_) | Kind::Recent(_) => (96.0, 12.0),
-            Kind::Profile => (96.0, 3.0),
+            Kind::Profile | Kind::RecentAchievement(_) => (96.0, 3.0),
             Kind::SwitchProfile | Kind::Settings | Kind::Power => (75.0, 3.0),
             Kind::Discord(item) => discord::height(item),
         }
     }
 }
 
+/// The achievements' totals under Switch profile (E/OverlayWindow.xaml, AchievementsSection): a divider 14 under
+/// the entry's room and 26 over the line, the line of Segoe UI 26 (34.58), and 12 under it.
+const TOTALS: f32 = 14.0 + 1.0 + 26.0 + 34.58 + 12.0;
+
 /// The tab's entries, top to bottom.
 pub fn of(tab: Tab, around: Around, discord: &Discord) -> Vec<Entry> {
     match tab {
         Tab::Landing => landing(around.library, around.playing),
         Tab::Discord => discord::entries(discord),
-        Tab::ProfileAndSystem => vec![
-            Entry::new(Kind::Profile, ""),
-            // Switching profile would put Start-up in front of a running game.
-            Entry { enabled: around.playing.is_none(), ..Entry::new(Kind::SwitchProfile, "Switch profile") },
-            Entry::new(Kind::Settings, "Settings").under_a_divider(),
-            Entry::new(Kind::Power, "Power").under_a_divider(),
-        ],
+        Tab::ProfileAndSystem => profile_and_system(around),
     }
+}
+
+/// The profile card, Switch profile, the achievements' totals under it and the last unlocks as entries of their
+/// own while there are any totals, then Settings and Power (C/ExtensionCore.cs, ShowProfileTab).
+fn profile_and_system(around: Around) -> Vec<Entry> {
+    let achievements = &around.library.achievements;
+    let totals = achievements.totals.is_some();
+    let mut entries = vec![
+        Entry::new(Kind::Profile, ""),
+        // Switching profile would put Start-up in front of a running game.
+        Entry { enabled: around.playing.is_none(), totals, ..Entry::new(Kind::SwitchProfile, "Switch profile") },
+    ];
+    if totals {
+        let recent = achievements.recent.iter().take(model::achievement::GUIDE_RECENT);
+        entries.extend(
+            recent.enumerate().map(|(i, unlock)| Entry::new(Kind::RecentAchievement(i), &unlock.achievement.name)),
+        );
+    }
+    entries.push(Entry::new(Kind::Settings, "Settings").under_a_divider());
+    entries.push(Entry::new(Kind::Power, "Power").under_a_divider());
+    entries
 }
 
 /// Home, My games & apps, then up to four games under a divider: the running game first, then the games played,
@@ -130,9 +153,12 @@ pub fn viewport(tab: Tab) -> (f32, f32) {
 pub struct Placed {
     /// Its divider's top, if it has one.
     pub divider: Option<f32>,
-    /// The entry's whole extent down the list: its divider and the room under its box included.
+    /// The entry's whole extent down the list: its divider and the room under its box included, and the
+    /// achievements' totals under it.
     pub extent: (f32, f32),
     pub rect: Rect,
+    /// Where the achievements' totals under it start, if they stand under it.
+    pub totals: Option<f32>,
 }
 
 /// Lays the entries out down the panel.
@@ -148,7 +174,11 @@ pub fn layout(tab: Tab, entries: &[Entry]) -> Vec<Placed> {
         let (height, below) = entry.height();
         let rect = Rect::new(PANEL.x + 9.0, y, PANEL.w - 18.0, height);
         y += height + below;
-        Placed { divider, extent: (top, y), rect }
+        let totals = entry.totals.then_some(y);
+        if entry.totals {
+            y += TOTALS;
+        }
+        Placed { divider, extent: (top, y), rect, totals }
     };
     entries.iter().map(place).collect()
 }
@@ -205,8 +235,18 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
         Kind::Running(game) | Kind::Recent(game) => {
             cover(ui, Rect::new(rect.x + 6.0, cy - 45.0, 90.0, 90.0), faces.library, game);
             if matches!(entry.kind, Kind::Running(_)) {
-                detail = Some("Running");
+                detail = Some("Running".to_string());
             }
+        }
+        // Its icon on a rounded square, its name over its game's in grey.
+        Kind::RecentAchievement(at) => {
+            if let Some(unlock) = faces.library.achievements.recent.get(at) {
+                achievement::icon(ui, Rect::new(rect.x + 18.0, cy - 30.0, 60.0, 60.0), &unlock.achievement, 4.0);
+                let library = faces.library;
+                let game = library.games.iter().chain(&library.hidden).find(|game| game.id == unlock.game);
+                detail = game.map(|game| game.name.clone());
+            }
+            (text_x, lines) = (rect.x + 96.0, 1);
         }
         Kind::Profile => {
             let picture = Rect::new(rect.x + 18.0, cy - 30.0, 60.0, 60.0);
@@ -247,12 +287,35 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
     ui.with_alpha(alpha, |ui| {
         ui.with_clip(rect, |ui| {
             ui.paragraph(Rect::new(text_x, top, width, size.height), title, &BODY, HAlign::Left, VAlign::Top, lines);
-            if let Some(detail) = detail {
+            if let Some(detail) = &detail {
                 let line = Rect::new(text_x, top + taken, width, size.line_height);
                 ui.paragraph(line, detail, &BODY.color(TEXT_DIM), HAlign::Left, VAlign::Top, 1);
             }
         });
     });
+    if let Some(top) = placed.totals {
+        totals(ui, top, faces.library);
+    }
+}
+
+/// The achievements' totals from `top`: a divider, then the trophy, the Score total, "12,345 G", and how many are
+/// unlocked, "56 achievements", dimmer (E/OverlayWindow.xaml, AchievementsSection). Not an entry: focus never
+/// rests on it.
+fn totals(ui: &mut Ui, top: f32, library: &Library) {
+    let Some(totals) = library.achievements.totals else { return };
+    ui.fill(Rect::new(PANEL.x + 30.0, top + 14.0, PANEL.w - 60.0, 1.0), Color::argb(0x33FFFFFF), 0.0);
+    let line = top + 41.0;
+    let middle = line + 34.58 / 2.0;
+    // The trophy in a box 36 wide, 33 in; the Score 12 after it, the count 24 after that.
+    let left = PANEL.x + 33.0;
+    ui.icon(left + 18.0, middle, glyph::TROPHY, 26.0, Color::WHITE);
+    let score = format!("{} G", achievement::thousands(totals.score));
+    let width = ui.label_middle(left + 48.0, middle - 2.0, &score, &BODY).width;
+    let count = match totals.unlocked {
+        1 => "1 achievement".to_string(),
+        n => format!("{} achievements", achievement::thousands(u64::from(n))),
+    };
+    ui.label_middle(left + 48.0 + width + 24.0, middle - 2.0, &count, &BODY.color(TEXT_DIM));
 }
 
 /// A game's cover in the list: square, filled from the cover's top. Without one, the console's own tile for a game
@@ -321,6 +384,46 @@ mod tests {
         // The Bundle's pictures have the dividers at y 403 and, with nothing between Switch profile and Settings,
         // 119 further down.
         assert!(near(placed[2].divider.unwrap(), 403.6) && near(placed[3].divider.unwrap(), 522.6));
+    }
+
+    #[test]
+    fn the_achievements_stand_under_switch_profile_while_there_are_totals() {
+        use model::achievement::{Achievement, Totals, Unlock};
+        let mut library = crate::fake_library();
+        let audio = model::Audio::default();
+        fn around<'a>(library: &'a Library, audio: &'a model::Audio) -> Around<'a> {
+            Around { library, playing: None, discord: false, audio, notifications: &[], now_playing: None }
+        }
+        let unlock =
+            |name: &str| Unlock { game: 1, achievement: Achievement { name: name.into(), ..Default::default() } };
+        library.achievements.recent = ["Five", "Four", "Three", "Two", "One"].map(unlock).to_vec();
+        // No totals: no section and no unlocks, as the Bundle has none without them.
+        assert_eq!(of(Tab::ProfileAndSystem, around(&library, &audio), &Discord::default()).len(), 4);
+
+        library.achievements.totals = Some(Totals { score: 12_345, unlocked: 56, of: 80, games: 3 });
+        let entries = of(Tab::ProfileAndSystem, around(&library, &audio), &Discord::default());
+        let kinds: Vec<Kind> = entries.iter().map(|e| e.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                Kind::Profile,
+                Kind::SwitchProfile,
+                Kind::RecentAchievement(0),
+                Kind::RecentAchievement(1),
+                Kind::RecentAchievement(2),
+                Kind::Settings,
+                Kind::Power
+            ]
+        );
+        assert_eq!(entries[2].title, "Five");
+        assert!(entries[1].totals && !entries[2].divider);
+        let placed = layout(Tab::ProfileAndSystem, &entries);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        // The totals' divider where the Bundle's picture has it, y 403, the first unlock under their line.
+        assert!(near(placed[1].totals.unwrap() + 14.0, 403.6));
+        assert!(near(placed[2].rect.y, 477.18) && near(placed[2].rect.h, 96.0));
+        assert!(near(placed[4].rect.bottom(), 477.18 + 2.0 * 99.0 + 96.0));
+        assert!(near(placed[5].divider.unwrap(), 477.18 + 3.0 * 99.0 + 14.0));
     }
 
     #[test]

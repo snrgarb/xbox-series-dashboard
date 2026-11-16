@@ -2,7 +2,8 @@
 # tap's time has passed; focus goes along its actions and up to its cards; the last action turns between its two
 # pages; Manage and Menu open the game's Tile menu over the hub, and B closes it onto the hub; B is Home again with
 # focus on the tile; a game that is not installed has Install where Play is, and A there closes the hub and asks
-# Steam for the game; and a double tap on a tile plays the game with no hub.
+# Steam for the game; A on Your game stats opens the game's Achievements page and B comes back; and a double tap on
+# a tile plays the game with no hub.
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: GameHub: 9100010 Hub Play` is the hub
 # of the game with that appid, on its Game hub page, focus on Play (the page's name, the game, the page of the two,
@@ -95,9 +96,13 @@ try {
 
     # Up to the cards and down again: the stats card is over the toggle, the cover over Play.
     Press Up "$hub Hub Stats" '03-hub-card-focused'
-    Press-Nothing A 'a card does nothing'
+    # A on Your game stats of a game with achievements (the fake Steam's Ashfall Courier has six) opens its
+    # Achievements page in the hub's place, focus on the newest unlock (#141); B is the hub again, on the card.
+    Press A "Achievements: $game ACH_\w+; \d+ of \d+ unlocked" '03b-achievements-page'
+    Press B "$hub Hub Stats"
     Press-Nothing Up 'nothing over the cards takes focus'
     Press Left "$hub Hub Cover"
+    Press-Nothing A 'the cover card does nothing'
     Press-Nothing Left 'the cover is the first card'
     Press Down "$hub Hub Play"
     Press Up "$hub Hub Cover"

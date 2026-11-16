@@ -86,10 +86,71 @@ struct Stage {
     _drawing: MutexGuard<'static, ()>,
 }
 
+/// An achievement's icon, as Steam's are: square, here split across in two colours with a light edge.
+fn icon() -> PathBuf {
+    static ICON: OnceLock<PathBuf> = OnceLock::new();
+    ICON.get_or_init(draw_icon).clone()
+}
+
+fn draw_icon() -> PathBuf {
+    let path = art_dir().join("icon.png");
+    let image = image::RgbImage::from_fn(64, 64, |x, y| {
+        let edge = x < 3 || y < 3 || x >= 61 || y >= 61;
+        if edge {
+            image::Rgb([240, 240, 240])
+        } else if x > y {
+            image::Rgb([200, 140, 30])
+        } else {
+            image::Rgb([90, 40, 160])
+        }
+    });
+    shots::save_shared(&image, &path);
+    path
+}
+
+/// The library with achievements, as a snapshot of the library database carries them: its games given ids, Halo
+/// Infinite 2 of 6 with Legend nearest to hand, Hades II 3 of 4, and Halo's Spartan (Rare, its icon fetched) the
+/// last unlock, yesterday.
+fn library_with_achievements() -> Library {
+    use model::achievement::{Achievement, GameProgress, Totals, Unlock};
+    let mut library = library();
+    for (i, game) in library.games.iter_mut().enumerate() {
+        game.id = i as i64 + 1;
+    }
+    let a = |name: &str, description: &str, rarity: f64, unlocked: Option<u64>| Achievement {
+        key: name.to_uppercase(),
+        name: name.into(),
+        description: Some(description.into()),
+        rarity: Some(rarity),
+        unlocked,
+        ..Achievement::default()
+    };
+    let at = library.games[0].last_played;
+    library.achievements.totals = Some(Totals { score: 1_265, unlocked: 5, of: 10, games: 2 });
+    library.achievements.games = vec![
+        GameProgress { game: 1, unlocked: 2, of: 6, score: 60 },
+        GameProgress { game: 5, unlocked: 3, of: 4, score: 45 },
+    ];
+    library.achievements.next = vec![
+        Unlock { game: 1, achievement: a("Legend", "Finish the campaign on Legendary.", 8.2, None) },
+        Unlock { game: 5, achievement: a("Night Bloom", "Grow every flower of the night.", 31.0, None) },
+    ];
+    let spartan = Achievement {
+        icon_file: Some(icon()),
+        ..a("Spartan", "Win a match without taking damage, against a full team.", 2.0, Some(at))
+    };
+    library.achievements.recent = vec![Unlock { game: 1, achievement: spartan }];
+    library
+}
+
 /// A Dashboard with the Idle screen's times short, as the end-to-end test's: 3 s and 6 s. "Played yesterday" is
 /// counted from the day after the fake library's last game was played.
 fn dashboard() -> Dashboard {
-    let mut dashboard = Dashboard::new(library());
+    dashboard_of(library())
+}
+
+fn dashboard_of(library: Library) -> Dashboard {
+    let mut dashboard = Dashboard::new(library);
     dashboard.set_clock(Some("9:41 AM".into()));
     // By the machine's own time zone, as the cards count, so it is the day after wherever the test runs.
     let last = screens::idle::cards::local_date(screens::fake_library().games[0].last_played);
@@ -103,12 +164,16 @@ fn dashboard() -> Dashboard {
 
 impl Stage {
     fn new() -> Self {
+        Self::with(library())
+    }
+
+    fn with(library: Library) -> Self {
         fonts();
         let drawing = DRAWING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let gpu = gpu::init(gpu::instance(None), None);
         let host = Host::new(&gpu, FORMAT, || {});
         let target = Offscreen::new(&gpu, HD);
-        Self { gpu, host, target, dashboard: dashboard(), _drawing: drawing }
+        Self { gpu, host, target, dashboard: dashboard_of(library), _drawing: drawing }
     }
 
     fn check(&mut self, name: &str) {
@@ -311,6 +376,38 @@ fn idle_showing_things_a_tip() {
     wait(&mut stage.dashboard, SHOW + 0.1);
     until_card(&mut stage.dashboard, |card| card.title.starts_with("On the keyboard"));
     stage.check("idle-showing-tip");
+}
+
+/// A nearly-finished game: the locked achievement most players have, its Score with the Rare diamond, the game's
+/// progress at the right and in the bar under it, the game's art.
+#[test]
+fn idle_showing_things_a_close_achievement() {
+    let mut stage = Stage::with(library_with_achievements());
+    press(&mut stage.dashboard, &[Down]);
+    wait(&mut stage.dashboard, SHOW + 0.1);
+    until_card(&mut stage.dashboard, |card| card.title == "Halo Infinite - Legend");
+    let card = stage.dashboard.idle_card().unwrap();
+    assert_eq!(
+        (card.kind, card.score, card.rare, card.label.as_deref()),
+        (Kind::CloseAchievement, Some(30), true, Some("Close achievement"))
+    );
+    stage.check("idle-showing-close-achievement");
+}
+
+/// The last unlock: when at the top right, its Score at the left, its icon large over the game's art.
+#[test]
+fn idle_showing_things_a_recent_unlock() {
+    let mut stage = Stage::with(library_with_achievements());
+    press(&mut stage.dashboard, &[Down]);
+    wait(&mut stage.dashboard, SHOW + 0.1);
+    until_card(&mut stage.dashboard, |card| card.kind == Kind::RecentUnlock);
+    let card = stage.dashboard.idle_card().unwrap();
+    assert_eq!(card.title, "Halo Infinite - Spartan");
+    assert_eq!(card.header.as_deref(), Some("Unlocked yesterday"));
+    stage.check("idle-showing-recent-unlock");
+    // Y on it sees the game, as on any game's card.
+    press(&mut stage.dashboard, &[Y]);
+    assert_eq!(stage.dashboard.page(), Some("GameHub"));
 }
 
 /// Over the Guide, which it dims with everything else.

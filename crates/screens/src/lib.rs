@@ -6,6 +6,8 @@
 //! other that shows the Launch screen and the Guide, over a running game and over Home alike. `overlay` says what
 //! the Overlay is wanted for, which the executable follows by showing and hiding it.
 //! Toasts are a third (`draw_toasts`), for the strip above both.
+pub mod achievement;
+pub mod achievements;
 mod app_tile;
 pub mod game_hub;
 pub mod guide;
@@ -1246,6 +1248,18 @@ impl Dashboard {
         self.pages.depth()
     }
 
+    /// The game, by its id in the library database, whose whole list of achievements an Achievements page that is
+    /// up shows (docs/spec/achievements-page.md). Whoever has the database reads it and gives it with
+    /// [`Dashboard::set_achievements`] as the page opens, and again as its icons come in or the library changes.
+    pub fn achievements_wanted(&self) -> Option<i64> {
+        self.pages.achievements_wanted()
+    }
+
+    /// A game's whole list of achievements, in its store's order, for the pages that show it.
+    pub fn set_achievements(&mut self, game: i64, list: Vec<model::achievement::Achievement>) {
+        self.pages.set_achievements(game, list);
+    }
+
     /// What is on top of Home's window, the Guide aside, and where its focus is: Home's focus as it is written
     /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail: Theme settings`). A press that
     /// changes this moved focus.
@@ -1290,9 +1304,11 @@ impl Dashboard {
         };
         // On the Discord tab, the entry focus is on and what Discord says (`Entry(4) Mute; in "General" with ...`).
         let discord = self.guide.discord_line().unwrap_or_default();
+        // On Profile & system, the entry by name (`Entry(6) Power`): its place moves with the achievements.
+        let named = self.guide.profile_line().unwrap_or_default();
         match self.guide.dialog() {
-            Some(dialog) => format!("{tab:?} {focus:?}{panel}, dialog {dialog:?}{title}{quitting}"),
-            None => format!("{tab:?} {focus:?}{discord}{panel}{flyout}{quitting}"),
+            Some(dialog) => format!("{tab:?} {focus:?}{named}{panel}, dialog {dialog:?}{title}{quitting}"),
+            None => format!("{tab:?} {focus:?}{named}{discord}{panel}{flyout}{quitting}"),
         }
     }
 
@@ -1828,6 +1844,7 @@ impl Dashboard {
             pad: self.pad.connected,
             pad_battery,
             show_percent: self.status.show_percent && self.options.show_battery_percent,
+            score: self.library.achievements.totals.map(|totals| totals.score),
         };
         // A page that fills the screen is there in Home's place, top bar and all: nothing of Home is drawn, but for
         // the picture a page takes of the screen it was opened over. Under a page that leaves it showing (the Tile

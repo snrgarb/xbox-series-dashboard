@@ -51,25 +51,35 @@ try {
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
 
     # Home starts on the profile, and A on it opens the Guide on Profile & system.
-    Step A 'ProfileAndSystem Entry\(0\)$' 'OpenMenu\.wav' '01-profile-and-system'
-    Step Down 'ProfileAndSystem Entry\(1\)$' 'Navigate\d\.wav'
-    Step Down 'ProfileAndSystem Entry\(2\)$' 'Navigate\d\.wav'
-    Step Down 'ProfileAndSystem Entry\(3\)$' 'Navigate\d\.wav' '02-power-entry'
+    Step A 'ProfileAndSystem Entry\(0\) Profile$' 'OpenMenu\.wav' '01-profile-and-system'
+    Step Down 'ProfileAndSystem Entry\(1\) SwitchProfile$' 'Navigate\d\.wav'
+    # Down to Power by its name: the last unlocks stand between Switch profile and Settings while there are
+    # achievements (the fake Steam's Ashfall Courier has two), so its place is not fixed.
+    for ($press = 0; $press -lt 8; $press++) {
+        $mark = Get-DashboardLogLength
+        Push-Button Down
+        $line = Wait-DashboardLog '^guide: ProfileAndSystem Entry\(\d+\) \w+' 8 $mark
+        Say "Down: $line"
+        if ($line -match ' Power$') { break }
+    }
+    if ($line -notmatch ' Power$') { throw "Down never reached Power (the Guide is at: $line)" }
+    Start-Sleep -Milliseconds 3000
+    Save-Screen '02-power-entry'
 
     # Power from its entry: Enter, then Prompt open; focus on Close; the panel out of focus behind it.
     $mark = Get-DashboardLogLength
-    Step A 'ProfileAndSystem Entry\(3\), dialog Power\(Close\)$' 'PromptOpen\.wav' '03-power'
+    Step A 'ProfileAndSystem Entry\(\d+\) Power, dialog Power\(Close\)$' 'PromptOpen\.wav' '03-power'
     Expect-Log 'audio: played Enter\.wav' $mark 'Enter before Prompt open'
-    Step Up 'ProfileAndSystem Entry\(3\), dialog Power\(Tile\(3\)\)$' 'Navigate\d\.wav' '04-power-exit-tile'
-    Step Up 'ProfileAndSystem Entry\(3\), dialog Power\(Tile\(0\)\)$' 'Navigate\d\.wav' '05-power-turn-off-tile'
-    Step Right 'ProfileAndSystem Entry\(3\), dialog Power\(Tile\(1\)\)$' 'Navigate\d\.wav'
-    Step Right 'ProfileAndSystem Entry\(3\), dialog Power\(Tile\(2\)\)$' 'Navigate\d\.wav' '06-power-sleep-tile'
+    Step Up 'ProfileAndSystem Entry\(\d+\) Power, dialog Power\(Tile\(3\)\)$' 'Navigate\d\.wav' '04-power-exit-tile'
+    Step Up 'ProfileAndSystem Entry\(\d+\) Power, dialog Power\(Tile\(0\)\)$' 'Navigate\d\.wav' '05-power-turn-off-tile'
+    Step Right 'ProfileAndSystem Entry\(\d+\) Power, dialog Power\(Tile\(1\)\)$' 'Navigate\d\.wav'
+    Step Right 'ProfileAndSystem Entry\(\d+\) Power, dialog Power\(Tile\(2\)\)$' 'Navigate\d\.wav' '06-power-sleep-tile'
 
     # B puts Power away and leaves the Guide on its entry.
-    Step B 'ProfileAndSystem Entry\(3\)$' 'PromptClose\.wav' '07-power-closed'
+    Step B 'ProfileAndSystem Entry\(\d+\) Power$' 'PromptClose\.wav' '07-power-closed'
 
     # Restart, dry: the Guide closes, then the Bundle's command is logged and nothing happens.
-    Step A 'ProfileAndSystem Entry\(3\), dialog Power\(Close\)$' 'PromptOpen\.wav'
+    Step A 'ProfileAndSystem Entry\(\d+\) Power, dialog Power\(Close\)$' 'PromptOpen\.wav'
     Step Up '.*dialog Power\(Tile\(3\)\)$'
     Step Up '.*dialog Power\(Tile\(0\)\)$'
     Step Right '.*dialog Power\(Tile\(1\)\)$'

@@ -220,13 +220,20 @@ Heading "Profile & system". Entries (C/ExtensionCore.cs:1228-1243):
 
 1. Profile: the picture and the gamertag of the Profile signed in (profiles.md 3). Focusable, A does nothing.
 2. Switch profile (M5).
-3. Recent achievements (M6).
+3. Recent achievements (M6): with totals, a divider, the totals' line and the last three unlocks (built in #141, below).
 4. Settings, divider above (M3).
 5. Power, divider above.
 
 Focus starts on the Profile entry. **There are no Utilities on this tab**: the row is the landing tab's alone (C/ExtensionCore.cs:1170; the comment at E/OverlayWindow.xaml:1081-1087; `data-guide-recent.jpg` shows none), so Down from Power does nothing.
 
 Measured (old type): the first divider at y 403, x 108..583. With nothing between Switch profile and Settings (no achievements, as in M2) the second is at y 522; in the picture the achievements stand between them.
+
+**The achievements (#141)**, only while there are totals (`Library::achievements.totals`), as the Bundle's `AchievementsSection` (E/OverlayWindow.xaml 434-464, 881-891):
+
+- Under Switch profile: a divider (margin 30,14,30,26), then a line 34.58 tall: the trophy (26, in a 36-wide box), "`{score:N0} G`" 12 after it, and "`{n} achievements`" ("1 achievement") in the dim colour 24 after that; 12 under it the entries. The whole is 33 in.
+- Each of the last three unlocks (`model::achievement::GUIDE_RECENT`), newest first, is an entry 96 tall with no divider of its own: the icon 60 square, 18 in, radius 4 (the grey `#4A4A4A` square with the trophy, `#B3FFFFFF` 26, while not fetched), and from 96 in the achievement's name over its game's name in grey. Focusable; A does nothing.
+- `--log-focus`'s `guide:` line names the entry focus is on in Profile & system after its place, as the Discord tab's does: `ProfileAndSystem Entry(0) Profile`, `Entry(1) SwitchProfile`, `Entry(2) Achievement "No Detours"`, `Entry(6) Power`. The places move with the unlocks; tests go by the names.
+- With no totals neither shows, and Settings follows Switch profile as in M2.
 
 ### 2.8 Utilities
 

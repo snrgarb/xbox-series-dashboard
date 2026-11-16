@@ -185,6 +185,9 @@ struct App {
     art_started: bool,
     /// What it says as it goes, for the loop to take in.
     art_events: (Sender<ArtEvent>, Receiver<ArtEvent>),
+    /// The game whose whole list of achievements an Achievements page was last given, and whether it should be
+    /// read again (new icons for it, or a new snapshot).
+    achievements_listed: (Option<i64>, bool),
     /// When the keyboard or the mouse was last used anywhere in Windows: the Idle screen counts from it, and from
     /// the pads' own (docs/spec/idle-screen.md, 2).
     input_clock: Box<dyn LastInput>,
@@ -422,6 +425,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         art: None,
         art_started: false,
         art_events: mpsc::channel(),
+        achievements_listed: (None, false),
         input_clock: shell::idle::system(),
         idle_after: args.idle_after,
         discord,
@@ -958,6 +962,28 @@ impl App {
         toast
     }
 
+    /// An Achievements page's game's whole list (docs/spec/achievements-page.md): read from the database as the
+    /// page opens, its icons asked for then, and read again as they come in or the snapshot changes.
+    fn follow_achievement_list(&mut self) {
+        let wanted = self.dashboard.achievements_wanted();
+        let (listed, stale) = self.achievements_listed;
+        if wanted == listed && !stale {
+            return;
+        }
+        if let Some(game) = wanted {
+            if wanted != listed {
+                self.store.ask_achievements(library::achievements::Ask::Icons(game));
+            }
+            let list = self.store.achievements_of(game);
+            let unlocked = list.iter().filter(|a| a.is_unlocked()).count();
+            let icons = list.iter().filter(|a| a.icon_file.is_some() || a.icon_locked_file.is_some()).count();
+            eprintln!("achievements: the page lists {} ({unlocked} unlocked, {icons} with icons)", list.len());
+            self.dashboard.set_achievements(game, list);
+            self.stale = true;
+        }
+        self.achievements_listed = (wanted, false);
+    }
+
     /// A newer snapshot of the library, if there is one, takes the place of the one on screen.
     fn show(&mut self, library: Option<Library>) {
         if let Some(library) = library {
@@ -1175,6 +1201,8 @@ impl ApplicationHandler for App {
             });
         }
         if let Some(update) = self.store.achievements_update() {
+            let listed = self.achievements_listed.0;
+            self.achievements_listed.1 |= update.library.is_some() || listed.is_some_and(|g| update.icons.contains(&g));
             self.show(update.library);
         }
         if self.take_art() {
@@ -1257,6 +1285,8 @@ impl ApplicationHandler for App {
         for press in presses {
             self.dashboard.press(press);
         }
+        // An Achievements page a press opened has its list before its focus is said.
+        self.follow_achievement_list();
         self.say_idle();
         if self.log_focus && self.dashboard.focus_line() != focus {
             eprintln!("focus: {}", self.dashboard.focus_line());
