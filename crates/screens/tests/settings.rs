@@ -105,12 +105,14 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let database = database();
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
-    // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord's place empty
-    // beside it, then Games & apps and Art. The row's end, the top and the foot stop.
+    // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord beside it, then
+    // Games & apps and Art. The row's end, the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
-    // Down from Idle is Guide, the row under it being one box long; Right there stops.
+    // Down from Idle is Discord; Right there stops, Left is Guide.
     press(&mut dashboard, &[Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Discord");
+    press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Down, Right, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
@@ -188,15 +190,21 @@ fn customise_home_opens_personalisation_and_b_climbs_back_through_every_level() 
 }
 
 #[test]
-fn the_settings_tile_and_the_discord_tile_open_theme_settings_on_its_first_box() {
+fn the_settings_tile_opens_theme_settings_on_its_first_box_and_the_discord_tile_on_discord() {
     let database = database();
-    for tile in [0, 1] {
+    let discord = "Settings: Discord: Client ID Type; client id not set, secret not set, \"Not connected\"";
+    for (tile, opens) in [(0, discord), (1, "Settings: Theme settings: Personalisation")] {
         let mut dashboard = start(&database);
         press(&mut dashboard, &[Down, Down]);
         press(&mut dashboard, &vec![Right; tile]);
         assert_eq!(dashboard.home_focus(), Focus::Wide(tile));
         press(&mut dashboard, &[A]);
-        assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
+        assert_eq!(dashboard.focus_line(), opens);
+        if tile == 0 {
+            // Discord's page, then Theme settings' boxes with focus on Discord.
+            press(&mut dashboard, &[B]);
+            assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Discord");
+        }
         press(&mut dashboard, &[B]);
         assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
         press(&mut dashboard, &[B]);
@@ -482,6 +490,7 @@ impl Stage {
             options: Options::default(),
             now: std::time::Instant::now(),
             now_playing: screens::now_playing::none(),
+            discord: screens::no_discord(),
         };
         let Self { gpu, host, target, .. } = self;
         let pixels = target.still(gpu, host, |ui| page.draw(ui, around));
@@ -669,6 +678,7 @@ fn around(library: &Library) -> Around<'_> {
         options: Options::default(),
         now: std::time::Instant::now(),
         now_playing: screens::now_playing::none(),
+        discord: screens::no_discord(),
     }
 }
 
@@ -918,6 +928,95 @@ fn settings_art() {
     // Left from the first column, as B, goes back to Theme settings' boxes on Art.
     stage.press(&[Up, Left]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
+}
+
+/// Theme settings > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): the Bundle's picture 36, its
+/// three rows of two walked, Type and Paste asked of the shell, the Secret never on screen or in the log, and the
+/// page following the connection as the shell tells it.
+#[test]
+fn settings_discord() {
+    use model::discord::{Ask, Discord, Field};
+    const ID: &str = "1290000000000000001";
+    const SECRET: &str = "s3cr3t-s3cr3t-s3cr3t-s3cr3t-0001";
+    let mut stage = settings_stage();
+    stage.press(&[Right, Down, Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Discord");
+    stage.press(&[A]);
+    let line = |rest: &str| format!("Settings: Discord: {rest}; client id not set, secret not set, \"Not connected\"");
+    assert_eq!(stage.dashboard.focus_line(), line("Client ID Type"));
+    stage.check("settings-discord");
+
+    // Three rows of two: Up and Down keep the column, Left and Right stay in the row; dimmed buttons take focus.
+    for (button, at) in [
+        (Right, "Client ID Paste"),
+        (Right, "Client ID Paste"),
+        (Down, "Client Secret Paste"),
+        (Down, "Disconnect"),
+        (Down, "Disconnect"),
+        (Left, "Connect"),
+        (Up, "Client Secret Type"),
+        (Up, "Client ID Type"),
+        (Up, "Client ID Type"),
+    ] {
+        stage.press(&[button]);
+        assert_eq!(stage.dashboard.focus_line(), line(at), "after {button:?}");
+    }
+    // Connect and Disconnect do nothing with nothing set up.
+    stage.press(&[Down, Down, A, Right, A]);
+    assert!(asked(&mut stage).is_empty());
+
+    // Paste asks the shell, which reads the clipboard.
+    stage.press(&[Up, Up, A, Down, A]);
+    let pastes = [Ask::Paste(Field::ClientId), Ask::Paste(Field::ClientSecret)].map(Effect::Discord);
+    assert_eq!(asked(&mut stage), pastes);
+
+    // Type: the Client ID from empty; the Secret as dots, never in the log or an effect's Debug.
+    stage.press(&[Up, Left, A]);
+    assert!(stage.dashboard.typed(screens::keyboard::Typed::Text(ID)));
+    stage.press(&[Menu]);
+    assert_eq!(asked(&mut stage), [Effect::Discord(Ask::ClientId(ID.into()))]);
+    stage.press(&[Down, A]);
+    assert!(stage.dashboard.typed(screens::keyboard::Typed::Text(SECRET)));
+    assert!(!stage.dashboard.focus_line().contains(SECRET), "{}", stage.dashboard.focus_line());
+    stage.check("settings-discord-secret-entry");
+    stage.press(&[Menu]);
+    let effects = asked(&mut stage);
+    assert_eq!(effects, [Effect::Discord(Ask::ClientSecret(SECRET.into()))]);
+    assert!(!format!("{effects:?}").contains(SECRET));
+    // An empty Secret kept leaves the saved one alone: nothing is asked.
+    stage.press(&[A, Menu]);
+    assert!(asked(&mut stage).is_empty());
+
+    // The shell answers with how the connection is: the page follows it, the Client ID shown, the Secret not.
+    let saved = Discord { client_id: Some(ID.into()), has_secret: true, ..Discord::default() };
+    stage.dashboard.set_discord(&saved);
+    stage.press(&[Down]);
+    let line =
+        |rest: &str, status: &str| format!("Settings: Discord: {rest}; client id set, secret saved, \"{status}\"");
+    assert_eq!(stage.dashboard.focus_line(), line("Connect", "Not connected"));
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::Discord(Ask::Connect)]);
+    // Type on the Client ID starts from the one saved.
+    stage.press(&[Up, Up, A]);
+    assert!(stage.dashboard.focus_line().contains(&format!("\"{ID}|\"")), "{}", stage.dashboard.focus_line());
+    stage.press(&[B]);
+    let connected = Discord {
+        has_tokens: true,
+        connected: true,
+        status: "Connected as E2E Tester".into(),
+        user: Some("E2E Tester".into()),
+        ..saved
+    };
+    stage.dashboard.set_discord(&connected);
+    stage.press(&[Down, Down, Right]);
+    assert_eq!(stage.dashboard.focus_line(), line("Disconnect", "Connected as E2E Tester"));
+    stage.check("settings-discord-connected");
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::Discord(Ask::Disconnect)]);
+
+    // Left from the first column, as B, goes back to Theme settings' boxes on Discord.
+    stage.press(&[Left, Left]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Discord");
 }
 
 /// What the Dashboard asked of the shell since last time, but its sounds.

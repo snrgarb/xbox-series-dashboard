@@ -241,7 +241,7 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
-The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. Until Discord comes, its place beside Guide is empty: Personalisation and Idle on the first row, Guide under Personalisation, then Games & apps on a row of its own, and Art (16.8) beside it.
+The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, and Art (16.8) beside it.
 
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
@@ -349,7 +349,9 @@ With L1 and L2 lines in the two descriptions: checkbox top = 246.58 + 34.58 L1; 
 - **Use the Guide**: on by default. Off, the Guide never shows: the Guide button is left alone, Home's profile and Achievements tile do nothing, its Discord tile opens Settings on Discord (section 8.2), and a Toast has no "Press ... to view" (C/SettingsState.cs:155-160). In force at once, saved, shared by every Profile.
 - **Now Playing source** choices: **Any**, **Spotify** (the default), then every other app that has had a media session this run (C/ExtensionCore.NowPlayingSource.cs:48-59, 107-108). A source saved in an earlier run whose app has had no session yet is among them, first after Spotify, so that the list always holds what the box shows. What it does: docs/spec/now-playing.md.
 
-### 6.9 Theme settings > Discord - **M6** (layout only)
+### 6.9 Theme settings > Discord - built in #143 ([../discord.md](../discord.md))
+
+As built: the y positions below are the Bundle's picture's (`artifacts/e2e/port-reference-20261115-192720/36-settings-discord.jpg` in the Bundle): the steps and the code from y 255; the address under the code in four centred lines, broken after each slash ("https://", "discord.com/", "developers/", "applications"); the Client ID row's buttons at y 645, the Secret's at 734, Connect and Disconnect at 833, the status line 24 under them. The QR code is a plain stand-in (a white square, the corner marks' places outlined): the Bundle's picture is not copied, and a real code is for later (discord.md). The value under "Client ID" and the status line are white, as in the picture. The focus log: `Settings: Discord: <button>; client id <set|not set>, secret <saved|not set>, "<status>"`.
 
 E/SettingsControl.xaml:449-543; C/DiscordSettingsState.cs:26-32, 80-83. The pane is the host's full width (x 520..1750) from y 190, top to bottom:
 
@@ -448,7 +450,7 @@ Settings is also closed, without B, by a game exiting back to Home, by the Guide
 | Home's top bar, Settings button (T/Views/Main.xaml:563-575; C/ExtensionCore.cs:1683) | Theme settings' boxes | the rail's **Theme settings** | rail -> Home, focus on the top bar's Settings button (E/SettingsControl.xaml.cs:862-880, 917-926) |
 | The Guide's Settings entry (C/ExtensionCore.cs:2139-2144; the Guide closes, the Dashboard comes to the front) | the same | the rail's Theme settings | rail -> Home, its rows taking focus where they last had it |
 | Tile menu, **Customise Home** (a Home tile) or **Customise games & apps** (a My games & apps tile) (C/ExtensionCore.TileMenu.cs:103-104; C/ExtensionCore.cs:1746-1748) | Theme settings > **Personalisation** | the **Boot video** box | Personalisation -> Theme settings' boxes (focus on Personalisation) -> rail -> back to the tile the menu was opened on: on Home, or My games & apps reopened on that game (C/ExtensionCore.cs:1815-1835) |
-| Home's **Discord** tile, when there is no Discord tab to show or the Guide is off (C/ExtensionCore.cs:1710-1726; E/PromoRow.xaml.cs:65) | Theme settings > **Discord** | **Type** (Client ID) | Discord -> Theme settings' boxes (focus on Discord) -> rail -> the tile |
+| Home's **Discord** tile, when there is no Discord tab to show or the Guide is off (C/ExtensionCore.cs:1710-1726; E/PromoRow.xaml.cs:65) (built in #143; until #144 the tile always comes here) | Theme settings > **Discord** | **Type** (Client ID) | Discord -> Theme settings' boxes (focus on Discord) -> rail -> the tile |
 | Home's **Playnite settings** tile (C/ExtensionCore.cs:1729; E/PromoRow.xaml.cs:69) | the **Playnite settings** category | its **Playnite settings** box (E/SettingsControl.xaml.cs:887-911) | boxes -> rail -> the tile |
 
 B never skips a level: an entry point that opens deep still climbs page, boxes, rail, out. "Opened in a pane" is forgotten as soon as focus leaves that first page (C/ExtensionCore.cs:1779-1786). CT/ThemeSettingsTests.cs:30-288 states these.

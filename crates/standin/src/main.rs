@@ -97,6 +97,18 @@
 //!       Store's catalogue and GOG's API, knowing every id, with a red cover, a blue hero, a green header and (the
 //!       Microsoft Store's alone) a magenta square (`STORE_ART_COLOURS`). Says `serve-art: listening on
 //!       http://127.0.0.1:<n>` and then a line a request (its path, and whether it had the key), until it is killed.
+//!   standin discord --pipe <name> [--port <n>]
+//!       A fake Discord (`discord::fake`), for `dashboard --discord-pipe <name> --discord-token-url
+//!       http://127.0.0.1:<n>/api/oauth2/token`: listens on the named pipe <name> (never Discord's own
+//!       `discord-ipc-N`), answers the handshake and AUTHORIZE at once, as if the user had approved, signs the user
+//!       in as "E2E Tester", and grants tokens at its own endpoint on 127.0.0.1 at <n> (any free port without one).
+//!       Says `discord fake: listening on <name>, tokens at <url>`, then a line a command, until it is killed.
+//!   standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | hang-up | go-away |
+//!                       come-back | close <message>
+//!       Tells the fake Discord on <name> to put the user in a Call in the voice channel <channel> (General or
+//!       Late_night) with those people, to have someone join or leave it, to leave it, to go away as Discord quitting
+//!       does (the connection dropped, nothing listening) and come back, or to close the connection with <message>.
+//!       Says what it answered. Exits 1 when no fake is on <name> or it refused.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -122,6 +134,9 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>]
+       standin discord --pipe <name> [--port <n>]
+       standin discord-say <name> call <channel> <person>... | join <person> | leave <person> | hang-up
+                               | go-away | come-back | close <message>
        standin toast <text>
        standin wake
        standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
@@ -723,6 +738,23 @@ fn run(args: &[String]) -> i32 {
             }
         }
         Some("serve-art") => serve_art(&args[1..]),
+        Some("discord") => serve_discord(&args[1..]),
+        Some("discord-say") => match &args[1..] {
+            [name, words @ ..] if !words.is_empty() => match discord::fake::say_to(name, &words.join(" ")) {
+                Ok(answer) => {
+                    note(&format!("discord-say: {answer}"));
+                    i32::from(!answer.starts_with("ok"))
+                }
+                Err(e) => {
+                    note(&format!("discord-say: no fake Discord on {name}: {e}"));
+                    1
+                }
+            },
+            _ => {
+                note(USAGE);
+                2
+            }
+        },
         Some("game") => parsed_game(&args[1..]),
         Some("steam-url") => match args.get(1) {
             Some(url) => steam_address(url, None),
@@ -835,6 +867,43 @@ fn art_picture(kind: library::art::Kind, colours: &[(library::art::Kind, [u8; 3]
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).expect("a PNG in memory");
     png.into_inner()
+}
+
+fn serve_discord(args: &[String]) -> i32 {
+    let (mut pipe, mut port) = (None, 0u16);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match (arg.as_str(), it.next()) {
+            ("--pipe", Some(value)) => pipe = Some(value.clone()),
+            ("--port", Some(value)) => match value.parse() {
+                Ok(value) => port = value,
+                Err(_) => {
+                    note(&format!("discord: bad --port {value}"));
+                    return 2;
+                }
+            },
+            _ => {
+                note(USAGE);
+                return 2;
+            }
+        }
+    }
+    let Some(pipe) = pipe else {
+        note(USAGE);
+        return 2;
+    };
+    let log: discord::fake::Log = std::sync::Arc::new(note);
+    // It says it is listening itself, and runs until this is killed.
+    let _fake = match discord::fake::FakeDiscord::start(&pipe, port, log) {
+        Ok(fake) => fake,
+        Err(e) => {
+            note(&format!("discord: {pipe}: {e}"));
+            return 1;
+        }
+    };
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
 }
 
 fn serve_art(args: &[String]) -> i32 {

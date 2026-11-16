@@ -302,6 +302,7 @@ mod tests {
             options,
             now: std::time::Instant::now(),
             now_playing: crate::now_playing::none(),
+            discord: crate::no_discord(),
         };
         page.entry(Event::Kept(" \"C:\\Games\\Tern\\tern.exe\" ".into()), around);
         assert_eq!(page.name, "tern");

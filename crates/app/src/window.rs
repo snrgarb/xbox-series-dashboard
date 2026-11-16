@@ -190,6 +190,8 @@ struct App {
     input_clock: Box<dyn LastInput>,
     /// `--idle-after`'s times: in force in place of Settings' whatever Settings says, and never saved.
     idle_after: Option<screens::idle::Times>,
+    /// The Discord connection (docs/discord.md): Discord's own pipe, or with --discord-pipe a test's.
+    discord: discord::Connection,
 }
 
 /// What a Toast says when SteamGridDB refuses the key (a 401): once, and no lookups until another key is entered.
@@ -314,6 +316,15 @@ pub fn run(args: &Args, library: Library, store: Store) {
     let data_dir = args.data_dir.clone().or_else(library::data_dir);
     let mut freezer = Freezer::new(data_dir.as_deref());
     freezer.thaw_leftovers();
+    // Discord, signed in with the tokens saved before, if any: its secrets are kept in the data folder.
+    let mut discord = discord::Connection::new(&args.discord, data_dir.as_deref(), {
+        let wake = std::sync::Mutex::new(event_loop.create_proxy());
+        move || {
+            let _ = wake.lock().map(|proxy| proxy.send_event(()));
+        }
+    });
+    discord.start();
+    dashboard.set_discord(discord.discord());
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
     }
@@ -413,6 +424,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
         art_events: mpsc::channel(),
         input_clock: shell::idle::system(),
         idle_after: args.idle_after,
+        discord,
     };
     event_loop.run_app(&mut app).expect("event loop");
 }
@@ -735,6 +747,23 @@ impl App {
         self.now_playing_said = line;
     }
 
+    /// Takes in what Discord said and the time, and has the Dashboard show how the connection is now. How soon it
+    /// wants another turn: its next timer (a try again, a refresh), None with none.
+    fn follow_discord(&mut self) -> Option<Duration> {
+        let focus = self.dashboard.focus_line();
+        if self.discord.pump(SystemTime::now()) {
+            self.dashboard.set_discord(self.discord.discord());
+            self.stale = true;
+        }
+        // What the Discord tab will follow (#144); nothing does yet.
+        self.discord.client().take_events();
+        if self.log_focus && self.dashboard.focus_line() != focus {
+            eprintln!("focus: {}", self.dashboard.focus_line());
+        }
+        let next = self.discord.next_timer()?;
+        Some(next.duration_since(SystemTime::now()).unwrap_or(Duration::ZERO))
+    }
+
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
         for effect in self.dashboard.take_effects() {
             match effect {
@@ -834,6 +863,12 @@ impl App {
                     if key.is_some() && self.art_started {
                         self.start_art();
                     }
+                }
+                // Settings > Discord: the connection does it, and the page shows how it is after.
+                Effect::Discord(ask) => {
+                    self.discord.ask(ask, shell::clipboard::text);
+                    self.dashboard.set_discord(self.discord.discord());
+                    self.stale = true;
                 }
                 Effect::ClearArt => {
                     self.art = None;
@@ -1233,6 +1268,7 @@ impl ApplicationHandler for App {
         self.keep_idle_after();
         let audio_wants = self.follow_audio();
         self.follow_media();
+        let discord_wants = self.follow_discord();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
         // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
         let mut release_wants = None;
@@ -1342,6 +1378,7 @@ impl ApplicationHandler for App {
             timer,
             audio_wants,
             idle,
+            discord_wants,
         ];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));

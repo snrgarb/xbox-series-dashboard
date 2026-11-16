@@ -452,6 +452,7 @@ mod tests {
             options: Default::default(),
             now: std::time::Instant::now(),
             now_playing: crate::now_playing::none(),
+            discord: crate::no_discord(),
         };
         assert!(TileMenu::open(Entry { game: absent, opener: Opener::Home }, around).is_none());
     }

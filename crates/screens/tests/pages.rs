@@ -70,6 +70,9 @@ fn there_and_back(dashboard: &mut Dashboard, open: Button, line: &str, back: Foc
     assert!(asked(dashboard).is_empty(), "nothing is asked of the shell");
 }
 
+/// Settings > Discord as Home's Discord tile opens it, nothing set up.
+const DISCORD_PAGE: &str = "Settings: Discord: Client ID Type; client id not set, secret not set, \"Not connected\"";
+
 /// Presses A on Home as it is, expects Settings with focus where `line` says and Home unchanged under it; then B
 /// `levels` times, one level each, and Home again with focus on `back`.
 #[track_caller]
@@ -187,9 +190,9 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[Down]);
     assert_eq!(home.home_focus(), Focus::Wide(0));
     let at_rest = rests(&home);
-    // Discord, with no Discord tab in the Guide: Settings, on Theme settings' first box until Discord has a page
-    // (M6). B is the rail, then the tile.
-    settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(0));
+    // Discord, with no Discord tab in the Guide: Settings > Discord, on the Client ID's Type. B is Theme settings'
+    // boxes, the rail, then the tile.
+    settings_and_back(&mut home, DISCORD_PAGE, 3, Focus::Wide(0));
     press(&mut home, &[Right]);
     settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(1));
     press(&mut home, &[Right, Right]);
@@ -210,7 +213,7 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     // Nor Discord's Guide: its tile opens Settings then, connected or not.
     home.set_status(screens::guide::Status { discord: true, ..Default::default() });
     press(&mut home, &[Left, Left]);
-    settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(0));
+    settings_and_back(&mut home, DISCORD_PAGE, 3, Focus::Wide(0));
     home.set_guide_enabled(true);
     press(&mut home, &[A]);
     assert!(home.guide_open() && home.page().is_none(), "with a Discord tab the tile opens the Guide");

@@ -323,6 +323,7 @@ mod tests {
                 options: Default::default(),
                 now: Instant::now(),
                 now_playing: crate::now_playing::none(),
+                discord: crate::no_discord(),
             };
             let hub = GameHub::open(Entry::of(game), around);
             Self { hub, library, playing: None }
@@ -336,6 +337,7 @@ mod tests {
                 options: Default::default(),
                 now: Instant::now(),
                 now_playing: crate::now_playing::none(),
+                discord: crate::no_discord(),
             };
             self.hub = GameHub::open(entry, around);
         }
@@ -347,6 +349,7 @@ mod tests {
                 options: Default::default(),
                 now: Instant::now(),
                 now_playing: crate::now_playing::none(),
+                discord: crate::no_discord(),
             };
             self.hub.press(Press { button, repeat: false }, around)
         }
@@ -420,6 +423,7 @@ mod tests {
             options: Default::default(),
             now: Instant::now(),
             now_playing: crate::now_playing::none(),
+            discord: crate::no_discord(),
         };
         assert_eq!(hub.hub.press(Press { button: Button::A, repeat: true }, around), None);
         assert_eq!(hub.go(&[Button::Up, Button::A]), "10 Hub Cover");

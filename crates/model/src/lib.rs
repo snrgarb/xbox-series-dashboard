@@ -1,6 +1,7 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod audio;
 pub mod by_hand;
+pub mod discord;
 pub mod media;
 pub mod post;
 pub mod profile;
