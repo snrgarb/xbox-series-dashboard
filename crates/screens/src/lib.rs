@@ -279,6 +279,18 @@ impl Dashboard {
         self.pages.library_changed(around);
     }
 
+    /// The Queue moved on (`library::queue`): it takes the old one's place, the games staying as they are. A page
+    /// that shows it (the Game hub's Queue action) is told, as of any change to the library.
+    pub fn set_queue(&mut self, queue: model::Queue) {
+        if self.library.queue == queue {
+            return;
+        }
+        self.library.queue = queue;
+        let around =
+            pages::Around { library: &self.library, playing: self.playing, options: self.options, now: self.now };
+        self.pages.library_changed(around);
+    }
+
     /// The names of Home's Groups, in order, as Home shows them now: what `--log-focus` says of them
     /// (`groups: ...`), since a Group's place is all Home's focus says of it.
     pub fn home_groups(&self) -> Vec<String> {

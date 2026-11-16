@@ -80,24 +80,26 @@ pub fn rects_at_rest(count: usize, focused: Option<usize>) -> Vec<Rect> {
     rects(count, &|i| if focused == Some(i) { 1.0 } else { 0.0 })
 }
 
-pub fn draw(ui: &mut Ui, row: &Row, focused: Option<usize>) {
+/// The row, with focus on this tile if on any; `queue` says which games are being installed.
+pub fn draw(ui: &mut Ui, row: &Row, queue: &model::Queue, focused: Option<usize>) {
     // Each tile's share of the growth closes on 1 with focus and 0 without.
     let shares: Vec<f32> = (0..row.tiles())
         .map(|i| ui.approach(("recent tile", i), if focused == Some(i) { 1.0 } else { 0.0 }, GROWTH_TAU))
         .collect();
     let rects = rects(row.tiles(), &|i| shares[i]);
     for (i, &rect) in rects.iter().enumerate() {
-        let title = match row.games.get(i) {
+        let (title, status) = match row.games.get(i) {
             Some(game) => {
                 tile::game(ui, rect, game, TILE * S, focused == Some(i));
-                game.name.as_str()
+                (game.name.as_str(), queue.status(game.id))
             }
             None => {
                 tile::collage(ui, rect, row.history.iter(), glyph::HISTORY);
-                "Play history"
+                ("Play history", None)
             }
         };
-        tile::title_band(ui, rect, ("recent", i), title, focused == Some(i), HEIGHT * S);
+        tile::status_band(ui, rect, status, focused == Some(i));
+        tile::title_band(ui, rect, ("recent", i), title, status, focused == Some(i), HEIGHT * S);
     }
     if let Some(&rect) = focused.and_then(|i| rects.get(i)) {
         theme::focus_ring(ui, rect, S);

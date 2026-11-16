@@ -1,6 +1,6 @@
 //! The hub's actions (docs/spec/game-hub.md, section 6): the main action, Manage, and the page toggle, in a row
-//! under the cards. Between Manage and the toggle is the place of Queue (M4), which shows only for a game in the
-//! Queue: when it is built it is an [`Action`] like Manage, and the toggle moves along.
+//! under the cards. Between Manage and the toggle is Queue, which shows only for a game in the Queue, the toggle
+//! moving along for it.
 use ui::{Color, Font, HAlign, Rect, TextStyle, Ui, VAlign};
 
 use super::cards;
@@ -28,15 +28,23 @@ const CHIP_EDGE: Color = Color::argb(0x80FFFFFF);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    /// Play, Running or Install.
+    /// Play, Running, Install, Queued or Installing...
     Main,
     Manage,
+    /// To Manage Queue: only while the game is in the Queue.
+    Queue,
     /// To the hub's other page.
     Toggle,
 }
 
-/// The actions, left to right.
-pub const ALL: [Action; 3] = [Action::Main, Action::Manage, Action::Toggle];
+/// The actions, left to right, for a game in the Queue or not.
+pub fn shown(queued: bool) -> &'static [Action] {
+    if queued {
+        &[Action::Main, Action::Manage, Action::Queue, Action::Toggle]
+    } else {
+        &[Action::Main, Action::Manage, Action::Toggle]
+    }
+}
 
 /// What the main action is, by the game's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +54,23 @@ pub enum Main {
     Running,
     /// The game is not installed.
     Install,
+    /// The game is in the Queue, waiting its turn (or paused): A does nothing.
+    Queued,
+    /// The game is in the Queue, downloading: A does nothing.
+    Installing,
+}
+
+impl Main {
+    /// What it reads: the state, in capitals.
+    fn label(self) -> &'static str {
+        match self {
+            Main::Play => "PLAY",
+            Main::Running => "RUNNING",
+            Main::Install => "INSTALL",
+            Main::Queued => "QUEUED",
+            Main::Installing => "INSTALLING...",
+        }
+    }
 }
 
 /// The toggle's label: the page it turns to.
@@ -57,33 +82,39 @@ fn toggle_label(details: bool) -> &'static str {
     }
 }
 
-/// Where each action is, in the order of [`ALL`]. The toggle is as wide as what is in it: `toggle` is its width.
-pub fn rects(toggle: f32) -> [Rect; 3] {
-    let manage = cards::LEFT + MAIN_WIDTH + GAP;
-    [
-        Rect::new(cards::LEFT, TOP, MAIN_WIDTH, HEIGHT),
-        Rect::new(manage, TOP, ICON_WIDTH, HEIGHT),
-        Rect::new(manage + ICON_WIDTH + GAP, TOP, toggle, HEIGHT),
-    ]
+/// Where each action is, in the order of [`shown`], with Queue or without. The toggle is as wide as what is in it:
+/// `toggle` is its width.
+pub fn rects(toggle: f32, queued: bool) -> Vec<Rect> {
+    let mut x = cards::LEFT;
+    shown(queued)
+        .iter()
+        .map(|action| {
+            let width = match action {
+                Action::Main => MAIN_WIDTH,
+                Action::Manage | Action::Queue => ICON_WIDTH,
+                Action::Toggle => toggle,
+            };
+            let rect = Rect::new(x, TOP, width, HEIGHT);
+            x += width + GAP;
+            rect
+        })
+        .collect()
 }
 
-/// Draws the row, with the focus ring round the action with focus. `source` is the store's name, which Install
-/// carries under its label. Returns the toggle's width.
-pub fn draw(ui: &mut Ui, main: Main, source: Option<&str>, details: bool, focus: Option<Action>) -> f32 {
+/// Draws the row, with the focus ring round the action with focus, and Queue while the game is `queued`. `source`
+/// is the store's name, which Install carries under its label. Returns the toggle's width.
+pub fn draw(ui: &mut Ui, main: Main, source: Option<&str>, details: bool, queued: bool, focus: Option<Action>) -> f32 {
     let label = toggle_label(details);
     let toggle = 2.0 * PADDING + TOGGLE_ICON + TOGGLE_GAP + ui.measure(&LABEL, label).width;
-    let rects = rects(toggle.max(ICON_WIDTH));
-    for (action, rect) in ALL.into_iter().zip(rects) {
+    let rects = rects(toggle.max(ICON_WIDTH), queued);
+    for (&action, &rect) in shown(queued).iter().zip(&rects) {
         let fill = if focus == Some(action) { theme::ACCENT_LIGHT } else { REST };
         ui.fill(rect, fill, RADIUS);
         let (cx, cy) = rect.center();
         match action {
             Action::Main => {
-                let (text, second) = match main {
-                    Main::Play => ("PLAY", None),
-                    Main::Running => ("RUNNING", None),
-                    Main::Install => ("INSTALL", source),
-                };
+                let text = main.label();
+                let second = source.filter(|_| main == Main::Install);
                 let width = rect.w - 2.0 * PADDING;
                 let line = ui.measure(&LABEL, text).height;
                 // With the source under it, the two lines are centred as one block.
@@ -97,6 +128,7 @@ pub fn draw(ui: &mut Ui, main: Main, source: Option<&str>, details: bool, focus:
                 }
             }
             Action::Manage => ui.icon(cx, cy, glyph::SETTINGS, 28.0, Color::WHITE),
+            Action::Queue => ui.icon(cx, cy, glyph::DOWNLOAD, 28.0, Color::WHITE),
             Action::Toggle => {
                 let icon = if details { glyph::HOME } else { INFO };
                 ui.icon(rect.x + PADDING + TOGGLE_ICON / 2.0, cy, icon, TOGGLE_ICON, Color::WHITE);
@@ -104,27 +136,30 @@ pub fn draw(ui: &mut Ui, main: Main, source: Option<&str>, details: bool, focus:
             }
         }
     }
-    if let Some(at) = focus.and_then(|focus| ALL.iter().position(|&action| action == focus)) {
+    if let Some(at) = focus.and_then(|focus| shown(queued).iter().position(|&action| action == focus)) {
         theme::focus_ring_cornered(ui, rects[at], 14.0);
     }
     toggle
 }
 
-/// The name an icon action with focus says over itself: Manage's. The others carry their own labels. It lies over
-/// the ring's top stroke and the cards' foot, so it is drawn after both, on a layer of its own.
-pub fn name_chip(ui: &mut Ui, focus: Option<Action>, toggle: f32) {
-    if focus != Some(Action::Manage) {
-        return;
-    }
-    let action = rects(toggle)[1];
-    let text = ui.measure(&BODY, "Manage");
+/// The name an icon action with focus says over itself: Manage's or Queue's. The others carry their own labels. It
+/// lies over the ring's top stroke and the cards' foot, so it is drawn after both, on a layer of its own.
+pub fn name_chip(ui: &mut Ui, focus: Option<Action>, toggle: f32, queued: bool) {
+    let name = match focus {
+        Some(Action::Manage) => "Manage",
+        Some(Action::Queue) => "Queue",
+        _ => return,
+    };
+    let Some(at) = shown(queued).iter().position(|&action| Some(action) == focus) else { return };
+    let action = rects(toggle, queued)[at];
+    let text = ui.measure(&BODY, name);
     // 10 and 4 of padding inside a 1 wide border.
     let (width, height) = (text.width + 22.0, text.height + 10.0);
     let chip = Rect::new(action.center().0 - width / 2.0, action.y - CHIP_UP, width, height);
     ui.layer();
     ui.fill(chip, CHIP, 3.0);
     ui.ring(chip, CHIP_EDGE, 3.0, 1.0);
-    ui.label_centered(chip.center().0, chip.center().1, "Manage", &BODY);
+    ui.label_centered(chip.center().0, chip.center().1, name, &BODY);
 }
 
 #[cfg(test)]
@@ -133,10 +168,14 @@ mod tests {
 
     #[test]
     fn the_actions_are_where_the_spec_says() {
-        let [main, manage, toggle] = rects(269.0);
+        let [main, manage, toggle] = rects(269.0, false)[..] else { panic!() };
         assert_eq!((main.x, main.right()), (80.0, 460.0));
         assert_eq!((manage.x, manage.right()), (472.0, 552.0));
         assert_eq!((toggle.x, toggle.right()), (564.0, 833.0));
         assert!((main.y - 802.4).abs() < 0.01 && main.h == 80.0);
+        // Queue between Manage and the toggle, which moves 92 along for it.
+        let [_, _, queue, moved] = rects(269.0, true)[..] else { panic!() };
+        assert_eq!((queue.x, queue.right()), (564.0, 644.0));
+        assert_eq!(moved.x - toggle.x, 92.0);
     }
 }

@@ -2,6 +2,7 @@
 pub mod audio;
 pub mod by_hand;
 pub mod post;
+pub mod queue;
 pub mod sound;
 pub mod source;
 
@@ -10,6 +11,7 @@ use std::path::PathBuf;
 
 pub use audio::{Audio, AudioDevice, Flow};
 pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
+pub use queue::{Install, InstallState, Installed, Queue, Queued};
 pub use sound::Sound;
 pub use source::{Ask, Found, Source, Start};
 
@@ -374,6 +376,10 @@ pub struct Library {
     /// could not be read, which leaves the database's as they are; and always in a snapshot.
     #[serde(default)]
     pub collections: Option<Vec<Collection>>,
+    /// The Queue: every game being installed, and those it held that have finished. Only a snapshot of the library
+    /// database has it; a source reads none.
+    #[serde(default)]
+    pub queue: Queue,
     /// The Apps (`by_hand`): not games, so in none of the lists above. In the order they were added. Only a
     /// snapshot of the library database has any.
     #[serde(default)]

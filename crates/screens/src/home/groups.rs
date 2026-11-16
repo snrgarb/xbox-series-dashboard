@@ -81,24 +81,25 @@ pub fn card_rect(group: usize, card: usize) -> Rect {
     Rect::new(x, top(group) + CARDS_TOP * S, CARD_WIDTH * S, CARD_HEIGHT * S)
 }
 
-/// The Groups, with focus on this card of this Group if on any.
-pub fn draw(ui: &mut Ui, groups: &[Group], focused: Option<(usize, usize)>) {
+/// The Groups, with focus on this card of this Group if on any; `queue` says which games are being installed.
+pub fn draw(ui: &mut Ui, groups: &[Group], queue: &model::Queue, focused: Option<(usize, usize)>) {
     for (g, group) in groups.iter().enumerate() {
         ui.label_middle(MARGIN, top(g) + HEADER * S / 2.0, group.name, &HEADING);
         for card in 0..group.cards() {
             let rect = card_rect(g, card);
             let has_focus = focused == Some((g, card));
-            let title = match group.games.get(card) {
+            let (title, status) = match group.games.get(card) {
                 Some(game) => {
                     tile::game(ui, rect, game, rect.w, has_focus);
-                    game.name.as_str()
+                    (game.name.as_str(), queue.status(game.id))
                 }
                 None => {
                     tile::collage(ui, rect, group.more.iter().copied(), glyph::LIBRARY);
-                    "See all"
+                    ("See all", None)
                 }
             };
-            tile::title_band(ui, rect, ("group", g, card), title, has_focus, rect.w);
+            tile::status_band(ui, rect, status, has_focus);
+            tile::title_band(ui, rect, ("group", g, card), title, status, has_focus, rect.w);
             if has_focus {
                 theme::focus_ring(ui, rect, S);
             }

@@ -170,8 +170,16 @@ impl Grid {
     }
 
     /// Draws the grid. `focused` says focus is on its tile; `running` is the game being launched or running. With
-    /// no games, `empty` is its one line, centred in the list's box.
-    pub fn draw(&mut self, ui: &mut Ui, games: &[&Game], focused: bool, running: Option<Key>, empty: &str) {
+    /// no games, `empty` is its one line, centred in the list's box. `queue` says which games are being installed.
+    pub fn draw(
+        &mut self,
+        ui: &mut Ui,
+        games: &[&Game],
+        focused: bool,
+        running: Option<Key>,
+        queue: &model::Queue,
+        empty: &str,
+    ) {
         if !self.keep(games) {
             ui.label_centered(LIST.0 + LIST.1 / 2.0, (self.cut.0 + self.cut.1) / 2.0, empty, &NO_GAMES);
             return;
@@ -181,7 +189,9 @@ impl Grid {
         let id = self.id;
         let face = |ui: &mut Ui, index: usize, focused: bool| {
             let game = games[index];
-            let tile = Tile { game, focused, running: running.as_ref().is_some_and(|running| game.is(running)) };
+            let running = running.as_ref().is_some_and(|running| game.is(running));
+            let installing = game.id != 0 && queue.get(game.id).is_some();
+            let tile = Tile { game, focused, running, installing };
             tile::draw(ui, self.rect(index, scroll), (id, key(game)), &tile);
         };
         // The rows that show any of themselves, the one going out at the top as the grid slides included.

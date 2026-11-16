@@ -23,7 +23,15 @@ pub struct Tile<'a> {
     pub focused: bool,
     /// The game is the one being launched or running: the play mark, top left.
     pub running: bool,
+    /// The game is in the Queue: "Installing...", queued or not, as the Bundle's list reads it (Playnite has one
+    /// flag for both), in place of the source's badge and the state badge.
+    pub installing: bool,
 }
+
+/// What an installing tile reads, at its foot or under its title.
+const INSTALLING: &str = model::queue::INSTALLING;
+/// The Installing band's text: 28 under the band's top, 12 in from the sides, 10 over the tile's foot.
+const INSTALLING_TOP: f32 = 28.0;
 
 /// How much of the title band shows: in over 150 ms after 50, out over 100, both linear; there and gone at once
 /// under Reduce motion, unlike Home's.
@@ -37,7 +45,7 @@ fn band(ui: &mut Ui, id: impl Hash, focused: bool) -> f32 {
 }
 
 pub fn draw(ui: &mut Ui, rect: Rect, id: impl Hash, tile: &Tile) {
-    let Tile { game, focused, running } = *tile;
+    let Tile { game, focused, running, installing } = *tile;
     let band = band(ui, id, focused);
     ui.fill(rect, theme::TILE, RADIUS);
     // A cover downloaded while the Dashboard runs fades in over the name, as on Home's tiles.
@@ -50,30 +58,49 @@ pub fn draw(ui: &mut Ui, rect: Rect, id: impl Hash, tile: &Tile) {
         let name = (1.0 - band) * (1.0 - cover);
         ui.with_alpha(name, |ui| ui.paragraph(lines, &game.name, &TEXT, HAlign::Center, VAlign::Center, 0));
     }
-    // The source's badge goes at once as focus comes, and the title takes its corner.
-    if let Some(source) = source(game).filter(|_| !focused) {
+    // The source's badge goes at once as focus comes, and the title takes its corner; an installing game's caption
+    // takes it the rest of the time.
+    if let Some(source) = source(game).filter(|_| !focused && !installing) {
         source_badge_at(ui, rect, source, 1.0);
     }
     let mark = match (running, game.installed) {
         (true, _) => Some((page_glyph::PLAY, 11.0)),
-        (false, false) => Some((glyph::DOWNLOAD, 14.0)),
-        (false, true) => None,
+        (false, false) if !installing => Some((glyph::DOWNLOAD, 14.0)),
+        (false, _) => None,
     };
     if let Some((mark, size)) = mark {
         let badge = Rect::new(rect.x + 6.0, rect.y + 6.0, BADGE, BADGE);
         ui.fill(badge, BADGE_BACK, 3.0);
         ui.icon(badge.center().0, badge.center().1, mark, size, Color::WHITE);
     }
+    let width = rect.w - 2.0 * BAND_SIDE;
+    // Installing...: at the foot while the tile has no focus, gone at once as focus comes.
+    if installing && !focused {
+        let line = ui.measure_wrapped(&TEXT, INSTALLING, width, 1).height;
+        let under = Rect::new(
+            rect.x,
+            rect.bottom() - INSTALLING_TOP - line - BAND_FOOT,
+            rect.w,
+            INSTALLING_TOP + line + BAND_FOOT,
+        );
+        ui.gradient(under, Color::CLEAR, BAND, Gradient::Vertical, RADIUS);
+        let text = Rect::new(rect.x + BAND_SIDE, under.y + INSTALLING_TOP, width, line);
+        ui.paragraph(text, INSTALLING, &TEXT, HAlign::Left, VAlign::Top, 1);
+    }
     if band > 0.0 {
-        let width = rect.w - 2.0 * BAND_SIDE;
         let text = ui.measure_wrapped(&TEXT, &game.name, width, 2);
-        let height = BAND_TOP + text.height + BAND_FOOT;
+        let line = if installing { ui.measure_wrapped(&TEXT, INSTALLING, width, 1).height } else { 0.0 };
+        let height = BAND_TOP + text.height + line + BAND_FOOT;
         let under = Rect::new(rect.x, rect.bottom() - height, rect.w, height);
         ui.with_alpha(band, |ui| {
             // Clear at its top, so only the foot's corners show the tile's rounding.
             ui.gradient(under, Color::CLEAR, BAND, Gradient::Vertical, RADIUS);
             let lines = Rect::new(rect.x + BAND_SIDE, under.y + BAND_TOP, width, text.height);
             ui.paragraph(lines, &game.name, &TEXT, HAlign::Left, VAlign::Top, 2);
+            if installing {
+                let under_title = Rect::new(lines.x, lines.bottom(), width, line);
+                ui.paragraph(under_title, INSTALLING, &TEXT, HAlign::Left, VAlign::Top, 1);
+            }
         });
     }
     if focused {

@@ -22,6 +22,7 @@ pub mod art;
 pub mod by_hand;
 pub mod filters;
 pub mod history;
+pub mod queue;
 pub mod sources;
 
 use std::collections::HashMap;
@@ -100,6 +101,8 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE games ADD COLUMN community_score INTEGER;",
     // 4: the Apps (docs/spec/apps.md).
     by_hand::MIGRATION,
+    // 5: the Queue, and the games it held that finished installing.
+    queue::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -441,6 +444,7 @@ impl Database {
             filters: self.filters_at(now)?,
             history: history::rows(&self.conn, now)?,
             collections: None,
+            queue: self.queue()?,
             apps: self.apps()?,
             store_apps: None,
         })

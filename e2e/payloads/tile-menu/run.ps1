@@ -1,7 +1,7 @@
 # The Tile menu, walked with the virtual pad on a fake Steam library (docs/spec/tile-menu.md): Menu on a Recent tile
 # and on a Group's card, its rows by a game's state, More options and its flyout, "Uninstall X?" and its answers, B a
 # level at a time, and what each row then does: Add to and Remove from Favourites and Hide this game (the library
-# database), Install and Uninstall (the address the stand-in Steam is started with), Customise Home (Settings on
+# database), Install and Uninstall (what the stand-in Steam client is asked), Customise Home (Settings on
 # Personalisation, B back to the tile), Manage game (the game's Game hub in the menu's place, whose own Tile menu has
 # no Manage game row, and B back to the tile) and Play game (a launch).
 #
@@ -142,20 +142,15 @@ try {
     Press-Nowhere Left 'Left does not close the flyout'
     Press B "TileMenu: Menu\(More options\) of $game" '04-flyout-closed' | Out-Null
 
-    # --- Uninstall: the question in the menu's place; Cancel and B come back to the menu on Uninstall; yes closes
-    # the menu and starts Steam with the game's uninstall address.
+    # --- Uninstall: the question in the menu's place; Cancel and B come back to the menu on Uninstall. Saying yes
+    # comes last of what is done with this game, as it really uninstalls the fake's.
     Walk Up "TileMenu: Menu\(Uninstall\) of $game"
     Press A "TileMenu: Prompt\(Uninstall\) of $game" '05-uninstall-question' | Out-Null
     Press Down "TileMenu: Prompt\(Cancel\) of $game" | Out-Null
     Press A "TileMenu: Menu\(Uninstall\) of $game" '06-question-cancelled' | Out-Null
     Press A "TileMenu: Prompt\(Uninstall\) of $game" | Out-Null
     Press B "TileMenu: Menu\(Uninstall\) of $game" | Out-Null
-    Press A "TileMenu: Prompt\(Uninstall\) of $game" | Out-Null
-    $mark = Get-DashboardLogLength
-    $tile = Press A 'Recent\(\d+\)' '07-uninstall-asked'
-    Expect-Logged "^store: asked Steam to uninstall ${game}: steam://uninstall/\d+" $mark 'Uninstall' | Out-Null
-    Expect-Steam 'steam-url: asked to uninstall \d+: steam://uninstall/\d+' 'Uninstall'
-    if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
+    $tile = Press B 'Recent\(\d+\)'
 
     # --- Favourites: the row marks the game in the library database, and the next menu reads the other way. Then
     # back again, so the library is as it was.
@@ -193,6 +188,20 @@ try {
     Press B 'GameHub: \d+ Hub (Play|Install)' | Out-Null
     if ($back) { Press B ([regex]::Escape($back)) | Out-Null }
 
+    # --- Uninstall, yes: the menu closes and Steam's client is asked, as the Bundle asks it (steam.exe -silent
+    # -console +app_uninstall), the stand-in client in the fake's folder. It uninstalls the fake's game, and the
+    # Dashboard sees it go.
+    Press Start "TileMenu: Menu\(Play game\) of $game" | Out-Null
+    Walk Down "TileMenu: Menu\(Uninstall\) of $game"
+    Press A "TileMenu: Prompt\(Uninstall\) of $game" | Out-Null
+    $mark = Get-DashboardLogLength
+    Press A 'Recent\(\d+\)' '07-uninstall-asked' | Out-Null
+    Expect-Logged "^store: asked Steam to uninstall ${game}: .*steam\.exe -silent -console \+app_uninstall \d+$" $mark 'Uninstall' | Out-Null
+    Expect-Steam 'steam: asked to uninstall \d+: -silent -console \+app_uninstall \d+' 'Uninstall'
+    $gone = Wait-DashboardLog "^queue: $game uninstalled$" 30 $mark
+    if ($gone) { Say "Uninstall: $gone" } else { $failures += "the Dashboard never saw $installed uninstalled" }
+    if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
+
     # --- A game that is not installed: Install first and no Uninstall, five rows. Install closes the menu and
     # starts Steam with the game's install address.
     Walk Left 'Recent\(0\)' 10
@@ -206,8 +215,9 @@ try {
     Walk Up "TileMenu: Menu\(Install\) of $absent"
     $mark = Get-DashboardLogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Logged "^store: asked Steam to install ${absent}: steam://install/\d+" $mark 'Install' | Out-Null
-    Expect-Steam 'steam-url: asked to install \d+: steam://install/\d+' 'Install'
+    Expect-Logged "^store: asked Steam to install ${absent}: .*steam\.exe -silent \+app_install \d+$" $mark 'Install' | Out-Null
+    Expect-Steam 'steam: asked to install \d+: -silent \+app_install \d+' 'Install'
+    Expect-Logged "^queue: $absent joined, asked for$" $mark 'Install, the Queue' | Out-Null
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
 
     # --- A Group's game card: the hint bar says "More options" there, and is gone while the menu is up. B closes

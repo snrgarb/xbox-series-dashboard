@@ -13,8 +13,8 @@
 //! | Full library | `full_library`: the tabs, the Sort and Filter row, and the grid under them |
 //! | Manage | `manage` |
 //!
-//! **Hooks for other tickets**, each one function that does nothing yet: `manage::open_manage_queue` and
-//! `nav::foot` (M4), [`progress`] (the library updating).
+//! **Hooks for other tickets**, each one function that does nothing yet: [`manage_queue`],
+//! `manage::open_manage_queue` and `nav::foot` (#79), [`progress`] (the library updating).
 mod apps;
 mod full_library;
 mod games;
@@ -56,6 +56,24 @@ pub enum Entry {
     /// Manage's Queue (M4): Home's Downloads tile. Until there is a Manage Queue it is Manage, focus on the Queue
     /// box.
     Queue,
+}
+
+/// The ways into Manage Queue (docs/spec/my-games.md, 9.2), for its hook to tell apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueFrom {
+    /// Home's Downloads tile.
+    Downloads,
+    /// The Game hub's Queue action, which B on Manage Queue comes back to.
+    GameHub,
+}
+
+/// **#79's hook.** What opens Manage Queue from outside My games & apps: Home's Downloads tile and the Game hub's
+/// Queue action, opened over the page that asked, so that B comes back to it. Until there is a Manage Queue it is
+/// My games & apps on Manage, focus on its Queue box, whichever way in. The third way in, A on that Queue box, is
+/// `manage::open_manage_queue`.
+pub fn manage_queue(from: QueueFrom) -> Open {
+    let _ = from;
+    Open::MyGames(Entry::Queue)
 }
 
 /// The content's left edge and its right; the header's top, and the content row's 118 under it.

@@ -599,6 +599,67 @@ fn manifest(game: &FixtureGame) -> Vec<u8> {
     map([("AppState", state)]).to_text().into_bytes()
 }
 
+/// Where an install the fake Steam has under way is, as `write_progress` writes it into its manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Progress {
+    /// Taken on and waiting its turn: what Steam writes as it is asked (`UpdateRequired | UpdateStarted`), no bytes.
+    Queued,
+    /// Downloading (`UpdateRunning` too), `done` of `total` bytes.
+    Downloading { done: u64, total: u64 },
+    /// Paused by the user (`UpdatePaused` in place of `UpdateRunning`).
+    Paused { done: u64, total: u64 },
+    /// Finished: `FullyInstalled`, its folder made under `steamapps/common`.
+    Done,
+    /// Dropped, cancelled in Steam, or uninstalled: the manifest goes.
+    Dropped,
+}
+
+/// Writes the manifest of the fixture's game `appid` (`Fixture::full_shelf`'s, else a made-up name and folder) as the
+/// fake Steam has it at `progress`: what the end-to-end tests' stand-in Steam does as it is asked to install or
+/// uninstall, and as a test moves an install along (`standin steam-install`). Nothing is downloaded.
+pub fn write_progress(root: &Path, appid: u32, progress: Progress) -> io::Result<()> {
+    let steamapps = root.join("steamapps");
+    let file = steamapps.join(format!("appmanifest_{appid}.acf"));
+    let known = Fixture::full_shelf().games.into_iter().find(|game| game.appid == appid);
+    let (name, install_dir, size) = match known {
+        Some(game) => (game.name, game.install_dir, game.size_on_disk),
+        None => (format!("App {appid}"), appid.to_string(), 0),
+    };
+    let (flags, done, total) = match progress {
+        Progress::Queued => (crate::installs::QUEUED, 0, 0),
+        Progress::Downloading { done, total } => {
+            (crate::installs::QUEUED | crate::installs::UPDATE_RUNNING, done, total)
+        }
+        Progress::Paused { done, total } => (crate::installs::QUEUED | crate::installs::UPDATE_PAUSED, done, total),
+        Progress::Done => (crate::installs::FULLY_INSTALLED, size, size),
+        Progress::Dropped => {
+            return match fs::remove_file(&file) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            };
+        }
+    };
+    if progress == Progress::Done {
+        fs::create_dir_all(steamapps.join("common").join(&install_dir))?;
+    }
+    let state = map([
+        ("appid", s(appid)),
+        ("universe", s(1)),
+        ("name", s(&name)),
+        ("StateFlags", s(flags)),
+        ("installdir", s(&install_dir)),
+        ("LastPlayed", s(0)),
+        ("SizeOnDisk", s(if progress == Progress::Done { size } else { 0 })),
+        ("BytesToDownload", s(total)),
+        ("BytesDownloaded", s(done)),
+    ]);
+    fs::create_dir_all(&steamapps)?;
+    // Written whole and then moved into place, as a reader may look at any moment.
+    let part = steamapps.join(format!("appmanifest_{appid}.acf.part"));
+    fs::write(&part, map([("AppState", state)]).to_text())?;
+    fs::rename(part, file)
+}
+
 // ------------------------------------------------------------------------ art
 
 #[derive(Clone, Copy)]

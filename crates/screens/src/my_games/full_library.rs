@@ -577,7 +577,7 @@ impl Pane for FullLibrary {
         };
         let running = around.playing.and_then(|at| library.games.get(at)).map(grid::key);
         ui.with_offset(across, 0.0, |ui| {
-            self.grid.draw(ui, &games, focused == Some(Focus::Grid), running, EMPTY);
+            self.grid.draw(ui, &games, focused == Some(Focus::Grid), running, &library.queue, EMPTY);
         });
         // Tiles scrolled up pass under this and are cut where it starts, so they never draw over the row.
         let fade = Rect::new(grid::LIST.0, grid::FULL_LIBRARY_CUT, grid::LIST.1, FADE);

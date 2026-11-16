@@ -117,7 +117,7 @@ impl Pane for Games {
         let games = installed(around.library);
         let running = around.playing.and_then(|at| around.library.games.get(at)).map(grid::key);
         // The grid slides in with the pane but does not fade.
-        self.grid.draw(ui, &games, look.focused && !self.on_button, running, EMPTY);
+        self.grid.draw(ui, &games, look.focused && !self.on_button, running, &around.library.queue, EMPTY);
         // Under the grid's end, and only while its last row is wholly in view.
         let Some(end) = self.grid.end(ui, games.len()) else { return };
         ui.with_alpha(look.fade, |ui| {
