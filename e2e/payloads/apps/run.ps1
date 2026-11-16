@@ -251,7 +251,9 @@ try {
     Start-Sleep -Seconds 2
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put back in front: $(Set-Foreground 'Xbox Series Dashboard')" }
     Start-Sleep -Milliseconds 1000
-    Press B 'TopBar\(MyGames\)'
+    # B on My games & apps is Home on the Recent row's game last focused, not the top bar: only Search and
+    # Settings give focus back to their button (docs/spec/home.md, 7.4; the pages payload).
+    Press B 'Recent\(\d+\)'
 
     # --- Search: the App is not a game; the game added by hand is, and its Game hub plays it.
     Press Y 'Search: Key\(Q\); .+'
@@ -302,7 +304,7 @@ try {
     # Apps shows once focus has rested on its item: a line of its own.
     Start-Sleep -Milliseconds 2000
     Press-Nothing Right 'Apps is empty: focus stays on the nav'
-    Press B 'TopBar\(MyGames\)'
+    Press B 'Recent\(\d+\)'
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }
