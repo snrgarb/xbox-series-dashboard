@@ -304,7 +304,7 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
     assert_eq!(dashboard.page(), None);
     press(&mut dashboard, &[Right; 9]);
     assert_eq!((dashboard.home_focus(), dashboard.focused_game()), (Focus::Recent(7), Some(7)), "eight games");
-    // A double tap: one A is the game's hub, once the second's time has passed.
+    // A is the game's hub, and A again its Play.
     press(&mut dashboard, &[A, A]);
     assert!(dashboard.take_effects().contains(&Effect::Launch(7)), "A twice on the eighth tile plays its game");
 

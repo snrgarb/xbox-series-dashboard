@@ -40,14 +40,12 @@ pub fn run(
         dashboard.set_media(media);
     }
     let press = |dashboard: &mut Dashboard, host: &mut Host, button| {
-        dashboard.press(Press { button, repeat: false });
-        // An A on a game's tile (or a Play history row): its Game hub opens when the double tap's time is up, over
-        // the screen as it then looks, which the hub keeps a picture of. So that is drawn to rest first, and the
-        // time then passed at once.
-        if let Some(wait) = dashboard.timer() {
+        // An A on a game's tile (or a Play history row) opens its Game hub at once, over the screen as it looks,
+        // which the hub keeps a picture of. So that is drawn to rest first.
+        if button == Button::A {
             target.still(&gpu, host, |ui| dashboard.draw(ui));
-            dashboard.advance(wait);
         }
+        dashboard.press(Press { button, repeat: false });
         // An Achievements page the press opened is given its game's list, as the window gives it.
         if let Some(game) = dashboard.achievements_wanted() {
             dashboard.set_achievements(game, achievements_of(game));

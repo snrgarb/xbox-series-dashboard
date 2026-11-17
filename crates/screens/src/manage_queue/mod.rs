@@ -7,12 +7,10 @@
 //! as it was: Manage's Queue box (My games & apps, focus on the box), Home's Downloads tile (Home, on the tile), and
 //! a Game hub's Queue action (the hub, on Queue).
 //!
-//! Its covers and rows are a game's as a Home tile is: A opens the game's Game hub when the double tap's time has
-//! passed, and a second A plays it; Menu and View open its Tile menu, which on a row is the queued game's menu,
+//! Its covers and rows are a game's as a Home tile is: A opens the game's Game hub at once, where a second A is its
+//! Play; Menu and View open its Tile menu, which on a row is the queued game's menu,
 //! with Pause or Resume and Cancel where its store can (`tile_menu::Opener::Queue`, #170).
 pub mod figures;
-
-use std::time::{Duration, Instant};
 
 use model::{Game, Library};
 use ui::{Button, Color, HAlign, Press, Rect, Ui, VAlign};
@@ -20,9 +18,9 @@ use ui::{Button, Color, HAlign, Press, Rect, Ui, VAlign};
 use self::figures::Figures;
 use crate::hint_bar::{self, Hint};
 use crate::my_games::look::{BOX, HEADER, LINE, PAGE, SECTION, TEXT};
-use crate::pages::{Around, Open, Page, PageAction, Tick};
+use crate::pages::{Around, Open, Page, PageAction};
 use crate::theme::{self, glyph};
-use crate::{game_hub, home, tile_menu, Effect};
+use crate::{game_hub, home, tile_menu};
 
 /// What opens the page, from wherever: the hook Manage's Queue box, Home's Downloads tile and the hub's Queue action
 /// all call.
@@ -32,8 +30,6 @@ pub fn open() -> Open {
 
 /// How many covers Recently installed holds.
 pub const RECENTLY_INSTALLED: usize = 8;
-/// A second A on the same cover or row this soon after the first plays the game.
-const DOUBLE_TAP: Duration = Duration::from_millis(300);
 
 /// The title's top left; the list starts under its line (Bahnschrift 42, 1.2 to the line).
 const TITLE: (f32, f32) = (96.0, 72.0);
@@ -143,8 +139,6 @@ pub struct ManageQueue {
     /// The cover last focused: where Up from the first row goes.
     last_cover: usize,
     scroll: f32,
-    /// When A last chose a cover or row, and whose.
-    chosen: Option<(Instant, i64)>,
     /// What the focus log says, kept as the library was when last looked at: the focused game's name, how many
     /// rows and covers there are, and the focused row's state and share.
     name: String,
@@ -159,7 +153,6 @@ impl ManageQueue {
             game: None,
             last_cover: 0,
             scroll: 0.0,
-            chosen: None,
             name: String::new(),
             counts: (0, 0),
             row: None,
@@ -265,32 +258,10 @@ impl Page for ManageQueue {
         self.keep(around.library);
     }
 
-    /// The cover or row A chose, once the double tap's time has passed with no second A: its game's hub opens, as
-    /// a Home tile's does.
-    fn tick(&mut self, around: Around) -> Tick {
-        let Some((at, chosen)) = self.chosen else { return Tick::Nothing };
-        let since = around.now.saturating_duration_since(at);
-        if since < DOUBLE_TAP {
-            return Tick::Wait(DOUBLE_TAP - since);
-        }
-        self.chosen = None;
-        // Long over, with the page not asked meanwhile: something else had the pad, and the choice went with it.
-        if since > DOUBLE_TAP * 3 {
-            return Tick::Nothing;
-        }
-        match around.library.game(chosen) {
-            Some(game) => Tick::Act(PageAction::Open(Open::GameHub(game_hub::Entry::of(game)))),
-            None => Tick::Nothing,
-        }
-    }
-
     fn press(&mut self, press: Press, around: Around) -> Option<PageAction> {
         let library = around.library;
         self.keep(library);
         let once = !press.repeat;
-        if press.button != Button::A && !press.button.is_direction() {
-            self.chosen = None;
-        }
         let covers = self.counts.1;
         let rows = library.queue.entries.len();
         match (press.button, self.focus) {
@@ -303,17 +274,10 @@ impl Page for ManageQueue {
             (Button::Down, Focus::Row(i)) if i + 1 < rows => self.focus = Focus::Row(i + 1),
             (Button::Up, Focus::Row(i)) if i > 0 => self.focus = Focus::Row(i - 1),
             (Button::Up, Focus::Row(0)) if covers > 0 => self.focus = Focus::Cover(self.last_cover.min(covers - 1)),
+            // The game's Game hub, at once, as a Home tile's.
             (Button::A, Focus::Cover(_) | Focus::Row(_)) if once => {
-                let (game, place) = (self.game?, self.place(library)?);
-                let again = self.chosen.is_some_and(|(at, chosen)| {
-                    chosen == game && around.now.saturating_duration_since(at) < DOUBLE_TAP
-                });
-                if again {
-                    // The second A of a double tap plays the game.
-                    self.chosen = None;
-                    return Some(PageAction::Effect(Effect::Launch(place)));
-                }
-                self.chosen = Some((around.now, game));
+                let place = self.place(library)?;
+                return Some(PageAction::Open(Open::GameHub(game_hub::Entry::of(&library.games[place]))));
             }
             (Button::Menu | Button::View, Focus::Cover(_) | Focus::Row(_)) if once => {
                 let place = self.place(library)?;

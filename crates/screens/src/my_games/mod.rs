@@ -41,7 +41,7 @@ use self::nav::{Item, Settle};
 use crate::game_hub;
 use crate::hint_bar::{self, Hint};
 use crate::keyboard;
-use crate::pages::{Around, Open, Page, PageAction, Tick};
+use crate::pages::{Around, Open, Page, PageAction};
 
 /// How the page is opened: which of its items shows, and so where focus lands (docs/spec/my-games.md, 3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,11 +149,6 @@ trait Pane {
 
     /// What text entry over the page has to say to the pane that opened it.
     fn entry(&mut self, _event: keyboard::Event, _around: Around) {}
-
-    /// What time has brought the pane while it shows ([`Page::tick`]).
-    fn tick(&mut self, _around: Around) -> Tick {
-        Tick::Nothing
-    }
 
     /// A press with focus in the content, but for B and the bumpers.
     fn press(&mut self, _press: Press, _around: Around) -> Outcome {
@@ -367,11 +362,6 @@ impl Page for MyGames {
         self.pane_mut(showing).entry(event, around);
         self.keep(around);
         self.note(around);
-    }
-
-    fn tick(&mut self, around: Around) -> Tick {
-        let showing = self.showing;
-        self.pane_mut(showing).tick(around)
     }
 
     fn hints(&self, around: Around) -> &'static [Hint] {

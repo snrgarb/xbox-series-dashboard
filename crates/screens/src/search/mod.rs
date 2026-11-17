@@ -20,7 +20,7 @@ use ui::{Button, Press, Repeat, Ui};
 use self::find::Kind;
 use crate::game_hub;
 use crate::keyboard::{self, Board, Outcome, Typed};
-use crate::pages::{Around, Open, Page, PageAction, Tick};
+use crate::pages::{Around, Open, Page, PageAction};
 
 /// Where focus is on the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,7 +310,7 @@ impl Page for Search {
                     None => {}
                 }
             }
-            // The game's hub, at once: no double tap here.
+            // The game's hub, at once, as on Home.
             (Focus::Tile { row, at }, Button::A) => {
                 let game = &library.games[self.game(row, at)?];
                 return Some(PageAction::Open(Open::GameHub(game_hub::Entry::of(game))));
@@ -322,9 +322,8 @@ impl Page for Search {
 
     /// Asked after each press while the page is on top: the rows follow a library that changed while something was
     /// over the page (its Game hub), so the focus log says where focus is as soon as the page is back.
-    fn tick(&mut self, around: Around) -> Tick {
+    fn tick(&mut self, around: Around) {
         self.follow(around.library);
-        Tick::Nothing
     }
 
     /// A physical keyboard's text goes in whether the keyboard is up or away.

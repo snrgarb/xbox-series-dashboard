@@ -128,14 +128,6 @@ pub fn art_keys(game: &Game, px: f32) -> Vec<(&'static str, ui::ArtKey)> {
     backdrop.into_iter().chain(cover).collect()
 }
 
-/// Asks for the pictures a hub of `game` shows as it opens, so that they are read while the double tap's time is
-/// waited out (docs/spec/game-hub.md 9.1) and are there in the hub's first frame (#214).
-pub fn prefetch(ui: &mut Ui, game: &Game) {
-    for (_, key) in art_keys(game, ui.px()) {
-        ui.ask_art(&key);
-    }
-}
-
 /// How far the game has got with its achievements, if it has any: a game in no library database has none.
 fn progress<'a>(game: &Game, library: &'a Library) -> Option<&'a model::achievement::GameProgress> {
     library.achievements.of(game.id).filter(|_| game.id != 0)

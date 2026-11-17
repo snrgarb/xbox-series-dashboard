@@ -1037,15 +1037,14 @@ fn press(dashboard: &mut Dashboard, buttons: &[Button]) {
     }
 }
 
-/// A twice at one moment: a double tap, which plays the game focus is on.
-fn double_tap(dashboard: &mut Dashboard) {
+/// A twice at one moment on a game's tile: its hub, and the hub's Play, which plays the game focus is on.
+fn a_twice(dashboard: &mut Dashboard) {
     press(dashboard, &[A, A]);
 }
 
-/// A on a game's tile, and the double tap's time gone by with no second A: the game's hub opens.
+/// A on a game's tile: the game's hub opens, at once.
 fn a_alone(dashboard: &mut Dashboard) {
     press(dashboard, &[A]);
-    dashboard.advance(screens::home::DOUBLE_TAP.as_secs_f32());
 }
 
 /// Presses, then says where focus is.
@@ -1290,13 +1289,15 @@ fn b_on_a_group_goes_back_to_the_recent_rows_game_last_focused() {
 }
 
 #[test]
-fn a_double_tap_on_a_groups_card_launches_its_game_and_a_on_see_all_or_play_history_none() {
+fn a_twice_on_a_groups_card_launches_its_game_from_its_hub_and_a_on_see_all_or_play_history_none() {
     let mut home = core();
     // Most played's first card is the game played longest, Stardew Valley, tenth in the library.
     press(&mut home, &[Down, Down, Down]);
     assert_eq!(home.focused_game(), Some(9));
-    double_tap(&mut home);
+    a_twice(&mut home);
     assert_eq!(asked(&mut home), [Effect::Launch(9)]);
+    press(&mut home, &[B]);
+    assert_eq!(home.page(), None);
     // See all and the Play history tile open pages (tests/pages.rs) and launch nothing.
     press(&mut home, &[Right, Right, Right, Right, Right, Right, A]);
     assert_eq!(home.focused_game(), None);
@@ -1307,101 +1308,36 @@ fn a_double_tap_on_a_groups_card_launches_its_game_and_a_on_see_all_or_play_hist
 }
 
 #[test]
-fn a_on_a_game_opens_its_hub_once_the_double_taps_time_is_up_and_a_second_a_within_it_plays() {
+fn a_on_a_game_opens_its_hub_at_once_and_a_second_a_is_its_play() {
     let mut home = core();
     press(&mut home, &[Right]);
-    // The Dashboard's clock, in ms from here: the test moves it on, and nothing waits.
-    let mut clock = 0;
-    let mut to = |home: &mut Dashboard, ms: u64| {
-        home.advance((ms - clock) as f32 / 1000.0);
-        clock = ms;
-    };
-    let left = |home: &Dashboard| home.timer().map(|left| (left * 1000.0).round() as u64);
     let a = Press { button: A, repeat: false };
     let button = |button: Button| Press { button, repeat: false };
 
-    // One A: nothing yet, for as long as a second may still come.
+    // One A: the game's hub, in the same turn, focus on Play. Nothing is launched, and nothing is left timed: there
+    // is no double tap to wait for (docs/spec/game-hub.md 9.1).
     home.press(a);
-    assert_eq!(left(&home), Some(300));
-    to(&mut home, 299);
-    assert_eq!(left(&home), Some(1));
-    assert!(asked(&mut home).is_empty() && home.page().is_none());
-    // None came: the game's hub, focus on Play. Nothing was launched.
-    to(&mut home, 300);
-    assert_eq!(left(&home), None);
     assert_eq!(home.focus_line(), "GameHub: 1001 Hub Play");
+    assert_eq!(home.timer(), None);
     assert!(asked(&mut home).is_empty());
-    // B: Home again, focus on the tile, and nothing more waiting.
-    to(&mut home, 400);
+    // B: Home again, focus on the tile, and nothing opens later.
     home.press(button(B));
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(1)));
-    to(&mut home, 1000);
-    assert_eq!(left(&home), None);
-
-    // A second A within the time plays the game, once, and no hub opens.
-    to(&mut home, 2000);
-    home.press(a);
-    to(&mut home, 2299);
-    home.press(a);
-    assert_eq!(asked(&mut home), [Effect::Launch(1)]);
-    assert_eq!(left(&home), None);
-    to(&mut home, 5000);
+    home.advance(1.0);
     assert_eq!(home.page(), None);
 
-    // One that comes after it finds the hub, which is up by then: it is A on Play.
-    to(&mut home, 6000);
+    // A second A at once is not swallowed: it lands on the hub's Play, and plays the game, once.
     home.press(a);
-    to(&mut home, 6300);
     home.press(a);
     assert_eq!(home.focus_line(), "GameHub: 1001 Hub Play");
     assert_eq!(asked(&mut home), [Effect::Launch(1)]);
-    to(&mut home, 6400);
     home.press(button(B));
 
-    // A on another tile is another choice, however soon: the first tile's is forgotten.
-    to(&mut home, 7000);
-    home.press(a);
-    to(&mut home, 7100);
+    // Menu on a tile is its Tile menu, and no hub opens under it.
     home.press(button(Right));
-    to(&mut home, 7200);
-    home.press(a);
-    to(&mut home, 7300);
-    assert_eq!(left(&home), Some(200));
-    to(&mut home, 7500);
-    assert_eq!(left(&home), None);
-    assert_eq!(home.focus_line(), "GameHub: 1002 Hub Play");
-    assert!(asked(&mut home).is_empty());
-    to(&mut home, 7600);
-    home.press(button(B));
-    assert_eq!(home.home_focus(), Focus::Recent(2));
-
-    // Focus moving on does not undo the choice: the hub of the tile that was chosen opens, and B is on the tile
-    // focus went to.
-    to(&mut home, 8000);
-    home.press(a);
-    to(&mut home, 8100);
-    home.press(button(Left));
-    to(&mut home, 8300);
-    assert_eq!(home.focus_line(), "GameHub: 1002 Hub Play");
-    to(&mut home, 8400);
-    home.press(button(B));
-    assert_eq!(home.home_focus(), Focus::Recent(1));
-
-    // Menu does, and so does anything that takes the pad from Home: the Guide, a page.
-    for (at, taken) in [Button::Menu, Button::Guide, Button::Y].into_iter().enumerate() {
-        let ms = 9000 + 1000 * at as u64;
-        to(&mut home, ms);
-        home.press(a);
-        to(&mut home, ms + 100);
-        home.press(button(taken));
-        to(&mut home, ms + 300);
-        assert_eq!(left(&home), None, "{taken:?}");
-        assert_ne!(home.page(), Some("GameHub"), "{taken:?}");
-        home.close_guide();
-        to(&mut home, ms + 400);
-        home.press(button(B));
-    }
-    assert!(asked(&mut home).iter().all(|effect| *effect == Effect::GuideClosed));
+    home.press(button(Button::Menu));
+    assert_eq!(home.page(), Some("TileMenu"));
+    assert_eq!(home.pages_up(), 1);
 }
 
 #[test]
@@ -1419,7 +1355,7 @@ fn a_game_played_from_its_hub_brings_home_back_on_its_tile_when_it_ends() {
 }
 
 #[test]
-fn a_hidden_games_card_opens_its_hub_and_a_double_tap_on_it_plays_nothing() {
+fn a_hidden_games_card_opens_its_hub_where_play_plays_nothing() {
     // The Hidden Group shown, with one game in it.
     let library = from_database(screens::fake_library(), |database| {
         let games = database.snapshot().unwrap().games;
@@ -1432,9 +1368,8 @@ fn a_hidden_games_card_opens_its_hub_and_a_double_tap_on_it_plays_nothing() {
     let mut home = on_row(library);
     press(&mut home, &[Down, Down]);
     assert_eq!((home.home_focus(), home.focused_game()), (card(0, 0), None));
-    double_tap(&mut home);
+    a_twice(&mut home);
     assert!(asked(&mut home).is_empty());
-    a_alone(&mut home);
     assert_eq!(home.focus_line(), format!("GameHub: {hidden} Hub Play"));
     press(&mut home, &[A, B]);
     assert!(asked(&mut home).is_empty());
@@ -1446,7 +1381,7 @@ fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
     let mut home = core();
     // Installed's second card is Forza Horizon 5, second in the Recent row.
     press(&mut home, &[Down, Down, Right]);
-    double_tap(&mut home);
+    a_twice(&mut home);
     assert_eq!(asked(&mut home), [Effect::Launch(1)]);
     home.launch_started(1);
     home.game_ended();
@@ -1457,7 +1392,7 @@ fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
 fn a_launch_asks_the_shell_and_the_game_ending_brings_home_back_on_its_tile() {
     let mut stage = Stage::on_row(screens::fake_library(), HD);
     stage.press(&[Button::Right, Button::Right]);
-    double_tap(&mut stage.dashboard);
+    a_twice(&mut stage.dashboard);
     assert_eq!(asked(&mut stage.dashboard), [Effect::Launch(2)]);
     stage.dashboard.launch_started(2);
     // While it starts, and behind it once it runs, Home takes no input.
@@ -2554,8 +2489,8 @@ fn library_for_the_hub() -> Library {
 }
 
 impl Stage {
-    /// Home with focus on the Recent row's tile `tile`, at rest as the player sees it by then; A on the tile; and
-    /// the double tap's time gone by with no second A. The game's hub is up, over Home as it was.
+    /// Home with focus on the Recent row's tile `tile`, at rest as the player sees it by then; and A on the tile.
+    /// The game's hub is up, over Home as it was.
     fn hub(tile: usize) -> Self {
         let mut stage = Stage::on_row(library_for_the_hub(), HD);
         stage.press(&vec![Button::Right; tile]);

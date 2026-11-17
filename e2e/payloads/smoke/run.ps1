@@ -134,9 +134,8 @@ try {
     # Down from the profile, then along the row.
     if ($moved -ne $moves + 1) { $failures += "$moved move sounds for $($moves + 1) moves" }
 
-    # A: the game's Game hub, once the double tap's 300 ms have passed with no second A, focus on Play. (A double
-    # tap would play at once, but two presses 300 ms apart are not something a VM this slow can be trusted to make:
-    # that is the game-hub test's to try.) Then A on Play: the Launch screen, then the game.
+    # A: the game's Game hub, at once, focus on Play (there is no double tap). Then A on Play: the Launch screen,
+    # then the game. A twice in quick succession is the game-hub test's to try.
     Push-Button A
     $hub = Wait-DashboardLog "^focus: GameHub: $($game.source_id) Hub Play`$" 10
     Say "after A: $(if ($hub) { $hub } else { "no hub: $((Get-DashboardLog | Where-Object { $_ -match '^focus: ' } | Select-Object -Last 1))" })"

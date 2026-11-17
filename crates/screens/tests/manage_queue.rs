@@ -307,21 +307,21 @@ fn a_rows_menu_has_no_pause_or_cancel_where_its_store_cannot() {
 }
 
 #[test]
-fn a_opens_the_games_hub_after_the_double_taps_time_and_a_second_a_plays_it() {
+fn a_opens_the_games_hub_at_once_and_a_second_a_is_its_play() {
     let library = with_queue(library(), several);
     let mut page = on_page(library.clone());
     press(&mut page, &[A]);
-    assert_eq!(page.page(), Some("ManageQueue"));
-    page.advance(screens::home::DOUBLE_TAP.as_secs_f32());
     assert_eq!(page.page(), Some("GameHub"));
+    assert_eq!(page.timer(), None, "nothing is waited out");
     // B on the hub: the page as it was.
     assert_eq!(after(&mut page, &[B]), "Cover(0) of Ashfall Courier");
+    // Two As at one moment: the hub, and its Play.
     press(&mut page, &[A, A]);
     let place = library.games.iter().position(|game| game.name == "Ashfall Courier").unwrap();
     assert_eq!(asked(&mut page), [Effect::Launch(place)]);
     // A row's game, being installed, has its hub too.
+    let mut page = on_page(library.clone());
     press(&mut page, &[Down, A]);
-    page.advance(screens::home::DOUBLE_TAP.as_secs_f32());
     assert!(page.focus_line().starts_with("GameHub: 3003 Hub Installing"), "{}", page.focus_line());
     assert_eq!(after(&mut page, &[B]), "Row(0) of Dune Cartographer");
 }
@@ -349,9 +349,7 @@ fn b_goes_back_to_where_manage_queue_was_opened_from() {
 
     // A Game hub's Queue action: the hub of the Recent row's first game, Dune Cartographer, being installed.
     let mut dashboard = Dashboard::new(library);
-    press(&mut dashboard, &[Down, A]);
-    dashboard.advance(screens::home::DOUBLE_TAP.as_secs_f32());
-    press(&mut dashboard, &[Right, Right]);
+    press(&mut dashboard, &[Down, A, Right, Right]);
     assert_eq!(dashboard.focus_line(), "GameHub: 3003 Hub Queue");
     press(&mut dashboard, &[A]);
     assert_eq!(dashboard.page(), Some("ManageQueue"));

@@ -76,7 +76,7 @@ pub fn draw(ui: &mut Ui, game: &Game, behind: Option<Snapshot>) {
             let (cx, cy) = screen.center();
             let (w, h) = (screen.w * scale, screen.h * scale);
             // Art there in the hub's first frame is drawn at once. Art read after it fades in over black, with its
-            // darkening (#214): its reading starts at the tile's A (`prefetch`), so it is mostly there by then.
+            // darkening (#214): its reading starts here, in the frame that answers the tile's A.
             let ready = ui.ask_art(&key);
             let shown = ui.tween(("game hub art", &key), if ready { 1.0 } else { 0.0 }, ART_FADE_SECONDS, Ease::Linear);
             if shown > 0.0 && ui.art(Rect::new(cx - w / 2.0, cy - h / 2.0, w, h), &key, Crop::Center, shown, 0.0) {

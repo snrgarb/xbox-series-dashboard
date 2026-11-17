@@ -1,7 +1,5 @@
 //! Play history: every played game, the last played first, a row each, under the days they were played
 //! (docs/spec/my-games.md, section 6). The rows and their sections are the library database's (`Library::history`).
-use std::time::{Duration, Instant};
-
 use model::{Ago, Day, Game, HistoryRow};
 use ui::{Button, HAlign, Press, Rect, Ui, VAlign};
 
@@ -10,8 +8,8 @@ use super::nav;
 use super::{open_game_hub, open_tile_menu, Look, Outcome, Pane};
 use crate::hint_bar::{self, Hint};
 use crate::home::{face, square_art};
-use crate::pages::{Around, PageAction, Tick};
-use crate::{theme, Effect};
+use crate::pages::Around;
+use crate::theme;
 
 /// The list's top: the content row's, under the header.
 const TOP: f32 = 190.0;
@@ -35,8 +33,6 @@ const TEXT_RIGHT: f32 = 24.0;
 const LINES_APART: f32 = 18.0;
 /// The Queue's line is 8 under the second.
 const STATUS_APART: f32 = 8.0;
-/// A second A on the same row this soon after the first plays the game.
-const DOUBLE_TAP: Duration = Duration::from_millis(300);
 
 /// The date last played, as the Bundle's pictures have it. The Bundle writes it in the user's regional short
 /// format; nothing here reads Windows' yet, so it is US English's, month first. **The hook for the user's own.**
@@ -86,8 +82,6 @@ pub struct History {
     /// The game whose row focus is on, or last was: where it goes back to.
     game: Option<i64>,
     scroll: f32,
-    /// When A last chose a row, and whose.
-    chosen: Option<(Instant, i64)>,
 }
 
 impl History {
@@ -123,25 +117,6 @@ impl Pane for History {
         Some(format!("Row({})", self.focus))
     }
 
-    /// The row A chose, once the double tap's time has passed with no second A: its game's hub opens, wherever
-    /// focus has gone on the list since, as on Home.
-    fn tick(&mut self, around: Around) -> Tick {
-        let Some((at, chosen)) = self.chosen else { return Tick::Nothing };
-        let since = around.now.saturating_duration_since(at);
-        if since < DOUBLE_TAP {
-            return Tick::Wait(DOUBLE_TAP - since);
-        }
-        self.chosen = None;
-        // Long over, with the pane not asked meanwhile: something else was shown or had the pad, and the choice
-        // went with it.
-        if since > DOUBLE_TAP * 3 {
-            return Tick::Nothing;
-        }
-        // A game that has left the library since has no hub to show.
-        let game = around.library.games.iter().find(|game| game.id == chosen);
-        game.and_then(open_game_hub).map_or(Tick::Nothing, Tick::Act)
-    }
-
     fn press(&mut self, press: Press, around: Around) -> Outcome {
         let rows = &around.library.history;
         if !self.keep(rows) {
@@ -150,29 +125,15 @@ impl Pane for History {
         let row = rows[self.focus];
         let place = around.library.games.iter().position(|game| game.id == row.game);
         let once = !press.repeat;
-        // Anything but A and a move along the list drops the row A chose: its hub does not open over what the
-        // press brought.
-        if press.button != Button::A && !matches!(press.button, Button::Up | Button::Down) {
-            self.chosen = None;
-        }
         match press.button {
             // Across the sections, stopping at the ends.
             Button::Up => self.focus = self.focus.saturating_sub(1),
             Button::Down => self.focus = (self.focus + 1).min(rows.len() - 1),
             Button::Left => return Outcome::Nav,
+            // Its Game hub, at once, as a Home tile's (docs/spec/my-games.md, section 6).
             Button::A if once => {
-                let Some(place) = place else { return Outcome::Stay };
-                let now = around.now;
-                let again = self
-                    .chosen
-                    .is_some_and(|(at, game)| game == row.game && now.saturating_duration_since(at) < DOUBLE_TAP);
-                if again {
-                    // The second A of a double tap plays the game.
-                    self.chosen = None;
-                    return Outcome::Action(PageAction::Effect(Effect::Launch(place)));
-                }
-                // The first opens its Game hub when the double tap's time has passed with no second A (`tick`).
-                self.chosen = Some((now, row.game));
+                let hub = place.and_then(|place| open_game_hub(&around.library.games[place]));
+                return hub.map_or(Outcome::Stay, Outcome::Action);
             }
             Button::Menu if once => {
                 let menu = place.and_then(|place| open_tile_menu(&around.library.games[place]));

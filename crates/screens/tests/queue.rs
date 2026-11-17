@@ -29,10 +29,9 @@ fn asked(dashboard: &mut Dashboard) -> Vec<Effect> {
     dashboard.take_effects().into_iter().filter(|effect| !matches!(effect, Effect::Sound(_))).collect()
 }
 
-/// A press of A, and the double tap's time gone by with no second.
+/// A press of A on a game's tile: its hub, at once.
 fn a_alone(dashboard: &mut Dashboard) {
     press(dashboard, &[A]);
-    dashboard.advance(screens::home::DOUBLE_TAP.as_secs_f32());
 }
 
 /// The game id of the Recent row's tile `tile`.

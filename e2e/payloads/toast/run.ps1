@@ -202,7 +202,7 @@ try {
         if (-not (Wait-DashboardLog $want 5 -After $before)) { throw "$step did not put focus on the Recent row's tile $at" }
         $at += 1
     }
-    # A is the game's Game hub, after the double tap's 300 ms; A on its Play is the launch.
+    # A is the game's Game hub, at once; A on its Play is the launch.
     $before = Get-DashboardLogLength
     Push-Button A
     if (-not (Wait-DashboardLog '^focus: GameHub: \d+ Hub Play$' 10 -After $before)) { throw "A did not open the game's hub (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }

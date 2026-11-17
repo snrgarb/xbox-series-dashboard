@@ -344,7 +344,7 @@ fn a_on_a_game_opens_its_game_hub_at_once_and_menu_and_x_open_its_tile_menu() {
     let line = page.focus_line();
     assert!(line.starts_with("GameHub: ") && line.ends_with(" Hub Play"), "{line}");
     assert_eq!(page.pages_up(), 2);
-    assert!(asked(&mut page).is_empty(), "the grid has no double tap: A opens, and plays nothing");
+    assert!(asked(&mut page).is_empty(), "A opens, and plays nothing");
     assert_eq!(after(&mut page, &[B]), "Games: Tile(1)");
     assert_eq!(page.pages_up(), 1);
 }
@@ -366,53 +366,26 @@ fn play_history_moves_across_its_sections_stops_at_its_ends_and_remembers_its_ro
 }
 
 #[test]
-fn a_second_a_on_a_play_history_row_within_the_double_tap_plays_its_game() {
+fn a_on_a_play_history_row_opens_its_game_hub_at_once_and_a_second_a_is_its_play() {
     let mut page = page(Entry::PlayHistory);
     press(&mut page, &[Down, Down]);
-    page.take_effects();
-    // One A waits out the double tap's time before the game's hub opens: nothing yet.
-    press(&mut page, &[A]);
-    assert!(asked(&mut page).is_empty());
-    assert_eq!(page.pages_up(), 1);
-    press(&mut page, &[A]);
-    assert_eq!(page.pages_up(), 1, "a double tap opens no hub");
     let row = page.library().history[2];
     let place = page.library().games.iter().position(|game| game.id == row.game).unwrap();
+    let appid = page.library().games[place].source_id.clone();
     assert_eq!(page.library().games[place].name, "Copperhead Station");
-    assert_eq!(asked(&mut page), [Effect::Launch(place)]);
-
-    // Not across two rows.
-    let mut page = self::page(Entry::PlayHistory);
-    press(&mut page, &[A, Down, A]);
-    assert!(asked(&mut page).is_empty());
-    press(&mut page, &[A]);
-    assert_eq!(asked(&mut page).len(), 1);
-}
-
-#[test]
-fn one_a_on_a_play_history_row_opens_its_game_hub_when_the_double_taps_time_is_over() {
-    let mut page = page(Entry::PlayHistory);
-    press(&mut page, &[Down, Down]);
-    let row = page.library().history[2];
-    let appid = page.library().games.iter().find(|game| game.id == row.game).unwrap().source_id.clone();
     page.take_effects();
-    // On the Dashboard's clock, which the test moves on: nothing waits.
+    // At once: no double tap's time is waited out, and nothing is left timed.
     press(&mut page, &[A]);
-    page.advance(0.1);
-    let wait = page.timer().expect("the hub is 200 ms off");
-    assert!((wait - 0.2).abs() < 0.001, "{wait}");
-    assert_eq!(page.pages_up(), 1);
-    page.advance(0.2);
-    assert_eq!(page.timer(), None);
     assert_eq!((page.pages_up(), page.focus_line()), (2, format!("GameHub: {appid} Hub Play")));
+    assert_eq!(page.timer(), None);
     assert!(asked(&mut page).is_empty());
-    // A there is the hub's Play; B is Play history again, focus on the row.
-    page.advance(1.6);
+    // B is Play history again, focus on the row.
     press(&mut page, &[B]);
     assert_eq!((page.pages_up(), page.focus_line().as_str()), (1, "MyGames: PlayHistory: Row(2)"));
-    // And nothing opens a second time.
-    page.advance(1.0);
-    assert_eq!((page.timer(), page.pages_up()), (None, 1));
+    // Two As at one moment: the hub, and its Play.
+    press(&mut page, &[A, A]);
+    assert_eq!(page.pages_up(), 2);
+    assert_eq!(asked(&mut page), [Effect::Launch(place)]);
 }
 
 #[test]
@@ -464,7 +437,7 @@ fn a_held_direction_moves_and_a_held_button_does_nothing() {
     assert_eq!(page.focus_line(), "MyGames: PlayHistory: Row(2)");
     page.press(Press { button: A, repeat: false });
     page.press(held(A));
-    assert!(asked(&mut page).is_empty(), "a held A is not a second A");
+    assert!(asked(&mut page).is_empty(), "a held A is not a second A: the hub's Play is not pressed");
     let mut page = self::page(Entry::Games);
     page.press(held(Y));
     page.press(held(Right));

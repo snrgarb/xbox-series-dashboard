@@ -392,21 +392,23 @@ fn in_front_of_the_game_the_guide_lists_it_running_and_a_on_it_goes_back() {
 fn in_front_of_the_game_its_own_tile_goes_back_to_it_and_another_game_is_asked_about() {
     let mut home = in_game();
     press(&mut home, &[Guide, A, Down]);
-    // A double tap on Halo Infinite's tile (one A is its Game hub): the question, over the Guide, which opens for it
-    // without the Guide's own sound. The first A has sounded the choice.
-    assert_eq!(press(&mut home, &[A, A]), [Effect::Sound(Sound::Activate), PROMPT_OPEN]);
+    // A on Halo Infinite's tile is its Game hub, and A there its Play: the question, over the Guide, which opens
+    // for it without the Guide's own sound. The first A sounds the tile's choice; Play's, which brings the question
+    // up, the Guide's select, as any choice that opens a dialog over the Guide.
+    assert_eq!(press(&mut home, &[A, A]), [Effect::Sound(Sound::Activate), SELECT, PROMPT_OPEN]);
     assert!(home.guide_open() && home.guide().panel_shown());
     assert_eq!(home.guide().dialog_title(), Some("Quit Sea of Thieves and start Halo Infinite?"));
     assert_eq!(press(&mut home, &[A]), [PROMPT_CLOSE, Effect::QuitGame]);
     home.game_ended();
     assert_eq!(home.take_effects(), [CLOSED, Effect::Launch(0)]);
 
-    // The running game's own tile: back to it.
+    // The running game's own tile: its hub, where the main action is Running, which does nothing.
     let mut home = in_game();
     press(&mut home, &[Guide, A, Down, ui::Button::Right, ui::Button::Right]);
     assert_eq!(home.focused_game(), Some(RUNNING));
-    assert_eq!(press(&mut home, &[A, A]).last(), Some(&Effect::ShowGame));
-    assert!(!home.in_front_of_game() && !home.guide_open());
+    press(&mut home, &[A, A]);
+    assert!(home.focus_line().ends_with(" Hub Running"), "{}", home.focus_line());
+    assert!(home.in_front_of_game() && !home.guide_open());
 }
 
 #[test]

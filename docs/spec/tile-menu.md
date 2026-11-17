@@ -60,7 +60,7 @@ It does **not** open:
 - while the Guide is open or still handing focus back, while text entry (the Console keyboard) is up, or while a Tile menu is already up (C/ExtensionCore.TileMenu.cs:33; C/ExtensionCore.cs:840, 869; CT/TileMenuTests.cs:150-170, 695-707);
 - for a game no longer in the library (C/ExtensionCore.TileMenu.cs:32-36, 60-64).
 
-Opening from a tile also cancels a pending A on that tile (the 300 ms double-tap window), so the Game hub does not open under the menu (C/ExtensionCore.TileMenu.cs:66-67).
+Opening from a tile also cancels a pending A on that tile (the 300 ms double-tap window), so the Game hub does not open under the menu (C/ExtensionCore.TileMenu.cs:66-67). The port has no pending A to cancel: A opens the hub at once (game-hub.md 16.2, the user's decision of 2026-11-17).
 
 Focus **stays on what opened it**: the tile keeps its ring, its grown size on the Recent row and its title band, dimmed with the rest of the page; the hub's button keeps its focus. Closing the menu therefore needs no refocus (E/TileMenuControl.xaml.cs:15-22). Home's background keeps doing whatever it was doing.
 

@@ -226,7 +226,7 @@ E/RecentRowControl.xaml:55-62; E/HomeTiles.xaml:227-265.
 
 | Input | Game tile | Play history tile | Source |
 |---|---|---|---|
-| A | Starts a 300 ms double-tap window. No second A: opens the game's **Game hub** after the 300 ms. Second A on the same tile within 300 ms: **plays the game** (or returns to it if it is the running game). | Opens My games & apps on Play history at once | C/ExtensionCore.cs:35-36, 1327-1362; E/RecentRowControl.xaml.cs:287-300 |
+| A | Starts a 300 ms double-tap window. No second A: opens the game's **Game hub** after the 300 ms. Second A on the same tile within 300 ms: **plays the game** (or returns to it if it is the running game). **The port departs from this** (section 11): the hub at once, no double tap. | Opens My games & apps on Play history at once | C/ExtensionCore.cs:35-36, 1327-1362; E/RecentRowControl.xaml.cs:287-300 |
 | Menu (Start) | Opens the **Tile menu** (plays `PromptOpen.wav`), centred over the dimmed page; cancels a pending A | Nothing | C/ExtensionCore.cs:840-843; C/ExtensionCore.TileMenu.cs:59-71 |
 | Y | Opens **Search** (anywhere on Home, any focus) | Same | E/PlayniteViewHost.cs:27-32; C/ExtensionCore.Search.cs:61-74 |
 | X | **NOT FOUND**: no action on Home | - | - |
@@ -342,7 +342,7 @@ E/GroupsControl.xaml, E/GroupsControl.xaml.cs; C/ExtensionCore.cs:29-33, 1437-14
 
 | Input | Game card | See all card | Source |
 |---|---|---|---|
-| A | As a Recent tile: Game hub after the 300 ms double-tap window, or play on a double tap | Opens My games & apps on Full library with this Group's preset tab selected (Favourites has no preset: plain Full library) | E/GroupsControl.xaml.cs:302-321; C/ExtensionCore.FullLibrary.cs:22-35 |
+| A | As a Recent tile: Game hub after the 300 ms double-tap window, or play on a double tap (the port: the hub at once, section 11) | Opens My games & apps on Full library with this Group's preset tab selected (Favourites has no preset: plain Full library) | E/GroupsControl.xaml.cs:302-321; C/ExtensionCore.FullLibrary.cs:22-35 |
 | Menu | Tile menu (`PromptOpen.wav`) | Nothing | C/ExtensionCore.cs:840-843 |
 | Y | Search | Search | as section 3.5 |
 | B | Back to the Recent row, on the game it last had focus | Same | E/GroupsControl.xaml.cs:216-229 |
@@ -604,7 +604,7 @@ Font resources: T/Constants.xaml:228-235. 26 px body text is deliberate (Xbox Ac
 - The scrim's bottom is `#D9` black (85%), which is what makes tiles readable; it is fixed to the screen.
 - The swirl is under the same scrim, so its on-screen look is darker at top and bottom than the raw colours.
 - With focus on a Group the background is the swirl even though the Recent row has faded out.
-- A on a tile is delayed 300 ms before the Game hub opens (double-tap detection).
+- A on a tile is delayed 300 ms before the Game hub opens (double-tap detection). The port does not do this (section 11).
 - `IsRunning` tile is always first in the Recent row.
 - The console's own reference notes (docs/research/xbox-dashboard-reference.md:142-172) record that focus ring metrics, motion timings, type sizes and the sound catalogue are **not publicly documented**; the Bundle's values come from its own console captures, and the only reference image of Home in the repo is docs/reference/startup/4-home.jpg (no notes file accompanies docs/reference/).
 
@@ -615,7 +615,7 @@ Font resources: T/Constants.xaml:228-235. 26 px body text is deliberate (Xbox Ac
 What `crates/screens/src/home*` does that the sections above do not say, or does differently until the pages it needs exist.
 
 - **Top bar, Up and Down.** The Bundle leaves these to WPF's directional navigation (section 2.5, UNVERIFIED). The Dashboard's rule: Up from a Recent tile goes to the top bar button whose centre x is nearest the focused tile's; Down from a button goes to the Recent tile whose centre x is nearest the button's, with the row laid out as it is with no tile focused.
-- **A on a game** is as sections 3 and 6 have it: the game's Game hub opens when the double tap's 300 ms have passed with no second A, and a second A on the same tile within them plays the game with no hub ([game-hub.md](game-hub.md) 9.1 and 16.2). Menu within the 300 ms drops the pending hub, as does the Guide, a page or a launch taking the pad; moving focus does not. The first A plays the activation sound, and the second nothing more.
+- **A on a game opens its Game hub at once**, where sections 3 and 6 have the Bundle's double tap. **The port departs from the Bundle here**, by the user's decision of 2026-11-17 (#214): there is no double tap, and A opens the Game hub at once, in the turn that took the press ([game-hub.md](game-hub.md) 9.1 and 16.2). The Bundle's 300 ms wait for a second A was nearly all of the time from A to the hub. To play straight away, A again: the hub opens with focus on Play, and the second A is its Play; or the Tile menu's Play game. A plays the activation sound.
 - **Home starts on the profile**, as the Bundle does in practice (section 7.4).
 - **The profile's picture** is drawn: the pale disc and grey figure of Windows' default account picture, which is what the Bundle shows for an account with none. Real pictures come with Profiles.
 - **The source badge** is a plain white disc on the theme's shadow, for every game (Steam is the only source): the stores' logos are not ours to ship. `home/tile.rs` `source_badge` is the one place to draw the real mark.
@@ -630,7 +630,7 @@ What `crates/screens/src/home*` does that the sections above do not say, or does
 - **The hint bar** (section 10.4) shows on a Group's game card, "More options" and "Search", and nowhere else on Home. Menu does nothing yet: the Tile menu is its own ticket. On a screen of another shape the bar keeps its 60 and 52 from the screen's own corner. It is gone at once under the Guide.
 - **Sounds for the pages.** A that opens a page plays the activation sound, as A on a tile does; Y and B are silent. The Bundle plays nothing of its own for either, and what Playnite plays is unverified ([my-games.md](my-games.md) 10, [search.md](search.md) 6).
 - **Groups** are the library's saved filters that are shown and have a game, in the user's order ([filters.md](filters.md)), in place of Playnite's flagged presets (section 6.1): on a first run Favourites, Steam's collections, Most played and Recently added. A Group with no games is left out rather than shown empty, where the Bundle shows it; with no Group left at all Favourites shows empty, as the Bundle's fallback does (sections 6.1 and 10.3). There is no page yet that shows, hides, orders or makes one (M3's Groups in Settings).
-- **A hidden game's card.** The Hidden Group, where the user has shown it, has the hidden games' cards. A on one opens its Game hub; a double tap plays nothing, and nor does the hub's Play: a launch names a game by its place among the library's games, and a hidden game has none.
+- **A hidden game's card.** The Hidden Group, where the user has shown it, has the hidden games' cards. A on one opens its Game hub, where Play does nothing: a launch names a game by its place among the library's games, and a hidden game has none.
 - **Recent row.** Seven games and the Play history tile, or eight games with Settings' Show Play history off ([settings.md](settings.md) 16.5); a library with no game keeps the tile. Never-played games pad it in the library's order, by name: there is no date added.
 - **Focused top bar glyphs.** Settings swaps to U+F8B0. My games & apps and Notifications keep their outline glyph (the Bundle's filled ones are vector paths) and Search is not emboldened.
 - **The Score line** (#141) is drawn as section 2.1 has it while there are totals: the gamertag and the Score line are centred together on the profile's middle, each line 34.58 tall; with no totals the gamertag alone is centred, as before.

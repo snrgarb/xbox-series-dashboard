@@ -1,14 +1,14 @@
-# The Game hub, walked with the virtual pad on a fake Steam library: A on a game's tile opens its hub once the double
-# tap's time has passed; focus goes along its actions and up to its cards; the last action turns between its two
-# pages; Manage and Menu open the game's Tile menu over the hub, and B closes it onto the hub; B is Home again with
+# The Game hub, walked with the virtual pad on a fake Steam library: A on a game's tile opens its hub at once (no
+# double tap since 2026-11-17, docs/spec/game-hub.md 16.2), its first frame within 50 ms of A; focus goes along its
+# actions and up to its cards; the last action turns between its two pages; Manage and Menu open the game's Tile menu over the hub, and B closes it onto the hub; B is Home again with
 # focus on the tile; a game that is not installed has Install where Play is, and A there closes the hub and asks
-# Steam for the game; A on Your game stats opens the game's Achievements page and B comes back; and a double tap on
-# a tile plays the game with no hub.
+# Steam for the game; A on Your game stats opens the game's Achievements page and B comes back; and A twice, as close
+# as the pad can make them, on a tile plays the game by way of its hub: the second A is not swallowed.
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: GameHub: 9100010 Hub Play` is the hub
 # of the game with that appid, on its Game hub page, focus on Play (the page's name, the game, the page of the two,
 # what has focus; the main action is named by what it is: Play, Running or Install). Passes when every press is
-# followed by the line expected of it, the double tap starts the game, and the Dashboard stays up. The screenshots are
+# followed by the line expected of it, A twice starts the game, and the Dashboard stays up. The screenshots are
 # to look at, beside the Bundle's pictures of its hub.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
@@ -20,7 +20,6 @@ function Focus-Now { Focus-Lines | Select-Object -Last 1 }
 
 # One press that must be followed by a new focus line matching $Expect, a regular expression for what comes after
 # "focus: ". Then a rest for the picture, if one is asked for: the software renderer takes most of a second a frame.
-# The hub opens 300 ms after A, which the wait for its line covers.
 function Press([string] $Button, [string] $Expect, [string] $Name = '') {
     # Two taps closer than a poll of the pad are one: the button has to be seen up between them.
     Start-Sleep -Milliseconds 130
@@ -61,11 +60,11 @@ function Expect-Logged([string] $Pattern, [int] $After, [string] $What) {
 
 # How long the hub took to open (#214), by the line the Dashboard logs for every hub once it has come to rest:
 # `hub: opened <game> in N ms: first frame N ms, last moving frame N ms after A (at rest, drawn on the GPU); A
-# answered by a frame at N ms; double tap wait N ms ...`. The double tap's 300 ms is the spec's; what is judged is the
-# time from the hub being put up to its first frame being done, which nothing the hub waits on (a picture, its
-# achievements) may hold: at most $HubFrameGpuMs on a GPU, and $HubFrameCpuMs on the processor (WARP on a VM, where a
-# frame takes most of a second).
-$HubFrameGpuMs = 100
+# answered by a frame at N ms; put up N ms after A ...`. There is no double tap to wait for: what is judged is the
+# time from A to the hub's first frame being done, which nothing the hub waits on (a picture, its achievements) may
+# hold: at most $HubFrameGpuMs on a GPU, and $HubFrameCpuMs on the processor (WARP on a VM, where a frame takes most
+# of a second).
+$HubFrameGpuMs = 50
 $HubFrameCpuMs = 3000
 function Expect-HubOpenedQuickly([int] $After, [string] $What) {
     $line = Wait-DashboardLog '^hub: opened ' 15 $After
@@ -73,13 +72,12 @@ function Expect-HubOpenedQuickly([int] $After, [string] $What) {
     Say "${What}: $line"
     if ($line -notmatch 'first frame (\d+) ms, last moving frame (\d+) ms after A') { $script:failures += "${What}: the hub's line does not count from A: $line"; return }
     $first = [double] $Matches[1]
-    $wait = if ($line -match 'double tap wait (\d+) ms') { [double] $Matches[1] } else { 0 }
+    if ($line -match 'double tap wait') { $script:failures += "${What}: the hub's line still has a double tap's wait: $line" }
     $bound = if ($line -match 'drawn on the processor') { $HubFrameCpuMs } else { $HubFrameGpuMs }
-    $frame = $first - $wait
-    if ($frame -gt $bound) {
-        $script:failures += "${What}: the hub's first frame was done $frame ms after it was put up, over the bound of $bound ms: $line"
+    if ($first -gt $bound) {
+        $script:failures += "${What}: the hub's first frame was done $first ms after A, over the bound of $bound ms: $line"
     } else {
-        Say "${What}: first frame $frame ms after the hub was put up (bound $bound ms)"
+        Say "${What}: first frame $first ms after A (bound $bound ms)"
     }
 }
 
@@ -183,9 +181,9 @@ try {
     }
     if (-not $install) { $failures += 'no game of the Recent row had Install in its hub' }
 
-    # A double tap on the first tile plays the game, and no hub opens. The two presses are 60 ms long and as close
-    # as the pad can make them; on a VM too slow to tell them from two taps the hub opens between them and the
-    # second A is its Play, which is said and is not a failure: the game starts either way.
+    # A twice on the first tile, as close as the pad can make them (60 ms each, 110 ms apart): the first opens the
+    # hub at once, focus on Play, and the second is not swallowed by the hub's first frames: it is Play, and the game
+    # starts.
     foreach ($press in 1..8) {
         if ((Focus-Now) -match 'Recent\(0\)$') { break }
         Push-Button Left
@@ -198,14 +196,15 @@ try {
     Start-Sleep -Milliseconds 110
     Push-Button A 60
     $up = Wait-DashboardLog 'Launch screen up' 10
-    Say "after the double tap: $(if ($up) { $up } else { 'no Launch screen up line' })"
-    if (-not $up) { throw "A double tap did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
-    if ($up -notmatch "\($game\)") { $failures += "the double tap launched something other than the game $game`: $up" }
+    Say "after A twice: $(if ($up) { $up } else { 'no Launch screen up line' })"
+    if (-not $up) { throw "A twice did not start a launch (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
+    if ($up -notmatch "\($game\)") { $failures += "A twice launched something other than the game $game`: $up" }
     $between = @(Focus-Lines | Select-Object -Skip $before)
-    if ($between.Count) { Say "note: the hub opened between the two presses, too far apart on this VM to be a double tap: $($between -join ' | ')" }
+    Say "focus between: $($between -join ' | ')"
+    if (-not ($between | Where-Object { $_ -match "^focus: $hub Hub Play$" })) { $failures += "the first A did not open the hub on Play: $($between -join ' | ')" }
     if (-not (Wait-DashboardLog 'the game has booted' 60)) { throw 'The game never counted as booted' }
     Start-Sleep -Milliseconds 1500
-    Save-Screen '07-game-after-a-double-tap'
+    Save-Screen '07-game-after-a-twice'
 
     # The game ends: Home again, and the pad is Home's.
     if (-not @(Get-StandInGame).Count) { $failures += 'the game was not running when the test came to stop it' }

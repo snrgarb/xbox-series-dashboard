@@ -1,10 +1,11 @@
 //! The Game hub's opening, timed (#214): from A on a tile to the hub's first frame and to its last moving frame,
 //! and what the time between went on. One line a hub, always, since it costs a few clock readings a frame:
 //!
-//! `hub: opened Ashfall Courier in 342 ms: first frame 342 ms, last moving frame 518 ms after A; ...`
+//! `hub: opened Ashfall Courier in 42 ms: first frame 42 ms, last moving frame 218 ms after A; ...`
 //!
-//! The parts, in the order the line gives them: the frame that answered A; the double tap's wait (300 ms on a tile
-//! of Home's, docs/spec/game-hub.md 9.1) and when the Dashboard put the hub up; the page's data (the Dashboard's work
+//! The parts, in the order the line gives them: the frame that answered A; when the Dashboard put the hub up after A
+//! (in the turn that took the press: there has been no double tap to wait for since 2026-11-17, docs/spec/game-hub.md
+//! 9.1); the page's data (the Dashboard's work
 //! in the turn that opened it); what the first frame spent its time on; each picture the hub shows as it opens (a
 //! cache hit, or how long it queued, decoded and uploaded, and when it came); the transition's own length (none: the
 //! hub shows in one frame, 9.2); and the longest frame while the hub was opening, with what ran in it.
@@ -214,7 +215,8 @@ impl HubOpen {
         }
         if open.pressed {
             parts.push(format!(
-                "double tap wait {:.0} ms (A to the hub put up; 300 by the spec on Home's tiles)",
+                "put up {:.0} ms after A (no double tap's wait: A opens the hub at once, the user's decision of \
+                 2026-11-17)",
                 after(open.put_up)
             ));
         }
@@ -269,16 +271,16 @@ mod tests {
         let a = Instant::now();
         let at = |ms: u64| a + Duration::from_millis(ms);
         hub.pressed(press(Button::A), a);
-        // Home's frame answers the press; nothing opens yet.
-        assert!(!hub.frame(at(5), at(6), at(10), FrameCost::default(), false, &art));
+        // The turn that took the press puts the hub up.
         hub.turn();
         hub.spent(Duration::from_micros(300));
-        hub.look(Some((7, "Ashfall Courier".into(), Vec::new())), &art, at(301));
+        hub.look(Some((7, "Ashfall Courier".into(), Vec::new())), &art, at(1));
         let open = hub.open.as_ref().unwrap();
-        assert!(open.pressed && open.answered == Some(at(10)) && open.built == Duration::from_micros(300));
-        // The first frame, still moving; then one at rest ends it.
-        assert!(!hub.frame(at(302), at(303), at(320), FrameCost::default(), true, &art));
-        assert!(hub.frame(at(330), at(331), at(340), FrameCost::default(), false, &art));
+        assert!(open.pressed && open.answered.is_none() && open.built == Duration::from_micros(300));
+        // The hub's first frame answers A, still moving; then one at rest ends it.
+        assert!(!hub.frame(at(2), at(3), at(20), FrameCost::default(), true, &art));
+        assert_eq!(hub.open.as_ref().unwrap().answered, Some(at(20)));
+        assert!(hub.frame(at(30), at(31), at(40), FrameCost::default(), false, &art));
         assert!(hub.open.is_none());
         // The same hub seen again is not a new one.
         hub.look(Some((7, "Ashfall Courier".into(), Vec::new())), &art, at(400));
@@ -286,27 +288,28 @@ mod tests {
     }
 
     #[test]
-    fn the_line_says_first_and_last_frames_from_a_and_the_wait_between() {
+    fn the_line_says_first_and_last_frames_from_a_and_when_the_hub_was_put_up() {
         let art = ArtCache::new(|| {});
         let mut hub = HubOpen::default();
         let a = Instant::now();
         let at = |ms: u64| a + Duration::from_millis(ms);
         hub.pressed(press(Button::A), a);
-        hub.look(Some((1, "Brass Meridian".into(), Vec::new())), &art, at(300));
+        hub.look(Some((1, "Brass Meridian".into(), Vec::new())), &art, at(1));
         let open = hub.open.as_mut().unwrap();
         open.frames = 2;
         let frame = Frame {
-            began: at(302),
+            began: at(2),
             wait: Duration::from_millis(1),
             took: Duration::from_millis(18),
             cost: FrameCost::default(),
             at: 1,
         };
-        (open.first, open.longest, open.last) = (Some(frame), Some(frame), Some(at(500)));
+        (open.first, open.longest, open.last) = (Some(frame), Some(frame), Some(at(200)));
         let line = HubOpen::line(hub.open.as_ref().unwrap(), &art, "at rest", false);
-        assert!(line.starts_with("hub: opened Brass Meridian in 320 ms: first frame 320 ms, last moving frame 500 ms after A (at rest, drawn on the GPU)"), "{line}");
-        assert!(line.contains("double tap wait 300 ms"), "{line}");
-        assert!(line.contains("first frame began 2.0 ms after it was put up, took 18.0 ms"), "{line}");
+        assert!(line.starts_with("hub: opened Brass Meridian in 20 ms: first frame 20 ms, last moving frame 200 ms after A (at rest, drawn on the GPU)"), "{line}");
+        assert!(line.contains("put up 1 ms after A (no double tap's wait"), "{line}");
+        assert!(!line.contains("double tap wait"), "{line}");
+        assert!(line.contains("first frame began 1.0 ms after it was put up, took 18.0 ms"), "{line}");
         assert!(line.contains("2 frames, the longest 18.0 ms (frame 1"), "{line}");
     }
 
