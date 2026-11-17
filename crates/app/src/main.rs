@@ -99,6 +99,9 @@ pub struct Args {
     fake_media: bool,
     /// The fake session's album art.
     fake_media_art: Option<PathBuf>,
+    /// The first pad's battery made up in place of Windows' word (`input::battery::Fake`): a percentage, a level,
+    /// `wired` or `none`, for a payload whose pad is a virtual one.
+    fake_pad_battery: Option<input::battery::Fake>,
     /// The program every store's address is given to, as `<program> open-address <address>`, in place of the one
     /// Windows has registered for it: a test machine whose registry is left alone (`standin.exe`).
     open_addresses_with: Option<PathBuf>,
@@ -166,6 +169,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--xbox <dir>]
                  [--media <dir>] [--no-startup] [--log-sounds] [--log-frames] [--log-focus] [--dry-power]
                  [--fake-media [--fake-media-art <picture>]]
+                 [--fake-pad-battery <percent> | empty | low | medium | full | wired | none]
                  [--log-queue-sources]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
@@ -251,6 +255,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--log-queue-sources" => args.log_queue_sources = true,
             "--dry-power" => args.dry_power = true,
             "--fake-media" => args.fake_media = true,
+            "--fake-pad-battery" => args.fake_pad_battery = Some(input::battery::Fake::parse(&value()?)?),
             "--fake-media-art" => args.fake_media_art = Some(value()?.into()),
             "--open-addresses-with" => args.open_addresses_with = Some(value()?.into()),
             "--page" => args.page = Some(page(&value()?)?),

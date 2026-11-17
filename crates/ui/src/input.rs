@@ -75,13 +75,17 @@ impl Default for Repeat {
     }
 }
 
-/// What powers a pad.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// What powers a pad, as far as Windows says (docs/research/pad-battery.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Battery {
     /// A cable.
     Wired,
-    /// A battery this full, 0 to 1.
-    Charge(f32),
+    /// A battery at one of XInput's four levels, 0 to 3: empty (under 10%), low (to 40%), medium (to 70%), full.
+    /// All most pads say of their charge. Logged, not drawn: the Status areas show the pad's glyph for it.
+    Level(u8),
+    /// A battery with this much charge left, 0 to 100: a pad on Bluetooth LE, as Windows' Settings shows it. The only
+    /// battery the Status areas draw.
+    Percent(u8),
 }
 
 /// The pad the Status area shows: the first one connected.

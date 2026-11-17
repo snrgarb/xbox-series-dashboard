@@ -570,6 +570,11 @@ impl Dashboard {
         self.pad
     }
 
+    /// The first pad's battery as the Status areas show it: what the shell's `Status` says, else what the pad says.
+    fn pad_battery(&self) -> Option<Battery> {
+        self.status.pad_battery.or(self.pad.battery)
+    }
+
     /// The Guide setting. Off, the Guide button does nothing, a hold too, and nor does the profile on Home's top
     /// bar. A Guide that is open stays open until it is closed.
     pub fn set_guide_enabled(&mut self, enabled: bool) {
@@ -1939,16 +1944,13 @@ impl Dashboard {
             notifications: self.toasts.notifications(),
             now_playing: self.now_playing.card(self.now),
         };
-        // The pad's own word on its charge, unless the shell has said otherwise. One on a cable shows its glyph.
-        let charge = match self.pad.battery {
-            Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),
-            _ => None,
-        };
+        // The pad's own word on its battery, unless the shell has said otherwise. One on a cable shows its glyph.
+        let battery = self.pad_battery();
         let show_percent = self.status.show_percent && self.options.show_battery_percent;
         // The badge counts the notifications the Dashboard itself holds, unless the shell has told of more.
         let notifications = self.status.notifications.max(self.toasts.notifications().len() as u32);
         let status = Status {
-            pad_battery: self.status.pad_battery.or(charge),
+            pad_battery: battery,
             show_percent,
             notifications,
             discord_call: self.discord.voice.mark(),
@@ -1980,11 +1982,8 @@ impl Dashboard {
     fn draw_home(&mut self, ui: &mut Ui) {
         ui.store.reduce_motion = self.options.reduce_motion;
         let clock = self.clock();
-        // A wireless pad's charge, as the Guide's Status area has it; one on a cable shows its glyph.
-        let pad_battery = self.status.pad_battery.or(match self.pad.battery {
-            Some(Battery::Charge(charge)) => Some((charge.clamp(0.0, 1.0) * 100.0).round() as u8),
-            _ => None,
-        });
+        // The pad's battery, as the Guide's Status area has it; one on a cable shows its glyph.
+        let pad_battery = self.pad_battery();
         let profile = self.profile();
         let status = home::Status {
             profile: &profile,

@@ -16,10 +16,14 @@ macro_rules! eprintln {
     };
 }
 
+pub mod battery;
+#[cfg(windows)]
+mod system_battery;
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat};
+use ui::{Button, PadEvent, PadStatus, Press, Repeat};
 
 /// XInput's button bits, and two of our own for the triggers. The Guide button is not among them: it is followed
 /// on its own.
@@ -164,57 +168,22 @@ impl Presses {
     }
 }
 
-/// The pad's battery is asked after this often, and as a pad connects.
-#[cfg_attr(not(windows), allow(dead_code))]
-const BATTERY_EVERY: Duration = Duration::from_secs(5);
-
-/// Follows which pad is connected and what powers it.
+/// Follows which pad is the first connected. Its battery is read on a thread of its own (`battery`), told each
+/// time this changes.
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Default)]
 struct Watch {
-    status: PadStatus,
     /// The first pad connected, by its place among XInput's four.
     first: Option<u32>,
-    battery_read: Option<Instant>,
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
 impl Watch {
-    /// `first` is the first pad connected now; `battery` asks a pad what powers it, and is called only when that is
-    /// due. True when the status is not what it was.
-    fn update(&mut self, first: Option<u32>, now: Instant, battery: impl FnOnce(u32) -> Option<Battery>) -> bool {
-        let was = self.status;
-        if first != self.first {
-            self.first = first;
-            self.battery_read = None;
-        }
-        self.status.connected = first.is_some();
-        match first {
-            None => self.status.battery = None,
-            Some(pad) => {
-                if self.battery_read.is_none_or(|read| now >= read + BATTERY_EVERY) {
-                    self.status.battery = battery(pad);
-                    self.battery_read = Some(now);
-                }
-            }
-        }
-        self.status != was
-    }
-}
-
-/// XInput's battery type and level as what the Status area shows. The four levels are all XInput says of the charge.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn battery(kind: u8, level: u8) -> Option<Battery> {
-    match (kind, level) {
-        // Wired.
-        (1, _) => Some(Battery::Wired),
-        // Alkaline or NiMH: empty, low, medium, full.
-        (2 | 3, 0) => Some(Battery::Charge(0.0)),
-        (2 | 3, 1) => Some(Battery::Charge(0.3)),
-        (2 | 3, 2) => Some(Battery::Charge(0.6)),
-        (2 | 3, 3) => Some(Battery::Charge(1.0)),
-        // Disconnected, or unknown.
-        _ => None,
+    /// `first` is the first pad connected now. True when that is another than before, or none where there was one.
+    fn update(&mut self, first: Option<u32>) -> bool {
+        let changed = first != self.first;
+        self.first = first;
+        changed
     }
 }
 
@@ -301,7 +270,7 @@ struct Reader {
     #[cfg(windows)]
     get_state: Option<unsafe extern "system" fn(u32, *mut State) -> u32>,
     #[cfg(windows)]
-    get_battery: Option<unsafe extern "system" fn(u32, u8, *mut BatteryInformation) -> u32>,
+    get_battery: Option<system_battery::XInputBattery>,
 }
 
 #[repr(C)]
@@ -320,21 +289,16 @@ struct State {
     reserved: [u32; 2],
 }
 
-/// XINPUT_BATTERY_INFORMATION.
-#[repr(C)]
-#[derive(Default)]
-#[cfg_attr(not(windows), allow(dead_code))]
-struct BatteryInformation {
-    kind: u8,
-    level: u8,
-}
-
 impl Pad {
     /// Starts reading. `wake` is called, on the reading thread, after events have been queued and when a pad has
     /// come, gone, or says something else of its battery.
-    pub fn start(wake: impl Fn() + Send + 'static) -> Self {
+    ///
+    /// The first pad's battery is Windows' word (docs/research/pad-battery.md), or `fake`'s where one is given
+    /// (`--fake-pad-battery`): read on a thread of its own as a pad connects and once a minute after.
+    pub fn start(wake: impl Fn() + Send + 'static, fake: Option<battery::Fake>) -> Self {
         let (sender, events) = std::sync::mpsc::channel();
         let shared = Arc::new(Shared::default());
+        let wake = Arc::new(Mutex::new(wake));
         #[cfg(windows)]
         std::thread::Builder::new()
             .name("pad".into())
@@ -342,6 +306,26 @@ impl Pad {
                 let shared = shared.clone();
                 move || {
                     let reader = Reader::new();
+                    // The battery's own thread, told which pad is first; it tells the window what it reads.
+                    let (tell, news) = std::sync::mpsc::channel();
+                    {
+                        let (shared, wake, xinput, again) =
+                            (shared.clone(), wake.clone(), reader.get_battery, tell.clone());
+                        std::thread::Builder::new()
+                            .name("pad battery".into())
+                            .spawn(move || {
+                                let told = move |reading| {
+                                    eprintln!("gamepad: battery {}", battery::describe(reading));
+                                    shared.status.lock().unwrap().battery = reading;
+                                    (wake.lock().unwrap())();
+                                };
+                                match fake {
+                                    Some(fake) => battery::run(news, fake, told),
+                                    None => battery::run(news, system_battery::System::new(xinput, again), told),
+                                }
+                            })
+                            .expect("the pad's battery thread starts");
+                    }
                     let (mut held, mut watch) = (Presses::default(), Watch::default());
                     let mut last: [Option<Reading>; 4] = [None; 4];
                     loop {
@@ -362,18 +346,22 @@ impl Pad {
                         if used {
                             *shared.used.lock().unwrap() = Some(now);
                         }
-                        if watch.update(first, now, |pad| reader.battery(pad)) {
+                        if watch.update(first) {
                             match first {
-                                Some(pad) => {
-                                    eprintln!("gamepad: pad {pad} connected, battery {:?}", watch.status.battery)
-                                }
+                                Some(pad) => eprintln!("gamepad: pad {pad} connected"),
                                 None => eprintln!("gamepad: none connected"),
                             }
-                            *shared.status.lock().unwrap() = watch.status;
+                            let mut status = shared.status.lock().unwrap();
+                            status.connected = first.is_some();
+                            if first.is_none() {
+                                status.battery = None;
+                            }
+                            drop(status);
+                            let _ = tell.send(battery::News::First(first));
                             news = true;
                         }
                         if news {
-                            wake();
+                            (wake.lock().unwrap())();
                         }
                         std::thread::sleep(READ_EVERY);
                     }
@@ -381,7 +369,7 @@ impl Pad {
             })
             .expect("the pad thread starts");
         #[cfg(not(windows))]
-        let _ = (sender, wake);
+        let _ = (sender, wake, fake);
         Self { events, shared }
     }
 
@@ -509,16 +497,6 @@ impl Reader {
             }
         }
         (buttons, first, readings)
-    }
-
-    /// What powers this pad, as XInput says it.
-    fn battery(&self, pad: u32) -> Option<Battery> {
-        let mut information = BatteryInformation::default();
-        // 0: the pad itself, not its headset.
-        if unsafe { self.get_battery?(pad, 0, &mut information) } != 0 {
-            return None;
-        }
-        battery(information.kind, information.level)
     }
 }
 
@@ -672,34 +650,13 @@ mod tests {
     #[test]
     fn a_pad_connecting_and_leaving_is_told_once_each() {
         let mut watch = Watch::default();
-        let start = Instant::now();
-        assert!(!watch.update(None, start, |_| unreachable!("no pad to ask")));
-        assert!(watch.update(Some(1), start + ms(4), |pad| (pad == 1).then_some(Battery::Wired)));
-        assert_eq!(watch.status, PadStatus { connected: true, battery: Some(Battery::Wired) });
-        assert!(!watch.update(Some(1), start + ms(8), |_| unreachable!("asked only every few seconds")));
-        assert!(watch.update(None, start + ms(12), |_| unreachable!("no pad to ask")));
-        assert_eq!(watch.status, PadStatus::default());
-        assert!(!watch.update(None, start + ms(16), |_| unreachable!("no pad to ask")));
-    }
-
-    #[test]
-    fn the_battery_is_asked_after_as_a_pad_connects_and_every_few_seconds() {
-        let mut watch = Watch::default();
-        let start = Instant::now();
-        assert!(watch.update(Some(0), start, |_| Some(Battery::Charge(1.0))));
-        assert!(!watch.update(Some(0), start + BATTERY_EVERY - ms(1), |_| unreachable!("not yet")));
-        // The same answer is no news; another is.
-        assert!(!watch.update(Some(0), start + BATTERY_EVERY, |_| Some(Battery::Charge(1.0))));
-        assert!(!watch.update(Some(0), start + BATTERY_EVERY + ms(4), |_| unreachable!("not yet")));
-        assert!(watch.update(Some(0), start + BATTERY_EVERY * 2, |_| Some(Battery::Charge(0.6))));
-        assert_eq!(watch.status.battery, Some(Battery::Charge(0.6)));
-
-        // Another pad is the first now: asked at once.
-        assert!(watch.update(Some(2), start + BATTERY_EVERY * 2 + ms(4), |pad| (pad == 2).then_some(Battery::Wired)));
-        assert_eq!(watch.status, PadStatus { connected: true, battery: Some(Battery::Wired) });
-        // A pad that does not say what powers it is still a pad.
-        assert!(watch.update(Some(2), start + BATTERY_EVERY * 4, |_| None));
-        assert_eq!(watch.status, PadStatus { connected: true, battery: None });
+        assert!(!watch.update(None));
+        assert!(watch.update(Some(1)));
+        assert!(!watch.update(Some(1)));
+        // Another pad is the first now: news, so its battery is read at once.
+        assert!(watch.update(Some(2)));
+        assert!(watch.update(None));
+        assert!(!watch.update(None));
     }
 
     #[test]
@@ -728,15 +685,5 @@ mod tests {
         assert!(Reading { left_trigger: 3 + 17, ..lying }.used(Some(&lying)));
         // A pad that has just come counts only if it is held.
         assert!(!lying.used(None));
-    }
-
-    #[test]
-    fn xinputs_battery_is_read_as_wired_or_a_charge() {
-        assert_eq!(battery(1, 0), Some(Battery::Wired));
-        assert_eq!(battery(2, 3), Some(Battery::Charge(1.0)));
-        assert_eq!(battery(3, 0), Some(Battery::Charge(0.0)));
-        // Disconnected, and unknown.
-        assert_eq!(battery(0, 0), None);
-        assert_eq!(battery(0xFF, 2), None);
     }
 }

@@ -99,8 +99,8 @@ pub struct Status<'a> {
     pub clock: &'a str,
     /// Whether a pad is connected: it stands left of the clock.
     pub pad: bool,
-    /// A wireless pad's charge, 0 to 100: its battery in the glyph's place. None for a pad on a cable.
-    pub pad_battery: Option<u8>,
+    /// The pad's battery: a cell in the glyph's place where a charge is known. None, or a cable, for the glyph.
+    pub pad_battery: Option<ui::Battery>,
     /// Settings' Show battery percentages: the figure beside the battery.
     pub show_percent: bool,
     /// The Score total under the gamertag, as the console's; none while there are no achievement totals.

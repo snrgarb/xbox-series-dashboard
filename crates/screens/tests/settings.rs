@@ -887,7 +887,7 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
         bar.pixels().filter(|pixel| pixel.0[..3].iter().all(|&channel| channel > 200)).count()
     };
     let mut stage = Stage::new(database().snapshot().unwrap());
-    stage.dashboard.set_pad(PadStatus { connected: true, battery: Some(Battery::Charge(0.57)) });
+    stage.dashboard.set_pad(PadStatus { connected: true, battery: Some(Battery::Percent(57)) });
     let home = stage.still();
     // Kept to look at: the top bar with a wireless pad's battery and its charge.
     home.save(PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("home-pad-battery.png")).unwrap();

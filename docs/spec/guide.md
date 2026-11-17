@@ -140,7 +140,7 @@ Right-aligned, its right edge 150 from the screen's (x 1770), top y 86 (1358-136
 | 1 | Height 28, a further 4 in from the right (right edge x 1766). Left to right: Discord mark (M6), PC battery, pad battery; 12 between | 174-186 |
 | 2 | The clock: `Bahnschrift SemiBold` 56, tabular figures, white, 10 below line 1 | 187-192 |
 
-The parts are Home's (`home.md` 2.4): pad battery = optional percent text "{0}%" (Segoe UI 26, raised 2, 8 to the glyph) and a cell 30 x 16, white border 2, radius 3, padding 2, white fill radius 1 as wide as the charge, with a nub 3 x 7 radius `0,1.5,1.5,0`; a wired pad shows icon U+E7FC at 24; no pad shows nothing (E/StatusArea.xaml:14-30, 69-98). PC battery: text Segoe UI 26 raised 2, 4 to an icon-font glyph at 26; only on a PC with a battery (38-63). Measured: pad cell x 1742..1765, y about 91..107.
+The parts are Home's (`home.md` 2.4): pad battery = optional percent text "{0}%" (Segoe UI 26, raised 2, 8 to the glyph) and a cell 30 x 16, white border 2, radius 3, padding 2, white fill radius 1 as wide as the charge, with a nub 3 x 7 radius `0,1.5,1.5,0`; a wired pad shows icon U+E7FC at 24; no pad shows nothing (E/StatusArea.xaml:14-30, 69-98). In the port the cell is drawn only for a pad that says a percentage; one that says only a level, or nothing, shows the glyph (home.md 2.4, #191). PC battery: text Segoe UI 26 raised 2, 4 to an icon-font glyph at 26; only on a PC with a battery (38-63). Measured: pad cell x 1742..1765, y about 91..107.
 
 Data and refresh (C/ExtensionCore.cs:425-486, 60-63):
 

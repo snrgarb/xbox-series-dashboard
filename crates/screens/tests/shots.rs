@@ -1527,7 +1527,7 @@ fn guide_utility_focused_with_a_badge_and_batteries() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.set_pad_connected(true);
     stage.dashboard.set_status(Status {
-        pad_battery: Some(60),
+        pad_battery: Some(ui::Battery::Percent(60)),
         pc_battery: Some(PcBattery { percent: Some(57), charging: false }),
         notifications: 3,
         ..Status::default()
@@ -2879,4 +2879,34 @@ impl Stage {
         stage.still();
         stage
     }
+}
+
+// --- The pad's battery (#191, docs/research/pad-battery.md): a percentage, a level only, nothing known. Only a
+// percentage draws a battery. ---
+
+/// Home with a pad connected that says this of its battery, and the Guide open over it.
+fn pad_battery(battery: Option<ui::Battery>, home: &str, guide: &str) {
+    let mut stage = Stage::on_row(screens::fake_library(), HD);
+    stage.dashboard.set_pad(ui::PadStatus { connected: true, battery });
+    stage.check(home);
+    stage.press(&[Button::Guide]);
+    stage.check(guide);
+}
+
+/// A pad on Bluetooth LE: the cell at its charge, and the figure beside it.
+#[test]
+fn pad_battery_with_a_percentage() {
+    pad_battery(Some(ui::Battery::Percent(85)), "pad-battery-percent-home", "pad-battery-percent-guide");
+}
+
+/// XInput's or Windows.Gaming.Input's word alone, low here: not shown, the controller's glyph (the user's call, #191).
+#[test]
+fn pad_battery_with_a_level_only() {
+    pad_battery(Some(ui::Battery::Level(1)), "pad-battery-level-home", "pad-battery-level-guide");
+}
+
+/// A virtual pad, a 2.4 GHz dongle: nothing known, the controller's glyph as for one on a cable.
+#[test]
+fn pad_battery_not_known() {
+    pad_battery(None, "pad-battery-none-home", "pad-battery-none-guide");
 }

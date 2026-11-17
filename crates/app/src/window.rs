@@ -394,12 +394,15 @@ pub fn run(args: &Args, started_with: &[String], library: Library, store: Store,
         windowed: args.windowed,
         as_shell,
         dashboard,
-        pad: Pad::start({
-            let proxy = event_loop.create_proxy();
-            move || {
-                let _ = proxy.send_event(());
-            }
-        }),
+        pad: Pad::start(
+            {
+                let proxy = event_loop.create_proxy();
+                move || {
+                    let _ = proxy.send_event(());
+                }
+            },
+            args.fake_pad_battery,
+        ),
         keys: Vec::new(),
         overlay: None,
         overlay_tried: false,
