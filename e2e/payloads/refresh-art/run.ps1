@@ -279,7 +279,7 @@ try {
     # --- 4. The Tile menu's Refresh art, on the first Recent tile.
     Press Down 'Recent\(\d+\)' | Out-Null
     Walk Left 'Recent\(0\)' 10
-    $menu = Press Menu 'TileMenu: Menu\(.+\) of .+'
+    $menu = Press Start 'TileMenu: Menu\(.+\) of .+'
     $game = if ($menu -match ' of (.+)$') { $Matches[1] } else { '' }
     Walk Down "TileMenu: Menu\(More options\) of $([regex]::Escape($game))" 7
     Press A "TileMenu: MoreOptions\(Hide this game\) of $([regex]::Escape($game))" | Out-Null
