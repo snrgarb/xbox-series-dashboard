@@ -177,6 +177,30 @@ impl Stage {
         image::RgbaImage::from_raw(target.size.0, target.size.1, pixels).unwrap()
     }
 
+    /// Home's window alone, at rest: Home, or behind a game its backdrop.
+    fn home_window(&mut self) -> image::RgbaImage {
+        self.host.store.set_time(10.0);
+        let Self { gpu, host, target, dashboard, .. } = self;
+        let pixels = target.still(gpu, host, |ui| dashboard.draw(ui));
+        image::RgbaImage::from_raw(target.size.0, target.size.1, pixels).unwrap()
+    }
+
+    /// One frame of Home's window alone, `dt` seconds after the last, as `step` draws one of both windows.
+    fn home_window_after(&mut self, mut dt: f32) -> image::RgbaImage {
+        let Self { gpu, host, target, dashboard, .. } = self;
+        loop {
+            let index = host.draw(gpu, &target.view, target.size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
+            wait(gpu, Some(index));
+            if !host.art.wait(gpu, &mut host.renderer) {
+                break;
+            }
+            while host.art.wait(gpu, &mut host.renderer) {}
+            dt = 0.0;
+        }
+        let pixels = read_back(gpu, &target.texture, target.size);
+        image::RgbaImage::from_raw(target.size.0, target.size.1, pixels).unwrap()
+    }
+
     fn check(&mut self, name: &str) {
         let image = self.still();
         compare(name, &image);
@@ -633,6 +657,91 @@ fn the_launch_screen_with_no_art_is_black_to_the_corners() {
         pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200
     });
     assert!(on_ring, "no white on the Spinner's ring");
+}
+
+/// Whether there is white on the Spinner's ring, round the screen's middle.
+fn spinner_shows(image: &image::RgbaImage) -> bool {
+    (0..360).any(|degrees| {
+        let (sin, cos) = (degrees as f32).to_radians().sin_cos();
+        let pixel = image.get_pixel((960.0 + 29.4 * sin) as u32, (540.0 - 29.4 * cos) as u32).0;
+        pixel[0] > 200 && pixel[1] > 200 && pixel[2] > 200
+    })
+}
+
+/// Whether two pixels are the same colour, each channel within a count.
+fn same_colour(a: &image::Rgba<u8>, b: &image::Rgba<u8>) -> bool {
+    a.0.iter().zip(b.0).all(|(&a, b)| a.abs_diff(b) <= 1)
+}
+
+/// Under the Launch screen and behind the game, Home's window is the game's backdrop (docs/spec/launch-screen.md): the
+/// Launch screen's picture to its corners, without the Spinner, and nothing of Home.
+#[test]
+fn behind_a_game_homes_window_is_its_launch_screen_without_the_spinner() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    let home = stage.home_window();
+    stage.dashboard.launch_started(1);
+    // Both windows, the Launch screen faded in over Home.
+    let launch_screen = stage.still();
+    assert!(stage.dashboard.home_covered() && stage.dashboard.backdrop_showing());
+    let backdrop = stage.home_window();
+    for (x, y) in [(0, 0), (1919, 0), (0, 1079), (1919, 1079), (400, 300), (1500, 900), (960, 60), (960, 1060)] {
+        let (seen, meant) = (backdrop.get_pixel(x, y), launch_screen.get_pixel(x, y));
+        assert!(same_colour(seen, meant), "at ({x}, {y}) the backdrop is {seen:?}, the Launch screen {meant:?}");
+    }
+    assert!(shots::difference(&backdrop, &home).share > 0.5, "Home shows in the backdrop");
+    assert!(spinner_shows(&launch_screen) && !spinner_shows(&backdrop), "the backdrop has no Spinner");
+    // The game booted: the Launch screen goes, and Home's window, behind the game, is the same.
+    stage.dashboard.game_booted();
+    stage.still();
+    assert!(!stage.dashboard.launch_screen_showing());
+    assert_eq!(shots::difference(&stage.home_window(), &backdrop).share, 0.0);
+}
+
+/// The game ends: its backdrop is what Home's window shows at first, then it fades to Home in the Launch screen's fade,
+/// 300 ms, and is gone.
+#[test]
+fn when_the_game_ends_its_backdrop_fades_to_home() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.launch_started(1);
+    stage.still();
+    stage.dashboard.game_booted();
+    let backdrop = stage.home_window();
+    stage.dashboard.game_ended();
+    assert!(stage.dashboard.backdrop_fading() && stage.dashboard.backdrop_showing());
+    let first = stage.home_window_after(0.0);
+    assert!(shots::difference(&first, &backdrop).share < 0.01, "the backdrop, whole, as the game goes");
+    let mid = stage.home_window_after(0.1);
+    assert!(stage.dashboard.backdrop_showing(), "still fading");
+    assert!(shots::difference(&mid, &backdrop).share > 0.1, "fading");
+    stage.home_window_after(0.25);
+    assert!(!stage.dashboard.backdrop_showing() && !stage.dashboard.backdrop_fading(), "Home, after 300 ms");
+}
+
+/// On a slow renderer the backdrop goes whole, as the Launch screen does there; and Home chosen in front of the game
+/// cuts to it, with no fade: the game runs on.
+#[test]
+fn the_backdrop_goes_at_once_on_a_slow_renderer_and_when_home_is_chosen_over_the_game() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_slow_renderer(true);
+    stage.dashboard.launch_started(1);
+    stage.still();
+    stage.dashboard.game_booted();
+    stage.home_window();
+    stage.dashboard.game_ended();
+    stage.home_window_after(0.0);
+    assert!(!stage.dashboard.backdrop_showing(), "gone in one frame");
+    // The drawing lock it holds, let go before the next is made.
+    drop(stage);
+
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.launch_started(1);
+    stage.still();
+    stage.dashboard.game_booted();
+    stage.home_window();
+    stage.dashboard.show_dashboard();
+    assert!(!stage.dashboard.home_covered());
+    stage.home_window_after(0.0);
+    assert!(!stage.dashboard.backdrop_showing() && !stage.dashboard.backdrop_fading());
 }
 
 /// The focused tile's title band is the theme's 90% black: over a white-edged cover its top edge is nearly black.

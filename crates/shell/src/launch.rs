@@ -1,6 +1,9 @@
 //! Launching a game through its source and following it: asked of its store (or its program run), its window up,
-//! booted, ended. While the game starts the Launch screen is over everything, on the Overlay; this says when it should go, hides Home's window
-//! behind the game, and brings Home back when the game ends. Home's window is otherwise left as it is: it is never
+//! booted, ended. While the game starts the Launch screen is over everything, on the Overlay; this says when it should
+//! go, and puts Home's window, which shows the game's backdrop meanwhile, directly behind the game's window, where it
+//! stays, not activated, until the game's window goes: it takes the foreground then, and Home comes back in it once
+//! the game has ended (docs/spec/launch-screen.md). The game's window is marked full screen for the shell, so the
+//! taskbar goes under the backdrop while the game is active. Home's window is otherwise left as it is: it is never
 //! made topmost, layered or clipped.
 use std::ffi::c_void;
 use std::path::Path;
@@ -71,10 +74,38 @@ impl Launch {
     pub fn show_game(&mut self, _: bool) -> bool {
         false
     }
+
+    pub fn game_in_front(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(windows)]
 pub use win::Launch;
+
+/// Whether a window cloaked so (its `DWMWA_CLOAKED`) may be the game's. Not cloaked (0), or cloaked by the shell (2,
+/// `DWM_CLOAKED_SHELL`): Windows' Xbox mode cloaks the app that is not in front, the game's windows while Home is,
+/// and a virtual desktop not shown cloaks its windows so too; the game still has them. Not a window its own app
+/// cloaked (1, `DWM_CLOAKED_APP`: a UWP frame kept for later, a window hidden by design), nor one cloaked with its
+/// owner (4, `DWM_CLOAKED_INHERITED`). Other programs' windows are kept out by their path, not by this.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn may_be_the_games(cloaked: u32) -> bool {
+    matches!(cloaked, 0 | 2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::may_be_the_games;
+
+    #[test]
+    fn a_window_the_shell_cloaked_is_still_the_games_and_one_its_app_cloaked_is_not() {
+        assert!(may_be_the_games(0), "shown");
+        assert!(may_be_the_games(2), "cloaked by the shell: Xbox mode with Home in front");
+        assert!(!may_be_the_games(1), "cloaked by its own app");
+        assert!(!may_be_the_games(4), "cloaked with its owner");
+        assert!(!may_be_the_games(1 | 2), "its app's cloak as well as the shell's");
+    }
+}
 
 #[cfg(windows)]
 mod win {
@@ -100,7 +131,9 @@ mod win {
     /// A look this long after the one before came late: the machine is not keeping up.
     const LATE: Duration = Duration::from_millis(500);
     const GIVE_UP: Duration = Duration::from_secs(120);
-    /// The game is over once its store and the desktop have shown nothing of it for this long.
+    /// A launch whose game has shown nothing yet, after the Launch screen stepped aside for a window that wanted the
+    /// user, is over once its store and the desktop have still shown nothing of it for this long. A game that has
+    /// been seen is over as soon as its windows and processes have gone and its store no longer says it runs.
     const GONE: Duration = Duration::from_secs(2);
     /// The game's own window covers at least this much of the screen; a launcher's or a splash doesn't.
     const GAME_COVERS: f64 = 0.6;
@@ -108,10 +141,10 @@ mod win {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum State {
         /// Asked of its store. The Launch screen is over whatever the store and the game put up; Home's window is
-        /// under it all, as it was.
+        /// under it all, as it was, showing the game's backdrop once the Launch screen covers it.
         Starting,
-        /// The Launch screen is fading away, Home's window hidden: what shows through is the game, or the window
-        /// that wants the user.
+        /// The Launch screen is fading away, Home's window directly behind the game's: what shows through is the
+        /// game, or the window that wants the user, with the backdrop round it.
         Revealing,
         /// The Launch screen has gone. The game runs, with the Guide over it or not.
         Running,
@@ -154,6 +187,21 @@ mod win {
         guide: bool,
         /// Whether the game has been asked to quit: from then on it is not frozen, so it is free to close.
         quitting: bool,
+        /// Whether a window of the game's was up at the last look: its coming and going are said.
+        window_up: bool,
+        /// The window Home's window was last put directly behind, once the Launch screen has gone.
+        behind: HWND,
+        /// Whether Home's window is in front of the running game: Home was chosen in the Guide, or with Alt+Tab.
+        home_in_front: bool,
+        /// The windows marked full screen for the shell, so that the taskbar goes under Home's window while one of
+        /// them is active; unmarked when the launch ends.
+        marked: Vec<HWND>,
+        /// With no window of the game's up: the processes of its still running when last said.
+        left: Vec<String>,
+        /// With no window or process of the game's left: since when its store has still said it runs.
+        store_since: Option<Instant>,
+        /// The game's largest window when last said, and how it was cloaked.
+        found: (HWND, u32),
     }
 
     fn log(message: &str) {
@@ -214,6 +262,13 @@ mod win {
                 game: None,
                 guide: false,
                 quitting: false,
+                window_up: false,
+                behind: std::ptr::null_mut(),
+                home_in_front: false,
+                marked: Vec::new(),
+                left: Vec::new(),
+                store_since: None,
+                found: (std::ptr::null_mut(), 0),
             })
         }
 
@@ -235,6 +290,30 @@ mod win {
             let running = self.source.running(&self.playing);
             self.seen |= running || look.any;
             self.game = look.largest;
+            // Which window of the game's is its largest, and how it is cloaked: said as either changes.
+            let found = (look.largest.unwrap_or(std::ptr::null_mut()), look.cloaked);
+            if found != self.found && look.largest.is_some() {
+                let how = match look.cloaked {
+                    0 => "not cloaked",
+                    2 => "cloaked by the shell",
+                    _ => "cloaked",
+                };
+                log(&format!("the game's window {}, {how} ({})", unsafe { crate::describe(found.0) }, found.1));
+            }
+            self.found = found;
+            let starting = self.state == State::Starting;
+            if look.any != self.window_up {
+                self.window_up = look.any;
+                log(match (look.any, starting) {
+                    (true, _) => "game window seen",
+                    (false, true) => "game gone, Launch screen showing",
+                    (false, false) if self.home_in_front => "game gone, Home in front",
+                    (false, false) => "game gone, backdrop showing",
+                });
+                if !look.any && !starting {
+                    self.home_takes_front();
+                }
+            }
 
             match self.state {
                 State::Starting => self.starting(now, since_last, &look, overlay),
@@ -244,23 +323,105 @@ mod win {
                         self.said_up = true;
                         log("the game's window is up");
                     }
-                    if running || look.any {
-                        self.gone_since = None;
-                    } else if now - *self.gone_since.get_or_insert(now) >= GONE {
-                        // Under the open Guide the foreground stays the Guide's, as in the Bundle: Home's window
-                        // comes back behind it, and gets the foreground when the Guide closes.
-                        if overlay.is_some_and(|overlay| overlay.mode() == Some(crate::Mode::Guide)) {
-                            log("the game has ended, Home back behind the Guide");
-                            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE;
-                            unsafe { SetWindowPos(self.home, HWND_NOTOPMOST, 0, 0, 0, 0, flags) };
-                        } else {
-                            log("the game has ended, Home back");
-                            unsafe { restore(self.home) };
-                        }
-                        return Step::Ended;
+                    self.keep_behind(look.largest);
+                    if look.any {
+                        (self.gone_since, self.store_since) = (None, None);
+                        self.left.clear();
+                        return Step::Same;
                     }
-                    Step::Same
+                    // Nothing of the game's has shown yet (the Launch screen stepped aside for a window that wanted
+                    // the user): over once its store and the desktop have shown nothing of it for a while.
+                    if !self.seen {
+                        if now - *self.gone_since.get_or_insert(now) >= GONE {
+                            return self.ended(overlay, "nothing of the game's showed");
+                        }
+                        return Step::Same;
+                    }
+                    self.gone(now, running, overlay)
                 }
+            }
+        }
+
+        /// No window of the game's is up: it has ended once none of its processes runs and its store no longer
+        /// says it does, which is looked at every LOOK_EVERY with no wait of its own. A process of the game's
+        /// still running is a game between windows or handing off to another of its programs; its store still
+        /// saying it runs (Steam's `Running`) is a store that has not seen it go yet, or a launcher outside the
+        /// game's folder starting it again. Home's window, the backdrop, holds meanwhile.
+        fn gone(&mut self, now: Instant, running: bool, overlay: Option<&Overlay>) -> Step {
+            let left = crate::freeze::running_under(&self.prefixes);
+            if !left.is_empty() {
+                if left != self.left {
+                    log(&format!("no window of the game's, its processes still running: {}", left.join(", ")));
+                    self.left = left;
+                }
+                self.store_since = None;
+                return Step::Same;
+            }
+            // The store still saying it runs is waited for only while something else has the foreground: a launcher
+            // outside the game's folder may be starting it again. With Home's window in front the user is back at
+            // the Dashboard, and a store slow to see the game go (Steam took 2.2 s on the TV PC) holds nothing up.
+            let home_front = unsafe { GetForegroundWindow() } == self.home;
+            if running && !home_front {
+                if self.store_since.is_none() {
+                    log(&format!("the game's processes have gone, {} still says it runs", self.source.name()));
+                    self.store_since = Some(now);
+                }
+                return Step::Same;
+            }
+            let why = match (running, self.store_since) {
+                (true, _) => format!(
+                    "the game's windows and processes have gone, Home's window has the foreground: ended without \
+                     waiting for {} to say so",
+                    self.source.name()
+                ),
+                (false, Some(since)) => format!(
+                    "the game's windows and processes have gone, and {} said so {:.0} ms later",
+                    self.source.name(),
+                    (now - since).as_secs_f64() * 1000.0
+                ),
+                (false, None) => "the game's windows and processes have gone".to_string(),
+            };
+            self.ended(overlay, &why)
+        }
+
+        /// The game has ended: Home's window back in front, the windows marked full screen for the shell unmarked.
+        fn ended(&mut self, overlay: Option<&Overlay>, why: &str) -> Step {
+            log(why);
+            for window in std::mem::take(&mut self.marked) {
+                if unsafe { IsWindow(window) } != 0 {
+                    if let Err(why) = mark_fullscreen(window, false) {
+                        let window = unsafe { crate::describe(window) };
+                        log(&format!("{window} could not be unmarked as full screen: {why}"));
+                    }
+                }
+            }
+            // Under the open Guide the foreground stays the Guide's, as in the Bundle: Home's window comes back
+            // behind it, and gets the foreground when the Guide closes.
+            if overlay.is_some_and(|overlay| overlay.mode() == Some(crate::Mode::Guide)) {
+                log("the game has ended, Home back behind the Guide");
+                let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE;
+                unsafe { SetWindowPos(self.home, HWND_NOTOPMOST, 0, 0, 0, 0, flags) };
+            } else {
+                log("the game has ended, Home back");
+                unsafe { restore(self.home) };
+            }
+            Step::Ended
+        }
+
+        /// The game's last window has gone: Home's window, the backdrop, takes the foreground at once, so that what
+        /// Windows would hand it on to (whatever was active before, a console) does not come up over the backdrop.
+        /// Not while Home was chosen over the game, which has it already, or under the open Guide, which keeps it.
+        fn home_takes_front(&self) {
+            if self.home_in_front || self.guide {
+                return;
+            }
+            unsafe {
+                let taken = GetForegroundWindow() == self.home || take_foreground(self.home);
+                log(&format!(
+                    "Home's window takes the foreground: {taken}, {} has it; Home's window {}",
+                    crate::describe(GetForegroundWindow()),
+                    window_state(self.home)
+                ));
             }
         }
 
@@ -321,12 +482,68 @@ mod win {
             Step::Same
         }
 
-        /// The Launch screen is to go. Home's window, covered by it until now, hides first, so what the fade
-        /// shows is the game or the window that wants the user and never Home.
+        /// The Launch screen is to go. Home's window, covered by it until now and showing the game's backdrop, goes
+        /// directly behind the window in front (the game's, or the one that wants the user), so what the fade shows
+        /// is that window with the backdrop round it, and never Home or the desktop.
         fn reveal(&mut self) -> Step {
-            unsafe { ShowWindow(self.home, SW_HIDE) };
+            let front = unsafe { GetForegroundWindow() };
+            let front = if front.is_null() || ours(front) || unsafe { IsWindowVisible(front) } == 0 {
+                self.game.unwrap_or(std::ptr::null_mut())
+            } else {
+                front
+            };
+            if front.is_null() {
+                log("no window of the game's to put Home's window behind: it stays where it is");
+            } else {
+                self.put_behind(front);
+            }
             self.state = State::Revealing;
             Step::LaunchScreenGoes
+        }
+
+        /// Home's window directly behind `front` in the z-order, shown and not activated: whatever does not cover
+        /// round `front`, and whatever is left when it goes, is Home's window, which shows the game's backdrop
+        /// meanwhile. Behind every topmost window instead, when `front` is one: a window put after a topmost one is
+        /// made topmost itself, and Home's must never be.
+        ///
+        /// `front` is marked full screen for the shell too: while it is active the taskbar goes to the bottom of the
+        /// z-order, under Home's window, however little of the screen `front` covers (docs/spec/launch-screen.md).
+        fn put_behind(&mut self, front: HWND) {
+            unsafe {
+                let topmost = GetWindowLongPtrW(front, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0;
+                let after = if topmost { HWND_TOP } else { front };
+                let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+                SetWindowPos(self.home, after, 0, 0, 0, 0, flags);
+                let which = if topmost { "the topmost windows, below " } else { "" };
+                log(&format!(
+                    "Home's window behind {which}{} as the game's backdrop; Home's window {}",
+                    crate::describe(front),
+                    window_state(self.home)
+                ));
+            }
+            if !self.marked.contains(&front) {
+                match mark_fullscreen(front, true) {
+                    Ok(()) => log("the game's window marked full screen: the taskbar goes under the backdrop"),
+                    Err(why) => log(&format!("the game's window could not be marked full screen: {why}")),
+                }
+                self.marked.push(front);
+            }
+            self.behind = front;
+        }
+
+        /// A window of the game's that came since Home's window was put behind the last: after a hand-off to another
+        /// process, or a window the game made anew. Home's window goes behind it, and it is given the foreground if
+        /// Home's window has it, as it has when Windows gave it on the last window's going.
+        fn keep_behind(&mut self, largest: Option<HWND>) {
+            let Some(window) = largest else { return };
+            if self.home_in_front || window == self.behind {
+                return;
+            }
+            self.put_behind(window);
+            if !self.guide && unsafe { GetForegroundWindow() } == self.home {
+                let given = unsafe { SetForegroundWindow(window) } != 0;
+                log(&format!("the game's new window given the foreground: {given}"));
+            }
         }
 
         /// The Launch screen has faded away, or there was none to fade.
@@ -413,6 +630,7 @@ mod win {
         /// Home's window in front of the running game, which runs on behind it: Home or a page was chosen in the
         /// Guide. With `foreground` it takes the foreground too; without, the Overlay is about to hand it over.
         pub fn show_home(&mut self, foreground: bool) {
+            self.home_in_front = true;
             unsafe {
                 if foreground {
                     restore(self.home);
@@ -424,27 +642,51 @@ mod win {
             log("Home in front of the game");
         }
 
-        /// The game in front again and Home's window hidden behind it, as while it was played. With `foreground`
-        /// the game's window is given the foreground, which is Home's to give; without, the Overlay has just
-        /// handed it over. False when the game has no window to go back to: nothing is done.
+        /// The game in front again and Home's window directly behind it as its backdrop, as while it was played.
+        /// With `foreground` the game's window is given the foreground, which is Home's to give; without, the
+        /// Overlay has just handed it over. False when the game has no window to go back to: nothing is done.
         pub fn show_game(&mut self, foreground: bool) -> bool {
             let game = self.game_window();
             if game.is_null() {
                 log("the game has no window to go back to");
                 return false;
             }
+            self.home_in_front = false;
             unsafe {
                 if foreground {
                     if IsIconic(game) != 0 {
                         ShowWindow(game, SW_RESTORE);
                     }
-                    SetForegroundWindow(game);
+                    // In Xbox mode the game's window is cloaked by the shell while Home is in front. No documented
+                    // call switches Xbox mode's app: activating the window is how an app is brought forward there,
+                    // as it is for a window on another virtual desktop. Said, with the window's state after, so a
+                    // run shows whether the shell uncloaked it (the next look says so again as it changes).
+                    let given = SetForegroundWindow(game) != 0;
+                    log(&format!("the game's window given the foreground: {given}; it is {}", window_state(game)));
                 }
-                ShowWindow(self.home, SW_HIDE);
             }
-            log("back to the game, Home hidden");
+            self.put_behind(game);
+            log("back to the game, Home behind it");
             true
         }
+
+        /// Whether the game is what the user is playing: the Launch screen has gone, Home was not chosen over it, and
+        /// its window is up. Home's window getting the foreground then is the user choosing the Dashboard (Alt+Tab),
+        /// and not Windows handing it on as the game's window went.
+        pub fn game_in_front(&self) -> bool {
+            let game = self.game_window();
+            self.state == State::Running
+                && !self.home_in_front
+                && !game.is_null()
+                && unsafe { IsWindowVisible(game) } != 0
+        }
+    }
+
+    /// Whether `hwnd` is a window of the Dashboard's own: Home's, the Overlay, the Toast strip.
+    fn ours(hwnd: HWND) -> bool {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        pid == std::process::id()
     }
 
     /// How long a window holds the foreground before it needs the user: `DASHBOARD_NEEDS_USER_MS`, or 5 s.
@@ -465,8 +707,56 @@ mod win {
     /// Home's window shown again and in front.
     unsafe fn restore(home: HWND) {
         SetWindowPos(home, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-        if !take_foreground(home) {
-            log("Windows did not give Home the foreground");
+        if GetForegroundWindow() != home && !take_foreground(home) {
+            log(&format!(
+                "Windows did not give Home the foreground: {} has it",
+                crate::describe(GetForegroundWindow())
+            ));
+        }
+    }
+
+    /// What Windows has a window as, for the log: shown, minimised, cloaked (hidden by Windows or the shell while
+    /// still shown: in Xbox mode, the app not in front), and where.
+    unsafe fn window_state(window: HWND) -> String {
+        let mut cloaked = 0u32;
+        DwmGetWindowAttribute(window, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut c_void, 4);
+        let mut rect: RECT = std::mem::zeroed();
+        GetWindowRect(window, &mut rect);
+        let cloaked = match cloaked {
+            0 => String::new(),
+            1 => ", cloaked by the Dashboard".into(),
+            2 => ", cloaked by the shell".into(),
+            4 => ", cloaked with its owner".into(),
+            other => format!(", cloaked ({other})"),
+        };
+        format!(
+            "{}{}{cloaked}, {}x{} at ({}, {})",
+            if IsWindowVisible(window) != 0 { "shown" } else { "hidden" },
+            if IsIconic(window) != 0 { ", minimised" } else { "" },
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            rect.left,
+            rect.top
+        )
+    }
+
+    /// Tells the shell that `window` is a full-screen window, or leaves it to the shell's own judging again: while a
+    /// window marked so is active, the taskbar goes to the bottom of the z-order (ITaskbarList2::MarkFullscreenWindow,
+    /// whose documentation says so). The game's own window is marked, since it is the one active; Home's window behind
+    /// it covers the display, the taskbar's place included.
+    fn mark_fullscreen(window: HWND, fullscreen: bool) -> Result<(), String> {
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+        };
+        use windows::Win32::UI::Shell::{ITaskbarList2, TaskbarList};
+        unsafe {
+            // The window's thread has COM already; either answer is fine.
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let list: ITaskbarList2 =
+                CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER).map_err(|why| why.to_string())?;
+            list.HrInit().map_err(|why| why.to_string())?;
+            list.MarkFullscreenWindow(windows::Win32::Foundation::HWND(window), fullscreen)
+                .map_err(|why| why.to_string())
         }
     }
 
@@ -478,6 +768,9 @@ mod win {
         any: bool,
         /// The largest of them.
         largest: Option<HWND>,
+        /// How the largest is cloaked (`DWMWA_CLOAKED`): 0, or 2 where the shell has set the game aside (Xbox
+        /// mode, with Home in front).
+        cloaked: u32,
     }
 
     struct Search<'a> {
@@ -507,7 +800,7 @@ mod win {
         DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut c_void, 4);
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
-        if cloaked != 0 || pid == 0 || pid == std::process::id() {
+        if !super::may_be_the_games(cloaked) || pid == 0 || pid == std::process::id() {
             return 1;
         }
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
@@ -529,6 +822,7 @@ mod win {
         if area > search.largest {
             search.largest = area;
             search.look.largest = Some(hwnd);
+            search.look.cloaked = cloaked;
         }
         if area >= search.screen * GAME_COVERS && area > search.best {
             search.best = area;

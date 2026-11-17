@@ -209,7 +209,10 @@ back to the first; a wake from sleep pretended by `standin wake`; then Sign in t
 nothing, and the next start straight to Signing you in), `idle` (the
 Idle screen with `--idle-after 3,6`: Dimmed then Showing things over Home and over the stand-in game, a picture of
 each, and a press that wakes it seen to move no focus and start nothing; a stage woken early by someone else's input
-on the TV PC is said in the steps and waited for again), and `overlay` and `video` for the spikes.
+on the TV PC is said in the steps and waited for again), `launch-backdrop` (the desktop never seen round a game: the
+stand-in game slow to start with a launcher and a gap, windowed, quit from the Guide, crashing and handing off to
+another process, the screen sampled throughout by the window at each point and its colour; docs/spec/launch-screen.md),
+and `overlay` and `video` for the spikes.
 
 Every wait is timed by a stopwatch and by its own sleeps, never by the clock, which the VM's time sync can move by hours
 mid-test; each line of `steps.txt` has the clock's time and then the seconds since the test began. The smoke test sets
