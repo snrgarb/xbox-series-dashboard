@@ -83,6 +83,11 @@ fn info(game: &Game) -> Vec<(&'static str, String)> {
     pairs
 }
 
+/// Where Info's `count` pairs go in the card's `inner` room: one to a line, each the room's width (#237).
+fn info_places(inner: Rect, count: usize) -> Vec<Rect> {
+    (0..count).map(|row| Rect::new(inner.x, inner.y + row as f32 * PAIR_HEIGHT, inner.w, PAIR_HEIGHT)).collect()
+}
+
 /// The cards that show for this game, left to right, on the Game hub page or on Game details, `progress` how far
 /// it has got with its achievements if it has any. The Bundle's About and Description are in neither: no file of
 /// Steam's on this machine holds a game's description.
@@ -141,11 +146,13 @@ pub fn draw(ui: &mut Ui, game: &Game, cards: &[Card], focus: Option<Card>, progr
                     }
                 }
                 Card::Info => {
+                    // One pair to a line, the card's width each: the Bundle's two columns of 192 cut "Community
+                    // score" and most developers' names, and with only its Developer, Critic score and Community
+                    // score here they left most of the card empty (#237).
                     let inner = titled(ui, rect, "Info");
-                    let column = inner.w / 2.0;
-                    for (at, (label, value)) in info(game).iter().enumerate() {
-                        let (x, y) = (inner.x + (at % 2) as f32 * column, inner.y + (at / 2) as f32 * PAIR_HEIGHT);
-                        pair(ui, x, y, column, label, value);
+                    let pairs = info(game);
+                    for ((label, value), at) in pairs.iter().zip(info_places(inner, pairs.len())) {
+                        pair(ui, at.x, at.y, at.w, label, value);
                     }
                 }
             }
@@ -238,6 +245,19 @@ mod tests {
             community_score: Some(0),
             ..Game::default()
         }
+    }
+
+    #[test]
+    fn infos_pairs_are_one_to_a_line_the_cards_width_each() {
+        let inner = Rect::new(929.0, 331.0, 384.0, 417.0);
+        let places = info_places(inner, 3);
+        assert!(places.iter().all(|at| at.x == 929.0 && at.w == 384.0));
+        assert_eq!(
+            places.iter().map(|at| at.y).collect::<Vec<_>>(),
+            [331.0, 331.0 + PAIR_HEIGHT, 331.0 + 2.0 * PAIR_HEIGHT]
+        );
+        // Five fit the card.
+        assert!(info_places(inner, 5)[4].bottom() <= inner.bottom());
     }
 
     #[test]

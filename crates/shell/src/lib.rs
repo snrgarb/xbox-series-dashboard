@@ -21,6 +21,7 @@ pub mod freeze;
 pub mod helper;
 pub mod idle;
 mod launch;
+pub mod locale;
 pub mod media;
 pub mod overlay;
 pub mod power;

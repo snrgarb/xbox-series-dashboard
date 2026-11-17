@@ -1,6 +1,6 @@
 //! The hub's words for a game's numbers, as Playnite's converters write them for the Bundle (docs/spec/game-hub.md,
 //! 4.2 and 5.2).
-use chrono::{Datelike, Local, TimeZone, Utc};
+use chrono::{Datelike, TimeZone, Utc};
 
 /// How long a game was played: under an hour "N minutes", else "Hh Mm". The library counts whole minutes, so
 /// Playnite's "N seconds" is never said.
@@ -11,13 +11,9 @@ pub fn playtime(minutes: u32) -> String {
     }
 }
 
-/// The day a game was last played, where the player is: month, day and year, as the Bundle's picture has it
-/// ("11/15/2026").
+/// The day a game was last played, where the player is, in their short date format (`crate::date`).
 pub fn date(unix_seconds: u64) -> String {
-    let Some(at) = i64::try_from(unix_seconds).ok().and_then(|at| Local.timestamp_opt(at, 0).single()) else {
-        return String::new();
-    };
-    at.format("%-m/%-d/%Y").to_string()
+    crate::date::short_at(unix_seconds)
 }
 
 /// The year a game came out.

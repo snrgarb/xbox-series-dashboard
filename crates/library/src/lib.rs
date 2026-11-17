@@ -59,6 +59,12 @@ const USER: &str = "user";
 /// the database before it could say which they are.
 const MARKS: &str = "marks";
 
+/// `<source>.last_played`, set when the games' last played is to be taken again from the source at its next sync,
+/// and not kept from before as it is otherwise: Steam's was the later of the user's record and the app manifest's,
+/// and a new install's manifest can say the day it was installed, which a sync then kept for good (#237). The
+/// Play sessions recorded here are kept: the later of those and the source's is taken.
+const RETAKE: &str = "last_played";
+
 const MIGRATIONS: &[&str] = &[
     // 1: games, their art, Play sessions and settings.
     "CREATE TABLE games (
@@ -126,6 +132,8 @@ const MIGRATIONS: &[&str] = &[
     queue::ITEMS_MIGRATION,
     // 9: the user's choice of a game's pictures, in the art picker (#213).
     choices::MIGRATION,
+    // 10: Steam's games' last played taken again from Steam at its next sync (`RETAKE`, #237).
+    "INSERT OR REPLACE INTO settings (key, value) VALUES ('steam.last_played', 'retake');",
 ];
 
 /// What a sync changed.
@@ -300,6 +308,9 @@ impl Database {
         }
 
         let mut synced = Synced::default();
+        let retake_key = format!("{source}.{RETAKE}");
+        let retake =
+            tx.query_row("SELECT 1 FROM settings WHERE key = ?1", [&retake_key], |_| Ok(())).optional()?.is_some();
         let set_art = |game: i64, art: &[(String, String)]| -> Result<()> {
             tx.execute("DELETE FROM art WHERE game = ?1", [game])?;
             for (kind, path) in art {
@@ -386,7 +397,16 @@ impl Database {
                 }
                 Some(known) => {
                     known.seen = true;
-                    state.last_played = state.last_played.max(known.state.last_played);
+                    let before = match retake {
+                        false => known.state.last_played,
+                        true => tx.query_row(
+                            "SELECT COALESCE(MAX(MAX(started, COALESCE(ended, 0))), 0) FROM play_sessions
+                             WHERE game = ?1",
+                            [known.id],
+                            |row| row.get(0),
+                        )?,
+                    };
+                    state.last_played = state.last_played.max(before);
                     state.playtime = state.playtime.max(known.state.playtime);
                     if state == known.state {
                         continue;
@@ -423,6 +443,7 @@ impl Database {
             )?;
             synced.gone += 1;
         }
+        tx.execute("DELETE FROM settings WHERE key = ?1", [&retake_key])?;
         let key = format!("{source}.{USER}");
         match &found.user {
             Some(user) => tx.execute(
@@ -914,6 +935,44 @@ mod tests {
         assert_eq!(db.sync(STEAM, &next, NOW).unwrap(), Synced { added: 2, updated: 1, gone: 0 });
         let after = db.game(before.id).unwrap().unwrap();
         assert_eq!((after.released, after.added), (1_552_348_800, 1_600_000_000));
+    }
+
+    /// A Steam game's last played that a new install's manifest put at the day of the install is taken again from
+    /// Steam's record of the user's play at the next sync, and the later Play session's kept; once (#237).
+    #[test]
+    fn a_steam_last_played_from_an_install_is_taken_again_from_steam_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        let install_day = NOW + 86_400;
+        {
+            let conn = Connection::open(&path).unwrap();
+            for migration in &MIGRATIONS[..9] {
+                conn.execute_batch(migration).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 9).unwrap();
+            conn.execute_batch(&format!(
+                "INSERT INTO games (id, source, source_id, name, sort_name, installed, last_played, playtime_minutes,
+                                    added)
+                 VALUES (7, 'steam', '20', 'Bramble', 'bramble', 1, {install_day}, 17, 1600000000),
+                        (8, 'steam', '30', 'Cinder', 'cinder', 1, {install_day}, 30, 1600000000),
+                        (9, 'steam', '10', 'The Anchor', 'anchor', 1, {install_day}, 0, 1600000000);
+                 INSERT INTO play_sessions (game, started, ended) VALUES (8, {NOW} - 1800, {NOW});"
+            ))
+            .unwrap();
+        }
+        let mut db = Database::open(&path).unwrap();
+        let played = |db: &Database, id: i64| db.game(id).unwrap().unwrap().last_played;
+        // Until Steam is read, as it was: the first frame keeps its Recent row.
+        assert_eq!(played(&db, 7), install_day);
+        let mut steam = found();
+        steam.games.iter_mut().for_each(|g| g.last_played = if g.source_id == "20" { 1_500_000_000 } else { 0 });
+        db.sync(STEAM, &steam, NOW).unwrap();
+        assert_eq!((played(&db, 7), played(&db, 8), played(&db, 9)), (1_500_000_000, NOW, 0));
+        // Once: from now on a Play session here is not undone by a source that has not caught up.
+        let session = db.session_started(7, NOW + 60).unwrap();
+        db.session_ended(session, NOW + 600).unwrap();
+        db.sync(STEAM, &steam, NOW + 700).unwrap();
+        assert_eq!(played(&db, 7), NOW + 600);
     }
 
     /// The rows a database had before there was more than one source were already keyed `(source, source_id)`:

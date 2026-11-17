@@ -11,6 +11,7 @@ pub mod achievements;
 pub mod agreement;
 mod app_tile;
 pub mod art_picker;
+pub mod date;
 pub mod drawn;
 pub mod game_hub;
 pub mod guide;
