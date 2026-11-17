@@ -397,7 +397,6 @@ pub fn load(steam_root: &Path) -> Result<Library> {
             let name = common.str_at(&["name"])?.to_string();
             let (played, minutes) = local.apps.get(&appid).copied().unwrap_or((0, 0));
             let manifest = installed.get(&appid);
-            let manifest_played = manifest.map(|m| m.played);
             let art = art_root.as_deref().and_then(|r| child(r, &appid.to_string())).map(|d| ArtDir::scan(&d));
             let find =
                 |asset: &str, legacy: Option<&str>, names: &[&str]| art.as_ref()?.find(common, asset, legacy, names);
@@ -408,7 +407,9 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     source: SOURCE.to_string(),
                     source_id: appid.to_string(),
                     name,
-                    last_played: played.max(manifest_played.unwrap_or(0)),
+                    // The user's own record of play, beside their playtime. Never the app manifest's LastPlayed:
+                    // a new install's manifest can carry the day it was installed, which is no play (#237).
+                    last_played: played,
                     playtime_minutes: minutes,
                     added: 0,
                     installed_at: None,
@@ -538,8 +539,6 @@ fn score(common: &Value, key: &str) -> Option<u8> {
 struct Manifest {
     /// Its files are all on disk, and no uninstall is under way (`installs::installed`).
     installed: bool,
-    /// Its LastPlayed, in Unix seconds.
-    played: u64,
     /// The game's folder.
     folder: Option<PathBuf>,
     /// Its SizeOnDisk, in bytes.
@@ -576,14 +575,13 @@ fn installed_apps(steam_root: &Path) -> HashMap<u32, Manifest> {
     for dir in steamapps_dirs(steam_root) {
         for (id, file) in installs::manifests(&dir) {
             let manifest = fs::read(file).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
-            let played = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "LastPlayed"])).unwrap_or(0);
             let folder = manifest
                 .as_ref()
                 .and_then(|v| v.str_at(&["AppState", "installdir"]))
                 .map(|name| dir.join("common").join(name));
             let size = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "SizeOnDisk"])).unwrap_or(0);
             let flags = manifest.as_ref().and_then(|v| v.u64_at(&["AppState", "StateFlags"]));
-            out.insert(id, Manifest { installed: installs::installed(flags), played, folder, size });
+            out.insert(id, Manifest { installed: installs::installed(flags), folder, size });
         }
     }
     out
@@ -1009,6 +1007,28 @@ mod tests {
         assert_eq!(score(&scores, "metacritic_score"), Some(87));
         assert_eq!(score(&scores, "review_percentage"), None);
         assert_eq!(score(&scores, "review_score"), None);
+    }
+
+    /// A game installed today, played long ago or never: its new manifest's LastPlayed of today is no play (#237).
+    #[test]
+    fn last_played_is_the_users_record_never_a_new_installs_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let spec = fixture::Fixture::standard();
+        fixture::write(&root, &spec).unwrap();
+        let installed = |played: bool| spec.games.iter().find(|g| g.installed && (g.last_played > 0) == played);
+        let (long_ago, never) = (installed(true).unwrap(), installed(false).unwrap());
+        let install_day = long_ago.last_played + 3 * 365 * 86_400;
+        for game in [long_ago, never] {
+            let file = root.join("steamapps").join(format!("appmanifest_{}.acf", game.appid));
+            let text = std::fs::read_to_string(&file).unwrap();
+            let line = text.lines().find(|line| line.contains("\"LastPlayed\"")).unwrap();
+            std::fs::write(&file, text.replace(line, &format!("\t\t\"LastPlayed\"\t\t\"{install_day}\""))).unwrap();
+        }
+        let library = load(&root).unwrap();
+        let read = |appid: u32| library.games.iter().find(|g| g.source_id == appid.to_string()).unwrap().last_played;
+        assert_eq!(read(long_ago.appid), long_ago.last_played);
+        assert_eq!(read(never.appid), 0);
     }
 
     #[test]
