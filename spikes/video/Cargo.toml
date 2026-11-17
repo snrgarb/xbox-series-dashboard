@@ -1,9 +1,9 @@
 [package]
 name = "video-spike"
-version = "0.0.0"
+version.workspace = true
+publish.workspace = true
 edition = "2021"
 description = "Spike (#6): plays a video file through Media Foundation into the renderer, with its sound."
-publish = false
 
 [[bin]]
 name = "video-spike"

@@ -116,12 +116,19 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Down, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
-    // Down from Launchers is Art, the fourth row's one box, and System is alone under it, where the foot stops.
+    // Down from Launchers is Art, the fourth row's one box, and System is under it, where the foot stops, with About
+    // beside it, where the row ends.
     press(&mut dashboard, &[Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
-    press(&mut dashboard, &[Down, Down, Right]);
+    press(&mut dashboard, &[Down, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
-    // Up from it is Art, and Up from Art is Games & apps above it.
+    press(&mut dashboard, &[Right, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: About");
+    // Up from About is Art, the row above having one box; Up from Art is Games & apps above it.
+    press(&mut dashboard, &[Up]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
+    press(&mut dashboard, &[Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
     press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Up]);
@@ -376,6 +383,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         boot_videos: Found::NONE,
         idle: screens::idle::Times { dim_after: ten, show_after: ten },
         shell: model::shell_mode::ShellMode::Unknown,
+        build: screens::settings::about::Build::default(),
     };
     assert_eq!(dashboard.options(), left);
 
@@ -983,6 +991,28 @@ fn settings_system() {
     assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
     stage.press(&[B]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
+}
+
+/// Theme settings > About (docs/spec/settings.md, 16.10): the version and the commit the executable gives, here a
+/// made-up pair so that the picture never changes with a release or a commit; B goes back to its box.
+#[test]
+fn settings_about() {
+    use screens::settings::about::Build;
+    let mut stage = settings_stage();
+    let options = stage.dashboard.options();
+    stage.dashboard.set_options(Options { build: Build { version: "1.2.3", commit: "0123abc" }, ..options });
+    stage.press(&[Right, Down, Down, Down, Down, Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: About: Version 1.2.3 (0123abc)");
+    stage.check("settings-about");
+    // Nothing on it moves focus; B, or Left, goes back to About's box.
+    stage.press(&[Down, Right, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: About: Version 1.2.3 (0123abc)");
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
+    stage.press(&[A, Left]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
 }
 
 /// Theme settings > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): the Bundle's picture 36, its

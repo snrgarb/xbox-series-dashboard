@@ -328,3 +328,19 @@ What stays VM-only: the **real protocol handlers** (the registry's `steam://`, `
 pointing at the stand-ins, and the Dashboard handing addresses to Windows' shell), a **first run on a clean Windows** (no Steam, no
 data folder, Windows' own first-sign-in prompts), the `overlay` spike (`Assert-VmOnly`: it opens Notepad and cannot
 tell its own from the user's), and the volume and mute steps of `flyouts`.
+
+## The installer
+
+**`install`** (docs/release.md, "Testing a package"), safe on the TV PC: it installs CI's
+`XboxSeriesDashboard-<version>-setup.exe` silently into a folder of the test's own (`/S /D=<folder>`, never
+`%LOCALAPPDATA%\Programs`), runs the installed `--version` and an offscreen frame of Settings > About, uninstalls
+with `/DRYSHELL` (the uninstaller's `--shell-off` as a dry run) and `/DATADIR=` (a data folder of the test's own), and
+checks what is left; then installs again and uninstalls with `/REMOVEDATA`. The installer's own writes, its uninstall
+entry under HKCU and its Start menu shortcut, are the one exception to safe mode's no-registry rule: the test refuses
+to start where either is there already, and checks both are gone after. Stage the installer beside `dashboard.exe`:
+
+```sh
+gh run download <run id> -n windows -D target/release-test
+gh run download <run id> -n XboxSeriesDashboard-<version> -D target/release-test
+e2e/htpc/run.sh install --exe target/release-test/dashboard.exe --standin target/release-test/standin.exe
+```

@@ -5,6 +5,12 @@ members = ["crates/model", "crates/library", "crates/source-steam", "crates/sour
     "crates/discord", "crates/shell-mode",
 ]
 
+# The Dashboard's one version: every crate takes it, the executable shows it in Settings > About and says it with
+# --version, and a release's tag is `v` and it (docs/release.md). Nothing is published to crates.io.
+[workspace.package]
+version = "0.1.0"
+publish = false
+
 [profile.release]
 opt-level = 3
 lto = "thin"

@@ -1,0 +1,24 @@
+Third-party licences
+====================
+
+Xbox Series Dashboard is built from the open-source crates below. Each licence text is given in full, with the
+crates it covers above it. Gathered by cargo-about from the crates' own files.
+
+Overview
+--------
+{{#each overview}}
+{{{name}}}: {{count}} crate{{#if (gt count 1)}}s{{/if}}
+{{/each}}
+
+{{#each licenses}}
+================================================================================
+{{{name}}} ({{id}})
+
+Used by:
+{{#each used_by}}
+  {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
