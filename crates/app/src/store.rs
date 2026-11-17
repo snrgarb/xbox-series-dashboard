@@ -71,6 +71,9 @@ pub struct Store {
     look_again: bool,
     /// Settings > Helpers: how each stands, as every snapshot carries them (`Library::helpers`).
     helpers: Vec<model::helper::Helper>,
+    /// Settings > Set up this PC: how each launcher's app stands, as every snapshot carries them
+    /// (`Library::clients`).
+    clients: Vec<model::setup::Client>,
 }
 
 /// What an update of the launchers came to: what it changed, in a few words; none when it could not be done.
@@ -732,6 +735,10 @@ impl Store {
         self.helpers = helpers;
     }
 
+    pub fn set_clients(&mut self, clients: Vec<model::setup::Client>) {
+        self.clients = clients;
+    }
+
     pub fn set_art_refresh(&mut self, refresh: model::ArtRefresh) {
         self.art_refresh = refresh;
     }
@@ -841,6 +848,7 @@ impl Store {
         library.art_refresh = self.art_refresh;
         library.storage = self.storage.clone();
         library.helpers = self.helpers.clone();
+        library.clients = self.clients.clone();
     }
 
     /// Switches a launcher on or off (Settings > Launchers): its games leave every list at once, or come back as

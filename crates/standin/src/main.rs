@@ -137,13 +137,20 @@
 //!       --bad-hash one that is not the zip's, so the download must be refused; with --not-public 404, as a private
 //!       repository's. Says `serve-updates: listening on <the update address>` and then a line a request (its path
 //!       and User-Agent, and whether it carried any Authorization), until it is killed.
-//!   standin serve-helpers --table <file> [--port <n>]
+//!   standin serve-helpers --table <file> [--port <n>] [--clients <file> --sandbox <dir>]
 //!       The stand-in helpers' release pages (`helpers::fake`), on 127.0.0.1 at <n> (any free port without one):
 //!       serves this program, and writes at <file> the helpers' table for `dashboard --helper-table <file>`, every
 //!       helper's address the stand-in's and its SHA-256 this program's. legendary's address serves this program, so
-//!       it is kept; gogdl's serves other bytes, so it must be refused. Says `serve-helpers: listening on
-//!       http://127.0.0.1:<n>` and then a line a request (its path and User-Agent, and whether it carried any
-//!       Authorization), until it is killed.
+//!       it is kept; gogdl's serves other bytes, so it must be refused. With --clients, the launchers' apps' table
+//!       too, for `dashboard --client-table <file>` (#178): every installer this program, named
+//!       `standin-setup-<key>.exe`, GOG Galaxy's other bytes; an installer told where to go told `<dir>\<key>`.
+//!       Says `serve-helpers: listening on http://127.0.0.1:<n>` and then a line a request (its path and
+//!       User-Agent, and whether it carried any Authorization), until it is killed.
+//!   standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
+//!       A launcher's installer, and the uninstaller it leaves (`set_up`): in the test's own folder that
+//!       `STANDIN_SETUP` names, and nowhere else, writes what it was run with (`runs.txt`), the app's folder and its
+//!       Uninstall key in the registry file standing in for Windows' (`registry.json`, `dashboard --setup-registry`);
+//!       the uninstaller takes them away. Without `STANDIN_SETUP` writes nothing and ends with 3.
 //!   legendary.exe | gogdl.exe [--version | <args>...]
 //!       The stand-in helper, when this program is named as one (as `serve-helpers` serves it, kept in the
 //!       Dashboard's data folder): with --version says `<name> <version> (stand-in)` on standard output and a line on
@@ -186,6 +193,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod media;
+mod set_up;
 #[cfg(windows)]
 mod win;
 
@@ -207,7 +215,8 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>] [--candidates <n>]
        standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
-       standin serve-helpers --table <file> [--port <n>]
+       standin serve-helpers --table <file> [--port <n>] [--clients <file> --sandbox <dir>]
+       standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
        legendary.exe | gogdl.exe [--version | <args>...]
        standin discord --pipe <name> [--port <n>]
        standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel>
@@ -1070,6 +1079,11 @@ fn run(args: &[String]) -> i32 {
                 }
             }
         }
+        // As a launcher's installer or uninstaller, in a test's own folder (#178).
+        _ if set_up::named().is_some() => {
+            let (install, key) = set_up::named().expect("named");
+            set_up::run(install, &key, args)
+        }
         // As a fake Battle.net's client.
         _ if named("Battle.net") => battlenet(args),
         _ if named("legendary") || named("gogdl") => helper(args),
@@ -1263,11 +1277,13 @@ fn serve_updates(args: &[String]) -> i32 {
 }
 
 fn serve_helpers(args: &[String]) -> i32 {
-    let (mut table, mut port) = (None, 0u16);
+    let (mut table, mut port, mut clients, mut sandbox) = (None, 0u16, None, None);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--table" => table = it.next().map(PathBuf::from),
+            "--clients" => clients = it.next().map(PathBuf::from),
+            "--sandbox" => sandbox = it.next().map(PathBuf::from),
             "--port" => match it.next().and_then(|v| v.parse().ok()) {
                 Some(value) => port = value,
                 None => {
@@ -1299,6 +1315,22 @@ fn serve_helpers(args: &[String]) -> i32 {
         return 1;
     }
     note(&format!("serve-helpers: table at {}: legendary served as itself, gogdl as other bytes", table.display()));
+    // The launchers' apps' table (#178): every installer this program, GOG Galaxy's other bytes.
+    if let Some(clients) = &clients {
+        let Some(sandbox) = sandbox.as_deref().and_then(|dir| std::path::absolute(dir).ok()) else {
+            note(&format!("serve-helpers: --clients needs --sandbox\n{USAGE}"));
+            return 2;
+        };
+        let json = serde_json::to_string_pretty(&service.client_table(&sandbox)).expect("plain fields");
+        if let Err(e) = std::fs::write(clients, json) {
+            note(&format!("serve-helpers: {}: {e}", clients.display()));
+            return 1;
+        }
+        note(&format!(
+            "serve-helpers: launchers' table at {}: every installer served as itself, GOG Galaxy's as other bytes",
+            clients.display()
+        ));
+    }
     note(&format!("serve-helpers: listening on {}", service.url("").trim_end_matches("/helpers/")));
     let mut said = 0;
     loop {

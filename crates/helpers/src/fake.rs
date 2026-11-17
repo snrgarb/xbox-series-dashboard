@@ -73,6 +73,34 @@ impl FakeHelpers {
             .collect()
     }
 
+    /// The launchers' apps' table (`crate::clients`) with their addresses here, for a test's machine: every
+    /// installer is this server's good program, run as itself (`standin-setup-<key>.exe`, the stand-in installer,
+    /// which writes its app's Uninstall key in the test's own registry file), with each app's own switches; an MSI
+    /// is run as a program. GOG Galaxy's address serves the bad bytes, which must be refused. An installer told where
+    /// to go is told `<sandbox>\<key>`.
+    pub fn client_table(&self, sandbox: &std::path::Path) -> Vec<crate::clients::Client> {
+        let hash = crate::sha256(&self.good);
+        crate::clients::builtin()
+            .into_iter()
+            .map(|client| {
+                let file = if client.key == "gog" { "bad" } else { "good" };
+                crate::clients::Client {
+                    url: self.url(file),
+                    size: self.good.len() as u64,
+                    sha256: Some(hash.clone()),
+                    sha256_from: "the stand-in's own program".into(),
+                    file: format!("standin-setup-{}.exe", client.key),
+                    kind: match client.kind {
+                        crate::clients::Kind::Msi => crate::clients::Kind::Exe,
+                        kind => kind,
+                    },
+                    location: client.location.as_ref().map(|_| sandbox.join(&client.key).display().to_string()),
+                    ..client
+                }
+            })
+            .collect()
+    }
+
     /// Every request so far, in the order they came.
     pub fn requests(&self) -> Vec<Request> {
         self.requests.lock().unwrap().clone()

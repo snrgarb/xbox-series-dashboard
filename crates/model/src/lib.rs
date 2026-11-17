@@ -11,6 +11,7 @@ pub mod media;
 pub mod post;
 pub mod profile;
 pub mod queue;
+pub mod setup;
 pub mod shell_mode;
 pub mod sound;
 pub mod source;
@@ -435,6 +436,10 @@ pub struct Library {
     /// executable carries them in every snapshot.
     #[serde(default)]
     pub helpers: Vec<helper::Helper>,
+    /// The launchers' own apps (Settings > Set up this PC, #178), each as it stands on this PC. Not the database's:
+    /// the executable carries them in every snapshot, as it does the helpers.
+    #[serde(default)]
+    pub clients: Vec<setup::Client>,
 }
 
 /// How a refresh of every game's art and details is going: everything downloaded forgotten, then fetched again in

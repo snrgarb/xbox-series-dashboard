@@ -755,7 +755,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 |---|---|---|
 | **General** | Personalisation (0, 0), Idle (1, 0), Guide (0, 1), **Boot video** (1, 1) | rows; the Bundle's Theme settings' first three at their places, Boot video in Discord's |
 | **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1) | rows |
-| **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers | sections |
+| **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers, Set up this PC ([set-up.md](set-up.md), #178) | sections |
 | **System** | System (0, 0), About (1, 0) | rows |
 
 - **Personalisation** keeps its four checkbox boxes, a row each: Background delay (y 210), Reduce motion (359), Show Play history (508), Show battery percentages (657). Its boxes that opened pages went to their categories: Boot video to General, Profiles and Who's playing today? to Account, Groups to Games & apps.
@@ -839,7 +839,7 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 
 The Bundle has no such page: Playnite's metadata sources fetched missing art (section 14, "Download metadata"). The port's is the user's own SteamGridDB key, a way to take away what was downloaded, and a switch for all art online (#110) (docs/sources.md, "Art"), and is decided here.
 
-- **Its box**: **Art**, icon U+EB9F, the last of Games & apps' Library section (x 520..957, y 709..840), under Groups (16.1; #194). Right from it is Helpers, the foot of Installs.
+- **Its box**: **Art**, icon U+EB9F, the last of Games & apps' Library section (x 520..957, y 709..840), under Groups (16.1; #194). Right from it is Set up this PC, the foot of Installs (#178).
 - **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190:
 
 | Element | y | Notes |

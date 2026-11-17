@@ -479,6 +479,7 @@ impl Database {
             art_refresh: Default::default(),
             storage: Default::default(),
             helpers: Vec::new(),
+            clients: Vec::new(),
         })
     }
 
