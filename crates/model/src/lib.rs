@@ -414,6 +414,26 @@ pub struct Library {
     /// the lists above.
     #[serde(default)]
     pub launchers: Launchers,
+    /// How Settings > Art's "Refresh all art and details" is going (docs/spec/settings.md, 16.8). Not the
+    /// database's: the executable carries it in every snapshot, as it does the launchers' update.
+    #[serde(default)]
+    pub art_refresh: ArtRefresh,
+}
+
+/// How a refresh of every game's art and details is going: everything downloaded forgotten, then fetched again in
+/// the background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArtRefresh {
+    /// None asked for since the Dashboard started, or one asked for before and finished.
+    #[default]
+    Idle,
+    /// Under way: of the games of the library, how many have been looked at.
+    Working { done: usize, of: usize },
+    /// Asked for, and not going on now: Download art online is off, or the run was cut short. It goes on where it
+    /// stopped once art is looked up again (art online on, the next start).
+    Paused,
+    /// Done: how many pictures were downloaded.
+    Done { pictures: usize },
 }
 
 impl Library {

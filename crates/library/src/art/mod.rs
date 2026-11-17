@@ -231,6 +231,90 @@ mod tests {
     }
 
     #[test]
+    fn a_refresh_empties_the_cache_and_fills_it_again_square_and_all_saying_how_far_it_has_got() {
+        let mut first = game("steam", "11", "First Made-up Game");
+        first.cover = Some("C:/Steam/librarycache/11/cover.jpg".into());
+        let library = Library { games: vec![first, game("steam", "12", "Second Made-up Game")], ..Library::default() };
+        let fake = FakeService::start(
+            0,
+            script(vec![
+                known(1, "First Made-up Game", &[("steam", "11")], &Kind::ALL),
+                known(2, "Second Made-up Game", &[("steam", "12")], &[Kind::Cover]),
+            ]),
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = crate::Database::open(&dir.path().join("library.db")).unwrap();
+        db.sync("steam", &library, NOW).unwrap();
+        let art = db.art_dir().unwrap().clone();
+        // What an earlier run left: no square for the first game, remembered as missed, so that for a week it is
+        // not asked for again, and a stale cover of the second's.
+        art.miss("steam", "11", Kind::Square, Online::SteamGridDb, NOW).unwrap();
+        art.save("steam", "12", Kind::Cover, b"\xFF\xD8\xFFan old picture").unwrap();
+        assert!(db.snapshot().unwrap().games.iter().all(|game| game.square.is_none()));
+
+        let forgot = db.forget_fetched().unwrap();
+        assert_eq!(forgot.pictures, 1);
+        assert!(art.index().is_empty(), "the cache is emptied");
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let kept = events.clone();
+        let (done, finished) = std::sync::mpsc::channel();
+        let snapshot = db.snapshot().unwrap();
+        let _lookup = Lookup::start(
+            art.clone(),
+            Services { stores: None, steamgriddb: Some(Service::new(&fake.url(), KEY)) },
+            wanted(&snapshot),
+            NOW,
+            pace(),
+            Arc::new(|_| {}),
+            move |event| {
+                let over = matches!(event, Event::Done(_));
+                kept.lock().unwrap().push(event);
+                if over {
+                    let _ = done.send(());
+                }
+            },
+        );
+        finished.recv_timeout(Duration::from_secs(10)).expect("the run ends");
+        let events = events.lock().unwrap().clone();
+        let mut looked: Vec<(usize, usize)> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Looked { done, of } => Some((*done, *of)),
+                _ => None,
+            })
+            .collect();
+        looked.sort();
+        assert_eq!(looked, [(1, 2), (2, 2)]);
+        let Some(Event::Done(summary)) = events.last() else { panic!("{events:?}") };
+        assert!(!summary.stopped);
+        assert_eq!(summary.pictures.steamgriddb, 4);
+
+        // Filled again: the square tile's square among it, the stale cover a new one.
+        let shown = db.snapshot().unwrap();
+        let first = shown.games.iter().find(|game| game.source_id == "11").unwrap();
+        assert_eq!(first.square, art.find("steam", "11", Kind::Square));
+        assert!(first.square.is_some());
+        assert_eq!(std::fs::read(art.find("steam", "12", Kind::Cover).unwrap()).unwrap(), PNG);
+    }
+
+    #[test]
+    fn a_run_with_nothing_to_ask_is_not_over_for_a_refresh() {
+        let library = Library { games: vec![game("steam", "1", "Made-up Game")], ..Library::default() };
+        let dir = tempfile::tempdir().unwrap();
+        let summary = Lookup::run_now(
+            ArtDir::under(dir.path()),
+            Services::default(),
+            wanted(&library),
+            NOW,
+            pace(),
+            Arc::new(|_| {}),
+        );
+        assert!(summary.stopped);
+    }
+
+    #[test]
     fn when_asked_to_wait_it_waits_and_carries_on() {
         let mut script = script(vec![known(9, "Quill", &[("steam", "9")], &[Kind::Cover])]);
         script.busy = 2;

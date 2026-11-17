@@ -2,11 +2,11 @@
 //! and a line beside it that takes turns with "Press (Guide) to view" ("to start" for a game ready to play). It grows from its middle as it fades in, and
 //! goes by growing a little, then shrinking as it fades out. Where it is in all that is told by how long it has
 //! been showing and going, so nothing here is remembered between frames.
-use ui::{Color, Crop, Ease, Font, HAlign, Rect, TextStyle, Ui, VAlign};
+use ui::{Color, Ease, Font, HAlign, Rect, TextStyle, Ui, VAlign};
 
 use super::{Toast, ToastKind};
 use crate::guide::marks;
-use crate::home::square_art;
+use crate::home::{face, square_art};
 use crate::profile;
 use crate::theme::{glyph, ACCENT};
 
@@ -198,7 +198,7 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
                 // icon until it is decoded, or with none.
                 ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled => {
                     let key = toast.art.as_deref().and_then(|game| square_art(game, ui.px()));
-                    let drawn = key.is_some_and(|key| ui.art(at(tile), &key, Crop::Center, 1.0, 4.0 * scale));
+                    let drawn = key.is_some_and(|key| face(ui, at(tile), &key, 1.0, 4.0 * scale));
                     if !drawn {
                         icon(
                             ui,

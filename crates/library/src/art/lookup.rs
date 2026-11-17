@@ -9,7 +9,7 @@
 //! told once.
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -102,6 +102,8 @@ impl Default for Pace {
 pub enum Event {
     /// A game has a new picture in the cache: the library's next snapshot shows it.
     Found { source: String, source_id: String },
+    /// Another game has been looked at, whatever came of it: `done` of the run's `of`.
+    Looked { done: usize, of: usize },
     /// SteamGridDB refused the key: nothing more is asked of it until it changes.
     KeyRefused,
     /// The run is over.
@@ -134,6 +136,8 @@ pub struct Summary {
     pub failed: usize,
     pub millis: u128,
     pub pictures: Pictures,
+    /// The run was stopped before it had looked at every game: told to, or the key was refused.
+    pub stopped: bool,
 }
 
 impl std::fmt::Display for Summary {
@@ -221,6 +225,9 @@ struct Run {
     /// The first failure's words: said once a run.
     failed_said: AtomicBool,
     summary: Mutex<Summary>,
+    /// The games the run was given, and how many have been looked at.
+    of: usize,
+    done: AtomicUsize,
 }
 
 /// Why a request was not answered.
@@ -264,6 +271,8 @@ impl Run {
         Self {
             dir,
             services,
+            of: wants.len(),
+            done: AtomicUsize::new(0),
             queue: Mutex::new(wants.into()),
             gates: Mutex::new(HashMap::new()),
             now,
@@ -288,6 +297,8 @@ impl Run {
         }
         let mut summary = self.summary.lock().unwrap().clone();
         summary.millis = started.elapsed().as_millis();
+        // With no service to ask nothing was looked at, and the run is not over: it is for one that can ask.
+        summary.stopped = self.stopped() || !self.services.any() || self.done.load(Ordering::Relaxed) < self.of;
         (self.log)(&format!("art: {summary}"));
         (self.tell)(Event::Done(summary.clone()));
         summary
@@ -304,6 +315,11 @@ impl Run {
             let found = outcome.store_online + outcome.steamgriddb > 0;
             if found {
                 (self.tell)(Event::Found { source: want.source.clone(), source_id: want.source_id.clone() });
+            }
+            // A game cut short by a stop is not looked at: the next run takes it again.
+            if !outcome.stopped {
+                let done = self.done.fetch_add(1, Ordering::Relaxed) + 1;
+                (self.tell)(Event::Looked { done, of: self.of });
             }
             let mut summary = self.summary.lock().unwrap();
             summary.pictures.store_online += outcome.store_online;

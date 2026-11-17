@@ -97,6 +97,8 @@ enum Choice {
 /// What a row of the flyout means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum More {
+    /// Forget the game's downloaded art and fetch it again (#190).
+    RefreshArt,
     /// Hide the game, or show it again.
     Hide(bool),
 }
@@ -162,13 +164,19 @@ fn has_uninstaller(game: &Game) -> bool {
     !game.source.is_empty() && game.source != model::by_hand::MANUAL
 }
 
-/// The flyout's rows (section 4): what is left of the Bundle's once Playnite's own are gone (section 13).
+/// The flyout's rows (section 4): what is left of the Bundle's once Playnite's own are gone (section 13), then the
+/// port's Refresh art, in the Bundle's Enable HDR's place under Hide, for a game whose art can be looked up (a
+/// store's; #190).
 fn more_rows(game: &Game) -> Vec<Row<More>> {
-    vec![if game.hidden {
+    let mut rows = vec![if game.hidden {
         Row::new(icon::UNHIDE, "Unhide this game", More::Hide(false))
     } else {
         Row::new(icon::HIDE, "Hide this game", More::Hide(true))
-    }]
+    }];
+    if !game.source.is_empty() && !game.source_id.is_empty() {
+        rows.push(Row::new(icon::REFRESH, "Refresh art", More::RefreshArt));
+    }
+    rows
 }
 
 /// Pause, resume or cancel, as it is chosen: the game still being installed, its store still able, and the install
@@ -343,6 +351,10 @@ impl Page for TileMenu {
             return match flyout.press(press) {
                 // The whole menu closes, then the game is hidden or shown again.
                 Answer::Chose(More::Hide(on)) => Some(PageAction::CloseWith(Effect::Hidden { game: self.game.id, on })),
+                // The whole menu closes, and the game's art is fetched again in the background.
+                Answer::Chose(More::RefreshArt) => {
+                    Some(PageAction::CloseWith(Effect::RefreshArt(Some(self.game.clone()))))
+                }
                 Answer::Declined => {
                     self.flyout = None;
                     None

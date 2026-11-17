@@ -77,6 +77,8 @@ const OPEN: Effect = Effect::Sound(Sound::PromptOpen);
 const MOVE: Effect = Effect::Sound(Sound::GuideMove);
 const ENTER: Effect = Effect::Sound(Sound::GuideSelect);
 const CLOSE: Effect = Effect::Sound(Sound::PromptClose);
+/// The More options flyout's height: its title, then Hide this game and Refresh art.
+const FLYOUT: f32 = 99.6 + 2.0 * 72.0;
 
 // ------------------------------------------------------------------------------------------------- what opens it
 
@@ -320,8 +322,12 @@ fn more_options_opens_the_flyout_and_hide_this_game_hides_it() {
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER]);
     assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Hide this game) of Hades II");
-    // One row: nowhere to move. Left does not close it.
-    assert_eq!(pressed(&mut menu, &[Up, Down, Left, Right]), []);
+    // Two rows: Up from the first goes nowhere, Down to Refresh art and back. Left does not close it.
+    assert_eq!(pressed(&mut menu, &[Up, Left, Right]), []);
+    assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
+    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Refresh art) of Hades II");
+    assert_eq!(pressed(&mut menu, &[Down]), []);
+    assert_eq!(pressed(&mut menu, &[Up]), [MOVE]);
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Hidden { game: game.id, on: true }]);
     assert_eq!(menu.page(), None);
 
@@ -332,6 +338,18 @@ fn more_options_opens_the_flyout_and_hide_this_game_hides_it() {
     menu.set_library(hidden);
     assert_eq!(menu.home_focus(), Focus::Recent(4));
     assert_ne!(menu.focused_game().map(|at| menu.library().games[at].id), Some(game.id));
+}
+
+/// Refresh art forgets the art fetched for this one game and fetches it again, first in line: the app does that.
+#[test]
+fn more_options_refresh_art_asks_for_this_games_art_again() {
+    let mut menu = menu_on(4);
+    let game = menu.library().games[4].clone();
+    down_to(&mut menu, "More options");
+    press(&mut menu, &[A, Down]);
+    menu.take_effects();
+    assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::RefreshArt(Some(game.key()))]);
+    assert_eq!(menu.page(), None);
 }
 
 /// Unhide is reached where the hidden games are listed: the Hidden Group, once the user shows it.
@@ -579,19 +597,6 @@ fn assert_panel(image: &image::RgbaImage, left: u32, top: f32, height: f32) {
     assert_sides(image, left, first);
 }
 
-/// A panel whose only row has focus, the flyout: its top, and its foot by the ring's lower stroke, which is the
-/// row's last four pixels.
-#[track_caller]
-fn assert_one_row_panel(image: &image::RgbaImage, left: u32, top: f32) {
-    let (first, _) = panel_rows(image, left + 20).expect("a panel");
-    assert!((first as f32 - top).abs() <= 1.0, "the panel's top at {first}, not {top}");
-    let foot = (top + 99.6 + 72.0).round() as u32;
-    assert!(near(colour(image, left + 200, foot - 2), GREEN, 8), "the ring on the panel's foot at {foot}");
-    let under = colour(image, left + 200, foot + 2);
-    assert!(under != PANEL && !near(under, GREEN, 40), "under the panel's foot: {under:?}");
-    assert_sides(image, left, first);
-}
-
 #[track_caller]
 fn assert_sides(image: &image::RgbaImage, left: u32, first: u32) {
     let y = first + 10;
@@ -656,8 +661,8 @@ fn more_options_is_a_flyout_over_the_dimmed_menu() {
     let menu = stage.still();
     stage.press(&[A]);
     let image = stage.check("tile-menu-more-options");
-    // One row: 99.6 + 72 tall, from the menu's top.
-    assert_one_row_panel(&image, 812, 299.7);
+    // Two rows, Hide this game and Refresh art: 99.6 + 2 x 72 tall, from the menu's top.
+    assert_panel(&image, 812, 299.7, FLYOUT);
     assert_eq!(colour(&image, 1100, 399 + 36), FILL, "focus on Hide this game");
     // The menu's left 77 shows, faded; its focused row's ring is there still, fainter than it was.
     assert_ne!(colour(&image, 760, 310), PANEL);
@@ -784,7 +789,7 @@ fn under_reduce_motion_the_menu_is_there_and_gone_at_once() {
     assert_panel(&first, 735, 299.7, 480.6);
     stage.press(&[Down, Down, Down, Down, A]);
     let flyout = stage.frame_after(0.0);
-    assert_one_row_panel(&flyout, 812, 299.7);
+    assert_panel(&flyout, 812, 299.7, FLYOUT);
     stage.press(&[B, B]);
     let gone = stage.frame_after(0.0);
     assert_eq!(colour(&gone, 755, 600), colour(&before, 755, 600));
@@ -825,5 +830,5 @@ fn the_flyout_comes_in_from_the_left() {
     // Cubic ease-out, half way: an eighth of 48 to go, so its right edge is 6 short of 1262.
     assert_ne!(colour(&middle, 1259, 310), grey);
     let last = stage.frame_after(0.07);
-    assert_one_row_panel(&last, 812, 299.7);
+    assert_panel(&last, 812, 299.7, FLYOUT);
 }

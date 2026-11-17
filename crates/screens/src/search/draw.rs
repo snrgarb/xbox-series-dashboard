@@ -8,7 +8,7 @@ use ui::art::RgbaImage;
 use ui::{ArtKey, Color, Crop, Ease, Font, HAlign, Kind, Painter, Rect, TextStyle, Ui, VAlign};
 
 use super::{Focus, Search};
-use crate::home::square_art;
+use crate::home::{face, square_art};
 use crate::keyboard::Board;
 use crate::theme::{self, ACCENT_LIGHT, BODY};
 
@@ -189,7 +189,7 @@ fn tile(ui: &mut Ui, rect: Rect, game: &Game, status: Option<&str>, focused: boo
     let rounded = Rect::new(cover.x, cover.y, cover.w, cover.h + RADIUS);
     ui.with_clip(cover, |ui| {
         ui.fill(rounded, COVER_GROUND, RADIUS);
-        let drawn = square_art(game, ui.px()).is_some_and(|key| ui.art(rounded, &key, Crop::Top, 1.0, RADIUS));
+        let drawn = square_art(game, ui.px()).is_some_and(|key| face(ui, rounded, &key, 1.0, RADIUS));
         if !drawn {
             ui.paragraph(cover.grow(-12.0), &game.name, &BODY, HAlign::Center, VAlign::Center, 0);
         }

@@ -3,13 +3,13 @@
 use std::time::{Duration, Instant};
 
 use model::{Ago, Day, Game, HistoryRow};
-use ui::{Button, Crop, HAlign, Press, Rect, Ui, VAlign};
+use ui::{Button, HAlign, Press, Rect, Ui, VAlign};
 
 use super::look::{self, LINE, ROW, SECTION, TEXT, TEXT_DIM, TEXT_SEMIBOLD};
 use super::nav;
 use super::{open_game_hub, open_tile_menu, Look, Outcome, Pane};
 use crate::hint_bar::{self, Hint};
-use crate::home::square_art;
+use crate::home::{face, square_art};
 use crate::pages::{Around, PageAction, Tick};
 use crate::{theme, Effect};
 
@@ -219,7 +219,7 @@ impl Pane for History {
                     ui.fill(cover, theme::TILE, 0.0);
                     let Some(game) = around.library.games.iter().find(|game| game.id == row.game) else { continue };
                     if let Some(key) = square_art(game, ui.px()) {
-                        ui.art(cover, &key, Crop::Top, 1.0, 0.0);
+                        face(ui, cover, &key, 1.0, 0.0);
                     }
                     // A third line, 8 under the second, while the game is in the Queue: Queued or Installing...
                     let status = around.library.queue.status(game.id);

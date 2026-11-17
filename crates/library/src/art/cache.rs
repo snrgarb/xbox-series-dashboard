@@ -173,6 +173,18 @@ impl ArtDir {
         Ok(path)
     }
 
+    /// Removes one game's folder, its pictures and its remembered misses, so that it is looked up afresh; gives how
+    /// many pictures went.
+    pub fn forget(&self, source: &str, source_id: &str) -> Result<usize> {
+        let dir = self.game_dir(source, source_id);
+        let pictures = Kind::ALL.into_iter().filter(|&kind| self.find(source, source_id, kind).is_some()).count();
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => Ok(pictures),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+            Err(e) => Err(e).with_context(|| format!("removing {}", dir.display())),
+        }
+    }
+
     /// Removes the whole cache, pictures and remembered misses; gives how many pictures went.
     pub fn clear(&self) -> Result<usize> {
         let pictures = self.index().values().map(|found| found.iter().flatten().count()).sum();
@@ -256,6 +268,21 @@ mod tests {
         assert_eq!(art.clear().unwrap(), 1);
         assert!(!art.root().exists() && art.index().is_empty());
         assert_eq!(art.clear().unwrap(), 0);
+    }
+
+    #[test]
+    fn one_game_is_forgotten_and_no_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        art.save("steam", "1", Kind::Cover, PNG).unwrap();
+        art.save("steam", "1", Kind::Square, PNG).unwrap();
+        art.miss("steam", "1", Kind::Hero, Online::SteamGridDb, 1).unwrap();
+        art.save("steam", "2", Kind::Cover, PNG).unwrap();
+        assert_eq!(art.forget("steam", "1").unwrap(), 2);
+        assert!(art.find("steam", "1", Kind::Cover).is_none());
+        assert!(!art.missed("steam", "1", Kind::Hero, Online::SteamGridDb, 1));
+        assert!(art.find("steam", "2", Kind::Cover).is_some());
+        assert_eq!(art.forget("steam", "1").unwrap(), 0);
     }
 
     #[test]

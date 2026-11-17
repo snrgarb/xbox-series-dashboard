@@ -950,6 +950,59 @@ fn settings_art() {
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
 }
 
+/// Settings > Art's Refresh all art and details (#190; docs/spec/settings.md, 16.8): beside Clear downloaded art,
+/// asked first, and the line under the two saying how it goes: at rest, working (where A does nothing), paused and
+/// done, as the executable says (`Dashboard::set_art_refresh`), the focus log saying it after the `;`.
+#[test]
+fn settings_art_refresh() {
+    use model::ArtRefresh;
+    let mut stage = settings_stage();
+    stage.press(&[Right, Down, Down, Down, A, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Clear downloaded art");
+    stage.press(&[Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Refresh all art and details");
+    stage.check("settings-art-refresh");
+    // Up from either of the two is Type; Down from either is Download art online.
+    stage.press(&[Up]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Type");
+    stage.press(&[Down, Right, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Download art online");
+    stage.press(&[Up, Right]);
+
+    // Asked first: Cancel, or B, does nothing.
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Prompt(Refresh) of Refresh all art and details");
+    stage.check("settings-art-refresh-prompt");
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Refresh all art and details");
+    stage.press(&[A, Down, A]);
+    assert!(asked(&mut stage).iter().all(|e| !matches!(e, Effect::RefreshArt(_))));
+    stage.press(&[A, A]);
+    assert!(asked(&mut stage).contains(&Effect::RefreshArt(None)));
+
+    // Working: the line says how far it has got, beside a spinner, and Refresh does nothing.
+    assert!(stage.dashboard.set_art_refresh(ArtRefresh::Working { done: 3, of: 14 }));
+    assert!(!stage.dashboard.set_art_refresh(ArtRefresh::Working { done: 3, of: 14 }));
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Refresh all art and details; refreshing 3 of 14");
+    stage.check("settings-art-refreshing");
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty());
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Refresh all art and details; refreshing 3 of 14");
+
+    // Paused, then done.
+    stage.dashboard.set_art_refresh(ArtRefresh::Paused);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Refresh all art and details; refresh paused");
+    stage.dashboard.set_art_refresh(ArtRefresh::Done { pictures: 9 });
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Refresh all art and details; refreshed: 9 pictures");
+    stage.check("settings-art-refreshed");
+    // Done, it can be asked for again.
+    stage.press(&[A]);
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: Art: Prompt(Refresh) of Refresh all art and details; refreshed: 9 pictures"
+    );
+}
+
 /// Theme settings > System (docs/spec/shell-mode.md, 2): the question before turning shell mode on, none before
 /// turning it off, nothing while it is refused, and the page following where the executable says it stands.
 #[test]

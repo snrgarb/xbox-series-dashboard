@@ -749,10 +749,11 @@ fn the_backdrop_goes_at_once_on_a_slow_renderer_and_when_home_is_chosen_over_the
 fn the_title_band_is_nearly_opaque() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     let image = stage.still();
-    // The first tile, focused: 105..377 across, standing on 805.9. Its cover's edge is white for 6 of its pixels.
-    let in_band = image.get_pixel(108, 790).0;
+    // The first tile, focused: 105..377 across, standing on 805.9. Its cover is shown whole, centred, so its left
+    // edge is 45.3 in from the tile's (#190), white for 6 of its pixels.
+    let in_band = image.get_pixel(152, 790).0;
     assert!(in_band[0] < 40 && in_band[1] < 40 && in_band[2] < 40, "the band lets the cover through: {in_band:?}");
-    let above_band = image.get_pixel(108, 600).0;
+    let above_band = image.get_pixel(152, 600).0;
     assert!(above_band[0] > 200, "the cover's white edge should show above the band: {above_band:?}");
 }
 

@@ -27,10 +27,63 @@ pub fn square_art(game: &Game, px: f32) -> Option<ArtKey> {
 /// A game's face for a tile of this shape: `square_art` for one as wide as it is tall (within a tenth), else
 /// `cover_art`.
 pub fn art_for(game: &Game, rect: Rect, px: f32) -> Option<ArtKey> {
-    if (rect.w - rect.h).abs() <= 0.1 * rect.w.max(rect.h) {
+    if is_square(rect.w, rect.h) {
         square_art(game, px)
     } else {
         cover_art(game, px)
+    }
+}
+
+/// As wide as it is tall, within a tenth: a square tile, or a square picture.
+pub fn is_square(w: f32, h: f32) -> bool {
+    (w - h).abs() <= 0.1 * w.max(h)
+}
+
+/// How a picture goes on a tile (docs/spec/home.md 3.3): filling it, cropped from the top, unless the tile is square
+/// and the picture is not. Then it is shown whole, as large as fits and in the middle, over itself blurred and
+/// darkened filling the tile, so that a square tile never shows a part of a portrait cover. Decided by the picture
+/// as it is decoded, not by where it came from: a picture kept as square that is not is shown whole too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fit {
+    Fill,
+    Whole,
+}
+
+/// How a picture of this size goes on a tile of this size.
+pub fn fit(tile: (f32, f32), picture: (u32, u32)) -> Fit {
+    if is_square(tile.0, tile.1) && !is_square(picture.0 as f32, picture.1 as f32) {
+        Fit::Whole
+    } else {
+        Fit::Fill
+    }
+}
+
+/// How much of the blurred picture's own colour is left under a picture shown whole.
+const BEHIND_LIGHT: f32 = 0.55;
+
+/// Draws a game's picture on a tile as [`fit`] says, once it is decoded; false until then.
+pub fn face(ui: &mut Ui, rect: Rect, key: &ArtKey, alpha: f32, radius: f32) -> bool {
+    let ui::Art::Ready { width, height, .. } = ui.art.get(key) else { return false };
+    match fit((rect.w, rect.h), (width, height)) {
+        Fit::Fill => ui.art(rect, key, Crop::Top, alpha, radius),
+        Fit::Whole => {
+            let behind = ArtKey { path: key.path.clone(), kind: Kind::Blurred };
+            if ui.art(rect, &behind, Crop::Center, alpha, radius) {
+                ui.fill(rect, Color::BLACK.fade(alpha * (1.0 - BEHIND_LIGHT)), radius);
+            }
+            ui.art_fitted(rect, key, alpha, 1.0).is_some()
+        }
+    }
+}
+
+/// As [`face`], for a picture that may come while the tile is on screen: `ui.art_arriving`'s fade, by `id`. Gives
+/// how much of it shows.
+pub fn face_arriving(ui: &mut Ui, id: impl std::hash::Hash, rect: Rect, key: Option<&ArtKey>, radius: f32) -> f32 {
+    let target = if key.is_some() { 1.0 } else { 0.0 };
+    let shown = ui.tween(("art arriving", id), target, ui::ART_FADE_SECONDS, Ease::Linear);
+    match key {
+        Some(key) if shown > 0.0 && face(ui, rect, key, shown, radius) => shown,
+        _ => 0.0,
     }
 }
 
@@ -173,7 +226,7 @@ pub fn game_at(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: b
     ui.fill(rect, theme::TILE, radius);
     // A cover downloaded while the Dashboard runs fades in over the name.
     let key = art_for(game, rect, ui.px());
-    let cover = ui.art_arriving((&game.source, &game.source_id, &game.name), rect, key.as_ref(), Crop::Top, radius);
+    let cover = face_arriving(ui, (&game.source, &game.source_id, &game.name), rect, key.as_ref(), radius);
     if cover < 1.0 {
         let width = name_width - 20.0 * s;
         let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * s, width, rect.h - 20.0 * s);
@@ -197,7 +250,7 @@ pub fn collage<'a>(ui: &mut Ui, rect: Rect, games: impl Iterator<Item = &'a Game
         let cell = Rect::new(rect.x + inset + (i % 2) as f32 * w, rect.y + inset + (i / 2) as f32 * h, w, h);
         let cell = cell.grow(-margin);
         if let Some(key) = art_for(game, cell, ui.px()) {
-            ui.art(cell, &key, Crop::Top, 1.0, 0.0);
+            face(ui, cell, &key, 1.0, 0.0);
         }
     }
     if !any {
@@ -282,4 +335,66 @@ pub fn title_band_at(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A made-up game with the pictures named.
+    fn game(cover: bool, header: bool, square: bool) -> Game {
+        let path = |on: bool, name: &str| on.then(|| std::path::PathBuf::from(format!("art/1/{name}.png")));
+        Game {
+            name: "Made-up Game".into(),
+            source: "steam".into(),
+            source_id: "1".into(),
+            cover: path(cover, "cover"),
+            header: path(header, "header"),
+            square: path(square, "square"),
+            ..Game::default()
+        }
+    }
+
+    fn picked(game: &Game, rect: Rect) -> Option<String> {
+        art_for(game, rect, 1.0).map(|key| key.path.file_stem().unwrap().to_string_lossy().into_owned())
+    }
+
+    fn square_tile() -> Rect {
+        Rect::new(0.0, 0.0, 245.0, 245.0)
+    }
+
+    fn portrait_card() -> Rect {
+        Rect::new(0.0, 0.0, 194.0, 296.0)
+    }
+
+    #[test]
+    fn a_square_tile_takes_the_square_picture_wherever_the_game_has_one() {
+        assert_eq!(picked(&game(true, true, true), square_tile()).as_deref(), Some("square"));
+        assert_eq!(picked(&game(false, false, true), square_tile()).as_deref(), Some("square"));
+        // Without one: the cover, then the header.
+        assert_eq!(picked(&game(true, true, false), square_tile()).as_deref(), Some("cover"));
+        assert_eq!(picked(&game(false, true, false), square_tile()).as_deref(), Some("header"));
+        assert_eq!(picked(&game(false, false, false), square_tile()), None);
+        // A portrait card keeps the cover, and takes the square only for want of one.
+        assert_eq!(picked(&game(true, true, true), portrait_card()).as_deref(), Some("cover"));
+        assert_eq!(picked(&game(false, false, true), portrait_card()).as_deref(), Some("square"));
+    }
+
+    #[test]
+    fn a_square_tile_never_crops_a_picture_that_is_not_square() {
+        let tile = (245.0, 245.0);
+        assert_eq!(fit(tile, (512, 512)), Fit::Fill);
+        assert_eq!(fit(tile, (1024, 1000)), Fit::Fill);
+        // A portrait cover, a header and a background are shown whole.
+        assert_eq!(fit(tile, (600, 900)), Fit::Whole);
+        assert_eq!(fit(tile, (300, 450)), Fit::Whole);
+        assert_eq!(fit(tile, (920, 430)), Fit::Whole);
+        assert_eq!(fit(tile, (3840, 1240)), Fit::Whole);
+        // A picture kept as square that is not is judged by its own size.
+        assert_eq!(fit(tile, (600, 800)), Fit::Whole);
+        // A tile that is not square is filled whatever the picture, as the Bundle fills it.
+        assert_eq!(fit((194.0, 296.0), (600, 900)), Fit::Fill);
+        assert_eq!(fit((194.0, 296.0), (512, 512)), Fit::Fill);
+        assert_eq!(fit((400.0, 211.0), (600, 900)), Fit::Fill);
+    }
 }

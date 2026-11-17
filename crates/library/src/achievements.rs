@@ -106,6 +106,10 @@ impl IconDir {
         Self::new(data_dir.join(FOLDER))
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     /// Where the icon at `url` of a game is kept.
     pub fn path(&self, source: &str, source_id: &str, url: &str) -> PathBuf {
         let file = url.split(['?', '#']).next().unwrap_or(url).rsplit('/').next().unwrap_or(url);

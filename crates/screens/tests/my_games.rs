@@ -1105,9 +1105,10 @@ fn a_tab_switch_flies_the_grid_in_from_its_side() {
 fn the_grid_slides_to_its_row() {
     let mut stage = Stage::new(library(), Entry::Games, HD);
     // The first game's cover is bright along its left edge: where that edge ends is the foot of its tile, which
-    // is the first row's (195.29 to 427.43 with the grid at its top).
+    // is the first row's (195.29 to 427.43 with the grid at its top). The cover is shown whole, its full height
+    // centred across the square tile, so that edge is 38.7 in from the tile's left (#190).
     let foot = |image: &image::RgbaImage| {
-        let bright = |y: u32| image.get_pixel(528, y).0[..3].iter().all(|&c| c > 100);
+        let bright = |y: u32| image.get_pixel(566, y).0[..3].iter().all(|&c| c > 100);
         let top = (120..1000).find(|&y| bright(y)).expect("the first tile");
         (top, (top..1000).find(|&y| !bright(y)).expect("its foot"))
     };
