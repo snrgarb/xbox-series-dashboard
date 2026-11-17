@@ -106,6 +106,8 @@ struct Row {
     game: i64,
     source: String,
     gone: bool,
+    /// Its launcher is switched off: the row is kept as it is, neither shown nor followed, until it is on again.
+    off: bool,
     started: u64,
     asked: Option<u64>,
     reported: bool,
@@ -136,18 +138,19 @@ fn moved(was: InstallState, now: InstallState) -> bool {
 
 impl Database {
     /// The Queue as the database has it: its games, the current download first, and the latest it saw finish.
-    /// A game gone from its source is in neither.
+    /// A game gone from its source, or of a launcher switched off, is in neither.
     pub fn queue(&self) -> Result<Queue> {
         let entries = self
             .rows()?
             .into_iter()
-            .filter(|row| !row.gone)
+            .filter(|row| !row.gone && !row.off)
             .map(|row| Queued { game: row.game, state: row.state, started: row.started, speed: None })
             .collect();
-        let mut installed = self.conn.prepare(
+        let mut installed = self.conn.prepare(&format!(
             "SELECT game, finished FROM installed JOIN games ON games.id = installed.game
-             WHERE games.gone = 0 ORDER BY finished DESC, game DESC LIMIT ?1",
-        )?;
+             WHERE {} ORDER BY finished DESC, game DESC LIMIT ?1",
+            crate::launchers::shown("games")
+        ))?;
         let installed = installed
             .query_map([RECENTLY_INSTALLED as i64], |row| {
                 Ok(Installed { game: row.get(0)?, finished: row.get::<_, i64>(1)?.max(0) as u64 })
@@ -157,15 +160,17 @@ impl Database {
     }
 
     fn rows(&self) -> Result<Vec<Row>> {
-        let mut rows = self.conn.prepare(
-            "SELECT queue.game, source, gone, started, asked, reported, state, done, total
+        let mut rows = self.conn.prepare(&format!(
+            "SELECT queue.game, source, gone, started, asked, reported, state, done, total, source IN {}
              FROM queue JOIN games ON games.id = queue.game",
-        )?;
+            crate::launchers::OFF
+        ))?;
         let rows = rows.query_map([], |row| {
             Ok(Row {
                 game: row.get(0)?,
                 source: row.get(1)?,
                 gone: row.get(2)?,
+                off: row.get(9)?,
                 started: row.get::<_, i64>(3)?.max(0) as u64,
                 asked: row.get::<_, Option<i64>>(4)?.map(|asked| asked.max(0) as u64),
                 reported: row.get(5)?,
@@ -368,13 +373,17 @@ impl Follower {
 
     /// Whether there is anything to follow: the Queue holds a game, or an uninstall is under way.
     pub fn busy(&self, db: &Database) -> Result<bool> {
-        Ok(!self.uninstalls.is_empty() || !db.rows()?.is_empty())
+        Ok(!self.uninstalls.is_empty() || db.rows()?.iter().any(|row| !row.off))
     }
 
     /// Reads the source again and merges it in, as at start; whether that changed anything. One that can't be read
     /// is said in the log, as it is at start, and changes nothing.
     fn read_again(&mut self, db: &mut Database, key: &str, now: u64) -> Result<bool> {
         let Some(source) = self.source(key).cloned() else { return Ok(false) };
+        // A launcher switched off is not read: its games are as it last left them.
+        if db.launchers_off()?.contains(key) {
+            return Ok(false);
+        }
         self.read_at.insert(source.key(), now);
         let read = crate::sources::read(std::slice::from_ref(&source));
         let synced = db.sync_all(&read, now)?;
@@ -402,12 +411,15 @@ impl Follower {
     fn square(&mut self, db: &mut Database, now: u64) -> Result<Polled> {
         let mut polled = Polled::default();
         let mut reports: HashMap<&'static str, Vec<model::Install>> = HashMap::new();
-        for source in &self.sources {
+        // A launcher switched off is not asked, and its games' rows are left as they are until it is on again.
+        let off = db.launchers_off()?;
+        for source in self.sources.iter().filter(|source| !off.contains(source.key())) {
             if let Some(installs) = source.installs() {
                 reports.insert(source.key(), installs);
             }
         }
-        let rows = db.rows()?;
+        let mut rows = db.rows()?;
+        rows.retain(|row| !row.off);
         let mut seen: Vec<i64> = Vec::new();
         let told_before = std::mem::take(&mut self.told);
         for (&key, installs) in &reports {

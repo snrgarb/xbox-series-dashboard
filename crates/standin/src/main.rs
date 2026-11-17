@@ -14,6 +14,11 @@
 //!       Moves the fake Steam's install of <appid> at <dir> along, by rewriting its app manifest as Steam's client
 //!       would (`fixture::write_progress`): waiting, so many bytes of so many downloaded, paused there, installed
 //!       (with this program as its `game.exe`), or dropped (the manifest gone).
+//!   standin steam-change <dir> add-game | played <appid> <minutes>
+//!       Changes the fake Steam at <dir>, written by make-steam without --full-shelf, as Steam's own files change
+//!       while the Dashboard runs (`fixture::change`): add-game makes Paper Lighthouse (9100800) the user's,
+//!       installed; played adds <minutes> to the game's play time and makes it last played now. Each is written over
+//!       the standard fixture with the changes made before it, which `fixture-changes.txt` in <dir> keeps.
 //!   standin make-epic <dir> [--json <file>]
 //!   standin make-gog <dir> [--json <file>]
 //!       As make-steam, for a fake Epic Games Launcher (`source_epic::fixture`) or a fake GOG (`source_gog::fixture`):
@@ -156,6 +161,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
                      [--no-previous] [--seconds <n>]
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
        standin unlock-achievement <dir> <key>
+       standin steam-change <dir> add-game | played <appid> <minutes>
        steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>";
 
 /// The file beside this program that names the fakes `open-address` takes addresses for.
@@ -818,6 +824,34 @@ fn run(args: &[String]) -> i32 {
                 Ok(()) => 0,
                 Err(e) => {
                     note(&format!("steam-install: {e}"));
+                    1
+                }
+            }
+        }
+        // Changes the fake Steam's library while the Dashboard runs, as Steam's own files change.
+        Some("steam-change") => {
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let change = match &args[1..] {
+                [root, what] if what == "add-game" => Some((root, fixture::Change::AddGame)),
+                [root, what, appid, minutes] if what == "played" => appid
+                    .parse()
+                    .ok()
+                    .zip(minutes.parse().ok())
+                    .map(|(appid, minutes)| (root, fixture::Change::Played { appid, minutes, at: now })),
+                _ => None,
+            };
+            let Some((root, change)) = change else {
+                note(USAGE);
+                return 2;
+            };
+            let exe = std::env::current_exe().ok();
+            match fixture::change(Path::new(root), change, exe.as_deref()) {
+                Ok(()) => {
+                    note(&format!("steam-change: {change:?} at {root}"));
+                    0
+                }
+                Err(e) => {
+                    note(&format!("steam-change: {root}: {e}"));
                     1
                 }
             }

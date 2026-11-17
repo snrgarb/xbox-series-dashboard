@@ -241,7 +241,7 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
-The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, and Art (16.8) beside it.
+The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, **Launchers** (U+E8F1, [launchers.md](launchers.md); #163) beside it at (1, 2), and Art (16.8) on the row under those at (0, 3).
 
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
@@ -743,7 +743,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 | Pane | Boxes |
 |---|---|
-| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Art on the row under them. |
+| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art on a row of its own. |
 | Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Who's playing today?** (0, 1) (start-up.md 9), at the Bundle's place, and **Groups** (1, 1) (filters.md 6.1), in the Bundle's empty slot; then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
 | Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
 | Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
@@ -784,6 +784,9 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Idle > Dim after (6.7) | `idle.dim_after` | `120` (seconds, or `never`) |
 | Idle > Show things after (6.7) | `idle.show_things_after` | `300` |
 | Who's playing today? (start-up.md 9) | `startup.ask_whos_playing` | on: Ask every time; off is Sign in the last profile |
+| Launchers > a launcher ([launchers.md](launchers.md) 3) | `launcher.<key>` (`launcher.steam`, `launcher.epic`, ...) | on; saved by `Effect::Launcher`, read by the library itself, never by `Options` |
+
+The library keeps `launcher.<key>.found` (`installed`, `not installed`, `failed`) and `launcher.<key>.read` (Unix seconds) beside them, what the launcher's last read found and when: launchers.md, 2.
 
 The same table keeps `profile.last`, the id of the Profile signed in last (profiles.md 1); the Profiles themselves are the `profiles` table's (profiles.md 2).
 
@@ -815,7 +818,7 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 
 The Bundle has no such page: Playnite's metadata sources fetched missing art (section 14, "Download metadata"). The port's is the user's own SteamGridDB key, a way to take away what was downloaded, and a switch for all art online (#110) (docs/sources.md, "Art"), and is decided here.
 
-- **Its box**: **Art**, icon U+EB9F, at (1, 1) (x 975..1412, y 359..490), beside Games & apps and under Guide, until Idle and Discord come back (they then take their places and Art goes after them). Down from Guide is Art; Left from it is Games & apps.
+- **Its box**: **Art**, icon U+EB9F, at (0, 3) (x 520..957, y 657..788), on a row of its own under Games & apps, since Launchers took its place beside Games & apps (#163; launchers.md 1). Down from Games & apps or Launchers is Art; Up from it is Games & apps.
 - **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190:
 
 | Element | y | Notes |

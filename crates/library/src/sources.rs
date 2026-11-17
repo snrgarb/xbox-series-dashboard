@@ -18,6 +18,8 @@ pub struct Read {
     pub found: Vec<(&'static str, Library)>,
     /// Each source that could not be read, by its key, with why.
     pub failed: Vec<(&'static str, anyhow::Error)>,
+    /// Each source whose client is not on this PC, by its key.
+    pub absent: Vec<&'static str>,
 }
 
 impl Read {
@@ -39,7 +41,7 @@ pub fn read(sources: &[Arc<dyn Source>]) -> Read {
                 eprintln!("{}: {} games from {} in {ms} ms", source.key(), found.library.games.len(), found.from);
                 read.found.push((source.key(), found.library));
             }
-            Ok(None) => {}
+            Ok(None) => read.absent.push(source.key()),
             Err(e) => {
                 eprintln!("{}: {e:#}", source.key());
                 read.failed.push((source.key(), e));
@@ -51,8 +53,10 @@ pub fn read(sources: &[Arc<dyn Source>]) -> Read {
 
 impl Database {
     /// Merges what each source was read as into the database, each under its own key (`sync`), at the time `now`.
-    /// A source that is not in `read` (not installed, or not read) is left as it was.
+    /// A source that is not in `read` (not installed, or not read) is left as it was. What was found of each is kept
+    /// for Settings > Launchers (`launchers`): read now, not installed, or not readable.
     pub fn sync_all(&mut self, read: &Read, now: u64) -> Result<Synced> {
+        self.note_read(read, now)?;
         let mut all = Synced::default();
         for (source, found) in &read.found {
             let synced = self.sync(source, found, now)?;

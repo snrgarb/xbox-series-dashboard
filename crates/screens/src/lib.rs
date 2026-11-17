@@ -116,6 +116,12 @@ pub enum Effect {
     /// Settings > Art: remove the art downloaded into the data folder (the user has said yes). A store's own art is
     /// not touched.
     ClearArt,
+    /// Settings > Launchers switched the launcher with this key (`Game::source`) on or off (docs/spec/launchers.md).
+    /// A new snapshot follows, in which its games are back, or in no list at all.
+    Launcher { key: String, on: bool },
+    /// Settings > Launchers' Update now: read every launcher switched on again, and fetch what is missing or out of
+    /// date. The snapshots that follow say how it goes (`Library::launchers`).
+    UpdateLaunchers,
     /// Settings' Profiles pages added, renamed or removed a Profile, or changed its picture; or a Profile signed in
     /// (`Dashboard::sign_in`). A new snapshot follows, as for a favourite, and every place a Profile shows follows
     /// it (docs/spec/profiles.md).

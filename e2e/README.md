@@ -195,7 +195,10 @@ client, one dropped, one done with Manage Queue up and focus going with it to Re
 through), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
 Home, in Games a screenful at a time and in Full library, a Game hub of each store's, Search finding two stores' games
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
-each), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
+each), `launchers` (Settings > Launchers on the fake Steam and Epic, docs/spec/launchers.md: Steam switched off with
+the pad, its games gone from Home's Recent row and Search and the page's count line, then on again with them back in
+their play order; a game added to the fake Steam and another's play time changed by `standin steam-change`, and Update
+now bringing both in with its summary line), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
 its first frame, its end and Home's first frame logged in that order, then Off set on Settings with the pad and the
 Dashboard straight to Who's playing today? at the next start; it needs `video-spike.exe`, so build `-p video-spike` too),
 `whos-playing` (Start-up with the Boot video Off in folders of the test's own: a second Profile added, Who's playing

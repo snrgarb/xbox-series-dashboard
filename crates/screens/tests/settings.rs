@@ -106,7 +106,7 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
     // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord beside it, then
-    // Games & apps and Art. The row's end, the top and the foot stop.
+    // Games & apps and Launchers, then Art. The row's end, the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
     // Down from Idle is Discord; Right there stops, Left is Guide.
@@ -114,10 +114,14 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Discord");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
-    press(&mut dashboard, &[Down, Right, Down]);
+    press(&mut dashboard, &[Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
+    // Down from Launchers is Art, the last row's one box; Up from it is Games & apps above it.
+    press(&mut dashboard, &[Down, Down, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
-    press(&mut dashboard, &[Left]);
+    press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
+    press(&mut dashboard, &[Right, Left]);
     press(&mut dashboard, &[Up, Up, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
     press(&mut dashboard, &[Left]);
@@ -887,7 +891,7 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
 fn settings_art() {
     const KEY: &str = "f00dfeedcafe1234";
     let mut stage = settings_stage();
-    stage.press(&[Right, Down, Down, Right]);
+    stage.press(&[Right, Down, Down, Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
     stage.check("settings-theme-settings-art-box");
     stage.press(&[A]);
@@ -1022,4 +1026,175 @@ fn settings_discord() {
 /// What the Dashboard asked of the shell since last time, but its sounds.
 fn asked(stage: &mut Stage) -> Vec<Effect> {
     stage.dashboard.take_effects().into_iter().filter(|e| !matches!(e, Effect::Sound(_))).collect()
+}
+
+// --- Theme settings > Launchers (docs/spec/launchers.md) ---
+
+/// Now, in Unix seconds: the page says how long ago each launcher was read.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+/// The fake library's first five games Steam's and the rest Epic's, both read five minutes ago; GOG, the EA app,
+/// Ubisoft Connect and Battle.net not on this PC; Xbox never read.
+fn launchers_database() -> library::Database {
+    let fake = screens::fake_library();
+    let (steam, epic) = fake.games.split_at(5);
+    let read = library::sources::Read {
+        found: vec![
+            ("steam", Library { games: steam.to_vec(), ..Library::default() }),
+            ("epic", Library { games: epic.to_vec(), ..Library::default() }),
+        ],
+        failed: Vec::new(),
+        absent: vec!["gog", "ea", "ubisoft", "battlenet"],
+    };
+    let mut database = library::Database::in_memory().unwrap();
+    database.sync_all(&read, unix_now() - 300).unwrap();
+    database
+}
+
+/// Theme settings, focus on Launchers' box.
+fn to_launchers(dashboard: &mut Dashboard) {
+    dashboard.open_page(Open::Settings(Entry::Rail));
+    press(dashboard, &[Right, Down, Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
+}
+
+/// Carries out what the page asked of the shell, as the executable does, the snapshot after handed back. The
+/// update is the test's to say.
+fn carry_out(dashboard: &mut Dashboard, database: &library::Database) -> Vec<Effect> {
+    let asked: Vec<Effect> = dashboard.take_effects().into_iter().filter(|e| !matches!(e, Effect::Sound(_))).collect();
+    for effect in &asked {
+        if let Effect::Launcher { key, on } = effect {
+            database.set_launcher(key, *on).unwrap();
+            dashboard.set_library(database.snapshot().unwrap());
+        }
+    }
+    asked
+}
+
+fn with_update(database: &library::Database, update: model::launcher::Update) -> Library {
+    let mut library = database.snapshot().unwrap();
+    library.launchers.update = update;
+    library
+}
+
+fn names_of(dashboard: &Dashboard, source: &str) -> Vec<String> {
+    dashboard.library().games.iter().filter(|g| g.source == source).map(|g| g.name.clone()).collect()
+}
+
+#[test]
+fn launchers_are_walked_by_those_that_can_be_switched_and_one_off_leaves_every_list() {
+    let database = launchers_database();
+    let mut dashboard = start(&database);
+    to_launchers(&mut dashboard);
+    press(&mut dashboard, &[A]);
+    let line = |row: &str, count: &str| format!("Settings: Launchers: {row}; {count}; ready");
+    assert_eq!(dashboard.focus_line(), line("Steam; on, 5 games", "14 games from 2 launchers"));
+    // Down passes over the four not on this PC, to Xbox and Update now; the foot stops.
+    press(&mut dashboard, &[Down, Down]);
+    assert_eq!(dashboard.focus_line(), line("Xbox; on, 0 games", "14 games from 2 launchers"));
+    press(&mut dashboard, &[Down, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Launchers: Update now; 14 games from 2 launchers; ready");
+    press(&mut dashboard, &[Up, Up]);
+    assert_eq!(dashboard.focus_line(), line("Epic Games; on, 9 games", "14 games from 2 launchers"));
+
+    // Epic off: its games leave the library every page shows, and the count; on again, they are back.
+    let epic = names_of(&dashboard, "epic");
+    assert_eq!(epic.len(), 9);
+    press(&mut dashboard, &[A]);
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::Launcher { key: "epic".into(), on: false }]);
+    assert_eq!(dashboard.focus_line(), line("Epic Games; off, 9 games", "5 games from 1 launcher"));
+    assert!(dashboard.library().games.iter().all(|g| g.source == "steam"));
+    press(&mut dashboard, &[A]);
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::Launcher { key: "epic".into(), on: true }]);
+    assert_eq!(dashboard.focus_line(), line("Epic Games; on, 9 games", "14 games from 2 launchers"));
+    assert_eq!(names_of(&dashboard, "epic"), epic);
+    // Left, as B, is Theme settings' boxes on Launchers.
+    press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
+}
+
+#[test]
+fn a_launcher_a_game_is_playing_from_stays_on_and_the_page_says_why() {
+    let database = launchers_database();
+    let mut dashboard = start(&database);
+    let playing = dashboard.library().games.iter().position(|g| g.source == "steam").unwrap();
+    let name = dashboard.library().games[playing].name.clone();
+    dashboard.launch_started(playing);
+    dashboard.game_booted();
+    dashboard.show_dashboard();
+    to_launchers(&mut dashboard);
+    press(&mut dashboard, &[A]);
+    dashboard.take_effects();
+    press(&mut dashboard, &[A]);
+    assert_eq!(carry_out(&mut dashboard, &database), []);
+    let refused = format!(
+        "Settings: Launchers: Steam; on, 5 games; 14 games from 2 launchers; refused: Quit {name} before switching \
+         Steam off."
+    );
+    assert_eq!(dashboard.focus_line(), refused);
+    // Another launcher is switched as ever, and moving on forgets why.
+    press(&mut dashboard, &[Down]);
+    assert!(dashboard.focus_line().ends_with("; ready"), "{}", dashboard.focus_line());
+    press(&mut dashboard, &[A]);
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::Launcher { key: "epic".into(), on: false }]);
+}
+
+#[test]
+fn update_now_is_asked_once_while_it_works_and_says_what_it_changed() {
+    let database = launchers_database();
+    let mut dashboard = start(&database);
+    to_launchers(&mut dashboard);
+    press(&mut dashboard, &[A, Down, Down, Down]);
+    dashboard.take_effects();
+    press(&mut dashboard, &[A]);
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::UpdateLaunchers]);
+    dashboard.set_library(with_update(&database, model::launcher::Update::Working));
+    assert_eq!(dashboard.focus_line(), "Settings: Launchers: Update now; 14 games from 2 launchers; updating");
+    press(&mut dashboard, &[A]);
+    assert_eq!(carry_out(&mut dashboard, &database), [], "pressed again while it works: nothing");
+    let done = model::launcher::Update::Done("1 new game, play time for 1".into());
+    dashboard.set_library(with_update(&database, done));
+    assert_eq!(
+        dashboard.focus_line(),
+        "Settings: Launchers: Update now; 14 games from 2 launchers; updated: 1 new game, play time for 1"
+    );
+    press(&mut dashboard, &[A]);
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::UpdateLaunchers], "and again once it is done");
+}
+
+/// The page at rest, focus on Steam; Epic off, focus on Update now while it works; done; a launcher refused.
+#[test]
+fn settings_launchers() {
+    let database = launchers_database();
+    let mut stage = Stage::new(database.snapshot().unwrap());
+    to_launchers(&mut stage.dashboard);
+    stage.check("settings-theme-settings-launchers-box");
+    stage.press(&[A]);
+    stage.check("settings-launchers");
+
+    stage.press(&[Down, A]);
+    carry_out(&mut stage.dashboard, &database);
+    stage.press(&[Down, Down, Down]);
+    stage.dashboard.set_library(with_update(&database, model::launcher::Update::Working));
+    let line = stage.dashboard.focus_line();
+    assert!(line.starts_with("Settings: Launchers: Update now; 5 games from 1 launcher"), "{line}");
+    stage.check("settings-launchers-updating");
+    let done = model::launcher::Update::Done("1 new game, play time for 1".into());
+    stage.dashboard.set_library(with_update(&database, done));
+    stage.check("settings-launchers-updated");
+
+    // Steam switched off while one of its games plays: refused, and why.
+    drop(stage);
+    let database = launchers_database();
+    let mut stage = Stage::new(database.snapshot().unwrap());
+    let playing = stage.dashboard.library().games.iter().position(|g| g.source == "steam").unwrap();
+    stage.dashboard.launch_started(playing);
+    stage.dashboard.game_booted();
+    stage.dashboard.show_dashboard();
+    to_launchers(&mut stage.dashboard);
+    stage.press(&[A, A]);
+    assert!(stage.dashboard.focus_line().contains("; refused: Quit "), "{}", stage.dashboard.focus_line());
+    stage.check("settings-launchers-refused");
 }

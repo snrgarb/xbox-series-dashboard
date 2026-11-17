@@ -30,6 +30,7 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::art::cache::{escape, extension};
 use crate::art::steamgriddb::{self, retry_after, transport, Error};
+use crate::launchers::shown;
 use crate::Database;
 
 /// Migration 7: every game's achievements, and when the store's figures of how rare they are were last asked for.
@@ -136,10 +137,13 @@ const ROW: &str = "a.game, g.source, g.source_id, a.key, a.name, a.description, 
                    FROM achievements a JOIN games g ON g.id = a.game";
 
 impl Database {
-    /// The game's id, by its source and its id there, if it is in the library and not gone.
+    /// The game's id, by its source and its id there, if it is in the library, not gone and its launcher switched on.
     pub fn game_id(&self, source: &str, source_id: &str) -> Result<Option<i64>> {
         let id = self.conn.query_row(
-            "SELECT id FROM games WHERE source = ?1 AND source_id = ?2 AND gone = 0",
+            &format!(
+                "SELECT id FROM games WHERE source = ?1 AND source_id = ?2 AND {}",
+                crate::launchers::shown("games")
+            ),
             params![source, source_id],
             |row| row.get(0),
         );
@@ -246,10 +250,11 @@ impl Database {
 
     /// The games that have achievements, by id, with their source and id there.
     fn achievement_games(&self) -> Result<Vec<(i64, String, String)>> {
-        let mut rows = self.conn.prepare(
+        let mut rows = self.conn.prepare(&format!(
             "SELECT g.id, g.source, g.source_id FROM games g
-             WHERE g.gone = 0 AND EXISTS (SELECT 1 FROM achievements a WHERE a.game = g.id) ORDER BY g.id",
-        )?;
+             WHERE {} AND EXISTS (SELECT 1 FROM achievements a WHERE a.game = g.id) ORDER BY g.id",
+            crate::launchers::shown("g")
+        ))?;
         let rows = rows.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -262,7 +267,8 @@ impl Database {
         // Each game's list, in its store's order, while it is read.
         let mut lists: Vec<Vec<Achievement>> = Vec::new();
         {
-            let mut rows = self.conn.prepare(&format!("SELECT {ROW} WHERE g.gone = 0 ORDER BY a.game, a.position"))?;
+            let mut rows =
+                self.conn.prepare(&format!("SELECT {ROW} WHERE {} ORDER BY a.game, a.position", shown("g")))?;
             for row in rows.query_map([], |row| row_achievement(row, None))? {
                 let (game, a) = row?;
                 if games.last().is_none_or(|last| last.game != game) {
@@ -297,8 +303,9 @@ impl Database {
             games: games.len() as u32,
         };
         let mut rows = self.conn.prepare(&format!(
-            "SELECT {ROW} WHERE g.gone = 0 AND a.unlocked IS NOT NULL ORDER BY a.unlocked DESC, a.game, a.position
-             LIMIT {RECENT}"
+            "SELECT {ROW} WHERE {} AND a.unlocked IS NOT NULL ORDER BY a.unlocked DESC, a.game, a.position
+             LIMIT {RECENT}",
+            shown("g")
         ))?;
         let recent = rows
             .query_map([], |row| row_achievement(row, icons.as_ref()))?
@@ -463,6 +470,9 @@ pub enum Ask {
     Playing { game: i64, since: u64 },
     /// Fetch every icon of this game: its Achievements page is showing (#141).
     Icons(i64),
+    /// Read every game's achievements again, and ask for the rarity that is due: Settings > Launchers' Update now
+    /// (docs/spec/launchers.md). A new snapshot follows.
+    ReadAll,
 }
 
 /// What the thread has to say.
@@ -556,11 +566,15 @@ fn follow(
             Duration::from_secs(3600)
         };
         match asked.recv_timeout(wait) {
-            Ok(ask) => follower.ask(db, ask, crate::now())?,
+            Ok(ask) => {
+                dirty |= ask == Ask::ReadAll;
+                follower.ask(db, ask, crate::now())?;
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         }
         while let Ok(ask) = asked.try_recv() {
+            dirty |= ask == Ask::ReadAll;
             follower.ask(db, ask, crate::now())?;
         }
         let unlocked = follower.look(db)?;
@@ -668,7 +682,7 @@ impl Follower {
             ));
         }
         for (game, _, _) in db.achievement_games()? {
-            if rarity_due(db, game, now)? {
+            if rarity_due(db, game, now)? && !self.rarity.contains(&game) {
                 self.rarity.push_back(game);
             }
         }
@@ -722,6 +736,7 @@ impl Follower {
                 }
                 Ok(())
             }
+            Ask::ReadAll => self.read_all(db, now),
         }
     }
 

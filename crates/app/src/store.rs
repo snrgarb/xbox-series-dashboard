@@ -55,7 +55,16 @@ pub struct Store {
     /// The thread that follows achievements (`library::achievements::spawn`), once the sources have been read. None
     /// with no database file for it to open.
     achievements: Option<library::achievements::Handle>,
+    /// Settings > Launchers' update: how it goes, as every snapshot carries it (`Library::launchers`).
+    update: model::launcher::Update,
+    /// Hears from the thread that reads the launchers again, while it does.
+    updating: Option<Receiver<Updated>>,
+    /// Launchers switched on while an update was under way: read again once it is done.
+    update_again: Vec<String>,
 }
+
+/// What an update of the launchers came to: what it changed, in a few words; none when it could not be done.
+type Updated = Option<String>;
 
 /// The one place the Library comes from: `--library`'s JSON as it is; else the database, filled from every source
 /// (Steam's from `--steam`'s install or the one the registry names); else, with no database and no source
@@ -125,7 +134,9 @@ fn open_library(args: &Args) -> (Library, Store) {
             library
         }
         stored => {
-            let read = library::sources::read(&sources);
+            // A launcher switched off is not read (docs/spec/launchers.md).
+            let off = database.as_ref().and_then(|db| db.launchers_off().ok()).unwrap_or_default();
+            let read = library::sources::read(&library::launchers::switched_on(&sources, &off));
             match (read.found.is_empty(), stored, read.failed.first()) {
                 (true, Some(library), _) => library,
                 (true, None, Some((_, e))) => fail(&format!("{e:#}")),
@@ -258,19 +269,30 @@ impl Store {
         // Profile may wear from elsewhere.
         let mut shown = Library { store_apps: None, ..shown.clone() };
         shown.profiles.pictures.clear();
+        shown.launchers.update = model::launcher::Update::Idle;
         let (path, sources) = (self.path.clone(), self.sources.clone());
         let (changed, synced) = mpsc::channel();
         self.synced = Some(synced);
         std::thread::spawn(move || {
-            let read = library::sources::read(&sources);
-            let news = !read.found.is_empty()
-                && match Database::open(&path).and_then(|mut database| sync(&mut database, &read)) {
-                    Ok(library) => library != shown,
-                    Err(e) => {
-                        eprintln!("library: {}: {e:#}", path.display());
-                        false
-                    }
+            // The launchers switched on, and what each was found to be kept for Settings > Launchers.
+            let read_and_sync = |database: &mut Database| -> Result<bool> {
+                let off = database.launchers_off()?;
+                let read = library::sources::read(&library::launchers::switched_on(&sources, &off));
+                let library = if read.found.is_empty() {
+                    database.sync_all(&read, library::now())?;
+                    database.snapshot()?
+                } else {
+                    sync(database, &read)?
                 };
+                Ok(library != shown)
+            };
+            let news = match Database::open(&path).and_then(|mut database| read_and_sync(&mut database)) {
+                Ok(news) => news,
+                Err(e) => {
+                    eprintln!("library: {}: {e:#}", path.display());
+                    false
+                }
+            };
             // Done, with news or none: the art lookup waits for this.
             let _ = changed.send(news);
             wake();
@@ -320,8 +342,7 @@ impl Store {
         let mut update = self.queue.as_ref()?.take()?;
         // A snapshot the thread took carries what every snapshot here does: the Store apps listed, the pictures.
         if let Some(library) = &mut update.library {
-            library.store_apps = self.store_apps.clone();
-            library.profiles.pictures = self.pictures();
+            self.dress(library);
         }
         Some(update)
     }
@@ -350,8 +371,7 @@ impl Store {
     pub fn achievements_update(&mut self) -> Option<library::achievements::Update> {
         let mut update = self.achievements.as_ref()?.take()?;
         if let Some(library) = &mut update.library {
-            library.store_apps = self.store_apps.clone();
-            library.profiles.pictures = self.pictures();
+            self.dress(library);
         }
         Some(update)
     }
@@ -650,8 +670,85 @@ impl Store {
     /// The library database's snapshot as it is now: what the screens show after art has come in.
     pub fn snapshot(&self) -> Option<Library> {
         let mut library = self.database.as_ref()?.snapshot().map_err(|e| eprintln!("library: {e:#}")).ok()?;
+        self.dress(&mut library);
+        Some(library)
+    }
+
+    /// What every snapshot carries that is not the database's: the Store apps listed, the pictures a Profile may
+    /// wear, and how Settings > Launchers' update goes.
+    fn dress(&self, library: &mut Library) {
+        library.store_apps = self.store_apps.clone();
         library.profiles.pictures = self.pictures();
-        Some(Library { store_apps: self.store_apps.clone(), ..library })
+        library.launchers.update = self.update.clone();
+    }
+
+    /// Switches a launcher on or off (Settings > Launchers): its games leave every list at once, or come back as
+    /// they were. A launcher a game is playing from (`playing`) stays on. Gives the snapshot after, or None when
+    /// nothing was changed.
+    pub fn set_launcher(&mut self, key: &str, on: bool, playing: Option<&Game>) -> Option<Library> {
+        if let Some(game) = playing.filter(|game| !on && game.source == key) {
+            eprintln!("launchers: {key} stays on: {} is playing", game.name);
+            return None;
+        }
+        let database = self.database.as_ref()?;
+        match database.set_launcher(key, on) {
+            Ok(games) if on => eprintln!("launchers: {key} on: {games} games back"),
+            Ok(games) => eprintln!("launchers: {key} off: {games} games hidden"),
+            Err(e) => {
+                eprintln!("launchers: {key}: {e:#}");
+                return None;
+            }
+        }
+        self.snapshot()
+    }
+
+    /// Reads every launcher switched on again (`only`: these alone) on a thread of its own, and merges what each
+    /// says into the database: Settings > Launchers' Update now, or a launcher just switched on. Whether one was
+    /// started: none while one is under way (a launcher switched on meanwhile is read once it is done), or with no
+    /// database file. `wake` is called once it is done (`launchers_updated`).
+    pub fn update_launchers(&mut self, only: Option<Vec<String>>, wake: impl FnOnce() + Send + 'static) -> bool {
+        if self.updating.is_some() {
+            match only {
+                Some(keys) => self.update_again.extend(keys),
+                None => eprintln!("launchers: update: already under way"),
+            }
+            return false;
+        }
+        if self.database.is_none() || self.path.as_os_str().is_empty() {
+            eprintln!("launchers: update: no library database to update");
+            return false;
+        }
+        let (path, sources) = (self.path.clone(), self.sources.clone());
+        let what = only.as_ref().map_or_else(|| "every launcher switched on".to_string(), |keys| keys.join(", "));
+        eprintln!("launchers: update: reading {what}");
+        let (done, updating) = mpsc::channel();
+        self.updating = Some(updating);
+        self.update = model::launcher::Update::Working;
+        std::thread::spawn(move || {
+            let _ = done.send(update(&path, &sources, only.as_deref()));
+            wake();
+        });
+        true
+    }
+
+    /// The snapshot after an update of the launchers, once, when it is done (one that could not be done says so in
+    /// it). Launchers switched on meanwhile are `take_update_again`'s.
+    pub fn launchers_updated(&mut self) -> Option<Library> {
+        let updated = self.updating.as_ref()?.try_recv().ok()?;
+        self.updating = None;
+        self.update = match updated {
+            Some(changes) => model::launcher::Update::Done(changes),
+            None => model::launcher::Update::Failed,
+        };
+        self.snapshot()
+    }
+
+    /// The launchers switched on while the last update was under way, which are to be read now.
+    pub fn take_update_again(&mut self) -> Option<Vec<String>> {
+        let mut keys = std::mem::take(&mut self.update_again);
+        keys.sort();
+        keys.dedup();
+        (!keys.is_empty()).then_some(keys)
     }
 
     /// The pictures a Profile may wear besides the plain ones: the Windows account picture, then the pictures in
@@ -686,6 +783,35 @@ impl Store {
         }
         Ok(self.snapshot())
     }
+}
+
+/// Reads the launchers switched on (`only`: these alone, if they are on) into the database at `path`, and says what
+/// that changed in the log: `launchers: update: steam, epic read in 12 ms: 1 new game, play time for 1`.
+fn update(path: &std::path::Path, sources: &[Arc<dyn Source>], only: Option<&[String]>) -> Updated {
+    let started = Instant::now();
+    let run = || -> Result<String> {
+        let mut database = Database::open(path)?;
+        let before = database.snapshot()?;
+        let mut on = library::launchers::switched_on(sources, &database.launchers_off()?);
+        if let Some(only) = only {
+            on.retain(|source| only.iter().any(|key| key == source.key()));
+        }
+        let read = library::sources::read(&on);
+        database.sync_all(&read, library::now())?;
+        let changes = library::launchers::Changes::between(&before, &database.snapshot()?);
+        let mut said = changes.to_string();
+        let name =
+            |key: &str| on.iter().find(|source| source.key() == key).map_or("A launcher", |source| source.name());
+        for (key, _) in &read.failed {
+            said.push_str(&format!(", {} couldn't be read", name(key)));
+        }
+        let keys: Vec<&str> = read.found.iter().map(|(key, _)| *key).collect();
+        let keys = if keys.is_empty() { "nothing".to_string() } else { keys.join(", ") };
+        let ms = started.elapsed().as_millis();
+        eprintln!("launchers: update: {keys} read in {ms} ms: {said}");
+        Ok(said)
+    };
+    run().map_err(|e| eprintln!("launchers: update: {}: {e:#}", path.display())).ok()
 }
 
 /// A picture's path, if there is a file there; else it is said in the log and left out.
@@ -740,6 +866,29 @@ mod tests {
         let file = dir.path().join("library.json");
         std::fs::write(&file, serde_json::to_string(&screens::fake_library()).unwrap()).unwrap();
         open(&Args { library: Some(file), ..Args::default() })
+    }
+
+    #[test]
+    fn a_launcher_switched_off_hides_its_games_unless_one_is_playing_and_on_brings_them_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("library.json");
+        let mut steam = screens::fake_library();
+        steam.games.iter_mut().for_each(|game| game.source = "steam".into());
+        std::fs::write(&file, serde_json::to_string(&steam).unwrap()).unwrap();
+        let (library, mut store) = open(&Args { library: Some(file), ..Args::default() });
+        let all = library.games.len();
+        assert!(all > 0);
+
+        let playing = library.games[0].clone();
+        assert_eq!(store.set_launcher("steam", false, Some(&playing)), None, "a game of its is playing");
+        assert_eq!(store.snapshot().unwrap().games.len(), all);
+        let off = store.set_launcher("steam", false, None).expect("a new snapshot");
+        assert!(off.games.is_empty() && off.hidden.is_empty());
+        assert!(!off.launchers.is_on("steam"));
+        let on = store.set_launcher("steam", true, None).expect("a new snapshot");
+        assert_eq!(on.games, library.games);
+        // No database file: there is nothing to update.
+        assert!(!store.update_launchers(None, || {}));
     }
 
     #[test]
