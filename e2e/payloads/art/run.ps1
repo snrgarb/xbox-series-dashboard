@@ -145,10 +145,19 @@ function Look-AtRecent([string] $Name) {
             Tap Right
             if (-not (Wait-Focus $before "Recent\($tile\)" 4)) { break }
         }
-        Start-Sleep -Milliseconds 900
         $x = 105 + $tile * 183 * $rowScale + 245 * $rowScale / 2
         $y = 533 + 60
+        # The tile has grown, and its picture is up, once two samples 300 ms apart agree: on a slow renderer (the
+        # VM's) that takes longer than a fixed wait. Six seconds at most; the colour is judged whatever it is then.
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        Start-Sleep -Milliseconds 300
         $pixel = Get-DesignPixel $x $y
+        while ($watch.Elapsed.TotalSeconds -lt 6) {
+            Start-Sleep -Milliseconds 300
+            $next = Get-DesignPixel $x $y
+            if ($next.R -eq $pixel.R -and $next.G -eq $pixel.G -and $next.B -eq $pixel.B) { break }
+            $pixel = $next
+        }
         Say "$Name`: Recent($tile) at ($([int] $x), $y) is $(Format-Colour $pixel)"
         $seen += $pixel
     }
