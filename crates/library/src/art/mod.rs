@@ -11,11 +11,13 @@
 pub mod cache;
 pub mod fake;
 pub mod lookup;
+pub mod picker;
 pub mod steamgriddb;
 pub mod store_online;
 
 pub use cache::{ArtDir, Kind, Online};
 pub use lookup::{wanted, Event, Log, Lookup, Pace, Pictures, Services, Summary, Want};
+pub use picker::{download_full, Picker};
 pub use steamgriddb::{Service, SERVICE};
 pub use store_online::{Hosts, StoreArt};
 

@@ -173,6 +173,19 @@ impl ArtDir {
         Ok(path)
     }
 
+    /// Removes the game's picture of a kind, if there is one.
+    pub fn remove(&self, source: &str, source_id: &str, kind: Kind) -> Result<()> {
+        let dir = self.game_dir(source, source_id);
+        for ext in ["png", "jpg", "webp"] {
+            match std::fs::remove_file(dir.join(format!("{}.{ext}", kind.name()))) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e).with_context(|| format!("removing a picture in {}", dir.display())),
+            }
+        }
+        Ok(())
+    }
+
     /// Removes one game's folder, its pictures and its remembered misses, so that it is looked up afresh; gives how
     /// many pictures went.
     pub fn forget(&self, source: &str, source_id: &str) -> Result<usize> {

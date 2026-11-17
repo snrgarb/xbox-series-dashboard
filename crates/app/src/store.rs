@@ -729,6 +729,34 @@ impl Store {
         }
     }
 
+    /// The art picker's network (docs/spec/art-picker.md): SteamGridDB with the user's key while art online is on
+    /// (none without: the picker then asks for nothing), its thumbnails in the data folder. None with no data folder.
+    pub fn art_picker(&self, tell: impl Fn(model::art_picker::Answer) + Send + Sync + 'static) -> Option<art::Picker> {
+        let thumbs = self.art_dir()?.root().parent()?.join(art::picker::THUMBS);
+        let service =
+            self.art_online().then(|| self.art_key()).flatten().map(|key| Service::new(&self.art_service, &key));
+        let log: art::Log = Arc::new(|line| eprintln!("{line}"));
+        Some(art::Picker::start(service, &thumbs, Pace::default(), log, tell))
+    }
+
+    /// Keeps the art picker's choice as the user's own (`picture`: a SteamGridDB picture's bytes, downloaded). The
+    /// log names no game. Gives the snapshot after.
+    pub fn choose_art(&self, choice: &model::art_picker::Choice, picture: Option<&[u8]>) -> Option<Library> {
+        use model::art_picker::Chosen;
+        let database = self.database.as_ref()?;
+        let (game, tab) = (&choice.game, choice.tab);
+        let what = match &choice.chosen {
+            None => "Automatic".to_string(),
+            Some(Chosen::Store) => "the store's own".to_string(),
+            Some(Chosen::Picture(id)) => format!("SteamGridDB picture {id}"),
+        };
+        match database.choose_art(&game.source, &game.source_id, tab, choice.chosen.as_ref(), picture) {
+            Ok(()) => eprintln!("art: picker: {} is {what}", tab.key()),
+            Err(e) => eprintln!("art: picker: {} not kept: {e:#}", tab.key()),
+        }
+        self.snapshot()
+    }
+
     /// Removes the art downloaded into the data folder, and nothing of a store's: gives the snapshot after.
     pub fn clear_art(&self) -> Option<Library> {
         let dir = self.art_dir()?;

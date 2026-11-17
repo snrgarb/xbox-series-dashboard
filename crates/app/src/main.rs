@@ -369,7 +369,19 @@ fn main() {
         if let Some(achievements) = store.achievements_now() {
             library.achievements = achievements;
         }
-        offscreen::run(&args, library, store.options(), |game| store.achievements_of(game));
+        // An art picker a press opens is given what it asks for, fetched here and now, as the window fetches it.
+        let (sender, answers) = std::sync::mpsc::channel();
+        let sender = std::sync::Mutex::new(sender);
+        let picker = store.art_picker(move |answer| {
+            let _ = sender.lock().unwrap().send(answer);
+        });
+        let fetch = |asks: Vec<model::art_picker::Ask>| -> Vec<model::art_picker::Answer> {
+            let Some(picker) = &picker else { return Vec::new() };
+            let count = asks.len();
+            asks.into_iter().for_each(|ask| picker.ask(ask));
+            (0..count).map_while(|_| answers.recv_timeout(std::time::Duration::from_secs(30)).ok()).collect()
+        };
+        offscreen::run(&args, library, store.options(), |game| store.achievements_of(game), fetch);
     } else if args.bench || args.size.is_some() {
         fail(&format!("--bench and --size go with --screenshot\n{USAGE}"));
     } else {

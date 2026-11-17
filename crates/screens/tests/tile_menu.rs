@@ -77,8 +77,8 @@ const OPEN: Effect = Effect::Sound(Sound::PromptOpen);
 const MOVE: Effect = Effect::Sound(Sound::GuideMove);
 const ENTER: Effect = Effect::Sound(Sound::GuideSelect);
 const CLOSE: Effect = Effect::Sound(Sound::PromptClose);
-/// The More options flyout's height: its title, then Hide this game and Refresh art.
-const FLYOUT: f32 = 99.6 + 2.0 * 72.0;
+/// The More options flyout's height: its title, then Hide this game, Refresh art and Change art.
+const FLYOUT: f32 = 99.6 + 3.0 * 72.0;
 
 // ------------------------------------------------------------------------------------------------- what opens it
 
@@ -322,12 +322,15 @@ fn more_options_opens_the_flyout_and_hide_this_game_hides_it() {
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER]);
     assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Hide this game) of Hades II");
-    // Two rows: Up from the first goes nowhere, Down to Refresh art and back. Left does not close it.
+    // Three rows: Up from the first goes nowhere, Down to Refresh art and Change art and back. Left does not close
+    // it.
     assert_eq!(pressed(&mut menu, &[Up, Left, Right]), []);
     assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
     assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Refresh art) of Hades II");
+    assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
+    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Change art) of Hades II");
     assert_eq!(pressed(&mut menu, &[Down]), []);
-    assert_eq!(pressed(&mut menu, &[Up]), [MOVE]);
+    assert_eq!(pressed(&mut menu, &[Up, Up]), [MOVE, MOVE]);
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Hidden { game: game.id, on: true }]);
     assert_eq!(menu.page(), None);
 
@@ -661,7 +664,7 @@ fn more_options_is_a_flyout_over_the_dimmed_menu() {
     let menu = stage.still();
     stage.press(&[A]);
     let image = stage.check("tile-menu-more-options");
-    // Two rows, Hide this game and Refresh art: 99.6 + 2 x 72 tall, from the menu's top.
+    // Three rows, Hide this game, Refresh art and Change art: 99.6 + 3 x 72 tall, from the menu's top.
     assert_panel(&image, 812, 299.7, FLYOUT);
     assert_eq!(colour(&image, 1100, 399 + 36), FILL, "focus on Hide this game");
     // The menu's left 77 shows, faded; its focused row's ring is there still, fainter than it was.

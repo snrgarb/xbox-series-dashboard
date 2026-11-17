@@ -17,6 +17,10 @@ use super::steamgriddb::plain_name;
 /// What a picture is: its bytes for a game's id and a kind.
 pub type Painter = Arc<dyn Fn(u64, Kind) -> Vec<u8> + Send + Sync>;
 
+/// What one of a game's candidates of a kind is, for the art picker: its bytes for the game's id, the kind, its
+/// place in the list (from 0), and whether it is the thumbnail.
+pub type CandidatePainter = Arc<dyn Fn(u64, Kind, usize, bool) -> Vec<u8> + Send + Sync>;
+
 /// A game the stand-in knows.
 #[derive(Debug, Clone)]
 pub struct FakeGame {
@@ -42,12 +46,32 @@ pub struct Script {
     pub picture: Painter,
     /// The stores' own art online, under `/stores` (`Hosts::all_at(<url>/stores)`): none without.
     pub stores: Option<StoreScript>,
+    /// How many candidates a game has of each kind it has: the lists the art picker pages through, served as
+    /// SteamGridDB serves them (`page` from 0, `limit` at most 50, the reply's `page`, `limit` and `total`). The
+    /// first is the picture the lookup takes.
+    pub candidates: usize,
+    /// The candidates' pictures and thumbnails; without, every one is `picture`'s.
+    pub candidate: Option<CandidatePainter>,
 }
 
 impl Script {
     pub fn new(key: &str, picture: Painter) -> Self {
-        Self { key: key.into(), games: Vec::new(), any_name: false, busy: 0, picture, stores: None }
+        Self {
+            key: key.into(),
+            games: Vec::new(),
+            any_name: false,
+            busy: 0,
+            picture,
+            stores: None,
+            candidates: 1,
+            candidate: None,
+        }
     }
+}
+
+/// The candidate at `n` of a game's list of a kind: its id, as the stand-in numbers them.
+pub fn candidate_id(game: u64, kind: Kind, n: usize) -> u64 {
+    (game * 10 + kind as u64) * 1000 + n as u64
 }
 
 /// What a store's picture is: its bytes for a store's key, a game's id there and a kind.
@@ -211,10 +235,19 @@ fn route(shared: &Shared, path: &str, authorization: Option<&str>) -> Reply {
     if let (["stores", rest @ ..], Some(stores)) = (&parts[..], &script.stores) {
         return store_route(shared, stores, rest, query);
     }
-    if let ["pictures", game, file] = parts[..] {
+    if let [place @ ("pictures" | "thumbs"), game, file] = parts[..] {
         let kind = Kind::ALL.into_iter().find(|kind| file.starts_with(kind.name()));
-        return match (game.parse::<u64>(), kind) {
-            (Ok(game), Some(kind)) => ("200 OK", "image/png", (script.picture)(game, kind), ""),
+        // `cover.png` is the first candidate, `cover-3.png` the fourth.
+        let stem = file.trim_end_matches(".png");
+        let n = stem.split_once('-').map_or(Some(0), |(_, n)| n.parse::<usize>().ok());
+        return match (game.parse::<u64>(), kind, n) {
+            (Ok(game), Some(kind), Some(n)) => {
+                let bytes = match &script.candidate {
+                    Some(paint) => paint(game, kind, n, place == "thumbs"),
+                    None => (script.picture)(game, kind),
+                };
+                ("200 OK", "image/png", bytes, "")
+            }
             _ => ("404 Not Found", "text/plain", b"no such picture".to_vec(), ""),
         };
     }
@@ -268,18 +301,35 @@ fn route(shared: &Shared, path: &str, authorization: Option<&str>) -> Reply {
             if known.is_none() && !has {
                 return not_found();
             }
-            let pictures: Vec<serde_json::Value> = has
-                .then(|| {
+            // Paged as the service pages: `page` from 0, `limit` 50 when not said and when more.
+            let number = |name: &str| {
+                query.split('&').find_map(|pair| pair.strip_prefix(name)?.strip_prefix('=')?.parse::<usize>().ok())
+            };
+            let limit = number("limit").filter(|&limit| (1..=50).contains(&limit)).unwrap_or(50);
+            let page = number("page").unwrap_or(0);
+            let total = if has { script.candidates } else { 0 };
+            let (width, height) = match kind {
+                Kind::Cover => (600, 900),
+                Kind::Hero => (1920, 620),
+                Kind::Header => (920, 430),
+                Kind::Square => (1024, 1024),
+            };
+            let pictures: Vec<serde_json::Value> = (page.saturating_mul(limit)..total)
+                .take(limit)
+                .map(|n| {
+                    let file = if n == 0 { kind.name().to_string() } else { format!("{}-{n}", kind.name()) };
                     serde_json::json!({
-                        "id": id * 10 + kind as u64, "score": 0, "style": "alternate", "nsfw": false, "humor": false,
-                        "epilepsy": false, "mime": "image/png", "language": "en",
-                        "url": format!("{}/pictures/{id}/{}.png", shared.base, kind.name()),
-                        "thumb": format!("{}/pictures/{id}/{}.png", shared.base, kind.name()),
+                        "id": candidate_id(id, kind, n), "score": 0, "style": "alternate", "width": width,
+                        "height": height, "nsfw": false, "humor": false, "epilepsy": false, "mime": "image/png",
+                        "language": "en",
+                        "url": format!("{}/pictures/{id}/{file}.png", shared.base),
+                        "thumb": format!("{}/thumbs/{id}/{file}.png", shared.base),
                     })
                 })
-                .into_iter()
                 .collect();
-            json("200 OK", serde_json::json!({"success": true, "page": 0, "total": pictures.len(), "data": pictures}))
+            let reply =
+                serde_json::json!({"success": true, "page": page, "total": total, "limit": limit, "data": pictures});
+            json("200 OK", reply)
         }
         _ => not_found(),
     }

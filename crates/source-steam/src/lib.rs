@@ -374,6 +374,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     critic_score: score(common, "metacritic_score"),
                     community_score: score(common, "review_percentage"),
                     play_count: 0,
+                    art: Default::default(),
                 },
             ))
         })

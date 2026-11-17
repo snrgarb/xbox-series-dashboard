@@ -31,6 +31,7 @@ macro_rules! eprintln {
 pub mod achievements;
 pub mod art;
 pub mod by_hand;
+pub mod choices;
 pub mod filters;
 pub mod history;
 pub mod launchers;
@@ -123,6 +124,8 @@ const MIGRATIONS: &[&str] = &[
     achievements::MIGRATION,
     // 8: the Queue's extras' items (#188).
     queue::ITEMS_MIGRATION,
+    // 9: the user's choice of a game's pictures, in the art picker (#213).
+    choices::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -556,6 +559,7 @@ impl Database {
                 header: None,
                 square: None,
                 online: Default::default(),
+                art: Default::default(),
             });
         }
         // With no limit here: art for games past it is read and dropped.
@@ -566,6 +570,10 @@ impl Database {
         while let Some(row) = art.next()? {
             let (game, kind, path): (i64, String, String) = (row.get(0)?, row.get(1)?, row.get(2)?);
             let Some(game) = place.get(&game).map(|&at| &mut games[at]) else { continue };
+            // The store's own, which the art picker offers as a choice.
+            if let Some(tab) = model::art_picker::Tab::from_key(&kind) {
+                game.art.store[tab.index()] = Some(path.clone().into());
+            }
             match kind.as_str() {
                 "cover" => game.cover = Some(path.into()),
                 "background" => game.hero = Some(path.into()),
@@ -599,6 +607,8 @@ impl Database {
                 }
             }
         }
+        // And over all of it, what the user chose.
+        self.apply_choices(&mut games)?;
         Ok(games)
     }
 
@@ -730,7 +740,7 @@ mod tests {
 
     /// A snapshot's games as a source would have read them: no ids, no time they were added, and no filters.
     fn without_ids(mut library: Library) -> Library {
-        library.games.iter_mut().for_each(|g| (g.id, g.added) = (0, 0));
+        library.games.iter_mut().for_each(|g| (g.id, g.added, g.art) = (0, 0, Default::default()));
         library.filters.clear();
         library.history.clear();
         library.launchers = Default::default();
@@ -813,7 +823,7 @@ mod tests {
         db.sync(STEAM, &first, NOW).unwrap();
         let read = |db: &Database| db.snapshot().unwrap().games.into_iter().find(|g| g.source_id == "20").unwrap();
         let game = read(&db);
-        assert_eq!(Game { id: 0, added: 0, ..game.clone() }, told);
+        assert_eq!(Game { id: 0, added: 0, art: Default::default(), ..game.clone() }, told);
         // A game the source says nothing of has nothing.
         let untold = db.snapshot().unwrap().games.into_iter().find(|g| g.source_id == "10").unwrap();
         assert!(untold.released == 0 && untold.developers.is_empty() && untold.critic_score.is_none());

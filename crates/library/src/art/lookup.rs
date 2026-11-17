@@ -560,7 +560,7 @@ impl Run {
 }
 
 /// A picture's host, by its address: what its gate is kept by. Never more of the address than the host's name.
-fn host(url: &str) -> String {
+pub(crate) fn host(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     rest.split(['/', '?', '#']).next().unwrap_or_default().to_string()
 }

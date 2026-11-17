@@ -1,5 +1,6 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod achievement;
+pub mod art_picker;
 pub mod audio;
 pub mod by_hand;
 pub mod discord;
@@ -109,6 +110,10 @@ pub struct Game {
     /// snapshot counts them; a source reads 0.
     #[serde(default)]
     pub play_count: u32,
+    /// What the user chose of its pictures in the art picker, and the store's own pictures it could choose
+    /// (docs/spec/art-picker.md). Only a snapshot says; a source reads none.
+    #[serde(default)]
+    pub art: art_picker::GameArt,
 }
 
 /// What a store's client on this PC says of the game's own art online: the id its public catalogue knows the game by

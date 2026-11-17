@@ -88,6 +88,8 @@ pub mod icon {
     pub const DELETE: char = '\u{E74D}';
     /// Refresh (Segoe Fluent Icons' Sync): fetch a game's art again.
     pub const REFRESH: char = '\u{E895}';
+    /// Change art (Segoe Fluent Icons' Photo): choose a game's pictures.
+    pub const CHANGE_ART: char = '\u{E91B}';
 }
 
 /// One row: what it shows, and what choosing it means to whoever made the panel.

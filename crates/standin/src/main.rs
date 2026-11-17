@@ -115,11 +115,14 @@
 //!       the Dashboard follows it by its windows. Exits 2 for a scheme it has no stand-in for, 1 when the fake it
 //!       needs is not in `handlers.json`.
 //!
-//!   standin serve-art [--port <n>] [--key <key>]
+//!   standin serve-art [--port <n>] [--key <key>] [--candidates <n>]
 //!       The stand-in SteamGridDB (`library::art::fake`), on 127.0.0.1 at <n> (any free port without one), for
 //!       `dashboard --art-service http://127.0.0.1:<n>`: it takes only <key> ("e2e-key" without one), finds a game
 //!       of any name searched for, and gives every game a plain picture of each kind, an orange cover, a teal hero,
-//!       a violet header and a yellow square. Under `/stores` it is the stores' own art online too, for
+//!       a violet header and a yellow square. Those are the first of each kind's list of candidates, which the art
+//!       picker pages through: --candidates long (60 without), served as SteamGridDB serves them (`page` from 0,
+//!       `limit` at most 50, the reply's `total`), each a lighter shade of its kind's colour, its thumbnail a
+//!       smaller one. Under `/stores` it is the stores' own art online too, for
 //!       `dashboard --store-art-service http://127.0.0.1:<n>/stores`: Steam's GetItems and CDN, the Microsoft
 //!       Store's catalogue and GOG's API, knowing every id, with a red cover, a blue hero, a green header and (the
 //!       Microsoft Store's alone) a magenta square (`STORE_ART_COLOURS`). Says `serve-art: listening on
@@ -179,7 +182,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin open-address <address>
-       standin serve-art [--port <n>] [--key <key>]
+       standin serve-art [--port <n>] [--key <key>] [--candidates <n>]
        standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
        standin discord --pipe <name> [--port <n>]
        standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel>
@@ -1087,6 +1090,26 @@ fn art_picture(kind: library::art::Kind, colours: &[(library::art::Kind, [u8; 3]
     png.into_inner()
 }
 
+/// One of the stand-in SteamGridDB's candidates: the first its kind's colour (`ART_COLOURS`) as the lookup takes
+/// it, each after it a lighter shade, ten shades round; a thumbnail half the size.
+fn candidate_picture(kind: library::art::Kind, n: usize, thumb: bool) -> Vec<u8> {
+    use library::art::Kind;
+    let (width, height) = match kind {
+        Kind::Cover => (60, 90),
+        Kind::Hero => (192, 62),
+        Kind::Header => (92, 43),
+        Kind::Square => (64, 64),
+    };
+    let (width, height) = if thumb { (width / 2, height / 2) } else { (width, height) };
+    let base = ART_COLOURS.iter().find(|(k, _)| *k == kind).map_or([0; 3], |(_, colour)| *colour);
+    let share = (n % 10) as f32 / 12.0;
+    let colour = base.map(|c| (c as f32 + (255.0 - c as f32) * share).round() as u8);
+    let image = image::RgbImage::from_pixel(width, height, image::Rgb(colour));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).expect("a PNG in memory");
+    png.into_inner()
+}
+
 fn serve_discord(args: &[String]) -> i32 {
     let (mut pipe, mut port) = (None, 0u16);
     let mut it = args.iter();
@@ -1189,7 +1212,7 @@ fn serve_updates(args: &[String]) -> i32 {
 }
 
 fn serve_art(args: &[String]) -> i32 {
-    let (mut port, mut key) = (0u16, "e2e-key".to_string());
+    let (mut port, mut key, mut candidates) = (0u16, "e2e-key".to_string(), 60usize);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         match (arg.as_str(), it.next()) {
@@ -1201,20 +1224,34 @@ fn serve_art(args: &[String]) -> i32 {
                 }
             },
             ("--key", Some(value)) => key = value.clone(),
+            ("--candidates", Some(value)) => match value.parse() {
+                Ok(value) => candidates = value,
+                Err(_) => {
+                    note(&format!("serve-art: bad --candidates {value}"));
+                    return 2;
+                }
+            },
             _ => {
                 note(USAGE);
                 return 2;
             }
         }
     }
-    use library::art::fake::{FakeService, Painter, Script, StorePainter, StoreScript};
+    use library::art::fake::{CandidatePainter, FakeService, Painter, Script, StorePainter, StoreScript};
     let picture: Painter = std::sync::Arc::new(|_, kind| art_picture(kind, &ART_COLOURS));
     let store_picture: StorePainter = std::sync::Arc::new(|_, _, kind| art_picture(kind, &STORE_ART_COLOURS));
     // How rare the fake Steam's achievements are, as Steam's global percentages would say.
     let rarity = fixture::ACHIEVEMENTS.iter().map(|a| (a.key.to_string(), a.rarity)).collect();
     let rarity = vec![(fixture::ACHIEVEMENTS_GAME.to_string(), rarity)];
     let stores = StoreScript { any_id: true, rarity, ..StoreScript::new(store_picture) };
-    let script = Script { any_name: true, stores: Some(stores), ..Script::new(&key, picture) };
+    let candidate: CandidatePainter = std::sync::Arc::new(|_, kind, n, thumb| candidate_picture(kind, n, thumb));
+    let script = Script {
+        any_name: true,
+        stores: Some(stores),
+        candidates,
+        candidate: Some(candidate),
+        ..Script::new(&key, picture)
+    };
     let service = match FakeService::start(port, script) {
         Ok(service) => service,
         Err(e) => {

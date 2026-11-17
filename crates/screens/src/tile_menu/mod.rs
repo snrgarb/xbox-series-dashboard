@@ -99,6 +99,8 @@ enum Choice {
 enum More {
     /// Forget the game's downloaded art and fetch it again (#190).
     RefreshArt,
+    /// Choose the game's pictures from SteamGridDB's candidates (#213).
+    ChangeArt,
     /// Hide the game, or show it again.
     Hide(bool),
 }
@@ -165,8 +167,8 @@ fn has_uninstaller(game: &Game) -> bool {
 }
 
 /// The flyout's rows (section 4): what is left of the Bundle's once Playnite's own are gone (section 13), then the
-/// port's Refresh art, in the Bundle's Enable HDR's place under Hide, for a game whose art can be looked up (a
-/// store's; #190).
+/// port's Refresh art, in the Bundle's Enable HDR's place under Hide, and Change art under it, for a game whose art
+/// can be looked up (a store's; #190, #213).
 fn more_rows(game: &Game) -> Vec<Row<More>> {
     let mut rows = vec![if game.hidden {
         Row::new(icon::UNHIDE, "Unhide this game", More::Hide(false))
@@ -175,6 +177,7 @@ fn more_rows(game: &Game) -> Vec<Row<More>> {
     }];
     if !game.source.is_empty() && !game.source_id.is_empty() {
         rows.push(Row::new(icon::REFRESH, "Refresh art", More::RefreshArt));
+        rows.push(Row::new(icon::CHANGE_ART, "Change art", More::ChangeArt));
     }
     rows
 }
@@ -355,6 +358,11 @@ impl Page for TileMenu {
                 Answer::Chose(More::RefreshArt) => {
                     Some(PageAction::CloseWith(Effect::RefreshArt(Some(self.game.clone()))))
                 }
+                // The picker in the menu's place, over what the menu was over: B there comes back to that.
+                Answer::Chose(More::ChangeArt) => Some(match find(around.library, &self.game) {
+                    Some(game) => PageAction::Replace(crate::art_picker::open(&game)),
+                    None => PageAction::Close,
+                }),
                 Answer::Declined => {
                     self.flyout = None;
                     None
