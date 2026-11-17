@@ -70,7 +70,7 @@ The next Toast waits for the going and then the usual half second. Reduce motion
 
 ## 7. Differs from the Bundle
 
-- **The Xbox mark** in the circle and in the prompt is the plain white disc every placeholder mark is (the repository holds no trademark).
+- **The Xbox mark** in the circle and in the prompt is the project's own drawing of the Guide button, a ring with a house in it (guide.md 10.1): the repository holds no trademark, and Windows' icon fonts have no glyph of the button.
 - **Listed in the Notifications Flyout, and A on it.** The Bundle's Flyout lists Playnite's own notifications and never an unlock; the ticket asks for the row, and A opens the game's Achievements page, which the Bundle never built.
 - **Clipping.** The port clips to rectangles: the shine is kept to the span between the pill's ends (the Bundle's reaches into the right end's curve, at 10% or less), and the trophy, while it is zoomed past the circle, to a square inside it; the icon and the diamond are cut round, as in the Bundle.
 - **The diamond's spin** is 24 painted pictures a turn (the Bundle interpolates 16 key frames).

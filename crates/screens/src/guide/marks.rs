@@ -1,18 +1,20 @@
 //! The marks the Bundle draws from vector paths that are other companies' trademarks: the Xbox mark, Discord's, the
 //! stores'. They are not this project's to ship (docs/spec/guide.md, section 10): a store's is the project's own
-//! drawing (`crate::drawn`), and each of the others a plain shape, its function the one place to draw it.
+//! drawing (`crate::drawn`), as are the Guide button's and chat's in the Xbox mark's and Discord's places.
 use ui::{Color, Rect, Ui};
 
-/// The Xbox mark, filling `rect`: the landing tab's icon and the Guide button's hint. A plain disc stands in.
-pub fn xbox_mark(ui: &mut Ui, rect: Rect, color: Color) {
-    ui.fill(rect, color, 999.0);
+use crate::drawn::{self, Drawing};
+
+/// The Guide button's mark, filling `rect`, where the Bundle draws the Xbox mark: the landing tab's icon, the Guide
+/// button's hint and the Toasts' prompt. The project's own drawing of a home button (docs/spec/guide.md, 10.1).
+pub fn guide_button(ui: &mut Ui, rect: Rect, color: Color) {
+    drawn::draw(ui, rect, Drawing::GuideButton, color);
 }
 
-/// Discord's mark, as wide as `rect` and three quarters as high, in its middle: the Discord tab's icon. A plain
-/// rounded bar stands in.
+/// Discord's mark, filling `rect`: the Discord tab's icon, the account's, a Call's. The project's own drawing of
+/// chat, never Discord's logo (docs/spec/guide.md, 10.1).
 pub fn discord_mark(ui: &mut Ui, rect: Rect, color: Color) {
-    let height = rect.w * 0.75;
-    ui.fill(Rect::new(rect.x, rect.y + (rect.h - height) / 2.0, rect.w, height), color, height / 3.0);
+    drawn::draw(ui, rect, Drawing::Chat, color);
 }
 
 /// The store's badge on a game's cover in the list: its mark 18 across, 6 in from the cover's bottom left, on a

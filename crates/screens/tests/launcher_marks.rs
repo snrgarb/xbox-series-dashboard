@@ -29,7 +29,7 @@ fn launcher_marks() {
     let pixels = target.still(&gpu, &mut host, |ui| {
         ui.fill(ui.screen(), Color::rgb(0x101010), 0.0);
         for (i, &drawing) in Drawing::ALL.iter().enumerate() {
-            let x = 60.0 + i as f32 * 182.0;
+            let x = 40.0 + i as f32 * 155.0;
             // On a tile's corner, as Home's Recent row and My games & apps carry it: a light tile and a dark one.
             for (row, colour) in [(0.0, 0x6A8CAF), (1.0, 0x1A1A1A)] {
                 let tile = Rect::new(x, 60.0 + row * 140.0, 120.0, 120.0);

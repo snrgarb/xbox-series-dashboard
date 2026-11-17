@@ -92,7 +92,7 @@ pub fn draw(ui: &mut Ui, status: &Status, clock: &str, pad: bool) {
 pub(crate) fn call_mark(ui: &mut Ui, right: f32, middle: f32, mark: CallMark) -> f32 {
     let area = Rect::new(right - 30.0, middle - 12.0, 30.0, 24.0);
     let colour = if mark.speaking { ACCENT_LIGHT } else { TEXT_DIM };
-    // The stand-in draws as high as three quarters of its width, in the middle: 18 high, 3 down.
+    // The chat drawing, 24 across, at the area's left.
     super::marks::discord_mark(ui, Rect::new(area.x, area.y, 24.0, 24.0), colour);
     let badge = match (mark.deafened, mark.muted) {
         (true, _) => Some('\u{E7F6}'),
