@@ -27,8 +27,11 @@ pub struct Helpers {
     /// The data folder; none, and nothing is fetched or kept.
     data: Option<PathBuf>,
     states: HashMap<String, HelperState>,
-    told: (Sender<(String, HelperState)>, Receiver<(String, HelperState)>),
+    told: (Sender<Told>, Receiver<Told>),
 }
+
+/// A helper's key and how it stands now, as the thread that fetched it says.
+type Told = (String, HelperState);
 
 impl Helpers {
     /// The table, and how each of its helpers stands in `data` now: added, if it is kept at the table's version.
