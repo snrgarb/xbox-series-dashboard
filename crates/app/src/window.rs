@@ -36,6 +36,13 @@ use crate::{since_start, Args};
 /// What an art lookup says, with the number of the run that said it.
 type RunEvent = (u64, ArtEvent);
 
+/// What the art picker's network said (docs/spec/art-picker.md), with the number of the picker it was for: one that
+/// has closed says nothing to the next. A chosen picture's download is told whatever picker it came from.
+enum PickerEvent {
+    Answer(u64, model::art_picker::Answer),
+    Downloaded(model::art_picker::Choice, Result<Vec<u8>, String>),
+}
+
 /// How long the loop sleeps with nothing to draw: the pad's thread, the art cache and the window wake it sooner.
 const IDLE: Duration = Duration::from_millis(250);
 /// How soon the Overlay is tried again when it had no frame to draw on.
@@ -198,6 +205,10 @@ struct App {
     /// The game whose whole list of achievements an Achievements page was last given, and whether it should be
     /// read again (new icons for it, or a new snapshot).
     achievements_listed: (Option<i64>, bool),
+    /// The art picker's network while a picker is up, and the number of the picker it is for.
+    picker: Option<(u64, library::art::Picker)>,
+    picker_run: u64,
+    picker_events: (Sender<PickerEvent>, Receiver<PickerEvent>),
     /// When the keyboard or the mouse was last used anywhere in Windows: the Idle screen counts from it, and from
     /// the pads' own (docs/spec/idle-screen.md, 2).
     input_clock: Box<dyn LastInput>,
@@ -481,6 +492,9 @@ pub fn run(args: &Args, started_with: &[String], library: Library, store: Store,
         art_events: mpsc::channel(),
         art_run: 0,
         achievements_listed: (None, false),
+        picker: None,
+        picker_run: 0,
+        picker_events: mpsc::channel(),
         input_clock: shell::idle::system(),
         idle_after: args.idle_after,
         discord,
@@ -980,6 +994,19 @@ impl App {
                     }
                 }
                 // The Tile menu's Refresh art: that game's downloaded art forgotten, and it looked up first.
+                // The art picker's choice (docs/spec/art-picker.md): kept at once, or once the chosen picture has
+                // downloaded, off the frame's thread.
+                Effect::ChooseArt(choice) => match choice.url.clone().filter(|_| choice.chosen.is_some()) {
+                    Some(url) => {
+                        let (sender, proxy) = (self.picker_events.0.clone(), self.proxy.clone());
+                        let log: library::art::Log = Arc::new(|line| eprintln!("{line}"));
+                        library::art::download_full(url, library::art::Pace::default(), log, move |got| {
+                            let _ = sender.send(PickerEvent::Downloaded(choice, got));
+                            let _ = proxy.send_event(());
+                        });
+                    }
+                    None => self.keep_art_choice(choice, None),
+                },
                 Effect::RefreshArt(Some(game)) => {
                     let forgotten = self.store.refresh_art_of(&game);
                     self.show(forgotten);
@@ -1195,6 +1222,61 @@ impl App {
             self.show(library);
         }
         toast
+    }
+
+    /// The art picker (docs/spec/art-picker.md): what was fetched for it goes to it, and what it asks for is
+    /// fetched, by a network of its own made as a picker first asks and dropped once none is up. A page coming
+    /// changes the focus line, which the turn then says with --log-focus.
+    fn follow_art_picker(&mut self) {
+        while let Ok(event) = self.picker_events.1.try_recv() {
+            match event {
+                PickerEvent::Answer(run, answer) => {
+                    if self.picker.as_ref().is_some_and(|(current, _)| *current == run) {
+                        self.dashboard.art_answer(answer);
+                        self.stale = true;
+                    }
+                }
+                PickerEvent::Downloaded(choice, Ok(bytes)) => self.keep_art_choice(choice, Some(&bytes)),
+                PickerEvent::Downloaded(choice, Err(why)) => {
+                    eprintln!("art: picker: the chosen {} could not be downloaded: {why}", choice.tab.key());
+                    self.dashboard.notify("The picture you chose couldn't be downloaded. Try again in a moment.");
+                    self.overlay_stale = true;
+                }
+            }
+        }
+        if !self.dashboard.art_picker_up() {
+            self.picker = None;
+        } else {
+            let asks = self.dashboard.art_asks();
+            if !asks.is_empty() && self.picker.is_none() {
+                self.picker_run += 1;
+                let run = self.picker_run;
+                let (sender, proxy) = (self.picker_events.0.clone(), self.proxy.clone());
+                self.picker = self
+                    .store
+                    .art_picker(move |answer| {
+                        let _ = sender.send(PickerEvent::Answer(run, answer));
+                        let _ = proxy.send_event(());
+                    })
+                    .map(|picker| (run, picker));
+            }
+            if let Some((_, picker)) = &self.picker {
+                for ask in asks {
+                    picker.ask(ask);
+                }
+            }
+        }
+    }
+
+    /// Keeps the art picker's choice, and shows the snapshot after. Automatic looks the game's art up again, first,
+    /// for what the choice stood in for.
+    fn keep_art_choice(&mut self, choice: model::art_picker::Choice, picture: Option<&[u8]>) {
+        let shown = self.store.choose_art(&choice, picture);
+        self.show(shown);
+        if choice.chosen.is_none() && self.art_started {
+            self.art = None;
+            self.start_art_with(Some(choice.game));
+        }
     }
 
     /// An Achievements page's game's whole list (docs/spec/achievements-page.md): read from the database as the
@@ -1597,6 +1679,8 @@ impl ApplicationHandler for App {
         }
         // An Achievements page a press opened has its list before its focus is said.
         self.follow_achievement_list();
+        // An art picker a press opened asks for its first page at once.
+        self.follow_art_picker();
         self.say_idle();
         if self.log_focus && self.dashboard.focus_line() != focus {
             eprintln!("focus: {}", self.dashboard.focus_line());

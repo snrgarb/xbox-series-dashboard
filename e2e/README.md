@@ -221,7 +221,7 @@ now bringing both in with its summary line), `refresh-art` (#190, on the fake St
 square anywhere a Recent tile shows its cover whole, never cropped; a key typed in and SteamGridDB's yellow squares on
 the Recent row; Settings > Art's Refresh all art and details asked and confirmed, the cache emptied, the page saying how
 far it has got, the Dashboard killed part way and the refresh going on at the next start until the cache is full again
-and the squares are back; then one game's Refresh art from the Tile menu's More options), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
+and the squares are back; then one game's Refresh art from the Tile menu's More options), `art-picker` (#213, on the fake Steam and `standin serve-art --candidates 60`: a key typed in, the Tile menu's Change art, Right past the grid's edge to the Square tab's last page and a candidate chosen there, the stand-in asked for the square list's pages 0 and 1 once each and in order; a candidate on Background's third page; both still in use after Refresh all art and details and after the game's Refresh art; docs/spec/art-picker.md), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
 its first frame, its end and Home's first frame logged in that order, then Off set on Settings with the pad and the
 Dashboard straight to Who's playing today? at the next start; it needs `video-spike.exe`, so build `-p video-spike` too),
 `whos-playing` (Start-up with the Boot video Off in folders of the test's own: a second Profile added, Who's playing

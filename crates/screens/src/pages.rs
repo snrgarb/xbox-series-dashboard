@@ -18,7 +18,7 @@ use ui::{Button, Press, Repeat, Snapshot, Ui};
 
 use crate::hint_bar::{self, Hint};
 use crate::keyboard::{self, Typed};
-use crate::{game_hub, manage_queue, my_games, search, settings, tile_menu, Effect};
+use crate::{art_picker, game_hub, manage_queue, my_games, search, settings, tile_menu, Effect};
 
 /// What a page is told of the world each time it is pressed or drawn. It keeps none of it.
 #[derive(Clone, Copy)]
@@ -57,6 +57,8 @@ pub enum Open {
     InstallWhere(crate::install_where::Entry),
     /// A game's Achievements page, over its Game hub (`achievements`).
     Achievements(crate::achievements::Entry),
+    /// A game's art picker, over whatever asked for it (`art_picker::open`).
+    ArtPicker(art_picker::Entry),
 }
 
 impl Open {
@@ -78,6 +80,7 @@ impl Open {
             Open::ManageQueue => Box::new(manage_queue::ManageQueue::open(around)),
             Open::InstallWhere(entry) => Box::new(crate::install_where::InstallWhere::open(entry, around)?),
             Open::Achievements(entry) => Box::new(crate::achievements::Achievements::open(entry, around)?),
+            Open::ArtPicker(entry) => Box::new(art_picker::ArtPicker::open(entry, around)?),
         })
     }
 }
@@ -248,6 +251,19 @@ pub trait Page {
 
     /// The game's whole list, in its store's order, as the library database has it now.
     fn set_achievements(&mut self, _game: i64, _list: Vec<model::achievement::Achievement>) {}
+
+    /// For the art picker: what it wants fetched now, each thing once (`art_picker::ArtPicker::art_asks`).
+    fn art_asks(&mut self) -> Vec<model::art_picker::Ask> {
+        Vec::new()
+    }
+
+    /// For the art picker: what was fetched.
+    fn art_answer(&mut self, _answer: model::art_picker::Answer) {}
+
+    /// Whether this is an art picker.
+    fn is_art_picker(&self) -> bool {
+        false
+    }
 }
 
 fn behind_key(page: u64) -> (&'static str, u64) {
@@ -352,6 +368,23 @@ impl Stack {
         for page in self.pages.iter_mut().filter(|page| page.achievements_wanted() == Some(game)) {
             page.set_achievements(game, list.clone());
         }
+    }
+
+    /// What the art picker on top wants fetched ([`Page::art_asks`]): only the top page's, so a picker under
+    /// another page asks nothing meanwhile.
+    pub fn art_asks(&mut self) -> Vec<model::art_picker::Ask> {
+        self.pages.last_mut().map(|page| page.art_asks()).unwrap_or_default()
+    }
+
+    /// Gives what was fetched to every art picker that is up.
+    pub fn art_answer(&mut self, answer: model::art_picker::Answer) {
+        for page in self.pages.iter_mut().filter(|page| page.is_art_picker()) {
+            page.art_answer(answer.clone());
+        }
+    }
+
+    pub fn art_picker_up(&self) -> bool {
+        self.pages.iter().any(|page| page.is_art_picker())
     }
 
     /// What the pages ask of the shell beyond what the last press answered ([`Page::asks`]).

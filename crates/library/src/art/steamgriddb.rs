@@ -9,10 +9,15 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use model::art_picker::{Candidate, Reply, Tab, LIMIT};
+
 use super::cache::Kind;
 
 /// The service's own address.
 pub const SERVICE: &str = "https://www.steamgriddb.com/api/v2";
+
+/// What every list of pictures is narrowed to: static, neither adult nor a joke nor a flasher, PNG, JPEG or WebP.
+const SAFE: &str = "types=static&nsfw=false&humor=false&epilepsy=false&mimes=image/png,image/jpeg,image/webp";
 
 /// The largest picture taken.
 const MOST_BYTES: u64 = 24 << 20;
@@ -87,8 +92,18 @@ impl Service {
         Self { base: base.trim_end_matches('/').to_string(), key: key.to_string(), agent: agent() }
     }
 
+    /// The address it is asked at.
+    pub fn base(&self) -> &str {
+        &self.base
+    }
+
     /// The API's reply to `path`, its `data`; None for 404.
     fn get(&self, path: &str) -> Result<Option<Value>, Error> {
+        Ok(self.get_reply(path)?.and_then(|reply| reply.get("data").cloned()))
+    }
+
+    /// The API's whole reply to `path`, its paging with its `data`; None for 404.
+    fn get_reply(&self, path: &str) -> Result<Option<Value>, Error> {
         let request =
             self.agent.get(format!("{}/{path}", self.base)).header("Authorization", format!("Bearer {}", self.key));
         let mut response = request.call().map_err(|e| transport(e, NAME))?;
@@ -106,7 +121,7 @@ impl Service {
         if reply.get("success").and_then(Value::as_bool) != Some(true) {
             return Err(Error::Failed("SteamGridDB said it did not succeed".into()));
         }
-        Ok(reply.get("data").cloned())
+        Ok(Some(reply))
     }
 
     /// The game's id on SteamGridDB: by its store's id where the API knows the store, else (or when that is not
@@ -142,7 +157,6 @@ impl Service {
     /// The address of the game's first picture of this kind that is static, neither adult nor a joke nor a
     /// flasher, and a PNG, JPEG or WebP; None when it has none.
     pub fn picture(&self, game: u64, kind: Kind) -> Result<Option<String>, Error> {
-        const SAFE: &str = "types=static&nsfw=false&humor=false&epilepsy=false&mimes=image/png,image/jpeg,image/webp";
         let path = match kind {
             Kind::Cover => format!("grids/game/{game}?dimensions=600x900&{SAFE}&limit=5"),
             Kind::Hero => format!("heroes/game/{game}?{SAFE}&limit=5"),
@@ -157,6 +171,50 @@ impl Service {
         };
         let url = pictures.as_array().and_then(|all| all.iter().find(safe)).and_then(|p| p.get("url")?.as_str());
         Ok(url.map(str::to_string))
+    }
+
+    /// One page of the game's candidates of a kind, for the art picker (docs/spec/art-picker.md, 2): static, safe
+    /// PNG, JPEG and WebP pictures of the kind's shapes, the service's own page `page` (from 0) of [`LIMIT`], and
+    /// the total it says the list has. A game it does not know is an empty list.
+    pub fn candidates(&self, game: u64, tab: Tab, page: u32) -> Result<Reply, Error> {
+        let path = match tab {
+            Tab::Cover => format!("grids/game/{game}?dimensions=600x900,342x482,660x930&{SAFE}"),
+            Tab::Square => format!("grids/game/{game}?dimensions=1024x1024,512x512&{SAFE}"),
+            Tab::Background => format!("heroes/game/{game}?{SAFE}"),
+        };
+        let path = format!("{path}&limit={LIMIT}&page={page}");
+        let Some(reply) = self.get_reply(&path)? else {
+            return Ok(Reply { page, total: 0, limit: LIMIT, items: Vec::new() });
+        };
+        let number = |field: &str| reply.get(field).and_then(Value::as_u64);
+        let items: Vec<Candidate> = reply
+            .get("data")
+            .and_then(Value::as_array)
+            .map(|all| {
+                all.iter()
+                    .filter_map(|picture| {
+                        let url = picture.get("url")?.as_str()?.to_string();
+                        let thumb = picture.get("thumb").and_then(Value::as_str).unwrap_or(&url).to_string();
+                        let size = |field: &str| picture.get(field).and_then(Value::as_u64).unwrap_or(0) as u32;
+                        Some(Candidate {
+                            id: picture.get("id")?.as_u64()?,
+                            url,
+                            thumb,
+                            width: size("width"),
+                            height: size("height"),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(Reply {
+            page: number("page").map_or(page, |p| p as u32),
+            // A reply without a total: a full page may have one after it, which a short or empty one then ends.
+            total: number("total")
+                .map_or(page as usize * LIMIT + items.len() + usize::from(items.len() == LIMIT), |t| t as usize),
+            limit: number("limit").map_or(LIMIT, |l| l as usize),
+            items,
+        })
     }
 
     /// A picture's bytes, from its own address: no key goes with it.

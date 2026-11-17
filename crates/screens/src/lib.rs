@@ -9,6 +9,7 @@
 pub mod achievement;
 pub mod achievements;
 mod app_tile;
+pub mod art_picker;
 pub mod game_hub;
 pub mod guide;
 pub mod hint_bar;
@@ -127,6 +128,10 @@ pub enum Effect {
     /// forget what was downloaded for it and fetch it again in the background (docs/spec/settings.md, 16.8). The
     /// snapshots that follow say how a refresh of all goes (`Library::art_refresh`).
     RefreshArt(Option<model::GameKey>),
+    /// The art picker's choice of a game's picture of a kind (docs/spec/art-picker.md): to keep as the user's own
+    /// in the library database, the full picture downloaded first for a SteamGridDB one; `chosen: None` puts the
+    /// Dashboard's own pick back. A new snapshot follows.
+    ChooseArt(model::art_picker::Choice),
     /// Settings > Launchers switched the launcher with this key (`Game::source`) on or off (docs/spec/launchers.md).
     /// A new snapshot follows, in which its games are back, or in no list at all.
     Launcher { key: String, on: bool },
@@ -1335,6 +1340,23 @@ impl Dashboard {
     /// A game's whole list of achievements, in its store's order, for the pages that show it.
     pub fn set_achievements(&mut self, game: i64, list: Vec<model::achievement::Achievement>) {
         self.pages.set_achievements(game, list);
+    }
+
+    /// What an art picker that is up wants fetched now (docs/spec/art-picker.md): pages of SteamGridDB's candidates
+    /// and their thumbnails, each asked once. Whoever has the network fetches them off the UI thread and tells what
+    /// came with [`Dashboard::art_answer`]. Empty with no picker up.
+    pub fn art_asks(&mut self) -> Vec<model::art_picker::Ask> {
+        self.pages.art_asks()
+    }
+
+    /// What was fetched for the art picker.
+    pub fn art_answer(&mut self, answer: model::art_picker::Answer) {
+        self.pages.art_answer(answer);
+    }
+
+    /// Whether an art picker is up.
+    pub fn art_picker_up(&self) -> bool {
+        self.pages.art_picker_up()
     }
 
     /// What is on top of Home's window, the Guide aside, and where its focus is: Home's focus as it is written

@@ -10,12 +10,14 @@ use ui::{Button, Host, Press};
 
 use crate::{fail, since_start, Args};
 
-/// `achievements_of` is one game's whole list of achievements, for an Achievements page a press opens.
+/// `achievements_of` is one game's whole list of achievements, for an Achievements page a press opens; `fetch`
+/// fetches what an art picker asks for, there and then.
 pub fn run(
     args: &Args,
     library: Library,
     options: screens::Options,
     achievements_of: impl Fn(i64) -> Vec<model::achievement::Achievement>,
+    fetch: impl Fn(Vec<model::art_picker::Ask>) -> Vec<model::art_picker::Answer>,
 ) {
     let out = args.screenshot.as_ref().unwrap();
     let size = args.size.unwrap_or((1920, 1080));
@@ -46,6 +48,16 @@ pub fn run(
         // An Achievements page the press opened is given its game's list, as the window gives it.
         if let Some(game) = dashboard.achievements_wanted() {
             dashboard.set_achievements(game, achievements_of(game));
+        }
+        // An art picker is given its pages and their thumbnails, until it asks for nothing more.
+        loop {
+            let asks = dashboard.art_asks();
+            if asks.is_empty() {
+                break;
+            }
+            for answer in fetch(asks) {
+                dashboard.art_answer(answer);
+            }
         }
     };
     // Home starts with focus on the profile: a game to launch or a row to walk is on the Recent row.
