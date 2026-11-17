@@ -657,7 +657,7 @@ Consequence for M3 with today's schema: the header is the title and "Steam"; the
 | Focus sounds for buttons (`navigation.wav`), none for the toggle and scroller, which the extension adds | Section 12 | **Port**: one navigation sound per focus move in the hub. (Whether the console's sounds come over is plan.md open question 4.) |
 | The game status view and its "is starting… / is running…" text | Section 11 | **Decide** (Open question 6). The Launch screen (M1) already does its job while a game starts. |
 | PlayniteAchievements, Extra Metadata Loader | Achievements row, trailer video | Achievements: **M6**. Trailer video: **drop for M3**, show the art; revisit with video in the renderer (M5). |
-| The store marks on the badge (Steam, Xbox paths) | Cover badge | **Do not copy** (home.md 3.3): the port's plain white disc, or the source's name as text, in the same chip. |
+| The store marks on the badge (Steam, Xbox paths) | Cover badge | **Do not copy** (home.md 3.3): the launcher's mark, the project's own drawing (home.md 3.3.1), in the same chip. |
 | The extension's silent Install and Queue action | Sections 6.2, 6.4 | **M4.** M3 leaves the Queue slot and gives Install to Steam (`steam://install/<appid>` or nothing: Open question 7). |
 
 ---
@@ -714,7 +714,7 @@ What `crates/screens/src/game_hub/` does (ticket #51), where the sections above 
 - **Opening is timed in the log** (#214): every hub says, once it has come to rest, `hub: opened <game> in N ms: first frame N ms, last moving frame N ms after A`, then the frame that answered A, the double tap's wait, the page's data, what its first frame spent its time on, each picture (a cache hit, or how long it queued, decoded and uploaded, and when it came), the transition (none) and its longest frame. The game-hub payload fails when the first frame is done more than 100 ms (on a GPU) after the hub is put up. The double tap's 300 ms is the Bundle's and is kept: it is most of the time from A to the hub on Home's tiles.
 - **The darkening gradient and the green** (2.2, 1.1) have three stops, where the renderer's gradients have two: each is a small picture painted once (`Kind::Painted`) and stretched over the screen.
 - **A game with no cover** shows its name on the dark tile, as Home's tiles do, where the Bundle shows Playnite's default cover.
-- **The source's mark** on the cover is the plain white disc Home's tiles carry, on the Bundle's chip: the stores' marks are not ours to ship. `home/tile.rs` `source_mark` is the one place to draw the real thing.
+- **The source's mark** on the cover is the launcher's mark Home's tiles carry (home.md 3.3.1), the project's own drawing, on the Bundle's chip: the stores' marks are not ours to ship.
 - **The date last played** is always month/day/year, as the Bundle's pictures have it, whatever the user's short date format.
 - **The row of cards never needs its second place** (5.4): without Description, Game details fits the screen. The rule is built all the same (`cards::rects`).
 - **Main action.** Play, Running, Install, Queued or Installing... Running shows from the moment the game is launched, there being no "Launching". Queued is a game in the Queue waiting its turn or paused, Installing... one downloading (#78); there is no Uninstalling: an uninstall asked for is Steam's own until the game reads uninstalled. The focus line names them `Queued` and `Installing`, and the Queue action `Queue`.

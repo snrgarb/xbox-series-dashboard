@@ -209,6 +209,25 @@ All authored units (multiply by s). E/HomeTiles.xaml.
 
 The source icons are the stores' own logos: NOTICE.md lists `source-steam-shadow.png` as "The Steam logo", Valve's, and `source-xbox-shadow.png` as Microsoft's; the vector paths are Simple Icons' drawings of the same marks. In the pictures the Steam mark shows as a white disc about 22 across with the logo cut out of it. Neither the paths nor the shadow pictures are the theme author's to license, so a port does not copy them.
 
+#### 3.3.1 The launchers' marks (the port's, #189)
+
+The Bundle's two marks are Valve's and Microsoft's logos, and the port has a launcher for each of seven stores. The user's choice (#189): **the project's own flat drawings**, one a launcher, shipped in the code. Each is an original, single-colour drawing of an idea its launcher brings to mind, never its logo or a tracing of one; no company's image or icon file is in the repository. They are vector paths on a 24 x 24 grid (`screens::drawn`), painted with tiny-skia at the smallest of 32, 64, 128 or 256 pixels that is at least as large as they are shown, in white, and drawn in the colour asked for. Placement and size are the Bundle's (`SourceBadge`, above): 20 x 20 (`Stretch="Uniform"`: the drawing fills the square), 10 in from the tile's bottom left, on the shadow, gone while the tile has focus.
+
+| Launcher (`Game::source`) | Drawing | Why |
+|---|---|---|
+| Steam (`steam`) | A white disc with three wisps of steam rising through it, cut out | Steam; the Bundle's mark shows as a white disc with a shape cut from it |
+| Epic Games (`epic`) | A shield, a five-pointed star cut out of it | "Epic": a hero's shield |
+| GOG (`gog`) | A planet with a ring round it, the ring's front crossing it with a gap either side | GOG GALAXY |
+| Battle.net (`battlenet`) | Two swords crossed, point up, the front one cut clear of the back | "Battle" |
+| EA (`ea`) | A lightning bolt | "Electronic" Arts |
+| Ubisoft (`ubisoft`) | Two rings linked, each over the other once | Ubisoft "Connect" |
+| Xbox and the Microsoft Store (`xbox`) | A pad: body and grips, a cross and two buttons cut out | The console's pad; never the Xbox sphere |
+| A game added by hand (`manual`) | A folder, a plus cut out of it | Added from a folder on the PC |
+| An App | A window: a rounded frame, its title bar solid | A program |
+| Any other (`Launcher`) | A box seen corner on: a hexagon cut in three faces | A game from somewhere with no drawing yet |
+
+Every launcher's games carry their mark, not only Steam's and Xbox's: the tiles on Home and in My games & apps (Games, Full library, Play history, Manage Queue's Recently installed and rows), the Guide's recent games (18 across), the Game hub's cover chip, and Settings > Launchers' rows (28 across). A game of a source with no drawing carries the box, where before it carried nothing. `crates/screens/tests/launcher_marks.rs` draws them all on tiles at 20, at 40 (a tile's 20 in a 4K screen's pixels) and enlarged; `screens::drawn`'s unit tests check each paints, at every size, and that no two are alike.
+
 There is **no "installed" badge** on Home tiles: only the source icon, the Running badge and the Queued / Installing... status (NOT FOUND otherwise). A not-installed game looks like any other.
 
 ### 3.4 Play history tile
@@ -618,7 +637,7 @@ What `crates/screens/src/home*` does that the sections above do not say, or does
 - **A on a game** is as sections 3 and 6 have it: the game's Game hub opens when the double tap's 300 ms have passed with no second A, and a second A on the same tile within them plays the game with no hub ([game-hub.md](game-hub.md) 9.1 and 16.2). Menu within the 300 ms drops the pending hub, as does the Guide, a page or a launch taking the pad; moving focus does not. The first A plays the activation sound, and the second nothing more.
 - **Home starts on the profile**, as the Bundle does in practice (section 7.4).
 - **The profile's picture** is drawn: the pale disc and grey figure of Windows' default account picture, which is what the Bundle shows for an account with none. Real pictures come with Profiles.
-- **The source badge** is a plain white disc on the theme's shadow, for every game (Steam is the only source): the stores' logos are not ours to ship. `home/tile.rs` `source_badge` is the one place to draw the real mark.
+- **The source badge** is the launcher's mark, the project's own drawing (section 3.3.1), on the theme's shadow, for every game: the stores' logos are not ours to ship.
 - **No Update button.** The green down arrow left of the Status area in the pictures is Playnite's own, shown while a Playnite update waits (section 2.3): the Dashboard has no updates to offer yet, and the Queue has no mark on the top bar in the Bundle either.
 - **The pad's glyph** (U+E7FC, left of the clock) shows while a pad is connected, as the input crate reports it (`Dashboard::set_pad`). A wireless pad shows its battery in the glyph's place, as section 2.4 has it: the cell, and its charge left of it unless Settings' Show battery percentages is off.
 - **Wide tiles.** "Settings" stands for "Playnite settings", and opens Settings on General's first box ([settings.md](settings.md) 16.3). Downloads is always there, as the Bundle's is, and counts the Queue ("`{n} in queue`", "Nothing queued"); A on it opens Manage Queue ([manage-queue.md](manage-queue.md)) over Home, B back to the tile. A tile whose game is in the Queue has the status band (section 3) unfocused and the state under its title in the focused title band; there is no progress on a tile, as there is none on the Bundle's, and no picture of the Bundle's shows either. Achievements says "`{Score:N0} Score`" while there are totals (#141), and "Nothing recorded yet", the Bundle's line for no achievements, until then; "Needs PlayniteAchievements" is never said, there being no such dependency here. Its trophy is drawn from Segoe UI Symbol (`render::Font::Symbols`), as WPF draws it. Discord shows the chat glyph, not Discord's logo.

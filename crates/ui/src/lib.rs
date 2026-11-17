@@ -414,6 +414,20 @@ impl<'a> Ui<'a> {
         Some(fitted)
     }
 
+    /// A piece of art, all of it, stretched over `rect`, its colour multiplied by `color`: a white picture drawn in
+    /// any colour, as a painted glyph is. False until it is decoded.
+    pub fn art_tinted(&mut self, rect: Rect, key: &ArtKey, color: Color) -> bool {
+        match self.art.get(key) {
+            Art::Ready { tex, .. } => {
+                let quad = Quad::image(rect, tex, [0.0, 0.0, 1.0, 1.0], 1.0, 0.0);
+                let tint = color.quad(self.alpha);
+                self.push(Quad { c0: tint, c1: tint, ..quad });
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// A piece of art, all of it, stretched over `rect`, which is turned `turn` radians clockwise about its
     /// middle. False until it is decoded.
     pub fn art_turned(&mut self, rect: Rect, key: &ArtKey, alpha: f32, turn: f32) -> bool {

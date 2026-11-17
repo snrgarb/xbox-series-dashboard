@@ -342,7 +342,7 @@ fn cover(ui: &mut Ui, rect: Rect, library: &Library, game: usize) {
     if !drawn {
         ui.icon(cx, cy, glyph::GAMEPAD, 36.0, Color::WHITE);
     }
-    marks::store_badge(ui, rect);
+    marks::store_badge(ui, rect, game);
 }
 
 #[cfg(test)]
