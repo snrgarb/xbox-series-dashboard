@@ -237,6 +237,19 @@ mod tests {
         assert_eq!(follow.look(Vec::new(), Some(&idle), None, NOT_UPDATING, 16.0), []);
     }
 
+    /// After `PauseAppUpdate` the real overview reads `update_appid: 0, update_state: "None", paused: false` (TV PC,
+    /// 2026-11-17): paused is the manifest's word, never the overview's.
+    #[test]
+    fn a_paused_download_reads_paused_by_its_manifest_whatever_the_overview_says() {
+        let mut follow = Follow::default();
+        let found = vec![(60, InstallState::Downloading { done: 100, total: 5000 }, counts(100, 5000))];
+        follow.look(found, Some(&overview(60, "Downloading", "")), None, NOT_UPDATING, 0.0);
+        let after_pause = Overview::parse(r#"{"update_appid":0,"update_state":"None","paused":false}"#).unwrap();
+        let paused = vec![(60, InstallState::Paused { done: 100, total: 5000 }, counts(100, 5000))];
+        let got = follow.look(paused, Some(&after_pause), None, NOT_UPDATING, 1.0);
+        assert_eq!(states(&got), [("60", InstallState::Paused { done: 100, total: 5000 }, None)]);
+    }
+
     #[test]
     fn without_the_overview_an_app_is_held_while_content_that_turned_up_just_after_it_is_under_way() {
         let mut follow = Follow::default();

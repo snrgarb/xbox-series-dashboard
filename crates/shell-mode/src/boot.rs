@@ -57,7 +57,9 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
 }
 
-pub fn run(data: Option<PathBuf>) -> i32 {
+/// `dashboard_args`: what the Dashboard is started with, `--from-shell` and the logging switches passed on
+/// (`contract::from_shell_args`).
+pub fn run(data: Option<PathBuf>, dashboard_args: Vec<String>) -> i32 {
     let name = wide(contract::SHELL_MUTEX);
     let mutex = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
     if mutex.is_null() || unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
@@ -65,7 +67,7 @@ pub fn run(data: Option<PathBuf>) -> i32 {
         return contract::NOT_A_DASHBOARD as i32;
     }
     let mut log = Log::new("shell");
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Boot::run(&mut log, data)));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Boot::run(&mut log, data, dashboard_args)));
     // Only a panic comes here: never leave the screen black with no shell.
     let why = match result {
         Ok(never) => match never {},
@@ -139,6 +141,8 @@ impl Events {
 struct Boot {
     began: Instant,
     exe: PathBuf,
+    /// What the Dashboard is started with: `--from-shell`, and the logging switches `--shell` was given.
+    args: Vec<String>,
     explorer: PathBuf,
     events: Events,
     processes: Processes,
@@ -152,7 +156,7 @@ impl Boot {
         self.began.elapsed()
     }
 
-    fn run(log: &mut Log, data: Option<PathBuf>) -> std::convert::Infallible {
+    fn run(log: &mut Log, data: Option<PathBuf>, args: Vec<String>) -> std::convert::Infallible {
         let began = Instant::now();
         let running = std::env::current_exe().unwrap_or_default();
         // The Dashboard is the file beside this one under its own name: after an update renamed this one aside, the
@@ -187,6 +191,7 @@ impl Boot {
         let mut boot = Boot {
             began,
             exe: exe.clone(),
+            args,
             explorer: windows_folder().join("explorer.exe"),
             events,
             processes: Processes::new(exe),
@@ -294,11 +299,12 @@ impl Boot {
             (self.first_seen, self.ended_seen) = (false, false);
             log.line("events reset");
             set_black(true, self.dog.line(), log);
-            match start_held(&self.exe, &[contract::FROM_SHELL]) {
+            let args: Vec<&str> = self.args.iter().map(String::as_str).collect();
+            match start_held(&self.exe, &args) {
                 Ok((pid, handle)) => {
                     self.processes.adopt(pid, handle);
                     self.dog.launched(pid, self.now());
-                    log.line(&format!("started pid {pid}: \"{}\" {}", self.exe.display(), contract::FROM_SHELL));
+                    log.line(&format!("started pid {pid}: \"{}\" {}", self.exe.display(), self.args.join(" ")));
                 }
                 Err(why) => {
                     log.line(&format!("ERROR: \"{}\" didn't start: {why}", self.exe.display()));

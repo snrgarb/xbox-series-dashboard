@@ -134,14 +134,18 @@ fn install_on_a_game_already_in_the_queue_asks_nothing_more() {
     let mut dashboard = on_tile(UNINSTALLED);
     let game = id_on(&dashboard, UNINSTALLED);
     dashboard.set_queue(queue(game, InstallState::Queued));
+    // #171: no Install in its menu while it is in the Queue (its store steering nothing here: no Pause or Cancel
+    // either), so it cannot be asked for again.
     press(&mut dashboard, &[Menu]);
-    assert!(dashboard.focus_line().contains("(Install)"), "{}", dashboard.focus_line());
-    press(&mut dashboard, &[A]);
+    assert!(dashboard.focus_line().contains("(Add to Favourites)"), "{}", dashboard.focus_line());
+    press(&mut dashboard, &[B]);
     assert_eq!(asked(&mut dashboard), []);
     assert_eq!(dashboard.page(), None);
     // Not queued, it asks.
     dashboard.set_queue(Queue::default());
-    press(&mut dashboard, &[Menu, A]);
+    press(&mut dashboard, &[Menu]);
+    assert!(dashboard.focus_line().contains("(Install)"), "{}", dashboard.focus_line());
+    press(&mut dashboard, &[A]);
     assert_eq!(asked(&mut dashboard), [Effect::Install(game)]);
 }
 

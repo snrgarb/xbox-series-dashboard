@@ -31,8 +31,14 @@
 //! bytes gained over the time since they last moved, smoothed, and 0 once they have stood still for
 //! [`STALLED_AFTER`] seconds, as Steam writes its progress only every few seconds. None until they first move.
 //!
-//! [`spawn`] runs all this on a thread of its own, which polls only while there is something to follow and wakes
-//! whoever started it when the Queue or the library has changed.
+//! What is done in the store's own client while the Dashboard runs shows too (#171): the thread looks every
+//! [`WATCH_EVERY`] seconds when there is nothing else to follow, so an install started there joins the Queue as its
+//! source reports it; and at that pace each source's own cheap word of what is installed (`Source::installed_now`,
+//! Steam's app manifests) is held to what it said last, the source read again when it changes, so a game installed
+//! or uninstalled there reads so without a restart.
+//!
+//! [`spawn`] runs all this on a thread of its own, which polls once a second while there is something to follow,
+//! every [`WATCH_EVERY`] seconds otherwise, and wakes whoever started it when the Queue or the library has changed.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -76,6 +82,10 @@ pub const UNINSTALL_FOR: u64 = 120;
 /// How long an uninstall is followed where it is the user's to finish in a window of its own, in seconds: as long
 /// as the Bundle follows one before giving up.
 pub const USER_UNINSTALL_FOR: u64 = 600;
+/// How often, in seconds, each source's own word of what is installed (`Source::installed_now`) is looked at, and
+/// how long the Queue's thread waits between looks when there is nothing else to follow: a game installed,
+/// uninstalled or started downloading in the store's own client shows within this.
+pub const WATCH_EVERY: u64 = 5;
 /// How many finished installs a snapshot carries.
 pub const RECENTLY_INSTALLED: usize = 8;
 /// How often the Queue is looked at while there is something to follow.
@@ -215,6 +225,15 @@ impl Database {
         Ok(id)
     }
 
+    /// The `source_id`s of the source's games that read installed, sorted: what `Source::installed_now` is held to.
+    fn installed_ids(&self, source: &str) -> Result<Vec<String>> {
+        let mut ids =
+            self.conn.prepare("SELECT source_id FROM games WHERE source = ?1 AND installed = 1 AND gone = 0")?;
+        let mut ids: Vec<String> = ids.query_map([source], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
+        ids.sort();
+        Ok(ids)
+    }
+
     /// Whether the game reads installed.
     fn installed(&self, game: i64) -> Result<bool> {
         let installed =
@@ -316,6 +335,10 @@ pub struct Follower {
     samples: HashMap<i64, Sample>,
     /// Each downloading game's speed as its store says it, by game: shown in place of the sample's.
     told: HashMap<i64, u64>,
+    /// What each source's client said was installed at its last look (`Source::installed_now`), by its key.
+    installed: HashMap<&'static str, Vec<String>>,
+    /// When the sources' installed games were last looked at.
+    watched_at: Option<u64>,
 }
 
 impl Follower {
@@ -326,7 +349,43 @@ impl Follower {
             read_at: HashMap::new(),
             samples: HashMap::new(),
             told: HashMap::new(),
+            installed: HashMap::new(),
+            watched_at: None,
         }
+    }
+
+    /// The sources whose client's word of what is installed has changed since the last look, every
+    /// [`WATCH_EVERY`] seconds: to be read again, so that a game installed or uninstalled in the store's own client
+    /// shows as such. At the first look, a source whose word differs from the database's.
+    fn watch_installed(
+        &mut self,
+        db: &Database,
+        off: &std::collections::HashSet<String>,
+        now: u64,
+    ) -> Result<Vec<String>> {
+        if self.watched_at.is_some_and(|at| now.saturating_sub(at) < WATCH_EVERY) {
+            return Ok(Vec::new());
+        }
+        self.watched_at = Some(now);
+        let mut changed = Vec::new();
+        for source in self.sources.iter().filter(|source| !off.contains(source.key())) {
+            let Some(now_installed) = source.installed_now() else { continue };
+            let before = match self.installed.get(source.key()) {
+                Some(before) => before.clone(),
+                None => db.installed_ids(source.key())?,
+            };
+            if before != now_installed {
+                eprintln!(
+                    "queue: {}'s installed games changed in its own client ({} then, {} now): reading it again",
+                    source.key(),
+                    before.len(),
+                    now_installed.len()
+                );
+                changed.push(source.key().to_string());
+            }
+            self.installed.insert(source.key(), now_installed);
+        }
+        Ok(changed)
     }
 
     /// The Queue as the database has it, each download with the speed it has been given and what its store's
@@ -509,6 +568,7 @@ impl Follower {
         let mut to_read: Vec<String> = ended.iter().map(|row| row.source.clone()).collect();
         to_read.extend(playable.iter().map(|(_, key)| key.clone()));
         to_read.extend(waiting.iter().filter(|row| self.due(&row.source, now, READ_EVERY)).map(|r| r.source.clone()));
+        to_read.extend(self.watch_installed(db, &off, now)?);
         let uninstalls: Vec<(i64, u64)> = self.uninstalls.iter().map(|(&game, &asked)| (game, asked)).collect();
         for &(game, asked) in &uninstalls {
             let Some(source) = db.game(game)?.map(|game| game.source) else {
@@ -730,11 +790,10 @@ fn follow(
             wake();
         }
         first = false;
-        let next = if follower.busy(&db)? {
-            asked.recv_timeout(POLL)
-        } else {
-            asked.recv().map_err(|_| RecvTimeoutError::Disconnected)
-        };
+        // With nothing to follow, it still looks every few seconds: an install started in the store's own client
+        // joins the Queue, and a game installed or uninstalled there reads so (`Follower::watch_installed`).
+        let wait = if follower.busy(&db)? { POLL } else { Duration::from_secs(WATCH_EVERY) };
+        let next = asked.recv_timeout(wait);
         match next {
             Ok(Ask::Install(game)) => {
                 if follower.asked_install(&mut db, game, crate::now())? {
@@ -774,6 +833,8 @@ mod tests {
         reads: Mutex<usize>,
         /// What its installer can do; none: it has no installer.
         can: Mutex<Option<model::Can>>,
+        /// It gives its own word of what is installed (`Source::installed_now`): its games' as they are set.
+        watched: Mutex<bool>,
     }
 
     impl model::Installer for Fake {
@@ -801,6 +862,7 @@ mod tests {
                 installs: Mutex::default(),
                 reads: Mutex::default(),
                 can: Mutex::default(),
+                watched: Mutex::default(),
             })
         }
 
@@ -842,6 +904,13 @@ mod tests {
 
         fn installs(&self) -> Option<Vec<Install>> {
             self.follows.then(|| self.installs.lock().unwrap().clone())
+        }
+
+        fn installed_now(&self) -> Option<Vec<String>> {
+            let games = self.games.lock().unwrap();
+            let mut ids: Vec<String> = games.iter().filter(|g| g.installed).map(|g| g.source_id.clone()).collect();
+            ids.sort();
+            self.watched.lock().unwrap().then_some(ids)
         }
 
         /// The store that reports its installs uninstalls by itself too, as Steam does; the other is the user's.
@@ -900,6 +969,35 @@ mod tests {
 
     fn named(names: &[(&str, InstallState)]) -> Vec<(String, InstallState)> {
         names.iter().map(|&(name, state)| (name.to_string(), state)).collect()
+    }
+
+    /// #171: a game uninstalled or installed in the store's own client while the Dashboard runs reads so at the next
+    /// look, the source read again only when its own word of what is installed changes.
+    #[test]
+    fn a_game_installed_or_uninstalled_in_its_stores_own_client_reads_so_within_a_few_seconds() {
+        let mut world = World::new();
+        *world.fake.watched.lock().unwrap() = true;
+        // The first look: the client says what the database says, so nothing is read.
+        let reads = world.fake.reads();
+        assert!(!world.poll(0).library_changed);
+        assert_eq!(world.fake.reads(), reads);
+        // Wren uninstalled in the client, Moss installed there: not looked at before the next look is due.
+        world.fake.set_installed("3", false);
+        world.fake.set_installed("1", true);
+        world.poll(1);
+        assert_eq!(world.fake.reads(), reads);
+        assert!(world.installed("Wren"));
+        assert!(world.poll(WATCH_EVERY).library_changed);
+        assert!(!world.installed("Wren") && world.installed("Moss"));
+        assert!(world.queue().is_empty(), "nothing joins the Queue for it");
+        // Nothing changed since: not read again.
+        let reads = world.fake.reads();
+        world.poll(2 * WATCH_EVERY);
+        assert_eq!(world.fake.reads(), reads);
+        // A source that gives no such word is never read for it.
+        world.other.set_installed("9", true);
+        world.poll(3 * WATCH_EVERY);
+        assert!(!world.installed("Kite"));
     }
 
     #[test]

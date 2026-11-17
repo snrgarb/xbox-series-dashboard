@@ -128,15 +128,18 @@ console has them: in a queued game's menu. No picture of the console was at hand
 manner as remembered, the wording guessed where marked.
 
 1. **Where.** Menu or View on a row of Installing opens the game's Tile menu as before (`tile_menu::Opener::Queue`),
-   with, after its first row (Install, as the Bundle's), **Pause installation** for a game downloading or waiting its
-   turn, or **Resume installation** for one paused, then **Cancel installation**. On a cover, on a Home tile or
-   anywhere else the menu is the Bundle's: the rows are the Queue's. Focus starts on the first row, as always.
+   with, **in place of its first row** (the Bundle's Install, which for a game already installing asks nothing and
+   reads wrong), **Pause installation** for a game downloading or waiting its turn, or **Resume installation** for
+   one paused, then **Cancel installation**. The same for the game's menu from anywhere while it is in the Queue: a
+   Home tile, My games, the library, the Game hub's Manage (#171, the lead's decision on the TV PC, 2026-11-17: the
+   console offers the queue's actions on the game wherever it is). The Game hub's own main action stays Queued or
+   Installing..., and its Queue action opens this page. Focus starts on the first row, as always.
    Labels: "Pause installation" and "Resume installation" as the console's queue words them (from memory, not a
    picture); "Cancel installation" guessed to match.
 2. **Only where the store can.** Each row shows only where the game's store can be asked it: its installer's
    `Can` (docs/sources.md "Installs"), which the Queue's follower gives each entry (`Queued::can`). Pause and Resume
-   go together. A store that cannot (Steam with its CEF debugger off, every other store until its ticket) has the
-   Bundle's menu. A game installed whose extras are still coming in (#188) has none of them.
+   go together. A store that cannot (Steam with its CEF debugger off, every other store until its ticket) has no row
+   in the first row's place: the menu starts at the Favourites row. A game installed whose extras are still coming in (#188) has none of them.
 3. **What they do.** Pause and Resume close the menu and ask the store (`Effect::Steer`); the row follows what the
    store then reports, a second or so later. Cancel asks first, in the menu's place as Uninstall does: "Cancel
    installing <game>?", "What has downloaded so far is deleted.", **Cancel installation** (focused) or **Keep

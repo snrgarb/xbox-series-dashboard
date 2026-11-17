@@ -14,6 +14,10 @@ use crate::vdf;
 
 /// The app's files are all on disk; a fresh install's manifest lacks it until Steam has committed the last of them.
 pub const FULLY_INSTALLED: u64 = 4;
+/// Content Steam fetched only to share with other apps (a redistributable, a common runtime: Steam's content log says
+/// `Fully Installed,Shared Only` for 68), not a game the user installed. Seen on the TV PC for app 70 (2026-11-17,
+/// #171): such a manifest is neither installed nor an install under way here.
+pub const SHARED_ONLY: u64 = 64;
 /// Steam works on the app's download: preallocating, downloading, staging, committing.
 pub const UPDATE_RUNNING: u64 = 256;
 /// The user has the app's download paused.
@@ -41,17 +45,18 @@ pub fn manifests(steamapps: &Path) -> Vec<(u32, PathBuf)> {
 
 /// Whether a manifest's `StateFlags` say the game is installed: its files all on disk and no uninstall under way.
 /// An installed game being updated still is. A manifest with no flags (an old one, or a made-up one) is taken at its
-/// word that the game is there.
+/// word that the game is there. Shared-only content ([`SHARED_ONLY`]) is not a game installed.
 pub fn installed(flags: Option<u64>) -> bool {
-    flags.is_none_or(|flags| flags & FULLY_INSTALLED != 0 && flags & UNINSTALLING == 0)
+    flags.is_none_or(|flags| flags & FULLY_INSTALLED != 0 && flags & (UNINSTALLING | SHARED_ONLY) == 0)
 }
 
 /// Where an app is by its manifest's flags and byte counts, while it is being installed: Steam has it queued or
 /// running (`UpdateStarted` or `UpdateRunning`), it is not installed yet, and it is not on its way out. A download
 /// cancelled by an uninstall can leave its manifest at `UpdateRequired | UpdatePaused`, with neither bit, for an app
-/// Steam has dropped. `running` is a second word that Steam works on it (the registry's `Updating`).
+/// Steam has dropped: none here, so it is not shown as a paused download (#171). Shared-only content
+/// ([`SHARED_ONLY`]) is none either. `running` is a second word that Steam works on it (the registry's `Updating`).
 pub fn state(flags: u64, done: u64, total: u64, running: bool) -> Option<InstallState> {
-    if flags & FULLY_INSTALLED != 0 || flags & UNINSTALLING != 0 || flags & (UPDATE_STARTED | UPDATE_RUNNING) == 0 {
+    if flags & (FULLY_INSTALLED | UNINSTALLING | SHARED_ONLY) != 0 || flags & (UPDATE_STARTED | UPDATE_RUNNING) == 0 {
         return None;
     }
     Some(if flags & UPDATE_RUNNING != 0 || running {
@@ -205,6 +210,23 @@ mod tests {
             installed(Some(FULLY_INSTALLED)) && installed(Some(FULLY_INSTALLED | UPDATE_RUNNING)) && installed(None)
         );
         assert!(!installed(Some(QUEUED)) && !installed(Some(FULLY_INSTALLED | UNINSTALLING)) && !installed(Some(1)));
+    }
+
+    /// #171, the TV PC: app 70 fetched as another game's shared content (`Fully Installed,Shared Only`, 68) is no
+    /// game installed and no install under way; and a cancel's leftover (514) is neither either, so not a paused
+    /// download the user cannot get rid of.
+    #[test]
+    fn shared_only_content_and_a_cancels_leftover_are_neither_installed_nor_under_way() {
+        for flags in [FULLY_INSTALLED | SHARED_ONLY, QUEUED | UPDATE_RUNNING | SHARED_ONLY, 2 | UPDATE_PAUSED] {
+            assert_eq!(state(flags, 3, 10, true), None, "{flags}");
+            assert!(!installed(Some(flags)), "{flags}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        for (appid, flags) in [(70, 68), (400, 514), (620, 4)] {
+            let manifest = format!("\"AppState\" {{ \"appid\" \"{appid}\" \"StateFlags\" \"{flags}\" }}");
+            fs::write(dir.path().join(format!("appmanifest_{appid}.acf")), manifest).unwrap();
+        }
+        assert!(under_way(&[dir.path().to_path_buf()], &|_| true).is_empty());
     }
 
     #[test]

@@ -49,6 +49,10 @@ impl Opener for Saying<'_> {
         let addresses = self.addresses.detached()?;
         Some(Box::new(Detached { addresses, store: self.store, what: self.what, name: self.game.name.clone() }))
     }
+
+    fn front(&mut self) {
+        self.addresses.front();
+    }
 }
 
 /// [`Saying`], for a thread to keep: an installer's fallback that is taken later (Steam's client not answering).
@@ -64,6 +68,10 @@ impl Opener for Detached {
         let opened = self.addresses.open(start);
         say(self.store, self.what, &self.name, start, &opened);
         opened
+    }
+
+    fn front(&mut self) {
+        self.addresses.front();
     }
 }
 
@@ -196,7 +204,58 @@ impl Addresses for SystemAddresses {
     }
 
     fn detached(&self) -> Option<Box<dyn Opener + Send>> {
-        Some(Box::new(SystemAddresses))
+        Some(Box::new(Home { addresses: SystemAddresses, home: front_window() }))
+    }
+}
+
+/// An opener for a thread to keep, with the window that was in front as it was made (Home's, the Dashboard's): put
+/// in front again by [`Opener::front`] when a store's window has come up over it.
+struct Home<A> {
+    addresses: A,
+    home: isize,
+}
+
+impl<A: Addresses> Opener for Home<A> {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
+        self.addresses.open(start)
+    }
+
+    fn front(&mut self) {
+        bring_front(self.home);
+    }
+}
+
+/// The window in front now; 0 anywhere but Windows.
+fn front_window() -> isize {
+    #[cfg(windows)]
+    {
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() as isize }
+    }
+    #[cfg(not(windows))]
+    {
+        0
+    }
+}
+
+/// Puts `home` in front again where another window has the foreground, and says so: `store: the foreground back
+/// to Home`.
+fn bring_front(home: isize) {
+    #[cfg(windows)]
+    {
+        let front = front_window();
+        if home == 0 || front == home {
+            return;
+        }
+        let back = unsafe { crate::take_foreground(home as windows_sys::Win32::Foundation::HWND) };
+        eprintln!(
+            "store: the foreground {} (it was {front:#x}'s) at {:.0} ms",
+            if back { "back to Home" } else { "could not be got back for Home" },
+            crate::since_start()
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = home;
     }
 }
 
@@ -257,7 +316,7 @@ impl Addresses for ProgramAddresses {
     }
 
     fn detached(&self) -> Option<Box<dyn Opener + Send>> {
-        Some(Box::new(self.clone()))
+        Some(Box::new(Home { addresses: self.clone(), home: front_window() }))
     }
 }
 

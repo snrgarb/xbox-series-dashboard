@@ -73,7 +73,7 @@ pub fn paths(data: &Path, as_installed: bool) -> Paths {
 pub fn run_job(args: &[String], data: Option<PathBuf>) -> Option<i32> {
     let first = args.first()?.as_str();
     match first {
-        contract::SHELL => Some(shell(data)),
+        contract::SHELL => Some(shell(data, contract::from_shell_args(&args[1..]))),
         contract::SENTINEL => Some(sentinel(data)),
         contract::PROBE => {
             println!("dashboard: {} ok", contract::PROBE);
@@ -170,14 +170,14 @@ fn usage(why: &str) -> i32 {
 }
 
 /// `--shell`: the Boot shell's job, for the rest of the session.
-fn shell(data: Option<PathBuf>) -> i32 {
+fn shell(data: Option<PathBuf>, dashboard_args: Vec<String>) -> i32 {
     #[cfg(windows)]
     {
-        boot::run(data)
+        boot::run(data, dashboard_args)
     }
     #[cfg(not(windows))]
     {
-        let _ = data;
+        let _ = (data, dashboard_args);
         eprintln!("dashboard: --shell is Windows' only");
         2
     }

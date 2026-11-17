@@ -27,6 +27,22 @@ pub const AS_INSTALLED: &str = "--as-installed";
 /// topmost.
 pub const FROM_SHELL: &str = "--from-shell";
 
+/// The Dashboard's logging switches, which `--shell` passes on to the Dashboard it starts `--from-shell`
+/// (`dashboard --shell --log-focus`), so that the live shell's Dashboard can log as any other.
+pub const PASSED_ON: [&str; 4] = ["--log-focus", "--log-sounds", "--log-frames", "--log-queue-sources"];
+
+/// What the Dashboard started `--from-shell` is given, after `--shell`'s own `args`: [`FROM_SHELL`], then each of
+/// [`PASSED_ON`] that `args` has, once, in the order given. Anything else in `args` is not passed on.
+pub fn from_shell_args(args: &[String]) -> Vec<String> {
+    let mut out = vec![FROM_SHELL.to_string()];
+    for arg in args {
+        if PASSED_ON.contains(&arg.as_str()) && !out.contains(arg) {
+            out.push(arg.clone());
+        }
+    }
+    out
+}
+
 /// An update's new Dashboard, started by the one it replaces with that one's pid (docs/spec/updates.md): it takes
 /// the single-instance guard alongside it, and sets [`handover_event`] once its first frame is presented.
 pub const HANDOVER: &str = "--handover";
@@ -43,3 +59,18 @@ pub fn handover_event(old_pid: u32) -> String {
 pub const NOT_A_DASHBOARD: u32 = 0x5844_0001;
 /// `--shell-probe`'s exit code: this exe starts.
 pub const PROBE_OK: u32 = 0x5844_0002;
+
+#[cfg(test)]
+mod passed_on {
+    use super::*;
+
+    #[test]
+    fn the_logging_switches_are_passed_on_from_shell_and_nothing_else() {
+        let given: Vec<String> =
+            ["--log-focus", "--data-dir", r"C:\d", "--log-queue-sources", "--log-focus", "--dry-shell"]
+                .map(String::from)
+                .to_vec();
+        assert_eq!(from_shell_args(&given), ["--from-shell", "--log-focus", "--log-queue-sources"]);
+        assert_eq!(from_shell_args(&[]), ["--from-shell"]);
+    }
+}
