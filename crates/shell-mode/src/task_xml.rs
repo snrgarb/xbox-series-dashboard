@@ -91,4 +91,12 @@ mod tests {
         assert!(lists(csv, "XboxSeriesDashboard.SafetyNet"));
         assert!(!lists(csv, "Other"));
     }
+
+    #[test]
+    fn the_task_runs_as_the_users_sid_in_its_trigger_and_its_principal() {
+        let task = Task { command: "conhost.exe".into(), arguments: String::new(), delay_seconds: 90 };
+        let xml = write(&task, "S-1-5-21-1004336348-1177238915-682003330-1001");
+        assert_eq!(xml.matches("<UserId>S-1-5-21-1004336348-1177238915-682003330-1001</UserId>").count(), 2);
+        assert!(!xml.contains("WORKGROUP"));
+    }
 }

@@ -23,6 +23,12 @@ lines and the logs print there; `--shell` and `--sentinel` never attach. cmd and
 program: `start /wait dashboard.exe --shell-on`, or `Start-Process -Wait -NoNewWindow`, to wait and read its exit code
 (`echo %errorlevel%`, `$p.ExitCode`).
 
+Every start leaves a log. Where the Dashboard's stderr goes nowhere (a start by Explorer, a shortcut, another program
+that gives it no handles), its lines go to `<data>\logs\dashboard-<stamp>.log`, the newest 30 kept; `--log-file
+<path>` appends them to that file instead, however it is started (and under `--from-shell` too). Under `--from-shell`
+without it they go to `<data>\shell\logs\dashboard-<stamp>.log` (section 6). A terminal, a file or a pipe it was given
+keeps them.
+
 Exit codes: `--shell-on` and `--shell-off` end 0 (done, or so already), 3 (refused), 4 (failed) or 2 (bad arguments).
 `--sentinel`, a second `--shell` and a second Dashboard end `0x58440001`, which the watchdog never takes for a
 Dashboard's exit.

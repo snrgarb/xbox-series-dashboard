@@ -74,7 +74,18 @@ mod elsewhere {
         false
     }
 
-    pub fn log_to_file(_: &Path) {}
+    pub fn log_to_file(_: &Path) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    pub fn log_to_path(_: &Path) -> bool {
+        false
+    }
+
+    /// Off Windows the terminal or whatever the caller gave.
+    pub fn errors_go_somewhere() -> bool {
+        true
+    }
 
     pub fn attach_parent_console() -> bool {
         false
@@ -215,26 +226,48 @@ mod win {
         }
     }
 
-    /// Everything the Dashboard says goes to `<folder>\dashboard-<stamp>.log` from here on: started by the --shell
-    /// process it has no console, and its lines would go nowhere.
-    pub fn log_to_file(folder: &Path) {
-        let _ = std::fs::create_dir_all(folder);
+    /// Everything the Dashboard says goes to `<folder>\dashboard-<stamp>.log` from here on, the newest
+    /// [`crate::log::KEEP`] kept: a start with nowhere else for its lines (by the --shell process, Explorer, a
+    /// shortcut, another program) still leaves a log. The file, if it could be opened.
+    pub fn log_to_file(folder: &Path) -> Option<std::path::PathBuf> {
         let path = folder.join(format!("dashboard-{}.log", crate::setup::stamp()));
         crate::log::prune(folder, "dashboard", crate::log::KEEP - 1);
+        log_to_path(&path).then_some(path)
+    }
+
+    /// Everything the Dashboard says is appended to `path` from here on (`--log-file`). Whether it could be opened.
+    pub fn log_to_path(path: &Path) -> bool {
+        use windows_sys::Win32::Storage::FileSystem::{FILE_APPEND_DATA, SYNCHRONIZE};
+        if let Some(folder) = path.parent() {
+            let _ = std::fs::create_dir_all(folder);
+        }
         let name = wide(&path.display().to_string());
         unsafe {
             let file = CreateFileW(
                 name.as_ptr(),
-                FILE_GENERIC_WRITE,
+                FILE_APPEND_DATA | SYNCHRONIZE,
                 FILE_SHARE_READ | FILE_SHARE_DELETE,
                 std::ptr::null(),
                 OPEN_ALWAYS,
                 FILE_ATTRIBUTE_NORMAL,
                 std::ptr::null_mut(),
             );
-            if !file.is_null() && file as isize != -1 {
-                SetStdHandle(STD_ERROR_HANDLE, file);
+            if file.is_null() || file as isize == -1 {
+                return false;
             }
+            SetStdHandle(STD_ERROR_HANDLE, file);
+            true
+        }
+    }
+
+    /// Whether what the Dashboard says goes anywhere: a console, a file or a pipe. A GUI program started by
+    /// Explorer, a shortcut or another program with no handles given has none.
+    pub fn errors_go_somewhere() -> bool {
+        use windows_sys::Win32::Storage::FileSystem::{GetFileType, FILE_TYPE_UNKNOWN};
+        use windows_sys::Win32::System::Console::GetStdHandle;
+        unsafe {
+            let handle = GetStdHandle(STD_ERROR_HANDLE);
+            !handle.is_null() && handle as isize != -1 && GetFileType(handle) != FILE_TYPE_UNKNOWN
         }
     }
 

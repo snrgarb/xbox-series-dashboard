@@ -18,6 +18,40 @@ use crate::{contract, task_xml};
 /// CREATE_NO_WINDOW: schtasks and the probe show no console.
 const NO_WINDOW: u32 = 0x0800_0000;
 
+/// This process's user as its token has it, as a SID string (`S-1-5-21-...`), which Task Scheduler takes for a
+/// `UserId`. Never from the environment: in an SSH session `USERDOMAIN` is `WORKGROUP`, which names no account.
+pub fn token_user() -> Result<String, String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
+    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows_sys::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err(format!("this process's token: {}", std::io::Error::last_os_error()));
+        }
+        let mut needed = 0u32;
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        // u64s, so the TOKEN_USER at its start is aligned.
+        let mut buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+        let ok = GetTokenInformation(token, TokenUser, buffer.as_mut_ptr().cast(), needed, &mut needed) != 0;
+        let failed = std::io::Error::last_os_error();
+        CloseHandle(token);
+        if !ok {
+            return Err(format!("this process's user: {failed}"));
+        }
+        let user = &*(buffer.as_ptr() as *const TOKEN_USER);
+        let mut text: windows_sys::core::PWSTR = std::ptr::null_mut();
+        if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 {
+            return Err(format!("this user's SID as text: {}", std::io::Error::last_os_error()));
+        }
+        let length = (0..).take_while(|&i| *text.add(i) != 0).count();
+        let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
+        LocalFree(text.cast());
+        Ok(sid)
+    }
+}
+
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
 }

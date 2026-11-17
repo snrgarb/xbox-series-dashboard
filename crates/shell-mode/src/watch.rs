@@ -55,6 +55,30 @@ struct Tracked {
     closed_by_hold: bool,
     /// Has had a window: one it didn't start is a Dashboard only once it has, as this exe's jobs never make one.
     windowed: bool,
+    /// What it was started as, for the log: `the sentinel (--sentinel)`. Empty for one this process started.
+    what: String,
+}
+
+/// What a process of this exe is, from its command line: the job its first argument names, and the arguments.
+pub fn job_of(command_line: &str) -> String {
+    let line = command_line.trim_start();
+    let rest = match line.strip_prefix('"') {
+        Some(quoted) => quoted.split_once('"').map_or("", |(_, rest)| rest),
+        None => line.split_once(char::is_whitespace).map_or("", |(_, rest)| rest),
+    }
+    .trim();
+    let job = match rest.split_whitespace().next().unwrap_or("") {
+        contract::SENTINEL => "the sentinel",
+        contract::SHELL => "another --shell",
+        contract::ON | contract::OFF => "a turning on or off",
+        contract::PROBE => "--shell-on's probe",
+        _ => "a Dashboard",
+    };
+    if rest.is_empty() {
+        format!("{job} (no arguments)")
+    } else {
+        format!("{job} ({rest})")
+    }
 }
 
 /// Keeps the Dashboard up for the whole sign-in. It watches every Dashboard process in the session by its exe's
@@ -124,8 +148,16 @@ impl Watchdog {
 
     /// The --shell process started a Dashboard, `pid`: a start, behind the black.
     pub fn launched(&mut self, pid: u32, now: Duration) {
-        self.alive
-            .insert(pid, Tracked { launched: true, past_first_frame: false, closed_by_hold: false, windowed: true });
+        self.alive.insert(
+            pid,
+            Tracked {
+                launched: true,
+                past_first_frame: false,
+                closed_by_hold: false,
+                windowed: true,
+                what: String::new(),
+            },
+        );
         self.start = Some((pid, now));
         self.black = true;
         self.say(format!(
@@ -159,10 +191,14 @@ impl Watchdog {
 
     /// A Dashboard the --shell process didn't start has appeared: the Start menu, an update's handover, or one
     /// of this exe's other jobs. No black is put up for it.
-    pub fn appeared(&mut self, pid: u32) {
-        self.alive
-            .insert(pid, Tracked { launched: false, past_first_frame: true, closed_by_hold: false, windowed: false });
-        self.say(format!("pid {pid} appeared"));
+    pub fn appeared(&mut self, pid: u32, what: &str) {
+        let what =
+            if what.is_empty() { "unknown: its command line couldn't be read".to_string() } else { what.to_string() };
+        self.say(format!("pid {pid} appeared: {what}"));
+        self.alive.insert(
+            pid,
+            Tracked { launched: false, past_first_frame: true, closed_by_hold: false, windowed: false, what },
+        );
     }
 
     /// A Dashboard has exited with `code`.
@@ -178,7 +214,8 @@ impl Watchdog {
         };
         if code == contract::NOT_A_DASHBOARD || !process.windowed {
             self.say(format!(
-                "pid {pid} exited with code {code:#x} as another of this exe's jobs, not a Dashboard; left: {}",
+                "pid {pid} exited with code {code:#x} as another of this exe's jobs, not a Dashboard{}; left: {}",
+                if process.what.is_empty() { String::new() } else { format!(": {}", process.what) },
                 names(&left)
             ));
             if left.is_empty() && std::mem::take(&mut self.quit_pending) {
@@ -591,7 +628,7 @@ mod tests {
         let mut dog = Watchdog::default();
         dog.launched(10, s(0));
         dog.first_frame(s(1));
-        dog.appeared(20);
+        dog.appeared(20, "a Dashboard (no arguments)");
         assert_eq!(dog.windowless(), [20]);
         dog.has_window(20);
         assert!(dog.windowless().is_empty());
@@ -607,23 +644,42 @@ mod tests {
         dog.first_frame(s(1));
         // The sentinel, or --shell-off from a terminal, is up as the Dashboard exits 0: windowless, it is no
         // Dashboard left, and the exit is Exit to desktop.
-        dog.appeared(30);
+        dog.appeared(30, "the sentinel (--sentinel)");
         let orders = dog.exited(10, 0, s(5));
         assert_eq!(orders, Orders { start_desktop: true, ..Orders::default() }, "it was Exit to desktop");
         assert_eq!(dog.exited(30, contract::NOT_A_DASHBOARD, s(6)), Orders::default());
         // --shell-off from a terminal with no Dashboard up, failing (4), or the probe's code: not a crash.
-        dog.appeared(32);
+        dog.appeared(32, "a turning on or off (--shell-off)");
         assert!(!dog.running(), "the Guide button still starts the Dashboard");
         assert_eq!(dog.exited(32, 4, s(7)), Orders::default());
-        dog.appeared(33);
+        dog.appeared(33, "--shell-on's probe (--shell-probe)");
         assert_eq!(dog.exited(33, contract::PROBE_OK, s(8)), Orders::default());
         assert!(dog.crashes.is_empty());
         // One that comes and goes while the Dashboard runs changes nothing.
         dog.launched(11, s(10));
         dog.first_frame(s(11));
-        dog.appeared(31);
+        dog.appeared(31, "a Dashboard (no arguments)");
         assert_eq!(dog.exited(31, contract::NOT_A_DASHBOARD, s(12)), Orders::default());
         assert!(dog.running());
+    }
+
+    #[test]
+    fn a_process_of_this_exe_is_said_as_the_job_its_command_line_names() {
+        assert_eq!(job_of(r#""C:\Users\A User\dashboard.exe" --sentinel"#), "the sentinel (--sentinel)");
+        assert_eq!(
+            job_of(r"C:\d\dashboard.exe --shell-off --dry-shell"),
+            "a turning on or off (--shell-off --dry-shell)"
+        );
+        assert_eq!(job_of(r#""C:\d\dashboard.exe""#), "a Dashboard (no arguments)");
+        assert_eq!(job_of(r"dashboard.exe --from-shell"), "a Dashboard (--from-shell)");
+        let mut dog = Watchdog::default();
+        dog.appeared(30, &job_of(r#""C:\d\dashboard.exe" --sentinel"#));
+        dog.exited(30, contract::NOT_A_DASHBOARD, s(1));
+        assert!(
+            dog.said.iter().any(|line| line.ends_with("not a Dashboard: the sentinel (--sentinel); left: nothing")),
+            "{:?}",
+            dog.said
+        );
     }
 
     #[test]

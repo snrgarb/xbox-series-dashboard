@@ -239,8 +239,8 @@ impl Boot {
             if session_ending() {
                 continue;
             }
-            for pid in appeared {
-                boot.dog.appeared(pid);
+            for (pid, what) in appeared {
+                boot.dog.appeared(pid, &what);
             }
             // One it didn't start is a Dashboard once it has the Dashboard's window; this exe's jobs never do.
             for pid in boot.processes.windowed(&boot.dog.windowless()) {

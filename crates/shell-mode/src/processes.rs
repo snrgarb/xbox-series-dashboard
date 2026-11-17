@@ -17,6 +17,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
 };
 
+/// A process that has exited, and its code.
+pub type Exited = (u32, u32);
+
 pub struct Processes {
     exe: PathBuf,
     own: u32,
@@ -34,6 +37,51 @@ fn image(handle: HANDLE) -> Option<PathBuf> {
     let mut size = buffer.len() as u32;
     let ok = unsafe { QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, buffer.as_mut_ptr(), &mut size) };
     (ok != 0).then(|| PathBuf::from(String::from_utf16_lossy(&buffer[..size as usize])))
+}
+
+/// A process's command line, as `job_of` reads it (ProcessCommandLineInformation: a limited-information handle is
+/// enough). None if it can't be read.
+fn command_line(handle: HANDLE) -> Option<String> {
+    #[repr(C)]
+    struct UnicodeString {
+        length: u16,
+        maximum: u16,
+        buffer: *const u16,
+    }
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtQueryInformationProcess(
+            process: HANDLE,
+            class: u32,
+            info: *mut core::ffi::c_void,
+            length: u32,
+            returned: *mut u32,
+        ) -> i32;
+    }
+    const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
+    unsafe {
+        let mut needed = 0u32;
+        NtQueryInformationProcess(handle, PROCESS_COMMAND_LINE_INFORMATION, std::ptr::null_mut(), 0, &mut needed);
+        if needed < std::mem::size_of::<UnicodeString>() as u32 {
+            return None;
+        }
+        let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
+        if NtQueryInformationProcess(
+            handle,
+            PROCESS_COMMAND_LINE_INFORMATION,
+            buffer.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        ) < 0
+        {
+            return None;
+        }
+        let text = &*(buffer.as_ptr() as *const UnicodeString);
+        if text.buffer.is_null() {
+            return None;
+        }
+        Some(String::from_utf16_lossy(std::slice::from_raw_parts(text.buffer, text.length as usize / 2)))
+    }
 }
 
 fn same(a: &Path, b: &Path) -> bool {
@@ -54,8 +102,9 @@ impl Processes {
         }
     }
 
-    /// The new ones since the last look, and the ones that have exited, with their codes.
-    pub fn poll(&mut self) -> (Vec<u32>, Vec<(u32, u32)>) {
+    /// The new ones since the last look, with what each is (`watch::job_of`, empty if unread), and the ones that
+    /// have exited, with their codes.
+    pub fn poll(&mut self) -> (Vec<(u32, String)>, Vec<Exited>) {
         let mut appeared = Vec::new();
         let name = self.exe.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         unsafe {
@@ -77,7 +126,10 @@ impl Processes {
                         if !handle.is_null() {
                             if image(handle).is_some_and(|path| same(&path, &self.exe)) {
                                 self.tracked.insert(pid, handle);
-                                appeared.push(pid);
+                                appeared.push((
+                                    pid,
+                                    command_line(handle).map(|line| crate::watch::job_of(&line)).unwrap_or_default(),
+                                ));
                             } else {
                                 CloseHandle(handle);
                             }

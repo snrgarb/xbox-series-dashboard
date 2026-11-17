@@ -102,6 +102,10 @@ pub struct Args {
     /// Settings > System says what it would write to turn shell mode on or off, and writes nothing: what every test
     /// starts the Dashboard with.
     dry_shell: bool,
+    /// Where the log goes (appended), in place of stderr. Without it, a start whose stderr goes nowhere (by
+    /// Explorer, a shortcut or another program: a GUI program has no console) logs to
+    /// `<data>\logs\dashboard-<stamp>.log`.
+    log_file: Option<PathBuf>,
 }
 
 impl Args {
@@ -131,7 +135,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
-                 [--from-shell] [--dry-shell]
+                 [--from-shell] [--dry-shell] [--log-file <file>]
        dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
        dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
@@ -222,6 +226,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--discord-cdn-url" => args.discord.cdn_url = Some(value()?),
             "--from-shell" => args.from_shell = true,
             "--dry-shell" => args.dry_shell = true,
+            "--log-file" => args.log_file = Some(value()?.into()),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -247,10 +252,22 @@ fn main() {
         std::process::exit(code);
     }
     let args = parse_args(given).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    // A log for every start: --log-file's; under shell mode its own place (as_shell); otherwise, where its lines
+    // would go nowhere, the data folder's logs\.
+    let data = args.data_dir.clone().or_else(library::data_dir);
+    if let Some(path) = &args.log_file {
+        if !shell_mode::dashboard::log_to_path(path) {
+            eprintln!("dashboard: couldn't open --log-file {}", path.display());
+        }
+    } else if !args.from_shell && !shell_mode::dashboard::errors_go_somewhere() {
+        if let Some(data) = &data {
+            shell_mode::dashboard::log_to_file(&data.join("logs"));
+        }
+    }
     // One Dashboard at a time, and under shell mode its log in the data folder from its first line.
     let as_shell = args.screenshot.is_none().then(|| {
-        let data = args.data_dir.clone().or_else(library::data_dir);
-        as_shell::AsShell::start(args.from_shell, args.dry_shell, args.data_dir.clone(), data)
+        let own_log = args.from_shell && args.log_file.is_none();
+        as_shell::AsShell::start(args.from_shell, own_log, args.dry_shell, args.data_dir.clone(), data.clone())
     });
     let (library, mut store) = store::open(&args);
     if args.screenshot.is_some() {
@@ -308,6 +325,14 @@ mod tests {
         assert!(args.dry_power);
         assert_eq!(parse(&[]).unwrap().open_addresses_with, None);
         assert!(parse(&["--open-addresses-with"]).is_err());
+    }
+
+    #[test]
+    fn log_file_names_where_the_log_goes_and_needs_one() {
+        let args = parse(&["--log-file", r"C:\Users\Test User\dashboard.log"]).unwrap();
+        assert_eq!(args.log_file, Some(PathBuf::from(r"C:\Users\Test User\dashboard.log")));
+        assert_eq!(parse(&[]).unwrap().log_file, None);
+        assert!(parse(&["--log-file"]).is_err());
     }
 
     #[test]

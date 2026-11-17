@@ -391,9 +391,38 @@ pub(crate) mod files {
 #[cfg(windows)]
 mod windows;
 
+/// The user the safety net's task runs as: this process's token's SID (`S-1-5-21-...`), never a name from the
+/// environment. Off Windows, and if the token can't be read, the reason, which the task's registration then fails
+/// with.
+pub fn task_user() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        windows::token_user()
+    }
+    #[cfg(not(windows))]
+    {
+        Err("only Windows has a token's user".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The task's user is the token's SID, whatever the environment says (an SSH session's USERDOMAIN is
+    /// WORKGROUP); off Windows there is none.
+    #[test]
+    fn the_task_user_is_the_tokens_sid_never_the_environments_name() {
+        let user = task_user();
+        if cfg!(windows) {
+            let sid = user.expect("this process's token has a user");
+            assert!(sid.starts_with("S-1-5-"), "{sid}");
+            std::env::set_var("USERDOMAIN", "WORKGROUP");
+            assert_eq!(task_user().unwrap(), sid);
+        } else {
+            assert!(user.is_err());
+        }
+    }
 
     #[test]
     fn a_place_and_a_value_are_said_as_regedit_has_them() {

@@ -34,11 +34,11 @@ use system::{Dry, System, ThisPc};
 
 /// This PC, for this user: what writes, or with `dry` only reads. A task's XML is written in `paths`' shell folder.
 pub fn this_pc(paths: &Paths, dry: bool) -> Box<dyn System> {
-    let var = |name| std::env::var(name).unwrap_or_default();
-    let user = match (var("USERDOMAIN"), var("USERNAME")) {
-        (domain, name) if domain.is_empty() => name,
-        (domain, name) => format!(r"{domain}\{name}"),
-    };
+    // The token's SID: an SSH session's USERDOMAIN (WORKGROUP) names no account Task Scheduler knows.
+    let user = system::task_user().unwrap_or_else(|why| {
+        eprintln!("shell: this user's SID: {why}");
+        String::new()
+    });
     let pc = ThisPc { user, scratch: paths.folder() };
     if dry {
         Box::new(Dry(pc))

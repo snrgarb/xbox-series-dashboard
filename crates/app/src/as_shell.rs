@@ -20,9 +20,10 @@ pub struct AsShell {
 
 impl AsShell {
     /// As the Dashboard starts, before anything else: a second Dashboard brings the first forward and ends here.
-    pub fn start(from_shell: bool, dry: bool, data_dir: Option<PathBuf>, data: Option<PathBuf>) -> Self {
+    /// `own_log`: under --from-shell without --log-file, the log goes to `<data>\shell\logs\`.
+    pub fn start(from_shell: bool, own_log: bool, dry: bool, data_dir: Option<PathBuf>, data: Option<PathBuf>) -> Self {
         let shell_folder = data.as_ref().map(|data| data.join("shell"));
-        if from_shell {
+        if own_log {
             if let Some(folder) = &shell_folder {
                 dashboard::log_to_file(&folder.join("logs"));
             }
