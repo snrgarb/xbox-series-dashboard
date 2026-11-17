@@ -15,7 +15,7 @@
 //!   with that code having installed nothing.
 //! - The uninstaller writes `uninstall <key> <its switches>` and hands over to a copy of itself outside the app's
 //!   folder (`<STANDIN_SETUP>\handover`, told the folder with `_?=`, as an NSIS uninstaller does) and ends at once;
-//!   the copy waits as long, removes the key from the registry file and empties the app's folder.
+//!   the copy waits as long, empties the app's folder and then removes its key from the registry file.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -155,14 +155,15 @@ fn removed(sandbox: &Path, client: &helpers::clients::Client, args: &[String]) -
         note(&format!("set-up: uninstall {}: handed over to {}", client.key, copy.display()));
         return Ok(0);
     };
-    let mut keys = keys(sandbox);
-    keys.remove(&format!(r"{UNINSTALL}\{}", key_name(client)));
-    Registry::write(&sandbox.join(REGISTRY), &keys).map_err(|e| e.to_string())?;
     // The app's folder emptied, and left: an empty folder named for a store is no store (`source_kit::empty_folder`).
+    // Then its key, last, as a real uninstaller's: once the list no longer has it, the app is gone.
     for item in std::fs::read_dir(&folder).map_err(|e| format!("{}: {e}", folder.display()))?.flatten() {
         let path = item.path();
         let _ = if path.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
     }
+    let mut keys = keys(sandbox);
+    keys.remove(&format!(r"{UNINSTALL}\{}", key_name(client)));
+    Registry::write(&sandbox.join(REGISTRY), &keys).map_err(|e| e.to_string())?;
     note(&format!("set-up: removed {} from {}", client.key, folder.display()));
     Ok(0)
 }

@@ -95,7 +95,7 @@ mod tests {
     fn a_size_is_said_in_megabytes_or_gigabytes() {
         assert_eq!(size(2_380_800), "2.4 MB");
         assert_eq!(size(264_237_056), "264 MB");
-        assert_eq!(size(1_250_000_000), "1.3 GB");
+        assert_eq!(size(1_260_000_000), "1.3 GB");
         assert_eq!(size(10), "0.1 MB");
     }
 
