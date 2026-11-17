@@ -32,11 +32,21 @@
 //!   standin make-tones <dir>
 //!       Writes a short tone into <dir> under each of the names the Dashboard's sounds have in the Bundle, for
 //!       `dashboard --media <dir>`: the console's own sounds are in no repository and on no test machine.
-//!   standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
+//!   standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close] [--start-ms <n>] [--gap-ms <n>]
+//!                [--windowed <percent>] [--crash-ms <n>] [--hand-off-ms <n>]
 //!       The stand-in game: a borderless, full-screen, dark-blue window titled <t> ("Stand-in game"). It closes when
 //!       asked to, on Esc, and after <seconds> (600) in case a test leaves it behind. With --splash-ms, a small window
 //!       titled "<t> launcher" shows for that long first, as a game's launcher or splash screen does. With
 //!       --ignore-close it does not close when asked to, as a game that has hung does not, and says so in the log.
+//!       For the backdrop behind a game (docs/spec/launch-screen.md): --start-ms waits that long with no window at
+//!       all before anything, as a game slow to start does; --gap-ms that long with none between its launcher's
+//!       window closing and its own opening; --windowed puts its window in a frame, <percent> of the screen across
+//!       and down and in its middle, rather than borderless over all of it; --crash-ms ends the process that long
+//!       after its window is up, at once, as a crash does (no close asked, its window going with the process,
+//!       exit code 0xC0000005); --hand-off-ms, that long after its window is up, starts this program again as the
+//!       game (`standin game`, the same arguments but for --hand-off-ms, --splash-ms and --start-ms, and with
+//!       --gap-ms as its --start-ms) and exits at once, as a launcher that starts the real game or a game that
+//!       restarts itself does.
 //!       Its pulse, a square towards the window's bottom right, changes colour four times a second while the game
 //!       runs, and so stands still while the game is frozen; a beat that comes late says in the log how long the
 //!       game stood still.
@@ -144,7 +154,8 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin make-gog <dir> [--json <file>]
        standin epic-url <dir> com.epicgames.launcher://apps/...
        standin make-tones <dir>
-       standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close]
+       standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close] [--start-ms <n>] [--gap-ms <n>]
+                    [--windowed <percent>] [--crash-ms <n>] [--hand-off-ms <n>]
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
        standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
@@ -270,11 +281,38 @@ struct GameArgs {
     seconds: u32,
     /// Whether it stays up when its window is asked to close, as a game that has hung does.
     ignore_close: bool,
+    /// How long it waits with no window at all before anything, as a game slow to start does.
+    start_ms: u32,
+    /// How long it waits with no window between its launcher's closing and its own opening.
+    gap_ms: u32,
+    /// Its window in a frame, this percent of the screen across and down, in the screen's middle; 0 for borderless
+    /// over the whole screen.
+    windowed: u32,
+    /// How long after its window is up the process ends at once, as a crash ends it; 0 for never.
+    crash_ms: u32,
+    /// How long after its window is up it starts the game again as another process and exits; 0 for never.
+    hand_off_ms: u32,
+}
+
+impl Default for GameArgs {
+    fn default() -> Self {
+        GameArgs {
+            title: "Stand-in game".into(),
+            splash_ms: 0,
+            seconds: 600,
+            ignore_close: false,
+            start_ms: 0,
+            gap_ms: 0,
+            windowed: 0,
+            crash_ms: 0,
+            hand_off_ms: 0,
+        }
+    }
 }
 
 impl GameArgs {
     fn parse(args: &[String]) -> Result<GameArgs, String> {
-        let mut out = GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600, ignore_close: false };
+        let mut out = GameArgs::default();
         let mut it = args.iter();
         while let Some(arg) = it.next() {
             let mut value = || it.next().ok_or(format!("{arg} needs a value"));
@@ -284,10 +322,34 @@ impl GameArgs {
                 "--splash-ms" => out.splash_ms = number(value()?)?,
                 "--seconds" => out.seconds = number(value()?)?,
                 "--ignore-close" => out.ignore_close = true,
+                "--start-ms" => out.start_ms = number(value()?)?,
+                "--gap-ms" => out.gap_ms = number(value()?)?,
+                "--windowed" => match number(value()?)? {
+                    percent @ 10..=100 => out.windowed = percent,
+                    percent => return Err(format!("--windowed {percent}: a percent of the screen from 10 to 100")),
+                },
+                "--crash-ms" => out.crash_ms = number(value()?)?,
+                "--hand-off-ms" => out.hand_off_ms = number(value()?)?,
                 _ => return Err(format!("unknown argument {arg}")),
             }
         }
         Ok(out)
+    }
+
+    /// The arguments of the game it hands off to: the same game, its window up after `gap_ms` with no launcher, and
+    /// no hand-off of its own.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn handed_off(&self) -> Vec<String> {
+        let mut args = vec!["game".to_string(), "--title".into(), self.title.clone()];
+        args.extend(["--seconds".into(), self.seconds.to_string()]);
+        if self.ignore_close {
+            args.push("--ignore-close".into());
+        }
+        let numbers = [("--start-ms", self.gap_ms), ("--windowed", self.windowed), ("--crash-ms", self.crash_ms)];
+        for (flag, value) in numbers.into_iter().filter(|&(_, value)| value > 0) {
+            args.extend([flag.to_string(), value.to_string()]);
+        }
+        args
     }
 }
 
@@ -1043,17 +1105,91 @@ mod tests {
     fn game_arguments() {
         assert_eq!(
             GameArgs::parse(&[]).unwrap(),
-            GameArgs { title: "Stand-in game".into(), splash_ms: 0, seconds: 600, ignore_close: false }
+            GameArgs {
+                title: "Stand-in game".into(),
+                splash_ms: 0,
+                seconds: 600,
+                ignore_close: false,
+                ..Default::default()
+            }
         );
         assert_eq!(
             GameArgs::parse(&strings(&["--title", "Brass Meridian", "--splash-ms", "2500", "--seconds", "30"]))
                 .unwrap(),
-            GameArgs { title: "Brass Meridian".into(), splash_ms: 2500, seconds: 30, ignore_close: false }
+            GameArgs { title: "Brass Meridian".into(), splash_ms: 2500, seconds: 30, ..Default::default() }
         );
         assert!(GameArgs::parse(&strings(&["--ignore-close"])).unwrap().ignore_close);
         assert!(GameArgs::parse(&strings(&["--title"])).is_err());
         assert!(GameArgs::parse(&strings(&["--seconds", "soon"])).is_err());
         assert!(GameArgs::parse(&strings(&["--fullscreen"])).is_err());
+    }
+
+    /// What the backdrop's test asks of the stand-in game: a slow start, a gap after its launcher, a frame, a crash
+    /// and a hand-off.
+    #[test]
+    fn game_arguments_for_the_backdrop() {
+        let args = strings(&[
+            "--start-ms",
+            "4000",
+            "--splash-ms",
+            "2000",
+            "--gap-ms",
+            "1500",
+            "--windowed",
+            "85",
+            "--crash-ms",
+            "6000",
+            "--hand-off-ms",
+            "3000",
+        ]);
+        assert_eq!(
+            GameArgs::parse(&args).unwrap(),
+            GameArgs {
+                start_ms: 4000,
+                splash_ms: 2000,
+                gap_ms: 1500,
+                windowed: 85,
+                crash_ms: 6000,
+                hand_off_ms: 3000,
+                ..Default::default()
+            }
+        );
+        assert!(GameArgs::parse(&strings(&["--windowed", "5"])).is_err(), "too small to be a game's window");
+        assert!(GameArgs::parse(&strings(&["--windowed", "150"])).is_err());
+    }
+
+    /// The game a hand-off starts is the same game, up after the gap, with no launcher and no hand-off of its own:
+    /// and its arguments are ones the game takes.
+    #[test]
+    fn a_hand_off_starts_the_same_game_after_the_gap() {
+        let args = strings(&[
+            "--title",
+            "Brass Meridian",
+            "--start-ms",
+            "4000",
+            "--splash-ms",
+            "2000",
+            "--gap-ms",
+            "1500",
+            "--windowed",
+            "85",
+            "--hand-off-ms",
+            "3000",
+            "--seconds",
+            "20",
+        ]);
+        let handed = GameArgs::parse(&args).unwrap().handed_off();
+        assert_eq!(handed[0], "game");
+        assert_eq!(
+            GameArgs::parse(&handed[1..]).unwrap(),
+            GameArgs {
+                title: "Brass Meridian".into(),
+                seconds: 20,
+                start_ms: 1500,
+                windowed: 85,
+                ..Default::default()
+            }
+        );
     }
 
     #[test]

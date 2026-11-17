@@ -39,7 +39,7 @@ use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
 use crate::guide::{Around, DialogFocus, Face, Flyout, FlyoutFocus, Guide, GuideAction, PowerChoice, Status, Tab};
 use crate::home::{Focus, Home, HomeAction, TopButton};
-use crate::launch::LaunchScreen;
+use crate::launch::{Backdrop, LaunchScreen};
 use crate::pages::{Open, PageAction};
 pub use crate::settings::{Options, Setting};
 use crate::startup::Startup;
@@ -213,6 +213,8 @@ pub struct Dashboard {
     /// the window that gets it never sees the press (docs/spec/guide.md, 3.5).
     release_awaited: Option<Button>,
     launch: LaunchScreen,
+    /// Home's window behind the game while one is up: its Launch screen's picture, fading to Home when it ends.
+    backdrop: Backdrop,
     /// Whether there is an Overlay to draw on.
     has_overlay: bool,
     /// The game being launched or running, by its place in the library.
@@ -288,6 +290,7 @@ impl Dashboard {
             guide_overlaid: false,
             release_awaited: None,
             launch: LaunchScreen::default(),
+            backdrop: Backdrop::default(),
             has_overlay: true,
             playing: None,
             toasts: Toasts::default(),
@@ -1791,10 +1794,25 @@ impl Dashboard {
         self.launch.showing()
     }
 
-    /// Whether Home's window has nothing to show: a game is running in front of it, or its Launch screen has faded
-    /// in over it.
+    /// Whether Home has nothing to show: a game is running in front of it, or its Launch screen has faded in over
+    /// it. Home's window then shows the game's backdrop instead, and is drawn only when that changes.
     pub fn home_covered(&self) -> bool {
         self.playing.is_some() && !self.in_front && (!self.launch.up() || self.launch.covers())
+    }
+
+    /// Whether Home's window shows the backdrop, whole or fading to Home: false once Home is all there is.
+    pub fn backdrop_showing(&self) -> bool {
+        self.backdrop.showing() || self.home_covered()
+    }
+
+    /// Whether the backdrop is fading to Home, the game having ended.
+    pub fn backdrop_fading(&self) -> bool {
+        self.backdrop.fading()
+    }
+
+    /// The game whose backdrop covers Home's window now.
+    fn backdrop_game(&self) -> Option<&model::Game> {
+        self.playing.filter(|_| self.home_covered()).and_then(|game| self.library.games.get(game))
     }
 
     /// The shell has asked the store for the game: its Launch screen comes up.
@@ -1827,6 +1845,8 @@ impl Dashboard {
             self.home.focus_recent(game, &self.library);
         }
         self.launch.hide();
+        // What showed where the game was, its backdrop, fades to Home (docs/spec/launch-screen.md).
+        self.backdrop.fade();
         self.in_front = false;
         let quit = self.quit.take();
         // A prompt that was up on its own goes with the dim it showed over.
@@ -1894,12 +1914,17 @@ impl Dashboard {
     }
 
     /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to
-    /// draw it on; and the Toast, where Toasts have no window of their own.
+    /// draw it on; and the Toast, where Toasts have no window of their own. While a game is up, its backdrop in Home's
+    /// place, fading to Home when the game has ended.
     pub fn draw(&mut self, ui: &mut Ui) {
         if self.draw_startup(ui) {
             return;
         }
-        self.draw_home(ui);
+        let covering = self.backdrop_game().cloned();
+        if covering.is_none() {
+            self.draw_home(ui);
+        }
+        self.backdrop.draw(ui, covering.as_ref(), self.slow_renderer);
         self.draw_leaving(ui);
         if !self.toast_strip {
             self.draw_toasts(ui);

@@ -6,6 +6,7 @@
 //! /wait dashboard.exe ...`, or `Start-Process -Wait -NoNewWindow`, to wait for it and have its exit code.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 mod as_shell;
+mod backdrop;
 mod games;
 mod media_folder;
 mod offscreen;
