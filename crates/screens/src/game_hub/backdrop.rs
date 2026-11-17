@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use model::Game;
 use ui::art::RgbaImage;
-use ui::{ArtKey, Color, Crop, Kind, Painter, Rect, Snapshot, Ui};
+use ui::{ArtKey, Color, Crop, Ease, Kind, Painter, Rect, Snapshot, Ui, ART_FADE_SECONDS};
 
 /// The band leaves this much of the screen above it and below it.
 pub const STRIP: f32 = 88.0;
@@ -75,9 +75,12 @@ pub fn draw(ui: &mut Ui, game: &Game, behind: Option<Snapshot>) {
         Some((key, scale)) => {
             let (cx, cy) = screen.center();
             let (w, h) = (screen.w * scale, screen.h * scale);
-            // Nothing shows until the art is read, and then it is there: it does not fade in.
-            if ui.art(Rect::new(cx - w / 2.0, cy - h / 2.0, w, h), &key, Crop::Center, 1.0, 0.0) {
-                ui.art_turned(screen, &picture("game hub/darkening", darkening), 1.0, 0.0);
+            // Art there in the hub's first frame is drawn at once. Art read after it fades in over black, with its
+            // darkening (#214): its reading starts at the tile's A (`prefetch`), so it is mostly there by then.
+            let ready = ui.ask_art(&key);
+            let shown = ui.tween(("game hub art", &key), if ready { 1.0 } else { 0.0 }, ART_FADE_SECONDS, Ease::Linear);
+            if shown > 0.0 && ui.art(Rect::new(cx - w / 2.0, cy - h / 2.0, w, h), &key, Crop::Center, shown, 0.0) {
+                ui.art_turned(screen, &picture("game hub/darkening", darkening), shown, 0.0);
             }
         }
         None => {

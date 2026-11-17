@@ -2060,6 +2060,10 @@ impl Dashboard {
         self.home.set_in_front(!self.guide.is_open() && !self.pages.hides_home() && !self.home_gives_way());
         if !self.pages.hides_home() {
             self.home.draw(ui, &self.library, &status);
+            // The hub a tile's A may open in the double tap's time has its pictures read meanwhile (#214).
+            if let Some(game) = self.home.chosen().and_then(|entry| entry.game(&self.library)) {
+                game_hub::prefetch(ui, game);
+            }
         }
         let around = pages::Around {
             library: &self.library,

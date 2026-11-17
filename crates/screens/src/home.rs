@@ -213,6 +213,11 @@ impl Home {
         }
     }
 
+    /// The game whose tile A chose, while the double tap's time is waited out: its hub may open when it is up.
+    pub fn chosen(&self) -> Option<&game_hub::Entry> {
+        self.chosen.as_ref().map(|chosen| &chosen.game)
+    }
+
     /// The game focus is on, by its place in the library.
     pub fn focused_game(&self, library: &Library) -> Option<usize> {
         match self.focus {

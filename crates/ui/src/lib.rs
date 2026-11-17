@@ -378,6 +378,12 @@ impl<'a> Ui<'a> {
         self.push(Quad::image(rect, tex, [u0, v0, u0 + u, v0 + v], alpha * self.alpha, radius));
     }
 
+    /// Asks for a piece of art without drawing it, as a screen does for what it is about to show; true when it is
+    /// ready to draw.
+    pub fn ask_art(&mut self, key: &ArtKey) -> bool {
+        matches!(self.art.get(key), Art::Ready { .. })
+    }
+
     /// As `art`, under a black sheet: `light` of the picture's own colour is left, 1 for all of it. The darkening
     /// is part of the picture, so the two fade as one.
     pub fn art_darkened(&mut self, rect: Rect, key: &ArtKey, crop: Crop, alpha: f32, light: f32) -> bool {
