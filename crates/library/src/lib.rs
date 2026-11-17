@@ -537,14 +537,17 @@ impl Database {
             let score = |at: usize| -> rusqlite::Result<Option<u8>> {
                 Ok(row.get::<_, Option<i64>>(at)?.and_then(|score| u8::try_from(score).ok()))
             };
+            let installed: bool = row.get(4)?;
+            let install_dir = row.get::<_, Option<String>>(5)?.map(PathBuf::from);
             place.insert(id, games.len());
             games.push(Game {
                 id,
                 source,
                 source_id,
                 name: row.get(3)?,
-                installed: row.get(4)?,
-                install_dir: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
+                installed,
+                installed_at: install_dir.as_deref().filter(|_| installed).and_then(installed_at),
+                install_dir,
                 last_played: row.get::<_, i64>(6)?.max(0) as u64,
                 playtime_minutes: row.get::<_, i64>(7)?.clamp(0, u32::MAX as i64) as u32,
                 favourite: row.get(8)?,
@@ -708,6 +711,15 @@ fn sort_name(name: &str) -> String {
     rest.map_or(lower.clone(), |rest| rest.trim_start().to_string())
 }
 
+/// When the game in `dir` was installed, as near as can be told: when the folder was made, which its store does as
+/// the install begins (the Bundle's `InstalledAt`), else when it last changed where the file system keeps no birth
+/// time. None when the folder can't be read.
+fn installed_at(dir: &std::path::Path) -> Option<u64> {
+    let folder = std::fs::metadata(dir).ok()?;
+    let at = folder.created().or_else(|_| folder.modified()).ok()?;
+    Some(at.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -743,7 +755,10 @@ mod tests {
 
     /// A snapshot's games as a source would have read them: no ids, no time they were added, and no filters.
     fn without_ids(mut library: Library) -> Library {
-        library.games.iter_mut().for_each(|g| (g.id, g.added, g.art) = (0, 0, Default::default()));
+        library
+            .games
+            .iter_mut()
+            .for_each(|g| (g.id, g.added, g.art, g.installed_at) = (0, 0, Default::default(), None));
         library.filters.clear();
         library.history.clear();
         library.launchers = Default::default();
@@ -758,6 +773,26 @@ mod tests {
 
     fn names(games: &[Game]) -> Vec<&str> {
         games.iter().map(|g| g.name.as_str()).collect()
+    }
+
+    /// docs/spec/manage-queue.md, 7.3: an installed game's install date is its folder's, as the Bundle's; none for
+    /// a folder that is not there or a game not installed.
+    #[test]
+    fn a_snapshot_dates_an_installed_game_by_its_install_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Cinder");
+        std::fs::create_dir(&folder).unwrap();
+        let mut found = found();
+        found.games[0].install_dir = Some(folder.clone());
+        found.games[2].installed = false;
+        found.games[2].install_dir = Some(folder);
+        let mut db = Database::in_memory().unwrap();
+        db.sync(STEAM, &found, NOW).unwrap();
+        let snapshot = db.snapshot().unwrap();
+        let at = |name: &str| snapshot.games.iter().find(|g| g.name == name).unwrap().installed_at;
+        let made = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        assert!(at("Cinder").is_some_and(|at| at.abs_diff(made) < 60), "{:?}", at("Cinder"));
+        assert_eq!((at("The Anchor"), at("Bramble")), (None, None), "no folder there; not installed");
     }
 
     #[test]

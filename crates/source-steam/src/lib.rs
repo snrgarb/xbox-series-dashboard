@@ -377,6 +377,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     last_played: played.max(manifest_played.unwrap_or(0)),
                     playtime_minutes: minutes,
                     added: 0,
+                    installed_at: None,
                     installed: manifest.is_some_and(|m| m.installed),
                     install_dir: manifest.filter(|m| m.installed).and_then(|m| m.folder.clone()),
                     cover: find("library_capsule", None, &["library_600x900.jpg", "library_capsule.jpg"]),

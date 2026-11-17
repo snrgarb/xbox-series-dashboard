@@ -71,15 +71,17 @@ const END_PADDING: f32 = 80.0;
 const ROW_TITLE: ui::TextStyle = TEXT.weight(700);
 
 /// Manage Queue's Recently installed: the games the Queue saw finish installing, the latest first, then the rest
-/// of those installed, the latest to come into the library first; none that is hidden or no longer installed; at
-/// most [`RECENTLY_INSTALLED`].
+/// of those installed, the latest installed first by their install folders' dates, or by when they came into the
+/// library where that is not known (the Bundle's `InstalledAt ?? Added`); none that is hidden or no longer
+/// installed; at most [`RECENTLY_INSTALLED`].
 pub fn recently_installed(library: &Library) -> Vec<&Game> {
     let shown = |game: &&Game| game.installed && !game.hidden;
     let finished: Vec<&Game> =
         library.queue.installed.iter().filter_map(|done| library.game(done.game)).filter(shown).collect();
     let mut rest: Vec<&Game> =
         library.games.iter().filter(shown).filter(|game| !finished.iter().any(|done| done.id == game.id)).collect();
-    rest.sort_by(|a, b| b.added.cmp(&a.added).then_with(|| a.name.cmp(&b.name)));
+    let when = |game: &Game| game.installed_at.unwrap_or(game.added);
+    rest.sort_by(|a, b| when(b).cmp(&when(a)).then_with(|| a.name.cmp(&b.name)));
     finished.into_iter().chain(rest).take(RECENTLY_INSTALLED).collect()
 }
 
