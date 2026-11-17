@@ -10,6 +10,11 @@
 //!       Dashboard asks the real one (`source_steam::command`): says in the log what it was asked (`steam: asked to
 //!       install <appid>: ...`), and puts the game in its queue, Queued (its app manifest written as Steam writes
 //!       one), or uninstalls it (its manifest removed). Nothing is downloaded or deleted.
+//!   steam.exe -silent +standin_pause <appid> | +standin_resume <appid> | +standin_cancel <appid>
+//!       The same client asked to pause, resume or cancel an install under way, which only the stand-in takes
+//!       (`source_steam::fixture::steer_command`, #170; make-steam marks its folder so, `STANDIN_CLIENT`): its
+//!       manifest rewritten paused or downloading at the bytes it has, or removed (`steam: asked to pause
+//!       <appid>: ...`). Exits 1, having done nothing, when nothing of the app's is under way.
 //!   standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
 //!       Moves the fake Steam's install of <appid> at <dir> along, by rewriting its app manifest as Steam's client
 //!       would (`fixture::write_progress`): waiting, so many bytes of so many downloaded, paused there, installed
@@ -173,7 +178,8 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
        standin unlock-achievement <dir> <key>
        standin steam-change <dir> add-game | played <appid> <minutes>
-       steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>";
+       steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>
+       steam.exe -silent +standin_pause <appid> | +standin_resume <appid> | +standin_cancel <appid>";
 
 /// The file beside this program that names the fakes `open-address` takes addresses for.
 const HANDLERS_FILE: &str = "handlers.json";
@@ -382,9 +388,13 @@ fn make_steam(dir: &Path, json: Option<&Path>, mut spec: Fixture) -> Result<(), 
     let exe = std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?;
     spec.game_exe = Some(exe.clone());
     fixture::write(&dir, &spec).map_err(|e| format!("writing {}: {e}", dir.display()))?;
-    // The client, which the Dashboard asks to install and uninstall (`steam_exe`).
+    // The client, which the Dashboard asks to install and uninstall (`steam_exe`), and, as the stand-in it is, to
+    // pause, resume and cancel.
     let client = dir.join(STEAM_EXE);
     std::fs::copy(&exe, &client).map_err(|e| format!("{}: {e}", client.display()))?;
+    let marker = dir.join(fixture::STANDIN_CLIENT);
+    std::fs::write(&marker, "the stand-in Steam: takes +standin_pause, +standin_resume and +standin_cancel\n")
+        .map_err(|e| format!("{}: {e}", marker.display()))?;
     for game in spec.games.iter().filter(|g| g.installed) {
         // Each game's window is titled with its name, so a test can tell which one is in front.
         let args = dir.join("steamapps").join("common").join(&game.install_dir).join(GAME_ARGS_FILE);
@@ -457,6 +467,24 @@ fn steam_client(args: &[String]) -> i32 {
         let at = args.iter().position(|arg| arg.eq_ignore_ascii_case(command))?;
         args.get(at + 1)?.parse::<u32>().ok().filter(|&id| id != 0)
     };
+    if let Some((steer, appid)) = fixture::steer_asked(args) {
+        note(&format!("steam: asked to {} {appid}: {}", steer.verb(), args.join(" ")));
+        let Some(root) = root else { return 1 };
+        let steered = fixture::steered(&root, appid, steer).and_then(|progress| {
+            fixture::write_progress(&root, appid, progress)?;
+            Ok(progress)
+        });
+        return match steered {
+            Ok(progress) => {
+                note(&format!("steam: {appid} is {progress:?}"));
+                0
+            }
+            Err(e) => {
+                note(&format!("steam: {}: {e}", root.display()));
+                1
+            }
+        };
+    }
     let (verb, appid, progress) = match (asked("+app_install"), asked("+app_uninstall")) {
         (Some(appid), _) => ("install", appid, fixture::Progress::Queued),
         (None, Some(appid)) => ("uninstall", appid, fixture::Progress::Dropped),

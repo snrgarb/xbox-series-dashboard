@@ -190,7 +190,7 @@ impl Grid {
         let face = |ui: &mut Ui, index: usize, focused: bool| {
             let game = games[index];
             let running = running.as_ref().is_some_and(|running| game.is(running));
-            let installing = game.id != 0 && queue.get(game.id).is_some();
+            let installing = queue.installing(game.id).is_some();
             let tile = Tile { game, focused, running, installing };
             tile::draw(ui, self.rect(index, scroll), (id, key(game)), &tile);
         };

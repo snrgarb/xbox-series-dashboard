@@ -51,6 +51,11 @@ impl Follow {
         !self.reported.is_empty()
     }
 
+    /// Whether the app's manifest says installed and it was held as installing at the last look.
+    pub fn held(&self, appid: u32) -> bool {
+        self.held.contains_key(&appid)
+    }
+
     /// What a look at the installs under way (`found`, from the manifests) comes to, at `at` seconds on the caller's
     /// clock; with Steam's overview where there is one, the client's writes where they can be had, and the
     /// registry's `Updating` (false where it is not to be asked). Says in the log what changed of the holds and of

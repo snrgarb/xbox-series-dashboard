@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use model::{Game, InstallState, Installed, Library, Queue, Queued};
+use model::{Can, Game, InstallState, Installed, Library, Queue, Queued, Steer};
 use render::gpu::{self, Gpu};
 use render::offscreen::FORMAT;
 use screens::home::Focus;
@@ -85,23 +85,18 @@ const GB: u64 = 1 << 30;
 
 /// Dune Cartographer downloading, 67.80 MB of 3.55 GB at 106 Mbps.
 fn downloading(library: &Library) -> Queued {
-    Queued {
-        game: id(library, "Dune Cartographer"),
-        state: InstallState::Downloading { done: 71_094_272, total: 3_811_768_320 },
-        started: 10,
-        speed: Some(106_000_000),
-    }
+    let state = InstallState::Downloading { done: 71_094_272, total: 3_811_768_320 };
+    Queued { speed: Some(106_000_000), can: STEERS, ..Queued::new(id(library, "Dune Cartographer"), state, 10) }
 }
+
+/// A store that can pause, resume and cancel its installs, as the stand-in Steam can.
+const STEERS: Can = Can { pause: true, cancel: true, ..Can::NOTHING };
 
 /// The current download, then Ember Choir paused part way, then Fathom Nine waiting its turn.
 fn several(library: &Library) -> Queue {
-    let paused = Queued {
-        game: id(library, "Ember Choir"),
-        state: InstallState::Paused { done: 512 * MB, total: 2 * GB },
-        started: 20,
-        speed: None,
-    };
-    let waiting = Queued { game: id(library, "Fathom Nine"), state: InstallState::Queued, started: 30, speed: None };
+    let paused = InstallState::Paused { done: 512 * MB, total: 2 * GB };
+    let paused = Queued { can: STEERS, ..Queued::new(id(library, "Ember Choir"), paused, 20) };
+    let waiting = Queued { can: STEERS, ..Queued::new(id(library, "Fathom Nine"), InstallState::Queued, 30) };
     Queue::new(vec![downloading(library), paused, waiting], Vec::new())
 }
 
@@ -242,6 +237,54 @@ fn menu_and_view_open_the_games_tile_menu_and_b_there_comes_back() {
     assert!(page.focus_line().ends_with(" of Ashfall Courier"), "{}", page.focus_line());
 }
 
+/// #170: a row's menu is the queued game's, with Pause or Resume and Cancel after Install; each asks the game's
+/// store through the shell, Cancel once the player has said yes.
+#[test]
+fn a_rows_menu_pauses_resumes_and_cancels_its_install() {
+    let library = with_queue(library(), several);
+    let (dune, ember) = (id(&library, "Dune Cartographer"), id(&library, "Ember Choir"));
+    let mut page = on_page(library);
+    press(&mut page, &[Down, View]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Install) of Dune Cartographer");
+    press(&mut page, &[Down]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Pause installation) of Dune Cartographer");
+    press(&mut page, &[Down]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Cancel installation) of Dune Cartographer");
+    press(&mut page, &[Up]);
+    page.take_effects();
+    press(&mut page, &[A]);
+    assert_eq!(asked(&mut page), [Effect::Steer { game: dune, steer: Steer::Pause }]);
+    assert_eq!(after(&mut page, &[]), "Row(0) of Dune Cartographer");
+
+    // The paused one resumes.
+    press(&mut page, &[Down, Menu, Down]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Resume installation) of Ember Choir");
+    press(&mut page, &[A]);
+    assert_eq!(asked(&mut page), [Effect::Steer { game: ember, steer: Steer::Resume }]);
+
+    // Cancel asks first; Keep installing goes back to the menu, on Cancel installation.
+    press(&mut page, &[View, Down, Down]);
+    press(&mut page, &[A]);
+    assert_eq!(page.focus_line(), "TileMenu: Prompt(Cancel installation) of Ember Choir");
+    assert!(asked(&mut page).is_empty());
+    press(&mut page, &[Down, A]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Cancel installation) of Ember Choir");
+    press(&mut page, &[A, A]);
+    assert_eq!(asked(&mut page), [Effect::Steer { game: ember, steer: Steer::Cancel }]);
+    assert_eq!(after(&mut page, &[]), "Row(1) of Ember Choir");
+}
+
+/// A store that cannot steer its installs (the real Steam until #171): the row's menu is the Bundle's.
+#[test]
+fn a_rows_menu_has_no_pause_or_cancel_where_its_store_cannot() {
+    let library = with_queue(library(), |library| {
+        Queue::new(vec![Queued { can: Can::NOTHING, ..downloading(library) }], Vec::new())
+    });
+    let mut page = on_page(library);
+    press(&mut page, &[Down, View, Down]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Add to Favourites) of Dune Cartographer");
+}
+
 #[test]
 fn a_opens_the_games_hub_after_the_double_taps_time_and_a_second_a_plays_it() {
     let library = with_queue(library(), several);
@@ -370,7 +413,8 @@ fn manage_queue_one_download() {
     stage.check("manage_queue_one_download");
 }
 
-/// The current download, one paused and one waiting (both read Queued, 0.0%), focus on the first cover.
+/// The current download, one paused (Paused, with its amount and share, #170) and one waiting (Queued, 0.0%), focus
+/// on the first cover.
 #[test]
 fn manage_queue_several() {
     Stage::new(with_queue(library(), several), screens::manage_queue::open()).check("manage_queue_several");
@@ -382,6 +426,30 @@ fn manage_queue_several_scrolled() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
     stage.press(&[Down, Down, Down]);
     stage.check("manage_queue_several_scrolled");
+}
+
+/// The menu of the current download's row (#170): Pause installation and Cancel installation after Install.
+#[test]
+fn manage_queue_menu_pause() {
+    let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
+    stage.press(&[Down, View, Down]);
+    stage.check("manage_queue_menu_pause");
+}
+
+/// The paused row focused, its menu up: Resume installation in Pause's place.
+#[test]
+fn manage_queue_menu_resume() {
+    let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
+    stage.press(&[Down, Down, View, Down]);
+    stage.check("manage_queue_menu_resume");
+}
+
+/// Cancel installation asks first.
+#[test]
+fn manage_queue_cancel_prompt() {
+    let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
+    stage.press(&[Down, View, Down, Down, A]);
+    stage.check("manage_queue_cancel_prompt");
 }
 
 /// Nothing queued, a game just finished first among Recently installed; focus on the long-named cover, its title on

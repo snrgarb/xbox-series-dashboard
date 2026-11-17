@@ -43,7 +43,7 @@ One row per Queue entry, the current download first and then the rest in the Que
 | Text column | 36 right of the cover, 40 short of the row's end, from 38 down |
 | Title | Segoe UI 26 **bold**, white, one line, ellipsis, 160 short of the column's end |
 | Speed | Right-aligned on the title's line: "106 Mbps", "323 Kbps"; decimal units, whole (C/ExtensionCore.Queue.cs `SpeedOf`) |
-| State | Under the title: "Installing..." while it downloads, "Queued" while it waits its turn or is paused |
+| State | Under the title: "Installing..." while it downloads, "Queued" while it waits its turn or is paused (the port reads a paused one "Paused", section 8) |
 | Amount line | 34 under the state: "Network: {amount}" at the left, only when there is an amount; the share right-aligned, "1.9%" |
 | Amount | "67.80 MB of 3.55 GB": two decimals, a GB being 2^30 bytes, MB below 1 GB, TB from 1024 GB, the unit chosen by the value as rounded (C/MyGamesState.cs:300) |
 | Bar | 12 under the amount line, 5 tall, across the column: track `#FF4A4A4A`, the share filled white |
@@ -76,7 +76,7 @@ stays above it when it has games.
 | A cover | Down | The first row |
 | A row | Up, Down | Along the rows; Up from the first goes to the cover last focused |
 | A cover or row | A | As on a Home tile: the game's hub, a second A within 300 ms plays it (home.md 6) |
-| A cover or row | Menu, View | The game's Tile menu, its Customise row "Customise games & apps" |
+| A cover or row | Menu, View | The game's Tile menu, its Customise row "Customise games & apps"; on a row, the queued game's menu (section 8) |
 | Anywhere | B | Back to where the page was opened from |
 
 On open, focus is on the first cover, else the first row, else nothing. When the lists change under it, focus follows
@@ -120,3 +120,34 @@ hub's Queue action, B back to the hub on Queue; the Guide button during a Queued
    Guide button's way in during it (Toasts for the Queue are not built).
 7. **Home redraws** for a Queue change only when what it shows changed (order, state, finished games), not for bytes
    alone; with a page up every change is drawn.
+
+## 8. Pause, Resume and Cancel (decided in #170)
+
+The Bundle's Manage Queue has none of them. The user decided (2026-11-17, on #166) that they go in the Queue, as the
+console has them: in a queued game's menu. No picture of the console was at hand: what follows is the console's
+manner as remembered, the wording guessed where marked.
+
+1. **Where.** Menu or View on a row of Installing opens the game's Tile menu as before (`tile_menu::Opener::Queue`),
+   with, after its first row (Install, as the Bundle's), **Pause installation** for a game downloading or waiting its
+   turn, or **Resume installation** for one paused, then **Cancel installation**. On a cover, on a Home tile or
+   anywhere else the menu is the Bundle's: the rows are the Queue's. Focus starts on the first row, as always.
+   Labels: "Pause installation" and "Resume installation" as the console's queue words them (from memory, not a
+   picture); "Cancel installation" guessed to match.
+2. **Only where the store can.** Each row shows only where the game's store can be asked it: its installer's
+   `Can` (docs/sources.md "Installs"), which the Queue's follower gives each entry (`Queued::can`). Pause and Resume
+   go together. A store that cannot (the real Steam until #171, every other store until its ticket) has the
+   Bundle's menu. A game installed whose extras are still coming in (#188) has none of them.
+3. **What they do.** Pause and Resume close the menu and ask the store (`Effect::Steer`); the row follows what the
+   store then reports, a second or so later. Cancel asks first, in the menu's place as Uninstall does: "Cancel
+   installing <game>?", "What has downloaded so far is deleted.", **Cancel installation** (focused) or **Keep
+   installing**, which goes back to the menu on Cancel installation; B is Keep installing. Yes closes the menu and
+   asks the store, which drops the install and deletes what it fetched: the game leaves the Queue (`queue: <game>
+   dropped`). Each is looked at again as it is chosen (tile-menu.md 3.3): one that no longer applies does nothing,
+   and the menu closes all the same.
+4. **A paused row** reads **Paused**, the console's word, with its amount and share as far as it got and the bar
+   filled to that; no speed. (The Bundle reads it Queued, 0.0%, which said nothing true once the user can pause from
+   here.) Its tiles still read Queued, as the Bundle's. The focus log: `Row(1) of <game>; ...; Paused 25.0%`.
+5. **The log.** `store: asking Steam to pause <game>: <command>` as for install; `store: Steam can't pause <game>'s
+   install from here` where it cannot; then the Queue's own `queue: <game> paused, 50% of 100 bytes`.
+6. **Which folder.** An install goes to its store's default folder (`Installer::folders`, `default_folder`): the
+   question where there is more than one is Settings > Storage's, #179.

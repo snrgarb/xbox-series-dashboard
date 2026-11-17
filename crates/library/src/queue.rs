@@ -7,6 +7,10 @@
 //!   client joins.
 //! - While its source reports it, it is where the source says: Queued, downloading so many bytes of so many, or
 //!   paused.
+//! - Once the game itself is installed while its store is still fetching more for it (Steam's Workshop items,
+//!   `InstallState::Extras`, #188), its source is read again so that it reads installed, Play is offered, and it is
+//!   told of as finished (`Change::Playable`); its row stays until the store is done, then leaves with nothing more
+//!   said (`Change::ExtrasDone`).
 //! - Once its source no longer reports it, the source is read again (`Source::read`, merged in as every read is):
 //!   a game that now reads installed has finished and leaves for "recently installed", with when; one that does not
 //!   was dropped (cancelled in the client, or at its install dialog) and simply leaves.
@@ -49,7 +53,7 @@ pub const MIGRATION: &str = "CREATE TABLE queue (
         asked INTEGER,
         -- Its source has reported it: once it no longer does, the install has ended.
         reported INTEGER NOT NULL DEFAULT 0,
-        -- queued, downloading or paused; with the bytes done and to do, as the source last said.
+        -- queued, downloading, paused or extras; with the bytes done and to do, as the source last said.
         state TEXT NOT NULL DEFAULT 'queued',
         done INTEGER NOT NULL DEFAULT 0,
         total INTEGER NOT NULL DEFAULT 0
@@ -92,6 +96,11 @@ pub enum Change {
     State { game: i64, state: InstallState },
     /// Finished installing.
     Installed(i64),
+    /// The game itself is installed and playable, and its store is still fetching extras for it: told of as
+    /// finished, its row kept.
+    Playable(i64),
+    /// The extras of a game that was playable already are in too: it leaves the Queue.
+    ExtrasDone(i64),
     /// Left without installing.
     Dropped(i64),
     /// An uninstall asked for here has been seen done.
@@ -119,6 +128,7 @@ fn state_of(kind: &str, done: i64, total: i64) -> InstallState {
     match kind {
         "downloading" => InstallState::Downloading { done, total },
         "paused" => InstallState::Paused { done, total },
+        "extras" => InstallState::Extras { done, total },
         _ => InstallState::Queued,
     }
 }
@@ -128,6 +138,7 @@ fn columns(state: InstallState) -> (&'static str, i64, i64) {
         InstallState::Queued => ("queued", 0, 0),
         InstallState::Downloading { done, total } => ("downloading", done as i64, total as i64),
         InstallState::Paused { done, total } => ("paused", done as i64, total as i64),
+        InstallState::Extras { done, total } => ("extras", done as i64, total as i64),
     }
 }
 
@@ -144,7 +155,7 @@ impl Database {
             .rows()?
             .into_iter()
             .filter(|row| !row.gone && !row.off)
-            .map(|row| Queued { game: row.game, state: row.state, started: row.started, speed: None })
+            .map(|row| Queued::new(row.game, row.state, row.started))
             .collect();
         let mut installed = self.conn.prepare(&format!(
             "SELECT game, finished FROM installed JOIN games ON games.id = installed.game
@@ -222,12 +233,17 @@ impl Database {
     fn leave(&self, game: i64, finished: Option<u64>) -> Result<()> {
         self.conn.execute("DELETE FROM queue WHERE game = ?1", [game])?;
         if let Some(at) = finished {
-            self.conn.execute(
-                "INSERT INTO installed (game, finished) VALUES (?1, ?2)
-                 ON CONFLICT (game) DO UPDATE SET finished = ?2",
-                params![game, at as i64],
-            )?;
+            self.finished(game, at)?;
         }
+        Ok(())
+    }
+
+    /// The game finished installing at `at`: it heads Recently installed.
+    fn finished(&self, game: i64, at: u64) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO installed (game, finished) VALUES (?1, ?2) ON CONFLICT (game) DO UPDATE SET finished = ?2",
+            params![game, at as i64],
+        )?;
         Ok(())
     }
 }
@@ -300,11 +316,15 @@ impl Follower {
         }
     }
 
-    /// The Queue as the database has it, each download with the speed it has been given.
+    /// The Queue as the database has it, each download with the speed it has been given and what its store's
+    /// installer can do with it (`Source::installer`).
     pub fn queue(&self, db: &Database) -> Result<Queue> {
         let mut queue = db.queue()?;
+        let sources: HashMap<i64, String> = db.rows()?.into_iter().map(|row| (row.game, row.source)).collect();
         for entry in &mut queue.entries {
             entry.speed = self.speed(entry.game);
+            let installer = sources.get(&entry.game).and_then(|key| self.source(key)).and_then(|s| s.installer());
+            entry.can = installer.map_or(model::Can::NOTHING, |installer| installer.can());
         }
         Ok(queue)
     }
@@ -421,6 +441,9 @@ impl Follower {
         let mut rows = db.rows()?;
         rows.retain(|row| !row.off);
         let mut seen: Vec<i64> = Vec::new();
+        // Games that have just become playable while their extras come in: their source is read again, so that
+        // they read installed.
+        let mut playable: Vec<(i64, String)> = Vec::new();
         let told_before = std::mem::take(&mut self.told);
         for (&key, installs) in &reports {
             for install in installs {
@@ -429,7 +452,11 @@ impl Follower {
                 if let Some(speed) = install.speed.filter(|_| install.state.downloading()) {
                     self.told.insert(game, speed);
                 }
-                match rows.iter().find(|row| row.game == game) {
+                let was = rows.iter().find(|row| row.game == game);
+                if install.state.extras() && !was.is_some_and(|row| row.state.extras()) {
+                    playable.push((game, key.to_string()));
+                }
+                match was {
                     Some(row) if row.reported && row.state == install.state => {}
                     Some(row) => {
                         db.set_state(game, install.state)?;
@@ -467,6 +494,7 @@ impl Follower {
             }
         }
         let mut to_read: Vec<String> = ended.iter().map(|row| row.source.clone()).collect();
+        to_read.extend(playable.iter().map(|(_, key)| key.clone()));
         to_read.extend(waiting.iter().filter(|row| self.due(&row.source, now, READ_EVERY)).map(|r| r.source.clone()));
         let uninstalls: Vec<(i64, u64)> = self.uninstalls.iter().map(|(&game, &asked)| (game, asked)).collect();
         for &(game, asked) in &uninstalls {
@@ -486,11 +514,21 @@ impl Follower {
             polled.library_changed |= self.read_again(db, key, now)?;
         }
 
-        // A source read again has said whether each finished.
+        // A source read again has said whether each finished. One that was playable already, its extras coming
+        // in, finished then.
         for row in &ended {
             let installed = db.installed(row.game)?;
-            db.leave(row.game, installed.then_some(now))?;
-            polled.changes.push(if installed { Change::Installed(row.game) } else { Change::Dropped(row.game) });
+            let extras = row.state.extras();
+            db.leave(row.game, installed.then_some(now).filter(|_| !extras))?;
+            polled.changes.push(match (installed, extras) {
+                (true, false) => Change::Installed(row.game),
+                (true, true) => Change::ExtrasDone(row.game),
+                (false, _) => Change::Dropped(row.game),
+            });
+        }
+        for &(game, _) in &playable {
+            db.finished(game, now)?;
+            polled.changes.push(Change::Playable(game));
         }
         for row in &waiting {
             if to_read.contains(&row.source) && db.installed(row.game)? {
@@ -533,15 +571,14 @@ pub fn describe(change: &Change, name: &dyn Fn(i64) -> String) -> String {
         Change::State { game, state } => {
             let how = match (state, state.bytes(), state.percent()) {
                 (InstallState::Queued, ..) => "queued".to_string(),
-                (state, Some((_, total)), Some(percent)) => {
-                    let kind = if state.downloading() { "downloading" } else { "paused" };
-                    format!("{kind}, {percent}% of {total} bytes")
-                }
-                (state, ..) => (if state.downloading() { "downloading" } else { "paused" }).to_string(),
+                (state, Some((_, total)), Some(percent)) => format!("{}, {percent}% of {total} bytes", kind(*state)),
+                (state, ..) => kind(*state).to_string(),
             };
             format!("{} {how}", name(*game))
         }
         Change::Installed(game) => format!("{} installed", name(*game)),
+        Change::Playable(game) => format!("{} installed; its store is still fetching more for it", name(*game)),
+        Change::ExtrasDone(game) => format!("{} has all its store was fetching for it", name(*game)),
         Change::Dropped(game) => format!("{} dropped", name(*game)),
         Change::Uninstalled(game) => format!("{} uninstalled", name(*game)),
         Change::StillInstalled(game) => {
@@ -549,6 +586,15 @@ pub fn describe(change: &Change, name: &dyn Fn(i64) -> String) -> String {
         }
     };
     format!("queue: {says}")
+}
+
+/// How the log names a state other than Queued.
+fn kind(state: InstallState) -> &'static str {
+    match state {
+        InstallState::Paused { .. } => "paused",
+        InstallState::Extras { .. } => "fetching extras",
+        _ => "downloading",
+    }
 }
 
 /// What the thread was asked.
@@ -579,7 +625,7 @@ impl Tell {
     pub fn of(change: &Change, first: bool) -> Option<Tell> {
         match *change {
             Change::Joined { game, .. } if !first => Some(Tell::Queued(game)),
-            Change::Installed(game) => Some(Tell::Ready(game)),
+            Change::Installed(game) | Change::Playable(game) => Some(Tell::Ready(game)),
             Change::Uninstalled(game) => Some(Tell::Uninstalled(game)),
             _ => None,
         }
@@ -651,7 +697,10 @@ fn follow(
     loop {
         let Polled { changes, library_changed, moved } =
             follower.poll_at(&mut db, crate::now(), clock.elapsed().as_secs_f64())?;
-        if !changes.is_empty() || library_changed || moved {
+        // The first look says what it found whenever the Queue holds anything, so that the screens have what each
+        // store can be asked of its games (`Queued::can`), which no Queue read from the database carries.
+        let holds = first && !db.queue()?.entries.is_empty();
+        if !changes.is_empty() || library_changed || moved || holds {
             let name = |game: i64| db.game(game).ok().flatten().map_or_else(|| format!("game {game}"), |g| g.name);
             for change in &changes {
                 eprintln!("{}", describe(change, &name));
@@ -706,6 +755,14 @@ mod tests {
         games: Mutex<Vec<Game>>,
         installs: Mutex<Vec<Install>>,
         reads: Mutex<usize>,
+        /// What its installer can do; none: it has no installer.
+        can: Mutex<Option<model::Can>>,
+    }
+
+    impl model::Installer for Fake {
+        fn can(&self) -> model::Can {
+            self.can.lock().unwrap().unwrap_or_default()
+        }
     }
 
     impl Fake {
@@ -726,6 +783,7 @@ mod tests {
                 games: Mutex::new(games),
                 installs: Mutex::default(),
                 reads: Mutex::default(),
+                can: Mutex::default(),
             })
         }
 
@@ -772,6 +830,10 @@ mod tests {
         /// The store that reports its installs uninstalls by itself too, as Steam does; the other is the user's.
         fn uninstalls_by_itself(&self) -> bool {
             self.follows
+        }
+
+        fn installer(&self) -> Option<&dyn model::Installer> {
+            self.can.lock().unwrap().is_some().then_some(self as &dyn model::Installer)
         }
     }
 
@@ -821,6 +883,59 @@ mod tests {
 
     fn named(names: &[(&str, InstallState)]) -> Vec<(String, InstallState)> {
         names.iter().map(|&(name, state)| (name.to_string(), state)).collect()
+    }
+
+    #[test]
+    fn each_entry_carries_what_its_stores_installer_can_do_and_nothing_without_one() {
+        let mut world = World::new();
+        world.ask("Moss", 0);
+        let can = |world: &World| world.follower.queue(&world.db).unwrap().entries[0].can;
+        assert_eq!(can(&world), model::Can::NOTHING);
+        let pause_and_cancel = model::Can { pause: true, cancel: true, ..model::Can::NOTHING };
+        *world.fake.can.lock().unwrap() = Some(pause_and_cancel);
+        assert_eq!(can(&world), pause_and_cancel);
+        // The database alone knows nothing of stores.
+        assert_eq!(world.db.queue().unwrap().entries[0].can, model::Can::NOTHING);
+    }
+
+    /// #188: the game itself installed while its store fetches more for it is told of as finished at once, reads
+    /// installed and is played as any installed game; its row stays until the store is done, and then leaves with
+    /// nothing more told.
+    #[test]
+    fn a_game_playable_while_its_extras_come_in_is_told_of_then_and_leaves_quietly_later() {
+        let mut world = World::new();
+        let moss = world.id("Moss");
+        world.ask("Moss", 0);
+        world.fake.report(&[("1", InstallState::Downloading { done: 10, total: 10 })]);
+        world.poll(1);
+        // Steam's manifest says installed; its Workshop items are still coming.
+        let extras = InstallState::Extras { done: 0, total: 0 };
+        world.fake.set_installed("1", true);
+        world.fake.report(&[("1", extras)]);
+        let polled = world.poll(2);
+        assert_eq!(polled.changes, [Change::State { game: moss, state: extras }, Change::Playable(moss)]);
+        assert!(polled.library_changed && world.installed("Moss"));
+        let tell: Vec<Tell> = polled.changes.iter().filter_map(|change| Tell::of(change, false)).collect();
+        assert_eq!(tell, [Tell::Ready(moss)]);
+        let snapshot = world.db.snapshot().unwrap();
+        assert_eq!((snapshot.queue.status(moss), snapshot.queue.get(moss).map(|e| e.state)), (None, Some(extras)));
+        assert_eq!(snapshot.queue.installed.first().map(|done| done.game), Some(moss));
+        // Still fetching: nothing more.
+        assert!(world.poll(3).changes.is_empty());
+        // Done: it leaves, with no second Toast.
+        world.fake.report(&[]);
+        let polled = world.poll(4);
+        assert_eq!(polled.changes, [Change::ExtrasDone(moss)]);
+        assert!(polled.changes.iter().all(|change| Tell::of(change, false).is_none()));
+        let snapshot = world.db.snapshot().unwrap();
+        assert!(snapshot.queue.is_empty());
+        assert_eq!(snapshot.queue.installed.first().map(|done| done.game), Some(moss));
+        let name = |_| "Moss".to_string();
+        assert_eq!(
+            describe(&Change::Playable(moss), &name),
+            "queue: Moss installed; its store is still fetching more for it"
+        );
+        assert_eq!(describe(&Change::State { game: moss, state: extras }, &name), "queue: Moss fetching extras");
     }
 
     #[test]

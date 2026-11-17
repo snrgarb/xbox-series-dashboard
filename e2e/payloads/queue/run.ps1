@@ -291,12 +291,12 @@ try {
     Advance $client.source_id @('--drop')
     Expect-Logged "^queue: $clientName dropped$" $mark 'Started in the client, dropped' | Out-Null
 
-    # Done with Manage Queue up, focus on the game's row (paused, it reads Queued): it leaves for Recently
+    # Done with Manage Queue up, focus on the game's row (paused, it reads Paused 50.0%, #170): it leaves for Recently
     # installed, first there, and focus goes with it to its cover.
     Press Down 'Wide\(\d\)' | Out-Null
     Walk Right 'Wide\(3\)' 4
     Press A "ManageQueue: Cover\(0\) of .+; 1 installing, \d+ recently installed" | Out-Null
-    Press Down "$row; Queued 0\.0%" | Out-Null
+    Press Down "$row; Paused 50\.0%" | Out-Null
     $mark = Get-DashboardLogLength
     Advance $first.source_id @('--done')
     Expect-Logged "^queue: $firstName installed$" $mark 'Done' | Out-Null

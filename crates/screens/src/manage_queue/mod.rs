@@ -8,7 +8,8 @@
 //! a Game hub's Queue action (the hub, on Queue).
 //!
 //! Its covers and rows are a game's as a Home tile is: A opens the game's Game hub when the double tap's time has
-//! passed, and a second A plays it; Menu and View open its Tile menu.
+//! passed, and a second A plays it; Menu and View open its Tile menu, which on a row is the queued game's menu,
+//! with Pause or Resume and Cancel where its store can (`tile_menu::Opener::Queue`, #170).
 pub mod figures;
 
 use std::time::{Duration, Instant};
@@ -316,7 +317,11 @@ impl Page for ManageQueue {
             }
             (Button::Menu | Button::View, Focus::Cover(_) | Focus::Row(_)) if once => {
                 let place = self.place(library)?;
-                return Some(tile_menu::open(&library.games[place], tile_menu::Opener::MyGames));
+                let opener = match self.focus {
+                    Focus::Row(_) => tile_menu::Opener::Queue,
+                    _ => tile_menu::Opener::MyGames,
+                };
+                return Some(tile_menu::open(&library.games[place], opener));
             }
             _ => {}
         }

@@ -42,7 +42,7 @@ fn id_on(dashboard: &Dashboard, tile: usize) -> i64 {
 }
 
 fn queue(game: i64, state: InstallState) -> Queue {
-    Queue::new(vec![Queued { game, state, started: 1, speed: None }], Vec::new())
+    Queue::new(vec![Queued::new(game, state, 1)], Vec::new())
 }
 
 /// Home with focus on the Recent row's tile `tile`.

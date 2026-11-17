@@ -1,42 +1,103 @@
-//! Asking a game's store to install or uninstall it (docs/spec/tile-menu.md, sections 10 and 13). Until the
-//! Queue (M4) that is what the game's source gives (`model::Source::ask`: the store's own address for it, or a
-//! program to run), opened as Windows opens it: the store shows its own window and does the rest. Only
-//! [`SystemAddresses`] and [`ProgramAddresses`] open anything, which the executable makes only when it runs in its
-//! window; a test has a [`Recorded`], which keeps what it was asked.
+//! Asking a game's store to install or uninstall it (docs/spec/tile-menu.md, sections 10 and 13), and to pause,
+//! resume or cancel an install under way (docs/spec/manage-queue.md, section 8). A store with an installer of its
+//! own (`model::Source::installer`, `model::Installer`) is asked through it; one without, or one whose installer
+//! says it cannot, through what its source gives (`model::Source::ask`: the store's own address for the game, or a
+//! program to run), opened as Windows opens it, the store showing its own window and doing the rest. Either way
+//! what is opened goes through [`Addresses`]: only [`SystemAddresses`] and [`ProgramAddresses`] open anything, which
+//! the executable makes only when it runs in its window; a test has a [`Recorded`], which keeps what it was asked.
 use std::path::{Path, PathBuf};
 
-use model::{Game, Source, Start};
+use model::{installer, Game, Opener, Refusal, Source, Start, Steer};
 
 pub use model::Ask;
+/// Whoever opens what a store is asked by: the seam between what the Dashboard asks of a store and Windows. Opens
+/// an address with whatever program is registered for it, or runs a program; says why when nothing took it: on
+/// Windows, ShellExecute's answer. It is the `model::Opener` every store's installer acts through.
+pub use model::Opener as Addresses;
 
-/// Whoever opens what a store is asked by: the seam between what the Dashboard asks of a store and Windows.
-pub trait Addresses {
-    /// Opens an address with whatever program is registered for it, or runs a program. Says why when nothing took
-    /// it: on Windows, ShellExecute's answer.
-    fn open(&mut self, start: &Start) -> Result<(), String>;
+/// Says in the log what each address or program it opens asks of the game's store: `store: asked Epic Games to
+/// install <name>: com.epicgames...`; for Steam's own program, `store: asking Steam to install <name>: app_install
+/// <appid>`, the way it is asked said after (Steam's own program is only one of two ways of asking it, and the way
+/// is taken on a thread of its own, `crate::steam`, which says which in a line of its own).
+struct Saying<'a> {
+    addresses: &'a mut dyn Addresses,
+    store: &'a str,
+    what: &'a str,
+    game: &'a Game,
 }
 
-/// Asks the game's store, by way of its source (none for a game of no source the Dashboard has) and `addresses`,
-/// and says in the log what was asked: `store: asked Epic Games to install <name>: com.epicgames...`; for Steam's own
-/// program, `store: asking Steam to install <name>: app_install <appid>`, the way it is asked said after. A game
-/// whose store can't be asked is said so and left alone. Whether the store was asked.
+impl Opener for Saying<'_> {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
+        let opened = self.addresses.open(start);
+        let (store, what, name) = (self.store, self.what, &self.game.name);
+        match (&opened, start) {
+            (Ok(()), Start::Program { args, .. }) if crate::steam::is_steam(start).is_some() => {
+                let command = source_steam::cef::console_command(args).unwrap_or_else(|| args.join(" "));
+                eprintln!("store: asking {store} to {what} {name}: {command}");
+            }
+            (Ok(()), _) => eprintln!("store: asked {store} to {what} {name}: {start}"),
+            (Err(_), _) => eprintln!("store: nothing took {start}: {name} is as it was"),
+        }
+        opened
+    }
+}
+
+/// Asks the game's store, by way of its source (none for a game of no source the Dashboard has) and `addresses`:
+/// through its installer where it has one that can, into its default folder (the folder question is Settings >
+/// Storage's, #179), else as its source says. A game whose store can't be asked is said so and left alone. Whether
+/// the store was asked.
 pub fn ask(game: &Game, source: Option<&dyn Source>, ask: Ask, addresses: &mut dyn Addresses) -> bool {
     let what = ask.verb();
-    match source.and_then(|source| Some((source.name(), source.ask(game, ask)?))) {
-        Some((store, address)) if addresses.open(&address).is_ok() => {
-            // Steam's own program is only one of two ways of asking it, and the way is taken on a thread of its
-            // own (`crate::steam`), which says which in a line of its own.
-            match &address {
-                Start::Program { args, .. } if crate::steam::is_steam(&address).is_some() => {
-                    let command = source_steam::cef::console_command(args).unwrap_or_else(|| args.join(" "));
-                    eprintln!("store: asking {store} to {what} {}: {command}", game.name);
-                }
-                _ => eprintln!("store: asked {store} to {what} {}: {address}", game.name),
+    let Some(source) = source else {
+        eprintln!("store: {} is from no store that can {what} it", game.name);
+        return false;
+    };
+    let mut saying = Saying { addresses, store: source.name(), what, game };
+    if let Some(installer) = source.installer() {
+        let done = match ask {
+            Ask::Install => {
+                let folders = installer.folders();
+                installer.install(game, installer::default_folder(&folders), &mut saying)
             }
-            return true;
+            Ask::Uninstall => installer.uninstall(game, &mut saying),
+        };
+        match done {
+            Ok(()) => return true,
+            // The store's own way, as before there were installers.
+            Err(Refusal::Unsupported) => {}
+            Err(Refusal::Failed(why)) => {
+                eprintln!("store: {} couldn't {what} {}: {why}", source.name(), game.name);
+                return false;
+            }
         }
-        Some((_, address)) => eprintln!("store: nothing took {address}: {} is as it was", game.name),
-        None => eprintln!("store: {} is from no store that can {what} it", game.name),
+    }
+    match source.ask(game, ask) {
+        Some(address) => saying.open(&address).is_ok(),
+        None => {
+            eprintln!("store: {} is from no store that can {what} it", game.name);
+            false
+        }
+    }
+}
+
+/// Asks the game's store to pause, resume or cancel its install under way, through its installer. A store with
+/// none, or whose installer cannot, is said so: `store: Steam can't pause <name>'s install from here`. Whether the
+/// store was asked.
+pub fn steer(game: &Game, source: Option<&dyn Source>, steer: Steer, addresses: &mut dyn Addresses) -> bool {
+    let what = steer.verb();
+    let refused = match source.and_then(|source| Some((source, source.installer()?))) {
+        Some((source, installer)) => {
+            let mut saying = Saying { addresses, store: source.name(), what, game };
+            match installer.steer(game, steer, &mut saying) {
+                Ok(()) => return true,
+                Err(refusal) => (source.name(), refusal),
+            }
+        }
+        None => (source.map_or("No store", |source| source.name()), Refusal::Unsupported),
+    };
+    match refused {
+        (store, Refusal::Unsupported) => eprintln!("store: {store} can't {what} {}'s install from here", game.name),
+        (store, Refusal::Failed(why)) => eprintln!("store: {store} couldn't {what} {}'s install: {why}", game.name),
     }
     false
 }
@@ -192,6 +253,81 @@ mod tests {
         ask(&game(""), Some(&Fake), Ask::Uninstall, &mut addresses);
         ask(&game("5"), None, Ask::Uninstall, &mut addresses);
         assert_eq!(addresses.opened, ["fake://install/9100040", "fake://uninstall/9100010"]);
+    }
+
+    /// A store with an installer that installs and steers by `inst://`, uninstalls by nothing of its own (so its
+    /// source's address is opened), and cannot cancel.
+    struct WithInstaller;
+
+    impl model::Installer for WithInstaller {
+        fn can(&self) -> model::Can {
+            model::Can { pause: true, ..model::Can::NOTHING }
+        }
+
+        fn install(&self, game: &Game, folder: Option<&model::Folder>, open: &mut dyn Opener) -> Result<(), Refusal> {
+            let folder = folder.map_or("none".into(), |folder| folder.path.display().to_string());
+            let start = Start::Address(format!("inst://install/{}?into={folder}", game.source_id));
+            open.open(&start).map_err(Refusal::Failed)
+        }
+
+        fn folders(&self) -> Vec<model::Folder> {
+            let folder = |path: &str, default| model::Folder { path: path.into(), free: None, default };
+            vec![folder("E", false), folder("D", true)]
+        }
+
+        fn steer(&self, game: &Game, steer: Steer, open: &mut dyn Opener) -> Result<(), Refusal> {
+            if !steer.allowed(self.can()) {
+                return Err(Refusal::Unsupported);
+            }
+            open.open(&Start::Address(format!("inst://{}/{}", steer.verb(), game.source_id))).map_err(Refusal::Failed)
+        }
+    }
+
+    impl Source for WithInstaller {
+        fn key(&self) -> &'static str {
+            "fake"
+        }
+
+        fn name(&self) -> &'static str {
+            "Installing Store"
+        }
+
+        fn read(&self) -> anyhow::Result<Option<Found>> {
+            Ok(None)
+        }
+
+        fn start(&self, _: &Game) -> Option<Start> {
+            None
+        }
+
+        fn ask(&self, game: &Game, ask: Ask) -> Option<Start> {
+            Fake.ask(game, ask)
+        }
+
+        fn installer(&self) -> Option<&dyn model::Installer> {
+            Some(self)
+        }
+    }
+
+    #[test]
+    fn a_store_with_an_installer_is_asked_through_it_into_its_default_folder_and_else_as_before() {
+        let mut addresses = Recorded::default();
+        ask(&game("7"), Some(&WithInstaller), Ask::Install, &mut addresses);
+        // Its installer does not uninstall: the source's own address, as before installers.
+        ask(&game("7"), Some(&WithInstaller), Ask::Uninstall, &mut addresses);
+        assert_eq!(addresses.opened, ["inst://install/7?into=D", "fake://uninstall/7"]);
+    }
+
+    #[test]
+    fn steering_goes_through_the_installer_and_nothing_is_opened_where_it_cannot() {
+        let mut addresses = Recorded::default();
+        assert!(steer(&game("7"), Some(&WithInstaller), Steer::Pause, &mut addresses));
+        assert!(steer(&game("7"), Some(&WithInstaller), Steer::Resume, &mut addresses));
+        assert!(!steer(&game("7"), Some(&WithInstaller), Steer::Cancel, &mut addresses));
+        // A store with no installer, and a game of none.
+        assert!(!steer(&game("7"), Some(&Fake), Steer::Pause, &mut addresses));
+        assert!(!steer(&game("7"), None, Steer::Pause, &mut addresses));
+        assert_eq!(addresses.opened, ["inst://pause/7", "inst://resume/7"]);
     }
 
     #[test]

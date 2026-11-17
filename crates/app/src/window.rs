@@ -981,6 +981,14 @@ impl App {
                         self.store.tell_queue(::library::queue::Ask::Uninstall(game));
                     }
                 }
+                // A queued game's menu in the Queue (#170): the store is asked through its installer, and the
+                // Queue looks at once at what it then says.
+                Effect::Steer { game, steer } => {
+                    let (library, sources) = (self.dashboard.library(), self.store.sources());
+                    if crate::games::steer(library, sources, game, steer, &mut *self.addresses) {
+                        self.store.tell_queue(::library::queue::Ask::Look);
+                    }
+                }
             }
         }
         // A Profile signed in by the core itself (`Dashboard::sign_in`) changed before its effect was carried out.

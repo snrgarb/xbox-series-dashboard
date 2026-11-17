@@ -6,7 +6,7 @@ use model::{InstallState, Queued};
 /// One game in the Queue, as its row reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Figures {
-    /// "Installing..." or "Queued".
+    /// "Installing...", "Queued" or "Paused".
     pub state: &'static str,
     /// "106 Mbps", "323 Kbps": none while it waits, or until its bytes have first moved.
     pub speed: Option<String>,
@@ -33,14 +33,30 @@ impl Figures {
                     fraction: fraction as f32,
                 }
             }
-            // Waiting its turn, or paused in the client: the Bundle reads a download that is not active as Queued.
-            InstallState::Queued | InstallState::Paused { .. } => Figures {
+            // Paused, here or in the client (#170): the console's word, with what is down of the whole; no speed.
+            InstallState::Paused { done, total } => {
+                let fraction = if total == 0 { 0.0 } else { (done as f64 / total as f64).clamp(0.0, 1.0) };
+                Figures {
+                    state: model::queue::PAUSED,
+                    speed: None,
+                    amount: (total > 0).then(|| format!("{} of {}", size(done, 2), size(total, 2))),
+                    percent: Some(percent(fraction)),
+                    fraction: fraction as f32,
+                }
+            }
+            // Waiting its turn: only its share, 0.0%, as the Bundle reads a download that is not active.
+            InstallState::Queued => Figures {
                 state: entry.state.status(),
                 speed: None,
                 amount: None,
                 percent: Some(percent(0.0)),
                 fraction: 0.0,
             },
+            // The game installed, its extras still coming in (#188): Installing... alone until #188 says what of
+            // them is in, and never a speed of 0.
+            InstallState::Extras { .. } => {
+                Figures { state: entry.state.status(), speed: None, amount: None, percent: None, fraction: 0.0 }
+            }
         }
     }
 }
@@ -101,10 +117,8 @@ mod tests {
     #[test]
     fn a_download_says_its_speed_amount_and_share_and_one_waiting_only_its_share() {
         let downloading = Queued {
-            game: 1,
-            state: InstallState::Downloading { done: 71_094_272, total: 3_811_768_320 },
-            started: 0,
             speed: Some(106_000_000),
+            ..Queued::new(1, InstallState::Downloading { done: 71_094_272, total: 3_811_768_320 }, 0)
         };
         let figures = Figures::of(&downloading);
         assert_eq!(figures.state, "Installing...");
@@ -117,10 +131,19 @@ mod tests {
         let figures = Figures::of(&starting);
         assert_eq!((figures.amount, figures.speed, figures.percent), (None, None, None));
         assert_eq!((figures.state, figures.fraction), ("Installing...", 0.0));
-        // Paused half way: Queued, 0.0%, the bar empty.
-        let paused = Queued { state: InstallState::Paused { done: 50, total: 100 }, ..downloading };
+        // Paused half way: Paused, with what is down, and no speed.
+        let paused = Queued { state: InstallState::Paused { done: 1 << 30, total: 2 << 30 }, ..downloading };
         let figures = Figures::of(&paused);
+        assert_eq!((figures.state, figures.percent.as_deref(), figures.fraction), ("Paused", Some("50.0%"), 0.5));
+        assert_eq!((figures.speed, figures.amount.as_deref()), (None, Some("1.00 GB of 2.00 GB")));
+        // Waiting its turn: Queued, 0.0%, the bar empty.
+        let queued = Queued { state: InstallState::Queued, ..downloading };
+        let figures = Figures::of(&queued);
         assert_eq!((figures.state, figures.percent.as_deref(), figures.fraction), ("Queued", Some("0.0%"), 0.0));
         assert_eq!((figures.speed, figures.amount), (None, None));
+        // Installed, its extras coming in: Installing... alone.
+        let extras = Queued { state: InstallState::Extras { done: 0, total: 0 }, ..downloading };
+        let figures = Figures::of(&extras);
+        assert_eq!((figures.state, figures.percent, figures.speed), ("Installing...", None, None));
     }
 }

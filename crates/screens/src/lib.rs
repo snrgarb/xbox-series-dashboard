@@ -100,6 +100,9 @@ pub enum Effect {
     Install(i64),
     /// Ask its store to uninstall the game with this id. The player has said yes to "Uninstall X?".
     Uninstall(i64),
+    /// Ask its store to pause, resume or cancel the install under way of the game with this id: a queued game's
+    /// menu in the Queue (docs/spec/manage-queue.md, section 8). The Queue follows what the store then does.
+    Steer { game: i64, steer: model::Steer },
     /// Settings' Groups page changed a saved filter: shown or not, moved, made, changed, deleted
     /// (docs/spec/filters.md, section 6). A new snapshot follows, as for a favourite, and the pages over Home are
     /// told of it.
@@ -333,6 +336,10 @@ impl Dashboard {
         {
             let had = self.library.queue.get(entry.game).filter(|was| was.state.downloading());
             entry.speed = had.and_then(|was| was.speed);
+        }
+        // Nor what each store can be asked of its games: each keeps what it had.
+        for entry in library.queue.entries.iter_mut().filter(|entry| entry.can == model::Can::NOTHING) {
+            entry.can = self.library.queue.get(entry.game).map_or(model::Can::NOTHING, |was| was.can);
         }
         let place = |at: usize| {
             let game = self.library.games.get(at)?;

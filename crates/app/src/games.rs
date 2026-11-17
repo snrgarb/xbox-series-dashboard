@@ -1,7 +1,8 @@
 //! What the Dashboard asks of a game's store beyond starting it: installing and uninstalling, which the Tile menu
-//! offers (docs/spec/tile-menu.md, section 13). The game is named by its id in the library database, as the
-//! effect names it; its source gives the store's address, which is opened through `shell::store::Addresses`, which
-//! a test watches.
+//! offers (docs/spec/tile-menu.md, section 13), and pausing, resuming and cancelling an install, which a queued
+//! game's menu in the Queue offers (docs/spec/manage-queue.md, section 8). The game is named by its id in the
+//! library database, as the effect names it; its source's installer, or the address its source gives, is what is
+//! asked, through `shell::store::Addresses`, which a test watches.
 use std::sync::Arc;
 
 use model::{Library, Source};
@@ -18,6 +19,23 @@ pub fn ask_store(
 ) -> bool {
     match library.game(game).filter(|_| game != 0) {
         Some(game) => store::ask(game, crate::sources::of(sources, game).map(|source| &**source), ask, addresses),
+        None => {
+            eprintln!("store: no game {game} in the library: nothing asked");
+            false
+        }
+    }
+}
+
+/// Asks the store of the game with this id to pause, resume or cancel its install under way. Whether it was asked.
+pub fn steer(
+    library: &Library,
+    sources: &[Arc<dyn Source>],
+    game: i64,
+    steer: model::Steer,
+    addresses: &mut dyn Addresses,
+) -> bool {
+    match library.game(game).filter(|_| game != 0) {
+        Some(game) => store::steer(game, crate::sources::of(sources, game).map(|source| &**source), steer, addresses),
         None => {
             eprintln!("store: no game {game} in the library: nothing asked");
             false
@@ -70,6 +88,19 @@ mod tests {
         ask_store(&library(), &sources(), 3, Ask::Install, &mut addresses);
         ask_store(&library(), &sources(), 1, Ask::Uninstall, &mut addresses);
         assert_eq!(addresses.opened, ["steam://install/9100040", "steam://uninstall/9100010"]);
+    }
+
+    #[test]
+    fn the_real_steam_is_not_asked_to_pause_and_the_stand_in_is() {
+        let mut addresses = Recorded::default();
+        assert!(!steer(&library(), &sources(), 3, model::Steer::Pause, &mut addresses));
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("steam.exe"), "").unwrap();
+        std::fs::write(dir.path().join(source_steam::fixture::STANDIN_CLIENT), "").unwrap();
+        let standin = crate::sources::all(&crate::Args { steam: Some(dir.path().to_path_buf()), ..Default::default() });
+        assert!(steer(&library(), &standin, 3, model::Steer::Cancel, &mut addresses));
+        let exe = dir.path().join("steam.exe");
+        assert_eq!(addresses.opened, [format!("{} -silent +standin_cancel 9100040", exe.display())]);
     }
 
     #[test]

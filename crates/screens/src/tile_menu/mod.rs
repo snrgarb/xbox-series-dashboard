@@ -9,9 +9,13 @@
 //!
 //! The panels are [`MenuPanel`]s, the drawing the Guide's menus share. What is this file's own: which rows a game
 //! has, the three levels and where B goes from each, the dim, and how the panels come and go.
+//!
+//! Opened from the Queue (Manage Queue's row of a game being installed, [`Opener::Queue`]) it is the queued game's
+//! menu of the console: Pause installation or Resume installation, and Cancel installation, after the play row,
+//! each only where the game's store can be asked it (`model::Queued::can`; docs/spec/manage-queue.md, section 8).
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use model::{Game, GameKey, Library};
+use model::{Game, GameKey, Library, Queued, Steer};
 use ui::{Ease, Press, Ui};
 
 use crate::menu_panel::{self, icon, Answer, MenuPanel, Row, DIM, FLY};
@@ -34,6 +38,8 @@ pub enum Opener {
     MyGames,
     /// The Game hub's Manage button: the menu has no Manage game row, the player being there already.
     GameHub,
+    /// A game's row in Manage Queue: as My games & apps', with the queued game's Pause or Resume and Cancel.
+    Queue,
 }
 
 /// How the menu is opened: for which game, and from where.
@@ -78,6 +84,8 @@ enum Choice {
     Play,
     Install,
     Quit,
+    /// Pause, resume or cancel the game's install under way; cancel asks first.
+    Steer(Steer),
     /// Make the game a favourite, or no longer one.
     Favourite(bool),
     Manage,
@@ -93,18 +101,21 @@ enum More {
     Hide(bool),
 }
 
-/// The answers to "Uninstall X?".
+/// The answers to "Uninstall X?" and to "Cancel installing X?".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Confirm {
     Uninstall,
     Cancel,
+    CancelInstall,
+    KeepInstalling,
 }
 
 /// The menu's rows for a game (docs/spec/tile-menu.md, section 3): the play row, which is Quit for the running
-/// game and Install for one that is not installed; the Favourites row; Manage game, unless the hub opened the
-/// menu; Uninstall for an installed game its store can uninstall, unless it is running; then, after a gap,
-/// Customise and More options.
-fn rows(game: &Game, running: bool, opener: Opener) -> Vec<Row<Choice>> {
+/// game and Install for one that is not installed; opened from the Queue, Pause installation or Resume installation
+/// and Cancel installation for a game being installed, where its store can (`queued`); the Favourites row; Manage
+/// game, unless the hub opened the menu; Uninstall for an installed game its store can uninstall, unless it is
+/// running; then, after a gap, Customise and More options.
+fn rows(game: &Game, running: bool, opener: Opener, queued: Option<&Queued>) -> Vec<Row<Choice>> {
     let mut rows = vec![if running {
         Row::new(icon::QUIT, "Quit", Choice::Quit)
     } else if !game.installed {
@@ -112,6 +123,16 @@ fn rows(game: &Game, running: bool, opener: Opener) -> Vec<Row<Choice>> {
     } else {
         Row::new(icon::PLAY, "Play game", Choice::Play)
     }];
+    if let Some(entry) = queued.filter(|_| opener == Opener::Queue && !game.installed) {
+        if entry.can.pause && entry.state.paused() {
+            rows.push(Row::new(icon::PLAY, RESUME, Choice::Steer(Steer::Resume)));
+        } else if entry.can.pause {
+            rows.push(Row::new(icon::PAUSE, PAUSE, Choice::Steer(Steer::Pause)));
+        }
+        if entry.can.cancel {
+            rows.push(Row::new(icon::CANCEL_INSTALL, CANCEL, Choice::Steer(Steer::Cancel)));
+        }
+    }
     rows.push(if game.favourite {
         Row::new(icon::UNFAVOURITE, "Remove from Favourites", Choice::Favourite(false))
     } else {
@@ -123,11 +144,17 @@ fn rows(game: &Game, running: bool, opener: Opener) -> Vec<Row<Choice>> {
     if game.installed && has_uninstaller(game) && !running {
         rows.push(Row::new(icon::UNINSTALL, "Uninstall", Choice::Uninstall));
     }
-    let customise = if opener == Opener::MyGames { "Customise games & apps" } else { "Customise Home" };
+    let customise =
+        if matches!(opener, Opener::MyGames | Opener::Queue) { "Customise games & apps" } else { "Customise Home" };
     rows.push(Row::new(icon::CUSTOMISE, customise, Choice::Customise).after_a_gap());
     rows.push(Row::new(icon::MORE_OPTIONS, "More options", Choice::MoreOptions));
     rows
 }
+
+/// The queued game's rows, as the console words them.
+const PAUSE: &str = "Pause installation";
+const RESUME: &str = "Resume installation";
+const CANCEL: &str = "Cancel installation";
 
 /// Whether the game's store can be asked to uninstall it: any store's can, its source giving the address. A game
 /// from no store (a made-up one) has no Uninstall row, nor one added by hand, which Settings removes.
@@ -142,6 +169,18 @@ fn more_rows(game: &Game) -> Vec<Row<More>> {
     } else {
         Row::new(icon::HIDE, "Hide this game", More::Hide(true))
     }]
+}
+
+/// Pause, resume or cancel, as it is chosen: the game still being installed, its store still able, and the install
+/// where it can be (paused to resume, not paused to pause). Else nothing, the menu closing all the same.
+fn steerable(library: &Library, game: i64, steer: Steer) -> Option<Effect> {
+    let entry = library.queue.installing(game)?;
+    let applies = match steer {
+        Steer::Pause => !entry.state.paused(),
+        Steer::Resume => entry.state.paused(),
+        Steer::Cancel => true,
+    };
+    (applies && steer.allowed(entry.can)).then_some(Effect::Steer { game, steer })
 }
 
 /// The game with this key, hidden or not, and whether it is among the hidden.
@@ -179,9 +218,10 @@ impl TileMenu {
     pub fn open(entry: Entry, around: Around) -> Option<Self> {
         let game = find(around.library, &entry.game)?;
         let running = around.playing.is_some() && around.playing == place(around.library, &entry.game);
+        let queued = around.library.queue.installing(game.id);
         Some(Self {
             game: entry.game,
-            menu: MenuPanel::menu(&game.name, rows(&game, running, entry.opener)),
+            menu: MenuPanel::menu(&game.name, rows(&game, running, entry.opener, queued)),
             name: game.name,
             flyout: None,
             prompt: None,
@@ -204,6 +244,19 @@ impl TileMenu {
             Choice::Play => then(place.filter(|_| around.playing.is_none()).map(Effect::Launch)),
             Choice::Quit => then((around.playing.is_some() && around.playing == place).then_some(Effect::QuitGame)),
             Choice::Install => Some(game.as_ref().map_or(PageAction::Close, |game| install(game, around.library))),
+            // Cancel asks first, in the menu's place, as Uninstall does.
+            Choice::Steer(Steer::Cancel) => {
+                let answers = vec![
+                    Row::new(icon::CANCEL_INSTALL, CANCEL, Confirm::CancelInstall),
+                    Row::new(icon::PLAY, "Keep installing", Confirm::KeepInstalling),
+                ];
+                let message = "What has downloaded so far is deleted.";
+                self.prompt =
+                    Some(MenuPanel::prompt(&format!("Cancel installing {}?", self.name), Some(message), answers));
+                self.flights += 1;
+                None
+            }
+            Choice::Steer(steer) => then(steerable(around.library, self.game.id, steer)),
             Choice::Favourite(on) => then(Some(Effect::Favourite { game: self.game.id, on })),
             Choice::Manage => Some(game.as_ref().and_then(game_hub).map_or(PageAction::Close, PageAction::Replace)),
             Choice::Uninstall => {
@@ -303,8 +356,12 @@ impl Page for TileMenu {
                     let game = find(around.library, &self.game).filter(|game| game.installed && game.id != 0);
                     Some(game.map_or(PageAction::Close, |game| PageAction::CloseWith(Effect::Uninstall(game.id))))
                 }
+                Answer::Chose(Confirm::CancelInstall) => {
+                    let effect = steerable(around.library, self.game.id, Steer::Cancel);
+                    Some(effect.map_or(PageAction::Close, PageAction::CloseWith))
+                }
                 // Back to the menu, which flies up again as the question did.
-                Answer::Chose(Confirm::Cancel) | Answer::Declined => {
+                Answer::Chose(Confirm::Cancel | Confirm::KeepInstalling) | Answer::Declined => {
                     self.prompt = None;
                     self.flights += 1;
                     None
@@ -373,7 +430,58 @@ mod tests {
     }
 
     fn labels(game: &Game, running: bool, opener: Opener) -> Vec<String> {
-        rows(game, running, opener).into_iter().map(|row| row.label).collect()
+        rows(game, running, opener, None).into_iter().map(|row| row.label).collect()
+    }
+
+    /// The queued game's menu (#170): Pause or Resume and Cancel after Install, only from the Queue and only what
+    /// its store can.
+    #[test]
+    fn from_the_queue_a_queued_game_can_be_paused_resumed_and_cancelled_where_its_store_can() {
+        let absent = Game { installed: false, ..game() };
+        let all = model::Can { pause: true, cancel: true, ..model::Can::NOTHING };
+        let entry = |state, can| Queued { can, ..Queued::new(7, state, 0) };
+        let downloading = entry(model::InstallState::Downloading { done: 1, total: 2 }, all);
+        let labels = |opener, queued: &Queued| -> Vec<String> {
+            rows(&absent, false, opener, Some(queued)).into_iter().map(|row| row.label).collect()
+        };
+        assert_eq!(
+            labels(Opener::Queue, &downloading),
+            ["Install", PAUSE, CANCEL, "Add to Favourites", "Manage game", "Customise games & apps", "More options"]
+        );
+        let paused = entry(model::InstallState::Paused { done: 1, total: 2 }, all);
+        assert_eq!(labels(Opener::Queue, &paused)[1..3], [RESUME, CANCEL]);
+        // Waiting its turn, it can be paused too.
+        assert_eq!(labels(Opener::Queue, &entry(model::InstallState::Queued, all))[1], PAUSE);
+        // A store that cannot: as the Bundle's menu.
+        let nothing = entry(model::InstallState::Downloading { done: 1, total: 2 }, model::Can::NOTHING);
+        assert_eq!(labels(Opener::Queue, &nothing), labels(Opener::MyGames, &nothing));
+        let cancel_only = entry(
+            model::InstallState::Paused { done: 1, total: 2 },
+            model::Can { cancel: true, ..model::Can::NOTHING },
+        );
+        assert_eq!(labels(Opener::Queue, &cancel_only)[1], CANCEL);
+        // Anywhere but the Queue, the Bundle's menu.
+        for opener in [Opener::Home, Opener::MyGames, Opener::GameHub] {
+            assert!(!labels(opener, &downloading).iter().any(|label| label == PAUSE || label == CANCEL));
+        }
+    }
+
+    #[test]
+    fn pause_resume_and_cancel_are_asked_only_while_they_still_apply() {
+        let all = model::Can { pause: true, cancel: true, ..model::Can::NOTHING };
+        let queue = |state| model::Queue::new(vec![Queued { can: all, ..Queued::new(7, state, 0) }], Vec::new());
+        let at = |state| Library { queue: queue(state), ..Library::default() };
+        let downloading = at(model::InstallState::Downloading { done: 1, total: 2 });
+        let paused = at(model::InstallState::Paused { done: 1, total: 2 });
+        let effect = |steer| Some(Effect::Steer { game: 7, steer });
+        assert_eq!(steerable(&downloading, 7, Steer::Pause), effect(Steer::Pause));
+        assert_eq!(steerable(&downloading, 7, Steer::Resume), None);
+        assert_eq!(steerable(&paused, 7, Steer::Resume), effect(Steer::Resume));
+        assert_eq!(steerable(&paused, 7, Steer::Pause), None);
+        assert_eq!(steerable(&paused, 7, Steer::Cancel), effect(Steer::Cancel));
+        // Gone from the Queue, or installed with its extras coming in: nothing.
+        assert_eq!(steerable(&Library::default(), 7, Steer::Cancel), None);
+        assert_eq!(steerable(&at(model::InstallState::Extras { done: 0, total: 0 }), 7, Steer::Cancel), None);
     }
 
     /// docs/spec/tile-menu.md, section 3.1.
@@ -419,7 +527,7 @@ mod tests {
         assert_eq!(labels(&game(), false, Opener::MyGames)[4], "Customise games & apps");
         // The gap is over Customise, wherever that is.
         for opener in [Opener::Home, Opener::MyGames, Opener::GameHub] {
-            let gaps: Vec<bool> = rows(&game(), false, opener).iter().map(|row| row.gap).collect();
+            let gaps: Vec<bool> = rows(&game(), false, opener, None).iter().map(|row| row.gap).collect();
             assert_eq!(gaps.iter().filter(|&&gap| gap).count(), 1);
             assert!(gaps[gaps.len() - 2]);
         }
