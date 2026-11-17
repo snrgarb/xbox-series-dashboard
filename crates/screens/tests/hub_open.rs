@@ -2,7 +2,6 @@
 //! are asked for at the tile's A, while the double tap's time is waited out. The fonts are tools/test-fonts.sh's.
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 use model::achievement::GameProgress;
 use model::Library;
@@ -65,6 +64,8 @@ fn never(name: &str) -> PathBuf {
 #[cfg(unix)]
 #[test]
 fn the_hubs_first_frame_waits_on_neither_its_pictures_nor_its_achievements() {
+    use std::time::{Duration, Instant};
+
     fonts();
     let _drawing = DRAWING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let (gpu, size) = (gpu::init(gpu::instance(None), None), HD);
