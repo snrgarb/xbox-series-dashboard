@@ -108,6 +108,9 @@ pub struct AgreementPrompt {
     heights: Vec<f32>,
     /// The box's height as last drawn.
     view: f32,
+    /// The pad's scrolling before the text was first measured, in lines and in boxes-full: done at its first draw,
+    /// so that a press as the prompt comes up is not lost.
+    early: (f32, f32),
 }
 
 impl AgreementPrompt {
@@ -126,7 +129,7 @@ impl AgreementPrompt {
         };
         let blocks: Vec<String> = text.lines().map(|line| line.trim().to_string()).collect();
         let focus = choices.len() - 1;
-        Self { entry, choices, focus, scroll: 0.0, heights: Vec::new(), blocks, view: 0.0 }
+        Self { entry, choices, focus, scroll: 0.0, heights: Vec::new(), blocks, view: 0.0, early: (0.0, 0.0) }
     }
 
     /// The text's whole height, as last measured.
@@ -155,12 +158,20 @@ impl AgreementPrompt {
         (at.min(of), of)
     }
 
-    fn scroll_by(&mut self, by: f32) -> bool {
-        let was = self.scroll;
-        // Before it is first drawn its height is not known: it is held to its end then.
-        let most = if self.heights.is_empty() { f32::MAX } else { self.most() };
-        self.scroll = (self.scroll + by).clamp(0.0, most);
-        self.scroll != was
+    /// A box-full less a line: what a bumper or trigger scrolls.
+    fn page(&self) -> f32 {
+        (self.view - LINE).max(LINE)
+    }
+
+    /// Scrolls by `lines` and `pages`, within the text's ends; before the text is measured, kept for its first draw.
+    fn scroll_by(&mut self, lines: f32, pages: f32) {
+        if !self.measured() {
+            self.early.0 += lines;
+            self.early.1 += pages;
+            return;
+        }
+        let by = lines * LINE + pages * self.page();
+        self.scroll = (self.scroll + by).clamp(0.0, self.most());
     }
 
     fn rect(ui: &Ui) -> Rect {
@@ -200,20 +211,11 @@ impl Page for AgreementPrompt {
 
     fn press(&mut self, press: Press, _around: Around) -> Option<PageAction> {
         let once = !press.repeat;
-        let page = (self.view - LINE).max(LINE);
         match press.button {
-            Button::Up => {
-                self.scroll_by(-STEP_LINES * LINE);
-            }
-            Button::Down => {
-                self.scroll_by(STEP_LINES * LINE);
-            }
-            Button::LeftBumper | Button::LeftTrigger => {
-                self.scroll_by(-page);
-            }
-            Button::RightBumper | Button::RightTrigger => {
-                self.scroll_by(page);
-            }
+            Button::Up => self.scroll_by(-STEP_LINES, 0.0),
+            Button::Down => self.scroll_by(STEP_LINES, 0.0),
+            Button::LeftBumper | Button::LeftTrigger => self.scroll_by(0.0, -1.0),
+            Button::RightBumper | Button::RightTrigger => self.scroll_by(0.0, 1.0),
             Button::Left if self.focus > 0 => self.focus -= 1,
             Button::Right if self.focus + 1 < self.choices.len() => self.focus += 1,
             Button::A if once => {
@@ -268,7 +270,9 @@ impl Page for AgreementPrompt {
                 })
                 .collect();
         }
-        self.scroll = self.scroll.clamp(0.0, self.most());
+        // What was pressed before the text was measured, done now it is.
+        let (lines, pages) = std::mem::take(&mut self.early);
+        self.scroll = (self.scroll + lines * LINE + pages * self.page()).clamp(0.0, self.most());
         let style = if agreement.text.is_ok() { BODY } else { BODY.color(TEXT_DIM) };
         ui.with_clip(text, |ui| {
             let mut y = text.y - self.scroll;
@@ -368,6 +372,22 @@ mod tests {
             Some(PageAction::CloseWith(Effect::Agreement { id: 7, reply: Reply::Accept }))
         );
         assert_eq!(page.agreement(), Some(7));
+    }
+
+    /// A bumper pressed as the prompt comes up, before its text is first measured, scrolls once it is.
+    #[test]
+    fn scrolling_before_the_first_draw_is_done_at_it() {
+        let mut page = AgreementPrompt::open(entry(Ok("a\n\nb")));
+        press(&mut page, Button::RightBumper);
+        press(&mut page, Button::Down);
+        assert_eq!((page.scroll, page.state().as_str()), (0.0, "agreement 1 of 2, page 1"));
+        // Measured as a draw measures it, then what was pressed done.
+        page.view = 500.0;
+        page.heights = vec![2000.0, PARAGRAPH_GAP, 3000.0 - PARAGRAPH_GAP];
+        let (lines, pages) = std::mem::take(&mut page.early);
+        page.scroll_by(lines, pages);
+        assert!((page.scroll - (500.0 - LINE + STEP_LINES * LINE)).abs() < 0.01, "{}", page.scroll);
+        assert_eq!(page.state(), "agreement 1 of 2, page 2 of 10");
     }
 
     #[test]
