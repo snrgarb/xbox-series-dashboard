@@ -1366,6 +1366,9 @@ impl Dashboard {
             Some(state) if !state.is_empty() => format!("{place}; {state}"),
             // Settings > Discord: how the connection is, which the page has from the shell, not of its own.
             _ if place.starts_with("Settings: Discord: ") => format!("{place}; {}", self.discord.state_line()),
+            // Settings > About: where updates stand, which the page has from the shell, not of its own, so the line
+            // follows a check or an install at once rather than at the page's next draw.
+            _ if place.starts_with("Settings: About: ") => format!("{place}; {}", self.options.updates.state()),
             _ => place,
         }
     }

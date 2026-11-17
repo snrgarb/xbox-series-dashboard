@@ -40,7 +40,10 @@ impl AsShell {
         }
         let guard = match handover {
             Some(old) => {
-                eprintln!("update: taking over from pid {old}, an update's earlier version");
+                eprintln!(
+                    "update: taking over from pid {old}, an update's earlier version, at {:.0} ms",
+                    crate::since_start()
+                );
                 Instance::First(dashboard::taking_over(data_dir.as_deref()))
             }
             None => dashboard::single_instance(data_dir.as_deref()),

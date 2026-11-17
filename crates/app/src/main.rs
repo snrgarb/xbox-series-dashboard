@@ -306,7 +306,14 @@ fn main() {
     let data = args.data_dir.clone().or_else(library::data_dir);
     if let Some(path) = &args.log_file {
         if !shell_mode::dashboard::log_to_path(path) {
-            eprintln!("dashboard: couldn't open --log-file {}", path.display());
+            // Not lost: the data folder's logs\ instead, where the lines say why.
+            if let Some(data) = &data {
+                shell_mode::dashboard::log_to_file(&data.join("logs"));
+            }
+            eprintln!(
+                "dashboard: couldn't open --log-file {}; logging to the data folder's logs instead",
+                path.display()
+            );
         }
     } else if !args.from_shell && !shell_mode::dashboard::errors_go_somewhere() {
         if let Some(data) = &data {

@@ -215,14 +215,20 @@ fn hand_over(exe: &std::path::Path, current: Version, version: Version, args: &[
         Err(e) => return put_back(&format!("couldn't be started ({e})")),
     };
     eprintln!(
-        "update: started {version} (pid {}) with {}; waiting up to {} s for its first frame",
+        "update: started {version} (pid {}) at {:.0} ms with {}; waiting up to {} s for its first frame",
         handover.pid(),
+        crate::since_start(),
         args.join(" "),
         HANDOVER_LIMIT.as_secs()
     );
+    let waited = std::time::Instant::now();
     match handover.wait(HANDOVER_LIMIT) {
         HandoverEnd::Started => {
-            eprintln!("update: {version} (pid {}) has shown its first frame: this one exits", handover.pid());
+            eprintln!(
+                "update: {version} (pid {}) has shown its first frame: this one exits ({} ms after its start)",
+                handover.pid(),
+                waited.elapsed().as_millis()
+            );
             Event::HandedOver
         }
         HandoverEnd::Exited(code) => put_back(&format!("exited with {code:#x} before its first frame")),

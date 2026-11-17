@@ -182,7 +182,8 @@ mod win {
 
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, OPEN_ALWAYS,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_ALWAYS,
     };
     use windows_sys::Win32::System::Console::{SetStdHandle, STD_ERROR_HANDLE};
     use windows_sys::Win32::System::Threading::{
@@ -310,7 +311,9 @@ mod win {
             let file = CreateFileW(
                 name.as_ptr(),
                 FILE_APPEND_DATA | SYNCHRONIZE,
-                FILE_SHARE_READ | FILE_SHARE_DELETE,
+                // Shared for writing too: an update's new Dashboard appends to the same --log-file while the old
+                // one still has it open (docs/spec/updates.md). Appends from two processes don't overwrite.
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 std::ptr::null(),
                 OPEN_ALWAYS,
                 FILE_ATTRIBUTE_NORMAL,

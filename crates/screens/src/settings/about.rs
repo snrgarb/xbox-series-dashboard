@@ -109,13 +109,11 @@ impl Control {
 pub struct About {
     build: Build,
     at: Control,
-    /// Where updates stood at the last draw: the focus line says it.
-    updates: Updates,
 }
 
 impl About {
     pub fn open(around: Around) -> Self {
-        Self { build: around.options.build, at: Control::Check, updates: around.options.updates }
+        Self { build: around.options.build, at: Control::Check }
     }
 }
 
@@ -124,15 +122,14 @@ impl Pane for About {
         TITLE.into()
     }
 
-    /// `About: Version 0.1.0 (0123abc); Check for updates; ready 0.2.0`: the version, the control focus is on, and
-    /// where updates stand (`Updates::state`).
+    /// `About: Version 0.1.0 (0123abc); Check for updates`: the version and the control focus is on. The Dashboard's
+    /// focus line adds where updates stand (`Updates::state`, as `; ready 0.2.0`) from the options.
     fn focus(&self) -> String {
-        format!("{TITLE}: {}; {}; {}", self.build.says(), self.at.name(), self.updates.state())
+        format!("{TITLE}: {}; {}", self.build.says(), self.at.name())
     }
 
     fn press(&mut self, press: Press, around: Around) -> Step {
         let updates = around.options.updates;
-        self.updates = updates;
         let effect = |effect| Step::Do(PageAction::Effect(effect));
         match (press.button, self.at) {
             (Button::B, _) if !press.repeat => Step::Back,
@@ -169,7 +166,6 @@ impl Pane for About {
 
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool) {
         let updates = around.options.updates;
-        self.updates = updates;
         let mut y = TOP;
         y += controls::label(ui, LEFT, y, NAME) + 4.0;
         y += controls::description(ui, LEFT, y, ROW_WIDTH, &self.build.says()) + 40.0;

@@ -101,7 +101,11 @@ Install while a game runs does nothing (the line says to quit it). Otherwise, on
 The new Dashboard under `--handover <pid>`:
 
 - takes the single-instance guard alongside the old one's, rather than giving way to it (`shell_mode::dashboard::
-  taking_over`), and logs `update: taking over from pid <pid>, an update's earlier version`;
+  taking_over`), and logs `update: taking over from pid <pid>, an update's earlier version, at <ms> ms` and, at its first frame,
+  `update: first frame at <ms> ms; told pid <pid>: true` (the old one logs `started <new> (pid <pid>) at <ms> ms`
+  and `has shown its first frame: this one exits (<ms> ms after its start)`, so both sides' timings are in the log);
+- appends to the same `--log-file` as the old one, which shares it for writing; a `--log-file` that can't be
+  opened sends the log to the data folder's `logs\` instead;
 - has no Start-up (as `--no-startup`): the user just had one;
 - removes nothing as it starts (the old one is still running from its file).
 

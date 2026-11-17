@@ -1304,6 +1304,10 @@ impl ApplicationHandler for App {
             self.dashboard.set_options(screens::Options { shell, ..self.dashboard.options() });
             self.stale = true;
         }
+        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time, an
+        // update's check or install going on (Settings > About's line says where updates stand).
+        let focus = self.dashboard.focus_line();
+        let guide = self.dashboard.guide_line();
         // Updates: how a check or an install goes, as a thread says; the daily check when it is due; and a Toast
         // for a version ready, never while a game runs.
         for event in self.updater.poll() {
@@ -1327,9 +1331,6 @@ impl ApplicationHandler for App {
                 self.overlay_stale = true;
             }
         }
-        // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
-        let focus = self.dashboard.focus_line();
-        let guide = self.dashboard.guide_line();
         // The last input anywhere, read before the pad's events are taken (`pad.poll`): a press among them that
         // made it is then still to come, and is the Idle screen's wake press (docs/spec/idle-screen.md, 5).
         if let Some(at) = shell::idle::later(self.input_clock.last_input(), self.pad.last_used()) {

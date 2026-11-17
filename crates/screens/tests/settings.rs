@@ -1057,6 +1057,13 @@ fn about_asks_for_a_check_installs_only_what_is_ready_and_turns_the_daily_check_
     let change = Change { setting: Setting::DailyUpdateCheck, on: true };
     assert!(matches!(asked(&mut stage)[..], [Effect::Set(c)] if c == change));
     assert!(stage.dashboard.options().daily_update_check);
+    // The shell says where updates stand: the focus line follows at once, before the page is drawn again.
+    let refused = Updates::BadDownload(Version::new(1, 3, 0));
+    stage.dashboard.set_options(Options { updates: refused, ..stage.dashboard.options() });
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: About: Version 1.2.3 (0123abc); Check for updates every day; bad-download 1.3.0"
+    );
 }
 
 /// About with a version ready to install, focus on Install, the daily check on.

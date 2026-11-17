@@ -153,7 +153,10 @@ try {
     Push-Button 'A'
     Expect-Line $log "^update: started $([regex]::Escape($version)) \(pid \d+\)" 20 'Install starts the new version' $mark | Out-Null
     Expect-Line $log '^update: taking over from pid \d+' 30 'the new version takes over' $mark | Out-Null
-    $handed = Expect-Line $log "^update: $([regex]::Escape($version)) \(pid (\d+)\) has shown its first frame: this one exits" 40 'the new version shows its first frame, and the old one exits' $mark
+    $handed = Expect-Line $log "^update: $([regex]::Escape($version)) \(pid (\d+)\) has shown its first frame: this one exits \((\d+) ms after its start\)" 40 'the new version shows its first frame, and the old one exits' $mark
+    # A real update hands over in about a second: the new one's first frame comes as soon as it would on any start.
+    $took = if ($handed -match '\((\d+) ms after its start\)$') { [int] $Matches[1] } else { -1 }
+    Expect ($took -ge 0 -and $took -lt 5000) "the new version's first frame came within 5 s of its start ($took ms)"
     $exited = $old.WaitForExit([int] ((Get-Limit 15) * 1000))
     Expect ($exited -and $old.ExitCode -eq 0) "the old version exited 0 (exited: $exited, code $(if ($exited) { $old.ExitCode }))"
     $new = @(Get-CimInstance Win32_Process -Filter "Name = 'dashboard.exe'" | Where-Object {
@@ -161,7 +164,7 @@ try {
     $new | ForEach-Object { $script:started += $_.ProcessId; Say "  new: pid $($_.ProcessId): $($_.CommandLine)" }
     Expect ($new.Count -eq 1) "the copy's dashboard.exe runs with --handover $($old.Id)"
     Expect ([bool] (Read-Log $log | Select-Object -Skip $mark | Where-Object { $_ -match "^dashboard $([regex]::Escape($version))\b" })) "the new process says dashboard $version"
-    Expect ([bool] (Read-Log $log | Where-Object { $_ -match "^update: first frame at \d+ ms; told pid $($old.Id): True$" })) 'the new process told the old one of its first frame'
+    Expect ([bool] (Read-Log $log | Where-Object { $_ -match "^update: first frame at \d+ ms; told pid $($old.Id): true$" })) 'the new process told the old one of its first frame'
     $names = Get-Names $folder
     Say "the copy's folder: $($names -join ', ')"
     Expect (($names -join ',') -eq "dashboard.$Pretend.old,dashboard.exe") "the folder holds dashboard.exe and dashboard.$Pretend.old, and no dashboard.exe.new"
