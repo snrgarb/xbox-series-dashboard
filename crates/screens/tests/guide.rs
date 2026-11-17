@@ -89,8 +89,9 @@ fn left_and_right_move_along_the_utilities_and_do_nothing_on_an_entry() {
     assert_eq!(after(&mut guide, &[Left]), (LANDING, utility(0)), "the row stops at its ends");
     assert_eq!(after(&mut guide, &[Right]), (LANDING, utility(1)));
     assert_eq!(after(&mut guide, &[Right]), (LANDING, utility(2)));
-    assert_eq!(after(&mut guide, &[Right]), (LANDING, utility(2)));
-    assert_eq!(after(&mut guide, &[Left]), (LANDING, utility(1)));
+    assert_eq!(after(&mut guide, &[Right]), (LANDING, utility(3)), "Downloads, last");
+    assert_eq!(after(&mut guide, &[Right]), (LANDING, utility(3)));
+    assert_eq!(after(&mut guide, &[Left]), (LANDING, utility(2)));
 }
 
 #[test]

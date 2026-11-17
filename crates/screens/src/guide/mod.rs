@@ -75,10 +75,11 @@ pub enum GuideAction {
     Close,
     /// Home was chosen: close, onto Home.
     Home,
-    /// My games & apps, Settings or the Search Utility was chosen: close, onto that page.
+    /// My games & apps, Settings, the Search Utility or the Downloads Utility was chosen: close, onto that page.
     MyGames,
     Settings,
     Search,
+    ManageQueue,
     /// The running game was chosen: close, back to it.
     Resume,
     /// A game played before was chosen, by its place in the library: launched, or with another game running asked
@@ -568,6 +569,7 @@ impl Guide {
             (Button::A, Focus::Utility(at)) => {
                 return match self.utilities.get(at)? {
                     Utility::Search => Some(GuideAction::Search),
+                    Utility::Downloads => Some(GuideAction::ManageQueue),
                     Utility::Notifications => {
                         self.open_flyout(Flyout::Notifications);
                         Some(GuideAction::Asked)
@@ -778,9 +780,13 @@ impl Guide {
                     Focus::Utility(at) if self.flyout.is_none() => Some(at),
                     _ => None,
                 };
-                // The badge counts what the Flyout lists, or what the shell says there is, whichever is more.
-                let count = face.status.notifications.max(around.notifications.len() as u32);
-                utilities::draw(ui, &self.utilities, focus, count);
+                // Notifications' badge counts what the Flyout lists, or what the shell says there is, whichever is
+                // more; Downloads' the games in the Queue.
+                let counts = utilities::Counts {
+                    notifications: face.status.notifications.max(around.notifications.len() as u32),
+                    queued: around.library.queue.len() as u32,
+                };
+                utilities::draw(ui, &self.utilities, focus, counts);
             });
         });
     }

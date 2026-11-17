@@ -187,6 +187,8 @@ fn moving_in_the_guide_is_its_own_sound_and_only_when_focus_moved() {
     assert!(press(&mut home, Button::Left).is_empty());
     assert_eq!(press(&mut home, Button::Right), [GUIDE_MOVE]);
     assert_eq!(hold(&mut home, Button::Right), [GUIDE_MOVE]);
+    // Downloads, the fourth and last (#193).
+    assert_eq!(press(&mut home, Button::Right), [GUIDE_MOVE]);
     assert!(press(&mut home, Button::Right).is_empty());
     assert_eq!(press(&mut home, Button::Up), [GUIDE_MOVE]);
     // Home's focus is where it was: the Guide's moves were not Home's.

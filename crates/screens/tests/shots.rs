@@ -1538,6 +1538,29 @@ fn guide_utility_focused_with_a_badge_and_batteries() {
     stage.check("guide-utility");
 }
 
+/// The Downloads Utility (#193) with focus, the Queue empty: no badge.
+#[test]
+fn guide_downloads_utility_with_nothing_queued() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_pad_connected(true);
+    stage.press(&[Button::Guide]);
+    stage.press(&[Button::Down; 6]);
+    stage.press(&[Button::Right; 3]);
+    stage.check("guide-downloads");
+}
+
+/// The same with two games in the Queue, the first downloading: the badge counts them, as Notifications' does.
+#[test]
+fn guide_downloads_utility_with_a_download() {
+    let mut stage = Stage::on_row(library_with_art(), HD);
+    stage.dashboard.set_pad_connected(true);
+    stage.queue(&[2, 1], true);
+    stage.press(&[Button::Guide]);
+    stage.press(&[Button::Down; 6]);
+    stage.press(&[Button::Right; 3]);
+    stage.check("guide-downloads-queued");
+}
+
 /// The Bundle's own picture of the Guide (guide-over-game's guide-open.jpg): over the stand-in game, which is none
 /// of the library's, with nothing played yet and a pad on a cable.
 #[test]

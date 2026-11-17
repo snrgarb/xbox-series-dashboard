@@ -358,6 +358,24 @@ fn home_from_the_guide_over_a_game_brings_the_dashboard_in_front_of_it() {
 }
 
 #[test]
+fn downloads_from_the_guide_over_a_game_opens_manage_queue_in_front_of_it() {
+    let mut guide = in_game();
+    // The landing tab over the game: Home, My games & apps, the game and three played before it; then the
+    // Utilities, Downloads the fourth.
+    let effects = press(&mut guide, &[Guide, Down, Down, Down, Down, Down, Down, Button::Right, Button::Right]);
+    assert_eq!(guide.guide().focus(), (Tab::Landing, Focus::Utility(2)));
+    assert_eq!(effects.last(), Some(&MOVE));
+    assert_eq!(press(&mut guide, &[Button::Right, A])[1..], [SELECT, CLOSED, Effect::ShowHome]);
+    assert!(!guide.guide_open() && guide.page() == Some("ManageQueue"));
+    assert!(guide.in_front_of_game() && !guide.home_covered(), "the Dashboard is in front of the game");
+    assert_eq!(guide.playing(), Some(RUNNING), "the game runs on behind it");
+    // B closes the page onto Home, still in front of the game.
+    press(&mut guide, &[B]);
+    assert_eq!(guide.page(), None);
+    assert!(guide.in_front_of_game());
+}
+
+#[test]
 fn in_front_of_the_game_the_guide_lists_it_running_and_a_on_it_goes_back() {
     let mut guide = in_game();
     press(&mut guide, &[Guide, A]);
