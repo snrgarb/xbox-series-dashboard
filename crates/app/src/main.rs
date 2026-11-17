@@ -380,6 +380,10 @@ fn main() {
     if args.screenshot.is_none() && args.handover.is_none() {
         updates::remove_old();
     }
+    // Every date in the user's short date format, as their Windows writes it (#237).
+    let short_date = shell::locale::short_date_format();
+    eprintln!("dashboard: dates as {}", short_date.as_deref().unwrap_or(screens::date::FALLBACK));
+    screens::date::set_short_format(short_date);
     let (library, mut store) = store::open(&args);
     if args.screenshot.is_some() {
         // Art for the games a store's files gave none for, before the picture is taken, where there is a data

@@ -34,10 +34,10 @@ const LINES_APART: f32 = 18.0;
 /// The Queue's line is 8 under the second.
 const STATUS_APART: f32 = 8.0;
 
-/// The date last played, as the Bundle's pictures have it. The Bundle writes it in the user's regional short
-/// format; nothing here reads Windows' yet, so it is US English's, month first. **The hook for the user's own.**
+/// The date last played, in the user's short date format (`crate::date`), as the Bundle writes it.
 fn short_date(day: Day) -> String {
-    format!("{}/{}/{}", day.month, day.day, day.year)
+    let date = chrono::NaiveDate::from_ymd_opt(day.year, day.month.into(), day.day.into());
+    date.map_or(String::new(), crate::date::short)
 }
 
 /// What stands after the date: the game's platform. Every source there is gives Windows games, which the Bundle's
@@ -258,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn the_date_is_month_day_year_and_the_platform_follows_a_bullet() {
+    fn the_date_is_the_users_short_date_us_englishs_by_default_and_the_platform_follows_a_bullet() {
         assert_eq!(short_date(Day { year: 2026, month: 11, day: 5 }), "11/5/2026");
         let steam = Game { source: "steam".into(), ..Game::default() };
         assert_eq!((platform(&steam), platform(&Game::default())), (Some("PC (Windows)"), None));
