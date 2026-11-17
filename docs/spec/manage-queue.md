@@ -220,7 +220,7 @@ Dashboard never just loses an install.** Every refusal, cancel or drop is told.
    amount's, no bar: for want of room, "It needs 54.6 GB and 12.0 GB is free. Free up space in Settings > Storage,
    or install it somewhere else." (the console's units, `model::storage::size`); for what Steam asked, "Steam asked
    for a product key, which the Dashboard can't give. Install it in Steam."; and so on. **A on a row stopped for want
-   of room opens Settings > Storage**, on Games & apps' Storage box; Menu opens the game's menu, whose Install
+   of room opens Settings > Storage**, and **B there comes straight back to the row** (settings.md, 16.3); Menu opens the game's menu, whose Install
    asks the folder question where another library has room (section 8.6). A on any other is the Game hub. The row
    goes once the game is asked for again or installed; it is not kept across a restart. Focus log: `Row(1) of
    <game>; 1 installing, 3 recently installed; Stopped: Not enough space`.

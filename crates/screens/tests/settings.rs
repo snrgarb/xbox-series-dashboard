@@ -240,6 +240,36 @@ fn customise_home_opens_games_and_apps_on_groups_and_b_climbs_back_through_every
     assert_eq!((dashboard.page(), dashboard.home_focus()), (None, Focus::Recent(1)), "back on the tile");
 }
 
+/// #230, #235: Storage opened from Settings' own boxes climbs back through them as every page does; opened from
+/// Manage Queue's Stopped row, B goes straight back to the row.
+#[test]
+fn storage_from_its_box_climbs_back_and_from_the_queue_goes_straight_back() {
+    let database = database();
+    let mut dashboard = start(&database);
+    dashboard.open_page(Open::Settings(Entry::CustomiseHome));
+    for _ in 0..6 {
+        if dashboard.focus_line() == "Settings: Games & apps: Storage" {
+            break;
+        }
+        press(&mut dashboard, &[Up, Right]);
+    }
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Storage");
+    press(&mut dashboard, &[A]);
+    assert!(dashboard.focus_line().starts_with("Settings: Storage: "), "{}", dashboard.focus_line());
+    press(&mut dashboard, &[B]);
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Storage");
+    press(&mut dashboard, &[B, B]);
+    assert_eq!(dashboard.page(), None);
+
+    // Opened as the Queue's Stopped row opens it: one B and it is gone, back to what was under it (the row
+    // itself: tests/manage_queue.rs, a_stopped_row_says_why_and_one_with_no_room_opens_storage).
+    let mut dashboard = start(&database);
+    dashboard.open_page(Open::Settings(Entry::Storage));
+    assert!(dashboard.focus_line().starts_with("Settings: Storage: "), "{}", dashboard.focus_line());
+    press(&mut dashboard, &[B]);
+    assert_eq!(dashboard.page(), None);
+}
+
 #[test]
 fn the_settings_tile_opens_general_on_its_first_box_and_the_discord_tile_account_on_discord() {
     let database = database();

@@ -553,10 +553,8 @@ fn a_stopped_row_says_why_and_one_with_no_room_opens_storage() {
     assert_eq!(page.page(), Some("GameHub"));
     press(&mut page, &[B, Up, A]);
     assert!(page.focus_line().starts_with("Settings: Storage: "), "{}", page.focus_line());
-    // B back to Games & apps' boxes, on Storage, then to the rail, then back to the row, as Settings goes.
+    // Opened from the row: B goes straight back to it.
     press(&mut page, &[B]);
-    assert!(page.focus_line().starts_with("Settings: Games & apps: Storage"), "{}", page.focus_line());
-    press(&mut page, &[B, B]);
     assert_eq!(after(&mut page, &[]), "Row(1) of Fathom Nine");
 }
 

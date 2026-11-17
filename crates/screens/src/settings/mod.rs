@@ -57,8 +57,9 @@ pub enum Entry {
     /// Home's Discord tile while there is no Discord tab in the Guide: Account > Discord, focus on the Client ID's
     /// Type; B goes back to Account's boxes with focus on Discord.
     Discord,
-    /// Manage Queue's row of a game stopped for want of space (#230): Games & apps > Storage; B goes back to Games &
-    /// apps' boxes with focus on Storage.
+    /// Manage Queue's row of a game stopped for want of space (#230): Games & apps > Storage; B goes straight back
+    /// to the row, as the page was opened from there (`Settings::returns_at`); a page opened from Storage, closed,
+    /// comes back to Storage first.
     Storage,
 }
 
@@ -164,6 +165,10 @@ pub struct Settings {
     categories: Vec<Boxes>,
     /// Each page opened over the category's boxes, from the one before it. The last shows.
     pages: Vec<Box<dyn Pane>>,
+    /// Opened from a place that is not the Bundle's own entry (the Queue's Stopped row, #230): B on the page it
+    /// opened on closes Settings, back to where the user came from, focus where they left it. The Bundle's entries
+    /// climb page, boxes, rail, out (docs/spec/settings.md, 8.2): `None`.
+    returns_at: Option<usize>,
 }
 
 impl Settings {
@@ -176,6 +181,7 @@ impl Settings {
                 let boxes = Category::GamesAndApps.boxes().with_focus(row, column);
                 settings.categories[Category::GamesAndApps.index()] = boxes;
                 settings.pages.push(Box::new(storage::Storage::open(around)));
+                settings.returns_at = Some(settings.pages.len());
                 settings
             }
             Entry::Rail => Self { on_rail: true, ..Self::on(Category::General) },
@@ -201,7 +207,7 @@ impl Settings {
     /// Settings on this category's boxes, focus on its first.
     fn on(category: Category) -> Self {
         let categories = Category::ALL.iter().map(|category| category.boxes()).collect();
-        Self { on_rail: false, category: category.index(), categories, pages: Vec::new() }
+        Self { on_rail: false, category: category.index(), categories, pages: Vec::new(), returns_at: None }
     }
 
     /// Settings with this page showing, as if a box of this category had opened it: B goes back to its boxes.
@@ -294,6 +300,8 @@ impl Page for Settings {
         }
         match self.pane_mut().press(press, around) {
             Step::Stay => {}
+            // Opened from elsewhere on this page: back there.
+            Step::Back if self.returns_at == Some(self.pages.len()) => return Some(PageAction::Close),
             Step::Back if !self.pages.is_empty() => {
                 self.pages.pop();
             }

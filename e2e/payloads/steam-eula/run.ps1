@@ -263,7 +263,8 @@ try {
     Start-Sleep -Milliseconds 4500
     Save-Screen '06-stopped-row'
     Press A 'Settings: .+' '07-storage' | Out-Null
-    Press B 'ManageQueue: Row\(1\) of .+' | Out-Null
+    # Opened from the row, Settings goes straight back to it on B, not up through its own boxes and rail.
+    Press B "ManageQueue: Row\(1\) of $bigName; 1 installing, \d+ recently installed; Stopped: Not enough space" | Out-Null
 
     if ($dashboard.HasExited) { Fail "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($client.HasExited) { Fail "the stand-in Steam's client exited with $($client.ExitCode)" }
