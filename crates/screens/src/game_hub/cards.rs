@@ -203,12 +203,10 @@ fn cover(ui: &mut Ui, rect: Rect, game: &Game) {
     if !has_cover {
         ui.paragraph(rect.grow(-20.0), &game.name, &BODY, HAlign::Center, VAlign::Center, 0);
     }
-    if let Some(source) = home::source(game) {
-        // The mark is 20 across, 8 and 4 in from the chip's edges; the chip 10 in from the card's.
-        let chip = Rect::new(rect.x + 10.0, rect.bottom() - 10.0 - 28.0, 36.0, 28.0);
-        ui.fill(chip, CHIP, 3.0);
-        home::source_mark(ui, Rect::new(chip.x + 8.0, chip.y + 4.0, 20.0, 20.0), source);
-    }
+    // The mark is 20 across, 8 and 4 in from the chip's edges; the chip 10 in from the card's.
+    let chip = Rect::new(rect.x + 10.0, rect.bottom() - 10.0 - 28.0, 36.0, 28.0);
+    ui.fill(chip, CHIP, 3.0);
+    home::mark_drawn(ui, Rect::new(chip.x + 8.0, chip.y + 4.0, 20.0, 20.0), home::game_mark(game));
 }
 
 /// The Game details page's wide card: the game's background art about its middle, over its cover; with neither,

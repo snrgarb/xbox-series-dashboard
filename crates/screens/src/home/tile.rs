@@ -4,6 +4,7 @@
 use model::Game;
 use ui::{ArtKey, Color, Crop, Ease, HAlign, Kind, Rect, Ui, VAlign};
 
+use crate::drawn::{self, Drawing};
 use crate::theme::{self, BODY, ROW_SCALE as S};
 
 pub const RADIUS: f32 = 6.0;
@@ -136,80 +137,50 @@ pub fn source(game: &Game) -> Option<Source> {
     }
 }
 
-/// A source's mark, filling `mark`. The marks are the stores' own logos, which are not this project's to ship:
-/// until they are loaded from somewhere they may be, a plain white shape stands in for each, one unlike the
-/// others'. This is the one place to draw the real thing: each store's own function below.
+impl Source {
+    /// The project's own drawing that marks the store (docs/spec/home.md 3.3.1).
+    pub fn drawing(self) -> Drawing {
+        match self {
+            Source::Steam => Drawing::Steam,
+            Source::Epic => Drawing::Epic,
+            Source::Gog => Drawing::Gog,
+            Source::Ea => Drawing::Ea,
+            Source::Ubisoft => Drawing::Ubisoft,
+            Source::BattleNet => Drawing::BattleNet,
+            Source::Xbox => Drawing::Xbox,
+        }
+    }
+}
+
+/// The drawing a game is marked with: its store's, a folder for a game added by hand, and a plain box for a
+/// source with no drawing of its own.
+pub fn game_mark(game: &Game) -> Drawing {
+    match source(game) {
+        Some(source) => source.drawing(),
+        None if game.source == model::by_hand::MANUAL => Drawing::Manual,
+        None => Drawing::Launcher,
+    }
+}
+
+/// A source's mark, filling `mark`, in white: the project's own drawing of it, never the store's logo.
 pub fn source_mark(ui: &mut Ui, mark: Rect, source: Source) {
-    match source {
-        Source::Steam => steam_mark(ui, mark),
-        Source::Epic => epic_mark(ui, mark),
-        Source::Gog => gog_mark(ui, mark),
-        Source::Ea => ea_mark(ui, mark),
-        Source::Ubisoft => ubisoft_mark(ui, mark),
-        Source::BattleNet => battlenet_mark(ui, mark),
-        Source::Xbox => xbox_mark(ui, mark),
-    }
+    mark_drawn(ui, mark, source.drawing());
 }
 
-/// Steam's stand-in: a white disc.
-fn steam_mark(ui: &mut Ui, mark: Rect) {
-    ui.fill(mark, Color::WHITE, 999.0);
+/// A mark, filling `mark`, in white.
+pub fn mark_drawn(ui: &mut Ui, mark: Rect, drawing: Drawing) {
+    drawn::draw(ui, mark, drawing, Color::WHITE);
 }
 
-/// Epic's stand-in: a white square, its corners a little rounded, a little inside the disc's bounds so that it
-/// looks no bigger.
-fn epic_mark(ui: &mut Ui, mark: Rect) {
-    ui.fill(mark.grow(-mark.w * 0.08), Color::WHITE, mark.w * 0.12);
-}
-
-/// GOG's stand-in: a white ring.
-fn gog_mark(ui: &mut Ui, mark: Rect) {
-    ui.ring(mark, Color::WHITE, 999.0, mark.w * 0.2);
-}
-
-/// The EA app's stand-in: the top half of a white disc, its flat side down.
-fn ea_mark(ui: &mut Ui, mark: Rect) {
-    let top = Rect::new(mark.x, mark.y + mark.h * 0.15, mark.w, mark.h * 0.5);
-    let disc = Rect::new(mark.x, top.y, mark.w, mark.h);
-    ui.with_clip(top, |ui| ui.fill(disc, Color::WHITE, 999.0));
-}
-
-/// Ubisoft Connect's stand-in: four small white squares, two by two, apart.
-fn ubisoft_mark(ui: &mut Ui, mark: Rect) {
-    let side = mark.w * 0.36;
-    let gap = mark.w * 0.12;
-    let left = mark.x + (mark.w - 2.0 * side - gap) / 2.0;
-    let top = mark.y + (mark.h - 2.0 * side - gap) / 2.0;
-    for (column, row) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
-        let cell = Rect::new(left + column * (side + gap), top + row * (side + gap), side, side);
-        ui.fill(cell, Color::WHITE, side * 0.2);
-    }
-}
-
-/// Battle.net's stand-in: a white bar across the middle, half as tall as it is wide.
-fn battlenet_mark(ui: &mut Ui, mark: Rect) {
-    let bar = Rect::new(mark.x, mark.y + mark.h * 0.25, mark.w, mark.h * 0.5);
-    ui.fill(bar, Color::WHITE, mark.h * 0.25);
-}
-
-/// Xbox's stand-in: a white plus, two bars a third as thick as the mark is wide, crossed.
-fn xbox_mark(ui: &mut Ui, mark: Rect) {
-    let thick = mark.w * 0.34;
-    let across = Rect::new(mark.x, mark.y + (mark.h - thick) / 2.0, mark.w, thick);
-    let down = Rect::new(mark.x + (mark.w - thick) / 2.0, mark.y, thick, mark.h);
-    ui.fill(across, Color::WHITE, thick * 0.2);
-    ui.fill(down, Color::WHITE, thick * 0.2);
-}
-
-/// The source's badge at the tile's bottom left: its mark, 20 across, on a soft shadow, at `scale` (the rows', or
-/// 1 on My games & apps and Manage Queue, where nothing is scaled).
-pub fn source_badge_at(ui: &mut Ui, tile: Rect, source: Source, scale: f32) {
+/// The badge at the tile's bottom left: its mark, 20 across, on a soft shadow, at `scale` (the rows', or 1 on My
+/// games & apps and Manage Queue, where nothing is scaled).
+pub fn source_badge_at(ui: &mut Ui, tile: Rect, mark_of: Drawing, scale: f32) {
     let side = 20.0 * scale;
     let mark = Rect::new(tile.x + 10.0 * scale, tile.bottom() - 10.0 * scale - side, side, side);
     // The theme's shadow: 0.8 black, blurred by 6, straight under the mark.
     let shadow = mark.grow(3.0 * scale);
     ui.glow(shadow, Color::BLACK.fade(0.8), 999.0, shadow.w / 2.0, 6.0 * scale);
-    source_mark(ui, mark, source);
+    mark_drawn(ui, mark, mark_of);
 }
 
 /// A game's face: its square art on a square tile (a Recent tile), else its cover filling the tile from the top, or
@@ -232,8 +203,8 @@ pub fn game_at(ui: &mut Ui, rect: Rect, game: &Game, name_width: f32, focused: b
         let lines = Rect::new(rect.x + (rect.w - width) / 2.0, rect.y + 10.0 * s, width, rect.h - 20.0 * s);
         ui.with_alpha(1.0 - cover, |ui| ui.paragraph(lines, &game.name, &BODY, HAlign::Center, VAlign::Center, 0));
     }
-    if let Some(source) = source(game).filter(|_| !focused) {
-        source_badge_at(ui, rect, source, s);
+    if !focused {
+        source_badge_at(ui, rect, game_mark(game), s);
     }
 }
 

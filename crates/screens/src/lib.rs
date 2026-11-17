@@ -10,6 +10,7 @@ pub mod achievement;
 pub mod achievements;
 mod app_tile;
 pub mod art_picker;
+pub mod drawn;
 pub mod game_hub;
 pub mod guide;
 pub mod hint_bar;

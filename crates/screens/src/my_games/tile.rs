@@ -6,7 +6,7 @@ use model::Game;
 use ui::{Color, Ease, Gradient, HAlign, Rect, Ui, VAlign};
 
 use super::look::{glyph as page_glyph, TEXT};
-use crate::home::{art_for, face_arriving, source, source_badge_at};
+use crate::home::{art_for, face_arriving, game_mark, source_badge_at};
 use crate::theme::{self, glyph, BAND};
 
 const RADIUS: f32 = 6.0;
@@ -60,8 +60,8 @@ pub fn draw(ui: &mut Ui, rect: Rect, id: impl Hash, tile: &Tile) {
     }
     // The source's badge goes at once as focus comes, and the title takes its corner; an installing game's caption
     // takes it the rest of the time.
-    if let Some(source) = source(game).filter(|_| !focused && !installing) {
-        source_badge_at(ui, rect, source, 1.0);
+    if !focused && !installing {
+        source_badge_at(ui, rect, game_mark(game), 1.0);
     }
     let mark = match (running, game.installed) {
         (true, _) => Some((page_glyph::PLAY, 11.0)),

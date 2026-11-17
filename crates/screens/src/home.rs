@@ -20,8 +20,8 @@ pub use self::background::{hero_art, DELAY_SECONDS, FADE_SECONDS, LEAVE_SECONDS,
 use self::groups::Group;
 use self::recent::Row;
 pub use self::tile::{
-    art_for, cover_art, face, face_arriving, fit, game_at as tile_at, is_square, source, source_badge_at, source_mark,
-    square_art, status_band_at, title_band_at, Fit, Source,
+    art_for, cover_art, face, face_arriving, fit, game_at as tile_at, game_mark, is_square, mark_drawn, source,
+    source_badge_at, source_mark, square_art, status_band_at, title_band_at, Fit, Source,
 };
 pub use self::top_bar::{Status, TopButton};
 use crate::hint_bar::{self, Hint};
