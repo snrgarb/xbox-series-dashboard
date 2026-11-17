@@ -329,6 +329,65 @@ fn home_square_art_on_the_recent_row() {
     Stage::on_row(library, HD).check("home-square-art");
 }
 
+/// Pictures whose halves differ (#247): red on the left, blue on the right, a white stripe down the middle, so that a
+/// crop kept from one edge rather than about the middle moves the stripe off the tile's middle. `w` by `h`.
+fn halves_art(w: u32, h: u32) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("art").join(format!("halves-{w}x{h}.png"));
+    let image = image::RgbImage::from_fn(w, h, |x, _| {
+        let middle = (x as f32 + 0.5 - w as f32 / 2.0).abs() < w as f32 * 0.04;
+        match (middle, x < w / 2) {
+            (true, _) => image::Rgb([0xF0, 0xF0, 0xF0]),
+            (false, true) => image::Rgb([0xC0, 0x30, 0x30]),
+            (false, false) => image::Rgb([0x30, 0x50, 0xC0]),
+        }
+    });
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    shots::save_shared(&image, &path);
+    path
+}
+
+/// Where the white stripe's middle is along row `y` between `from` and `to`, in pixels.
+fn stripe_middle(image: &image::RgbaImage, y: u32, from: u32, to: u32) -> f32 {
+    let white: Vec<u32> = (from..to).filter(|&x| image.get_pixel(x, y).0[..3].iter().all(|&c| c > 0xD0)).collect();
+    assert!(!white.is_empty(), "no stripe on row {y} between {from} and {to}");
+    (white[0] + white[white.len() - 1]) as f32 / 2.0
+}
+
+/// A Recent tile's picture is cut about its middle across, grown with focus or not (#247): a picture a little wider
+/// than square fills the tile, its sides cut alike; a portrait one is shown whole in the middle. At 1080p and at 4K,
+/// where the pictures are decoded twice as wide.
+#[test]
+fn home_recent_tile_pictures_are_cut_about_their_middle() {
+    let mut library = library_with_art();
+    library.games[0].square = Some(halves_art(1100, 1000));
+    library.games[1].square = Some(halves_art(600, 900));
+    for (scale, size, name) in [(1.0, HD, Some("home-recent-middle")), (2.0, (3840, 2160), None)] {
+        // The row's tiles, in 1080p pixels: the first grown with focus, 245 rows' units, the second 153.
+        let s = 1700.0 / 1526.0;
+        let first = (105.0, 105.0 + 245.0 * s);
+        let second = (first.1 + 30.0 * s, first.1 + 30.0 * s + 153.0 * s);
+        let rest = (105.0, 105.0 + 153.0 * s);
+        let grown = (rest.1 + 30.0 * s, rest.1 + 30.0 * s + 245.0 * s);
+        for (focus, tiles) in [(0, [first, second]), (1, [rest, grown])] {
+            let mut stage = Stage::on_row(library.clone(), size);
+            stage.press(&vec![Button::Right; focus]);
+            let image = stage.still();
+            for (i, &(left, right)) in tiles.iter().enumerate() {
+                let y = (690.0 * scale) as u32;
+                let middle = stripe_middle(&image, y, (left * scale) as u32, (right * scale) as u32);
+                let want = (left + right) / 2.0 * scale;
+                assert!(
+                    (middle - want).abs() <= 2.0 * scale,
+                    "tile {i}, focus on {focus}: stripe at {middle}, middle {want}"
+                );
+            }
+            if let (0, Some(name)) = (focus, name) {
+                compare(name, &image);
+            }
+        }
+    }
+}
+
 #[test]
 fn home_blurred_cover_behind_a_game_with_no_background() {
     let mut stage = Stage::on_row(library_with_art(), HD);
