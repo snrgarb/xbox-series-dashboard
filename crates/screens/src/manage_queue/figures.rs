@@ -157,14 +157,21 @@ mod tests {
         assert_eq!((figures.state, figures.percent.as_deref(), figures.fraction), ("Queued", Some("0.0%"), 0.0));
         assert_eq!((figures.speed, figures.amount), (None, None));
         // Installed, its Workshop items coming in: what it is, the items in, the share by them, and never a speed.
-        let extras = Queued { state: InstallState::Extras { items_done: 3, items: 12, done: 0, total: 0 }, ..downloading };
+        let extras =
+            Queued { state: InstallState::Extras { items_done: 3, items: 12, done: 0, total: 0 }, ..downloading };
         let figures = Figures::of(&extras);
-        assert_eq!((figures.state, figures.percent.as_deref(), figures.speed), ("Downloading Workshop content", Some("25.0%"), None));
+        assert_eq!(
+            (figures.state, figures.percent.as_deref(), figures.speed),
+            ("Downloading Workshop content", Some("25.0%"), None)
+        );
         assert_eq!((figures.items.as_deref(), figures.amount, figures.fraction), (Some("3 of 12 items"), None, 0.25));
         // Their bytes known: the share by them.
         let sized = InstallState::Extras { items_done: 3, items: 12, done: GB / 2, total: 2 * GB };
         let figures = Figures::of(&Queued { state: sized, ..extras });
-        assert_eq!((figures.amount.as_deref(), figures.percent.as_deref()), (Some("512.00 MB of 2.00 GB"), Some("25.0%")));
+        assert_eq!(
+            (figures.amount.as_deref(), figures.percent.as_deref()),
+            (Some("512.00 MB of 2.00 GB"), Some("25.0%"))
+        );
         // Nothing said of them: the words alone.
         let unknown = Queued { state: InstallState::Extras { items_done: 0, items: 0, done: 0, total: 0 }, ..extras };
         let figures = Figures::of(&unknown);

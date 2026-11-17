@@ -289,6 +289,11 @@ mod tests {
         drop(debugger);
         assert!(cef::ports(&root).is_empty(), "the port is no longer written down");
         let said = said.lock().unwrap();
-        assert!(said.iter().any(|line| line == &format!("CEF: asked to pause {quiet}: {quiet} is Paused {{ done: 30, total: 100 }}")), "{said:#?}");
+        assert!(
+            said.iter()
+                .any(|line| line
+                    == &format!("CEF: asked to pause {quiet}: {quiet} is Paused {{ done: 30, total: 100 }}")),
+            "{said:#?}"
+        );
     }
 }

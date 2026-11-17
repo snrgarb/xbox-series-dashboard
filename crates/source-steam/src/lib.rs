@@ -241,7 +241,10 @@ impl Installer for Steam {
         let dirs = steamapps_dirs(&root);
         let last = dirs.len().saturating_sub(1);
         let library = |dir: &Path| dir.parent().map_or_else(|| dir.to_path_buf(), Path::to_path_buf);
-        dirs.iter().enumerate().map(|(at, dir)| Folder { path: library(dir), free: None, default: at == last }).collect()
+        dirs.iter()
+            .enumerate()
+            .map(|(at, dir)| Folder { path: library(dir), free: None, default: at == last })
+            .collect()
     }
 
     /// Into `folder` through the client where the debugger is on: Steam's own default for the default folder or
@@ -864,7 +867,9 @@ mod tests {
         fixture::write_workshop(&root, quiet, 2, 6).unwrap();
         fixture::write_progress(&root, quiet, fixture::Progress::Done).unwrap();
         let (got, speed) = state(&steam).unwrap();
-        assert!(matches!(got, model::InstallState::Extras { items_done: 2, items: 6, done, total } if done > 0 && total > done));
+        assert!(
+            matches!(got, model::InstallState::Extras { items_done: 2, items: 6, done, total } if done > 0 && total > done)
+        );
         assert_eq!(speed, None);
         fixture::write_workshop(&root, quiet, 5, 6).unwrap();
         assert!(matches!(state(&steam), Some((model::InstallState::Extras { items_done: 5, .. }, None))));
