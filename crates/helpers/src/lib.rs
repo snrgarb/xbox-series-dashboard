@@ -13,6 +13,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod clients;
 pub mod fake;
 
 /// The User-Agent every request carries. It names no user, machine or version.
@@ -223,7 +224,7 @@ fn get(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, Error> {
 }
 
 /// What went wrong, in words that name no address: ureq's own may carry the request's.
-fn transport(error: ureq::Error) -> Error {
+pub(crate) fn transport(error: ureq::Error) -> Error {
     Error::Failed(match error {
         ureq::Error::Timeout(_) => "its release took too long to answer".into(),
         ureq::Error::HostNotFound => "its release could not be found: is the PC online?".into(),

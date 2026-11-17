@@ -21,6 +21,7 @@ mod helper_programs;
 mod hub_open;
 mod media_folder;
 mod offscreen;
+mod set_up;
 mod sounds;
 mod sources;
 mod startup;
@@ -147,6 +148,12 @@ pub struct Args {
     helper_table: Option<PathBuf>,
     /// A test's folder for the helpers' records and installs (`legendary`, `games`), in place of the user's own.
     helper_home: Option<PathBuf>,
+    /// The launchers' apps' table (Set up this PC), in place of the `helpers` crate's: a test's, whose addresses are
+    /// a stand-in's (`standin serve-helpers --clients`). Never the real one in a test.
+    client_table: Option<PathBuf>,
+    /// A file standing in for Windows' list of installed programs (Set up this PC), in place of the registry: a
+    /// test's, which the stand-in installers write and nothing of the machine's.
+    setup_registry: Option<PathBuf>,
     /// The version this Dashboard takes itself for, in place of its own: a test's, older than the one it serves.
     pretend_version: Option<model::update::Version>,
     /// An update's new Dashboard, started by the one with this pid (docs/spec/updates.md): it takes the
@@ -184,7 +191,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
                  [--from-shell] [--dry-shell] [--log-file <file>]
                  [--update-source <url>] [--pretend-version <x.y.z>] [--helper-table <file>]
-                 [--helper-home <dir>]
+                 [--helper-home <dir>] [--client-table <file>] [--setup-registry <file>]
        dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
        dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
        dashboard --version: prints `dashboard <version> (<commit>)`
@@ -283,6 +290,8 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--update-source" => args.update_source = Some(value()?),
             "--helper-table" => args.helper_table = Some(value()?.into()),
             "--helper-home" => args.helper_home = Some(value()?.into()),
+            "--client-table" => args.client_table = Some(value()?.into()),
+            "--setup-registry" => args.setup_registry = Some(value()?.into()),
             "--pretend-version" => {
                 let value = value()?;
                 args.pretend_version =

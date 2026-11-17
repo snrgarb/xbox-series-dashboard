@@ -24,6 +24,7 @@ mod launch;
 pub mod media;
 pub mod overlay;
 pub mod power;
+pub mod running;
 pub mod steam;
 pub mod store;
 pub mod toast_strip;

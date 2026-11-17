@@ -13,6 +13,7 @@ use super::helpers::{self, Helpers};
 use super::idle::Idle;
 use super::launchers::{self, Launchers};
 use super::profiles::Profiles;
+use super::set_up::{self, SetUp};
 use super::storage::{self, Storage};
 use super::system;
 use super::whos_playing::WhosPlayingPage;
@@ -25,7 +26,8 @@ pub enum Category {
     General,
     /// Who plays, and the accounts they connect: Profiles, Who's playing today?, Discord.
     Account,
-    /// Where the games come from and where they go: Launchers, Games & apps, Groups, Art; Storage, Helpers.
+    /// Where the games come from and where they go: Launchers, Games & apps, Groups, Art; Storage, Helpers, Set up
+    /// this PC.
     GamesAndApps,
     /// The Dashboard on this PC: System (shell mode) and About (the version and its updates).
     System,
@@ -91,7 +93,8 @@ fn account() -> Boxes {
 
 /// Games & apps: more than a handful of boxes, so in two columns under section titles, as the console's pages with
 /// many boxes are. Library: where games come from (Launchers, and Games & apps, added by hand), how Home groups them
-/// and their art. Installs: where installs go, and the helper programs some stores install through.
+/// and their art. Installs: where installs go, the helper programs some stores install through, and the launchers'
+/// own apps (Set up this PC).
 fn games_and_apps() -> Boxes {
     let launchers =
         Item::Opens { icon: '\u{E8F1}', name: launchers::TITLE, pane: |around| Box::new(Launchers::open(around)) };
@@ -102,9 +105,10 @@ fn games_and_apps() -> Boxes {
         Item::Opens { icon: '\u{EDA2}', name: storage::TITLE, pane: |around| Box::new(Storage::open(around)) };
     let helpers =
         Item::Opens { icon: '\u{E896}', name: helpers::TITLE, pane: |around| Box::new(Helpers::open(around)) };
+    let set_up = Item::Opens { icon: '\u{E977}', name: set_up::TITLE, pane: |around| Box::new(SetUp::open(around)) };
     Boxes::sections(
         Category::GamesAndApps.name(),
-        vec![("Library", vec![launchers, added, groups, art]), ("Installs", vec![storage, helpers])],
+        vec![("Library", vec![launchers, added, groups, art]), ("Installs", vec![storage, helpers, set_up])],
     )
 }
 

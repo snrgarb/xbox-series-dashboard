@@ -30,6 +30,8 @@ pub fn run(
     // Settings > Helpers as they stand in `--data-dir`'s folder, if it names one.
     let helpers = crate::helper_programs::Helpers::for_args(args, args.data_dir.clone());
     dashboard.set_helpers(helpers.shown());
+    // Settings > Set up this PC as Windows' list (or `--setup-registry`'s file) has the launchers' apps.
+    dashboard.set_clients(crate::set_up::SetUp::for_args(args, args.data_dir.clone()).shown());
     dashboard.set_options(options);
     for text in &args.notify {
         dashboard.record(text);

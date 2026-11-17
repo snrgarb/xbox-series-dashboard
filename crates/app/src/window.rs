@@ -222,6 +222,8 @@ struct App {
     updater: crate::updates::Updater,
     /// Settings > Helpers, carried out.
     helpers: crate::helper_programs::Helpers,
+    /// Settings > Set up this PC, carried out (#178).
+    set_up: crate::set_up::SetUp,
 }
 
 /// What a Toast says when SteamGridDB refuses the key (a 401): once, and no lookups until another key is entered.
@@ -415,6 +417,9 @@ pub fn run(
     helpers.refresh(store.sources(), crate::helper_programs::wake(event_loop.create_proxy()));
     store.set_helpers(helpers.shown());
     dashboard.set_helpers(helpers.shown());
+    let set_up = crate::set_up::SetUp::for_args(args, data_dir.clone());
+    store.set_clients(set_up.shown());
+    dashboard.set_clients(set_up.shown());
     let mut app = App {
         windowed: args.windowed,
         as_shell,
@@ -515,6 +520,7 @@ pub fn run(
         discord,
         updater,
         helpers,
+        set_up,
     };
     // Where shell mode stands, for Settings > System: asked off the frame's thread, as schtasks is slow.
     let proxy = event_loop.create_proxy();
@@ -987,6 +993,21 @@ impl App {
                     });
                     self.show_helpers();
                 }
+                // Settings > Set up this PC: a launcher's app installed or removed off the frame's thread, one at a
+                // time; the page follows how it goes. Never while a game of that launcher plays.
+                Effect::SetUp(ask) => {
+                    let key = match &ask {
+                        model::setup::SetUpAsk::Install(key) | model::setup::SetUpAsk::Remove(key) => key.clone(),
+                    };
+                    let library = self.dashboard.library();
+                    let playing = self.dashboard.playing().and_then(|game| library.games.get(game));
+                    let playing = playing.filter(|game| game.source == key).map(|game| game.name.clone());
+                    let proxy = self.proxy.clone();
+                    self.set_up.ask(ask, playing.as_deref(), move || {
+                        let _ = proxy.send_event(());
+                    });
+                    self.show_clients();
+                }
                 Effect::InstallUpdate => {
                     if self.dashboard.playing().is_some() {
                         eprintln!("update: Install refused while a game runs");
@@ -1202,6 +1223,15 @@ impl App {
             let of = self.dashboard.library().games.len();
             let state = if self.art.is_some() { ArtRefresh::Working { done: 0, of } } else { ArtRefresh::Paused };
             self.set_art_refresh(state);
+        }
+    }
+
+    /// How the launchers' apps stand, on Settings > Set up this PC, without a new snapshot.
+    fn show_clients(&mut self) {
+        let shown = self.set_up.shown();
+        self.store.set_clients(shown.clone());
+        if self.dashboard.set_clients(shown) {
+            self.stale = true;
         }
     }
 
@@ -1641,6 +1671,19 @@ impl ApplicationHandler for App {
         let refreshed = self.helpers.refreshed();
         if !refreshed.is_empty() {
             self.update_launchers(Some(refreshed));
+        }
+        // A launcher's app installed or removed: its launcher read again, so its games come in or show as gone.
+        // The page's line follows the step without a press, and is said as a press's would be.
+        let (changed, over) = self.set_up.take();
+        if changed {
+            let focus = self.dashboard.focus_line();
+            self.show_clients();
+            if self.log_focus && self.dashboard.focus_line() != focus {
+                eprintln!("focus: {}", self.dashboard.focus_line());
+            }
+        }
+        if !over.is_empty() {
+            self.update_launchers(Some(over));
         }
         if self.take_art() {
             toasts_changed = true;

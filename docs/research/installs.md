@@ -330,7 +330,7 @@ Each is one PR; the probes come first, since what they find decides the rest.
 7. **Epic through legendary.** Sign-in page (WebView2 and the pad), `installed.json` as a fourth record, install, uninstall, pause by stopping, start through legendary; parsers tested on made-up lines. Depends on 3, 6 and P1 to P2.
 8. **GOG through gogdl.** Sign-in page, download, script interpreter, `unins000.exe /VERYSILENT`; the permission question decided (open question 3). Depends on 3, 6 and G2 to G3.
 9. **EA and Ubisoft: the client's window, kept short.** "Installing..." in the Queue from Install until the game's files appear, the client's window hidden once the download has started where E1 and U1 say it can be. Depends on E1, U1.
-10. **Set up this PC** (part B). Settings > Stores' list of clients, winget installs one at a time, the sign-in hand-over, removal with its warning. Depends on L1.
+10. **Set up this PC** (part B). Settings > Stores' list of clients, winget installs one at a time, the sign-in hand-over, removal with its warning. Depends on L1. Built in #178 as Settings > Games & apps > Set up this PC (docs/spec/set-up.md): each vendor's installer downloaded and run by the Dashboard itself at a version and SHA-256 fixed in its source, the ids, switches and hashes taken from winget's manifests (why not winget itself: set-up.md 1); L1 is answered by its first real run.
 11. **Settings > Storage**: the drives and folders installs may use, free space, and Manage's storage ring (manage-queue.md 7.6).
 
 ## Open questions for the user

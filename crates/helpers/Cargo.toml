@@ -7,6 +7,8 @@ description = "The helper programs some stores install through (legendary, gogdl
 
 [dependencies]
 model = { path = "../model" }
+# The launchers' apps (`clients`): Windows' list of installed programs, or a test's file standing in for it.
+source-kit = { path = "../source-kit" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # A small blocking HTTP client, TLS by rustls, no async runtime (as update's).

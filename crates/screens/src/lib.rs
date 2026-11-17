@@ -167,6 +167,10 @@ pub enum Effect {
     /// Settings > Helpers (docs/spec/helpers.md): fetch, check and keep a helper on the user's Yes, its licence and
     /// source in front of them, or remove it. The executable answers with how each stands, in `Library::helpers`.
     Helper(model::helper::HelperAsk),
+    /// Settings > Set up this PC (docs/spec/set-up.md): install a launcher's app on the user's Yes, the vendor, the
+    /// address and the size in front of them, or remove it with its own uninstaller. The executable answers with how
+    /// each stands, in `Library::clients`.
+    SetUp(model::setup::SetUpAsk),
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.
@@ -408,6 +412,25 @@ impl Dashboard {
             return false;
         }
         self.library.helpers = helpers;
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+            discord: &self.discord,
+        };
+        self.pages.library_changed(around);
+        true
+    }
+
+    /// How the launchers' apps stand (Settings > Set up this PC), without a new snapshot: whether that changed
+    /// anything.
+    pub fn set_clients(&mut self, clients: Vec<model::setup::Client>) -> bool {
+        if self.library.clients == clients {
+            return false;
+        }
+        self.library.clients = clients;
         let around = pages::Around {
             library: &self.library,
             playing: self.playing,

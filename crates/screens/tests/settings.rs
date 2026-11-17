@@ -154,7 +154,8 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Rail: Account");
 
-    // Games & apps, in two sections: Library (Launchers, Games & apps, Groups, Art) and Installs (Storage, Helpers).
+    // Games & apps, in two sections: Library (Launchers, Games & apps, Groups, Art) and Installs (Storage, Helpers,
+    // Set up this PC).
     // Down and Up go along a section, stopping at its ends; Right and Left to the section beside, as far down as it
     // goes.
     press(&mut dashboard, &[Down, Right]);
@@ -163,10 +164,14 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
         press(&mut dashboard, &[Down]);
     }
     press(&mut dashboard, &[Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Helpers", "the shorter section's foot");
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Set up this PC", "the shorter section's foot");
     press(&mut dashboard, &[Right, Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Helpers", "the last section, and its foot, stop");
-    press(&mut dashboard, &[Up, Up]);
+    assert_eq!(
+        dashboard.focus_line(),
+        "Settings: Games & apps: Set up this PC",
+        "the last section, and its foot, stop"
+    );
+    press(&mut dashboard, &[Up, Up, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Storage");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Launchers");
@@ -1543,4 +1548,112 @@ fn settings_helpers() {
     assert_eq!(asked(&mut stage), [Effect::Helper(HelperAsk::Remove("gogdl".into()))]);
     stage.press(&[B]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Helpers");
+}
+
+// --- Games & apps > Set up this PC (docs/spec/set-up.md) ---
+
+/// The launchers' apps as the executable shows them: Steam installed, Battle.net as `battlenet`, the rest not.
+fn clients_shown(battlenet: model::setup::ClientState) -> Vec<model::setup::Client> {
+    use model::setup::{Client, ClientState};
+    let client = |key: &str, name: &str, vendor: &str, address: &str, size, state| Client {
+        key: key.into(),
+        name: name.into(),
+        vendor: vendor.into(),
+        version: "1.0".into(),
+        address: address.into(),
+        size,
+        window: key == "battlenet",
+        uninstall_window: key == "battlenet",
+        removing: "Its games stay, but start and update only through it.".into(),
+        state,
+    };
+    vec![
+        client("steam", "Steam", "Valve", "https://cdn.example/SteamSetup.exe", 2_380_800, ClientState::Installed),
+        client(
+            "epic",
+            "Epic Games Launcher",
+            "Epic Games",
+            "https://dl.example/Epic.msi",
+            264_237_056,
+            ClientState::NotInstalled,
+        ),
+        client("gog", "GOG Galaxy", "GOG", "https://dl.example/galaxy.exe", 342_291_968, ClientState::NotInstalled),
+        client("ea", "EA app", "Electronic Arts", "https://dl.example/EA.exe", 2_141_208, ClientState::NotInstalled),
+        client(
+            "ubisoft",
+            "Ubisoft Connect",
+            "Ubisoft",
+            "https://dl.example/Ubi.exe",
+            263_096_496,
+            ClientState::NotInstalled,
+        ),
+        client("battlenet", "Battle.net", "Blizzard", "https://dl.example/Battle.net-Setup.exe", 4_700_880, battlenet),
+    ]
+}
+
+/// Set up this PC, under Helpers: a Row an app with how it stands; Install asks first, the vendor, the address and
+/// the size in the question, and only Install asks the executable; Remove asks too, with what happens to the games;
+/// a step under way shows on its Row, and A on another app then waits.
+#[test]
+fn settings_set_up() {
+    use model::setup::{ClientState, SetUpAsk};
+    let mut stage = settings_stage();
+    stage.dashboard.set_clients(clients_shown(ClientState::NotInstalled));
+    stage.press(&[Down, Down, Right, Right, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Set up this PC");
+    stage.check("settings-set-up-box");
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Set up this PC: Steam; installed");
+
+    // Battle.net, at the foot: Install asks; Cancel, or B, asks nothing of the executable.
+    stage.press(&[Down, Down, Down, Down, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Set up this PC: Battle.net; not installed");
+    stage.check("settings-set-up");
+    stage.press(&[A]);
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: Set up this PC: Battle.net; not installed; asking Install Battle.net?"
+    );
+    stage.check("settings-set-up-question");
+    stage.press(&[B]);
+    stage.press(&[A, Down, A]);
+    assert!(asked(&mut stage).is_empty());
+    stage.press(&[A, A]);
+    assert_eq!(asked(&mut stage), [Effect::SetUp(SetUpAsk::Install("battlenet".into()))]);
+
+    // Under way: its Row says so, and A on another app waits for it.
+    stage.dashboard.set_clients(clients_shown(ClientState::Downloading { done: 2_350_440 }));
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Set up this PC: Battle.net; downloading");
+    stage.dashboard.set_clients(clients_shown(ClientState::Installing));
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Set up this PC: Battle.net; installing");
+    stage.check("settings-set-up-installing");
+    stage.press(&[Up, A]);
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: Set up this PC: Ubisoft Connect; not installed; refused: Wait until Battle.net is done."
+    );
+    assert!(asked(&mut stage).is_empty());
+
+    // Installed: Remove asks, with what happens to its games, and Remove asks the executable.
+    stage.dashboard.set_clients(clients_shown(ClientState::Installed));
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Set up this PC: Battle.net; installed");
+    stage.press(&[A]);
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: Set up this PC: Battle.net; installed; asking Remove Battle.net?"
+    );
+    stage.check("settings-set-up-remove-question");
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::SetUp(SetUpAsk::Remove("battlenet".into()))]);
+
+    // A failure says why on the line, and the Row how it stands.
+    let why = "It wasn't installed: its installer ended with 1. The Dashboard's log says more.".to_string();
+    stage.dashboard.set_clients(clients_shown(ClientState::Failed { why: why.clone(), installed: false }));
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        format!("Settings: Set up this PC: Battle.net; not installed; failed: {why}")
+    );
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Set up this PC");
 }
