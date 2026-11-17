@@ -6,6 +6,7 @@ edition = "2021"
 description = "The library database: every source's games in one SQLite file, with what the user did with them."
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 anyhow = "1"
 # Play history is told by the calendar where the user is.

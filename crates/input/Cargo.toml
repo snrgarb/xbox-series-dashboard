@@ -6,6 +6,7 @@ edition = "2021"
 description = "The gamepad, through XInput, and the Guide button."
 
 [dependencies]
+log-line = { path = "../log-line" }
 ui = { path = "../ui" }
 
 [target.'cfg(windows)'.dependencies]

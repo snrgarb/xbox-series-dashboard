@@ -384,6 +384,8 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         idle: screens::idle::Times { dim_after: ten, show_after: ten },
         shell: model::shell_mode::ShellMode::Unknown,
         build: screens::settings::about::Build::default(),
+        daily_update_check: false,
+        updates: model::update::Updates::Unchecked,
     };
     assert_eq!(dashboard.options(), left);
 
@@ -993,26 +995,112 @@ fn settings_system() {
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
 }
 
-/// Theme settings > About (docs/spec/settings.md, 16.10): the version and the commit the executable gives, here a
-/// made-up pair so that the picture never changes with a release or a commit; B goes back to its box.
-#[test]
-fn settings_about() {
+/// Theme settings > About (docs/spec/settings.md, 16.10; docs/spec/updates.md) on a stage, with a made-up build so
+/// that the picture never changes with a release or a commit, and updates where `updates` stand.
+fn about_stage(updates: model::update::Updates) -> Stage {
     use screens::settings::about::Build;
     let mut stage = settings_stage();
     let options = stage.dashboard.options();
-    stage.dashboard.set_options(Options { build: Build { version: "1.2.3", commit: "0123abc" }, ..options });
+    stage.dashboard.set_options(Options { build: Build { version: "1.2.3", commit: "0123abc" }, updates, ..options });
     stage.press(&[Right, Down, Down, Down, Down, Right]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
     stage.press(&[A]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: About: Version 1.2.3 (0123abc)");
+    stage
+}
+
+/// About as it opens: the version, updates not checked yet, focus on Check for updates; its three controls walked,
+/// and B goes back to its box.
+#[test]
+fn settings_about() {
+    use model::update::Updates;
+    let mut stage = about_stage(Updates::Unchecked);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: About: Version 1.2.3 (0123abc); Check for updates; unchecked");
     stage.check("settings-about");
-    // Nothing on it moves focus; B, or Left, goes back to About's box.
-    stage.press(&[Down, Right, A]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: About: Version 1.2.3 (0123abc)");
-    stage.press(&[B]);
+    stage.press(&[Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: About: Version 1.2.3 (0123abc); Install; unchecked");
+    stage.press(&[Down]);
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: About: Version 1.2.3 (0123abc); Check for updates every day; unchecked"
+    );
+    stage.press(&[Up, B]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
     stage.press(&[A, Left]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
+}
+
+/// Check for updates asks the executable; Install asks only with an update ready and no game running; the daily
+/// check is an option, off until it is turned on, and saved.
+#[test]
+fn about_asks_for_a_check_installs_only_what_is_ready_and_turns_the_daily_check_over() {
+    use model::update::{Updates, Version};
+    let mut stage = about_stage(Updates::Unchecked);
+    asked(&mut stage);
+    stage.press(&[A]);
+    assert!(matches!(asked(&mut stage)[..], [Effect::CheckForUpdates]));
+    // Nothing more while one is under way.
+    let options = stage.dashboard.options();
+    stage.dashboard.set_options(Options { updates: Updates::Checking, ..options });
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty());
+    // Install, with nothing ready: nothing; with one ready: asked.
+    stage.press(&[Right]);
+    stage.dashboard.set_options(Options { updates: Updates::UpToDate(Version::new(1, 2, 3)), ..options });
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty());
+    stage.dashboard.set_options(Options { updates: Updates::Ready(Version::new(1, 3, 0)), ..options });
+    stage.press(&[A]);
+    assert!(matches!(asked(&mut stage)[..], [Effect::InstallUpdate]));
+    // The daily check: off, then on and saved.
+    assert!(!stage.dashboard.options().daily_update_check);
+    stage.press(&[Down, A]);
+    let change = Change { setting: Setting::DailyUpdateCheck, on: true };
+    assert!(matches!(asked(&mut stage)[..], [Effect::Set(c)] if c == change));
+    assert!(stage.dashboard.options().daily_update_check);
+    // The shell says where updates stand: the focus line follows at once, before the page is drawn again.
+    let refused = Updates::BadDownload(Version::new(1, 3, 0));
+    stage.dashboard.set_options(Options { updates: refused, ..stage.dashboard.options() });
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: About: Version 1.2.3 (0123abc); Check for updates every day; bad-download 1.3.0"
+    );
+}
+
+/// About with a version ready to install, focus on Install, the daily check on.
+#[test]
+fn settings_about_ready() {
+    use model::update::{Updates, Version};
+    let mut stage = about_stage(Updates::Ready(Version::new(1, 3, 0)));
+    stage.press(&[Down, A, Up, Right]);
+    assert!(stage.dashboard.options().daily_update_check);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: About: Version 1.2.3 (0123abc); Install; ready 1.3.0");
+    stage.check("settings-about-ready");
+}
+
+/// About when the update address answered 404, as GitHub's does while the repository is private: said plainly on
+/// the page, and no Toast.
+#[test]
+fn settings_about_not_public() {
+    use model::update::Updates;
+    let mut stage = about_stage(Updates::NotPublic);
+    assert!(stage.dashboard.notifications().is_empty());
+    stage.check("settings-about-not-public");
+}
+
+/// About when a download did not match its manifest's SHA-256.
+#[test]
+fn settings_about_bad_download() {
+    use model::update::{Updates, Version};
+    let mut stage = about_stage(Updates::BadDownload(Version::new(1, 3, 0)));
+    stage.check("settings-about-bad-download");
+}
+
+/// About while a check is under way: Check for updates dimmed, the Spinner beside the buttons.
+#[test]
+fn settings_about_checking() {
+    use model::update::Updates;
+    let mut stage = about_stage(Updates::Checking);
+    stage.check("settings-about-checking");
 }
 
 /// Theme settings > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): the Bundle's picture 36, its

@@ -6,6 +6,7 @@ edition = "2021"
 description = "Xbox and Microsoft Store PC games: the packages registered for the user that carry a MicrosoftGame.config."
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 source-kit = { path = "../source-kit" }
 anyhow = "1"

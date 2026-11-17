@@ -548,7 +548,7 @@ impl Store {
         if let Some(value) = self.setting(screens::settings::BOOT_VIDEO) {
             eprintln!("settings: {} is {value}", screens::settings::BOOT_VIDEO);
         }
-        Options { build: crate::BUILD, ..Options::read(|key| self.setting(key)) }
+        Options { build: crate::build(), ..Options::read(|key| self.setting(key)) }
     }
 
     /// Saves the Boot video Settings chose (docs/spec/start-up.md): it plays from the next start.

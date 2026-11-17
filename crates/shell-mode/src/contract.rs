@@ -27,6 +27,16 @@ pub const AS_INSTALLED: &str = "--as-installed";
 /// topmost.
 pub const FROM_SHELL: &str = "--from-shell";
 
+/// An update's new Dashboard, started by the one it replaces with that one's pid (docs/spec/updates.md): it takes
+/// the single-instance guard alongside it, and sets [`handover_event`] once its first frame is presented.
+pub const HANDOVER: &str = "--handover";
+
+/// Made by the Dashboard handing over (its pid in the name) and set by the new one at its first frame: the old one
+/// then exits 0, which the watchdog takes for a handover, another Dashboard being left.
+pub fn handover_event(old_pid: u32) -> String {
+    format!(r"Local\XboxSeriesDashboard.v{VERSION}.Handover.{old_pid}")
+}
+
 /// The exit code of every job of this exe that isn't a Dashboard (`--sentinel`, `--shell-on`'s probe, a second
 /// Dashboard that gave way to the first, a second --shell): the --shell process watches every process of this exe
 /// and counts these for nothing.

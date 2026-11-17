@@ -25,10 +25,13 @@ pub enum Setting {
     /// Who's playing today? asks on every start and on waking from sleep; off, the Profile signed in last signs in
     /// by itself (Settings > Personalisation > Who's playing today?, docs/spec/start-up.md).
     AskWhosPlaying,
+    /// Settings > About's Check for updates every day (docs/spec/updates.md): off by default, while the
+    /// repository's releases are not public.
+    DailyUpdateCheck,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 7] = [
+    pub const ALL: [Setting; 8] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
@@ -36,6 +39,7 @@ impl Setting {
         Setting::UseGuide,
         Setting::DownloadArtOnline,
         Setting::AskWhosPlaying,
+        Setting::DailyUpdateCheck,
     ];
 
     /// The option's key in the settings table. Never changed: a database has it.
@@ -49,12 +53,13 @@ impl Setting {
             // `library::art::ONLINE_SETTING`.
             Setting::DownloadArtOnline => "art.online",
             Setting::AskWhosPlaying => "startup.ask_whos_playing",
+            Setting::DailyUpdateCheck => "updates.daily_check",
         }
     }
 
     /// What the option is until it is set.
     pub fn default(self) -> bool {
-        self != Setting::ReduceMotion
+        !matches!(self, Setting::ReduceMotion | Setting::DailyUpdateCheck)
     }
 }
 
@@ -89,6 +94,10 @@ pub const BOOT_VIDEO: &str = "startup.boot_video";
 /// whether there is one: what it is never comes back from the database to the screens.
 pub const ART_KEY: &str = "art.steamgriddb_key";
 
+/// The settings row that holds when updates were last checked, by hand or of the Dashboard's own accord: seconds
+/// since 1970. The executable's alone: the daily check is due a day after it (docs/spec/updates.md).
+pub const LAST_UPDATE_CHECK: &str = "updates.last_check";
+
 /// Every option's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
@@ -103,6 +112,8 @@ pub struct Options {
     pub art_key: bool,
     /// Who's playing today? asks on every start and on waking from sleep: on by default, as the Bundle's.
     pub ask_whos_playing: bool,
+    /// Settings > About checks for updates once a day: off by default.
+    pub daily_update_check: bool,
     /// The Boot video chosen (docs/spec/start-up.md), which plays as the Dashboard starts if it is found.
     pub boot_video: BootVideo,
     /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
@@ -115,6 +126,8 @@ pub struct Options {
     pub shell: model::shell_mode::ShellMode,
     /// Which build this is (Settings > About): not an option, but the executable's own, which it says as it starts.
     pub build: super::about::Build,
+    /// Where updates stand (Settings > About): not an option, but what the executable last said of its checks.
+    pub updates: model::update::Updates,
 }
 
 impl Default for Options {
@@ -129,11 +142,13 @@ impl Default for Options {
             art_online: of(Setting::DownloadArtOnline),
             art_key: false,
             ask_whos_playing: of(Setting::AskWhosPlaying),
+            daily_update_check: of(Setting::DailyUpdateCheck),
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),
             shell: model::shell_mode::ShellMode::Unknown,
             build: super::about::Build::default(),
+            updates: model::update::Updates::Unchecked,
         }
     }
 }
@@ -165,6 +180,7 @@ impl Options {
             Setting::UseGuide => self.use_guide,
             Setting::DownloadArtOnline => self.art_online,
             Setting::AskWhosPlaying => self.ask_whos_playing,
+            Setting::DailyUpdateCheck => self.daily_update_check,
         }
     }
 
@@ -177,6 +193,7 @@ impl Options {
             Setting::UseGuide => &mut self.use_guide,
             Setting::DownloadArtOnline => &mut self.art_online,
             Setting::AskWhosPlaying => &mut self.ask_whos_playing,
+            Setting::DailyUpdateCheck => &mut self.daily_update_check,
         } = on;
     }
 }
@@ -201,6 +218,8 @@ mod tests {
         assert!(options.use_guide && !options.reduce_motion && options.ask_whos_playing);
         // The port's own: art online is on until it is turned off.
         assert!(options.art_online && !options.art_key);
+        // The port's own: no update check of its own accord until it is turned on.
+        assert!(!options.daily_update_check);
     }
 
     #[test]

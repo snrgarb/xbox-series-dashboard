@@ -5,6 +5,9 @@ publish.workspace = true
 edition = "2021"
 description = "Video: a file decoded by Media Foundation on a thread of its own, its sound on the default device, and the clock its picture is paced by. Nothing to play anywhere but Windows."
 
+[dependencies]
+log-line = { path = "../log-line" }
+
 # The version wgpu's DX12 backend already builds, so this adds no second copy. `windows` rather than `windows-sys`
 # because Media Foundation and WASAPI are COM. Media Foundation's own functions are found at run time
 # (`win::mf`), never imported: a Windows without it (an N edition) starts the Dashboard all the same, with no video.

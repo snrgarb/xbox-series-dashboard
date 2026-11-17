@@ -34,7 +34,9 @@ else `git rev-parse --short=7 HEAD`):
    - `XboxSeriesDashboard-<version>-portable.zip`, a folder of the same three files;
    - `SHA256SUMS.txt`.
 4. Try it: on the TV PC, `e2e/payloads/install` installs, starts and uninstalls it in a folder of its own (below).
-5. **Publishing is the user's.** To publish, they download the artifact and make the release by hand (`gh release
+5. **Publishing is the user's.** A published release is what the Dashboard's updates find (docs/spec/updates.md): its
+   tag, its portable zip and `SHA256SUMS.txt`, under those names, are what an update reads, so a release needs all
+   three as CI makes them. To publish, they download the artifact and make the release by hand (`gh release
    create v0.2.0 <files> --draft`, then look and publish). Nothing in this repository does it.
 
 A package of any commit, without a tag: run CI by hand, `gh workflow run ci.yml --ref <branch>`, or from the

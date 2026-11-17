@@ -22,6 +22,15 @@
 //!
 //! [`Epic`] is the source the library reads (`model::Source`): it starts a game, and asks for one to be installed,
 //! through the launcher's `com.epicgames.launcher://` links, the launcher checking the game is the user's.
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod fixture;
 pub mod install_helper;
 mod modern;

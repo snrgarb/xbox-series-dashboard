@@ -12,6 +12,15 @@
 //! - `--shell-probe` answers that this exe starts, before `Shell` may name it.
 //!
 //! Everything shell mode writes goes through [`system::System`]: the registry, the task, the record.
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod contract;
 pub mod dashboard;
 pub mod log;

@@ -41,6 +41,43 @@ pub fn crash_on_purpose(shell_folder: &Path) -> Option<u32> {
     Some(left)
 }
 
+/// How an update's handover ended (docs/spec/updates.md): the new Dashboard's first frame came, it exited first
+/// (with its code), or neither within the time given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoverEnd {
+    Started,
+    Exited(u32),
+    TimedOut,
+}
+
+/// An argument as a Windows command line carries it (as `CommandLineToArgvW` reads it back): quoted when it has a
+/// space, a tab or a quote in it, or is empty.
+pub fn quote(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::from('"');
+    let mut slashes = 0;
+    for c in arg.chars() {
+        match c {
+            '\\' => slashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat_n('\\', slashes * 2 + 1));
+                out.push('"');
+                slashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat_n('\\', slashes));
+                slashes = 0;
+                out.push(c);
+            }
+        }
+    }
+    out.extend(std::iter::repeat_n('\\', slashes * 2));
+    out.push('"');
+    out
+}
+
 #[cfg(windows)]
 pub use win::*;
 
@@ -95,6 +132,33 @@ mod elsewhere {
         String::new()
     }
 
+    pub fn taking_over(_: Option<&Path>) -> Guard {
+        Guard
+    }
+
+    pub fn handed_over(_: u32) -> bool {
+        false
+    }
+
+    /// Off Windows there is nothing to hand over to.
+    pub struct Handover;
+
+    impl Handover {
+        pub fn start(exe: &Path, _: &[String]) -> Result<Self, String> {
+            Err(format!("{}: only Windows starts it", exe.display()))
+        }
+
+        pub fn pid(&self) -> u32 {
+            0
+        }
+
+        pub fn wait(&self, _: std::time::Duration) -> super::HandoverEnd {
+            super::HandoverEnd::TimedOut
+        }
+
+        pub fn end(&self) {}
+    }
+
     pub struct Signals;
 
     impl Signals {
@@ -118,7 +182,8 @@ mod win {
 
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, OPEN_ALWAYS,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_ALWAYS,
     };
     use windows_sys::Win32::System::Console::{SetStdHandle, STD_ERROR_HANDLE};
     use windows_sys::Win32::System::Threading::{
@@ -246,7 +311,9 @@ mod win {
             let file = CreateFileW(
                 name.as_ptr(),
                 FILE_APPEND_DATA | SYNCHRONIZE,
-                FILE_SHARE_READ | FILE_SHARE_DELETE,
+                // Shared for writing too: an update's new Dashboard appends to the same --log-file while the old
+                // one still has it open (docs/spec/updates.md). Appends from two processes don't overwrite.
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 std::ptr::null(),
                 OPEN_ALWAYS,
                 FILE_ATTRIBUTE_NORMAL,
@@ -358,6 +425,101 @@ mod win {
         }
     }
 
+    /// The single-instance guard for an update's new Dashboard (`--handover`): taken alongside the old one's, which
+    /// is still running and exits once this one has shown its first frame. Held as the guard from then on.
+    pub fn taking_over(data: Option<&Path>) -> Guard {
+        let name = wide(&super::running_mutex(data));
+        Guard(unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) })
+    }
+
+    /// Tells the Dashboard with this pid, which is handing over, that this one's first frame is out. Whether it
+    /// was told: false when it is gone already.
+    pub fn handed_over(old_pid: u32) -> bool {
+        let name = wide(&contract::handover_event(old_pid));
+        unsafe {
+            let event = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
+            if event.is_null() {
+                return false;
+            }
+            let set = SetEvent(event) != 0;
+            CloseHandle(event);
+            set
+        }
+    }
+
+    /// The old Dashboard's side of an update's handover: the event the new one sets, and the new one's process.
+    pub struct Handover {
+        event: HANDLE,
+        process: HANDLE,
+        pid: u32,
+    }
+
+    // The two handles are the process's own, usable from any thread.
+    unsafe impl Send for Handover {}
+
+    impl Handover {
+        /// Makes the event, lets the new one take the foreground, and starts `exe` with `args` (quoted here).
+        pub fn start(exe: &Path, args: &[String]) -> Result<Self, String> {
+            use windows_sys::Win32::System::Threading::{CreateEventW, GetCurrentProcessId};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+            let name = wide(&contract::handover_event(unsafe { GetCurrentProcessId() }));
+            let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, name.as_ptr()) };
+            if event.is_null() {
+                return Err(format!("the handover's event: {}", std::io::Error::last_os_error()));
+            }
+            unsafe { AllowSetForegroundWindow(ASFW_ANY) };
+            let quoted: Vec<String> = args.iter().map(|arg| super::quote(arg)).collect();
+            let refs: Vec<&str> = quoted.iter().map(String::as_str).collect();
+            match start_held(exe, &refs) {
+                Ok((pid, process)) => Ok(Self { event, process, pid }),
+                Err(e) => {
+                    unsafe { CloseHandle(event) };
+                    Err(e)
+                }
+            }
+        }
+
+        pub fn pid(&self) -> u32 {
+            self.pid
+        }
+
+        /// Waits for the new one's first frame, or its exit, at most `limit`.
+        pub fn wait(&self, limit: std::time::Duration) -> super::HandoverEnd {
+            use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+            use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForMultipleObjects};
+            let handles = [self.event, self.process];
+            let ms = limit.as_millis().min(u128::from(u32::MAX - 1)) as u32;
+            let woke = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, ms) };
+            if woke == WAIT_OBJECT_0 {
+                super::HandoverEnd::Started
+            } else if woke == WAIT_OBJECT_0 + 1 {
+                let mut code = 0u32;
+                unsafe { GetExitCodeProcess(self.process, &mut code) };
+                super::HandoverEnd::Exited(code)
+            } else {
+                super::HandoverEnd::TimedOut
+            }
+        }
+
+        /// Ends the new one, and waits for it to be gone (at most 5 s), so its file can be renamed.
+        pub fn end(&self) {
+            use windows_sys::Win32::System::Threading::{TerminateProcess, WaitForSingleObject};
+            unsafe {
+                TerminateProcess(self.process, 1);
+                WaitForSingleObject(self.process, 5000);
+            }
+        }
+    }
+
+    impl Drop for Handover {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.event);
+                CloseHandle(self.process);
+            }
+        }
+    }
+
     /// The two events, opened to be set. None with no --shell process to tell.
     pub struct Signals {
         first_frame: HANDLE,
@@ -404,6 +566,15 @@ mod tests {
         assert!(a.starts_with(r"Local\XboxSeriesDashboard.Running."));
         assert_eq!(a, running_mutex(Some(Path::new(r"C:\E2E\Payload\Data"))), "as Windows compares paths");
         assert_ne!(a, running_mutex(Some(Path::new(r"C:\e2e\other"))));
+    }
+
+    #[test]
+    fn an_argument_is_quoted_as_windows_reads_it_back() {
+        assert_eq!(quote("--no-startup"), "--no-startup");
+        assert_eq!(quote(r"C:\Users\Test User\data"), r#""C:\Users\Test User\data""#);
+        assert_eq!(quote(r"C:\a dir\"), r#""C:\a dir\\""#);
+        assert_eq!(quote(r#"say "hi""#), r#""say \"hi\"""#);
+        assert_eq!(quote(""), r#""""#);
     }
 
     #[test]

@@ -5,6 +5,7 @@ publish.workspace = true
 edition = "2021"
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 source-kit = { path = "../source-kit" }
 anyhow = "1"

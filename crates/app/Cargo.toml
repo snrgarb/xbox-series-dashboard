@@ -10,6 +10,7 @@ name = "dashboard"
 path = "src/main.rs"
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 library = { path = "../library" }
 source-steam = { path = "../source-steam" }
@@ -28,6 +29,8 @@ audio = { path = "../audio" }
 media = { path = "../media" }
 discord = { path = "../discord" }
 shell-mode = { path = "../shell-mode" }
+# Updates (docs/spec/updates.md): the release asked for, downloaded, checked and put in place.
+update = { path = "../update" }
 wgpu = "30"
 winit = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }

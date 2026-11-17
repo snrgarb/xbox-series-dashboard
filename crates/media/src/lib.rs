@@ -13,6 +13,15 @@
 //! Windows without the Media Feature Pack) a video fails to open, and nothing else changes. Anywhere but Windows
 //! every video fails to open. What is decided here about which frame shows when is plain Rust, tested everywhere
 //! with a clock of the test's own ([`Clock`]).
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};

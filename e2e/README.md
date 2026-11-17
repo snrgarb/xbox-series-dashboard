@@ -362,3 +362,19 @@ gh run download <run id> -n windows -D target/release-test
 gh run download <run id> -n XboxSeriesDashboard-<version> -D target/release-test
 e2e/htpc/run.sh install --exe target/release-test/dashboard.exe --standin target/release-test/standin.exe
 ```
+
+## Updates
+
+**`updates`** (docs/spec/updates.md, 7), safe on the TV PC. A copy of the staged `dashboard.exe` in a folder of the
+test's own, started with `--pretend-version 0.0.1` and `--update-source` at `standin serve-updates` (on 127.0.0.1,
+serving the staged build as a release of its real version), is driven by the virtual pad to Settings > About: Check
+for updates finds, downloads and checks the release, Install puts it in place by renaming, the new version starts with
+`--handover` and the old one exits 0, kept as `dashboard.0.0.1.old`. Then a fresh copy against `serve-updates
+--bad-hash` sees the download refused and its folder unchanged. Judged by the copies' logs (`update-app.log`,
+`update-bad.log`) and `standin.log`. Nothing asks GitHub, and the user's installed copy is never touched. It needs
+only the Windows build's two programs:
+
+```sh
+cargo build --release --target x86_64-pc-windows-gnullvm -j 3 -p app -p standin
+e2e/htpc/run.sh updates
+```

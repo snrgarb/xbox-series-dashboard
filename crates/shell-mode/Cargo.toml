@@ -6,6 +6,7 @@ edition = "2021"
 description = "Shell mode: the Dashboard in place of the Windows desktop at sign-in. Turning it on and off, and the --shell process that does the Boot shell's job (docs/spec/shell-mode.md)."
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

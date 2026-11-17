@@ -117,6 +117,13 @@
 //!       Store's catalogue and GOG's API, knowing every id, with a red cover, a blue hero, a green header and (the
 //!       Microsoft Store's alone) a magenta square (`STORE_ART_COLOURS`). Says `serve-art: listening on
 //!       http://127.0.0.1:<n>` and then a line a request (its path, and whether it had the key), until it is killed.
+//!   standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
+//!       The stand-in update address (`update::fake`), on 127.0.0.1 at <n> (any free port without one), for
+//!       `dashboard --update-source http://127.0.0.1:<n>/releases/latest`: GitHub's API's newest release, version
+//!       <x.y.z>, whose portable zip holds <dashboard.exe> and whose SHA256SUMS.txt gives the zip's SHA-256; with
+//!       --bad-hash one that is not the zip's, so the download must be refused; with --not-public 404, as a private
+//!       repository's. Says `serve-updates: listening on <the update address>` and then a line a request (its path
+//!       and User-Agent, and whether it carried any Authorization), until it is killed.
 //!   standin discord --pipe <name> [--port <n>]
 //!       A fake Discord (`discord::fake`), for `dashboard --discord-pipe <name> --discord-token-url
 //!       http://127.0.0.1:<n>/api/oauth2/token --discord-cdn-url http://127.0.0.1:<n>`: listens on the named pipe
@@ -166,6 +173,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>]
+       standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
        standin discord --pipe <name> [--port <n>]
        standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel>
                                | dm <person> | group <person>... | join <person> | leave <person> | speak <who>
@@ -848,6 +856,7 @@ fn run(args: &[String]) -> i32 {
             }
         }
         Some("serve-art") => serve_art(&args[1..]),
+        Some("serve-updates") => serve_updates(&args[1..]),
         Some("discord") => serve_discord(&args[1..]),
         Some("discord-say") => match &args[1..] {
             [name, words @ ..] if !words.is_empty() => match discord::fake::say_to(name, &words.join(" ")) {
@@ -1063,6 +1072,70 @@ fn serve_discord(args: &[String]) -> i32 {
     };
     loop {
         std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+}
+
+fn serve_updates(args: &[String]) -> i32 {
+    let (mut exe, mut version, mut port) = (None, None, 0u16);
+    let (mut bad_hash, mut not_public) = (false, false);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--bad-hash" => bad_hash = true,
+            "--not-public" => not_public = true,
+            "--exe" => exe = it.next().map(PathBuf::from),
+            "--version" => version = it.next().and_then(|v| update::Version::parse(v)),
+            "--port" => match it.next().and_then(|v| v.parse().ok()) {
+                Some(value) => port = value,
+                None => {
+                    note("serve-updates: bad --port");
+                    return 2;
+                }
+            },
+            _ => {
+                note(USAGE);
+                return 2;
+            }
+        }
+    }
+    let (Some(exe), Some(version)) = (exe, version) else {
+        note(&format!("serve-updates: --exe and --version are needed\n{USAGE}"));
+        return 2;
+    };
+    let bytes = match std::fs::read(&exe) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            note(&format!("serve-updates: {}: {e}", exe.display()));
+            return 1;
+        }
+    };
+    let script = update::fake::Script { bad_hash, not_public, ..update::fake::Script::new(version, bytes) };
+    let service = match update::fake::FakeReleases::start(port, script) {
+        Ok(service) => service,
+        Err(e) => {
+            note(&format!("serve-updates: port {port}: {e}"));
+            return 1;
+        }
+    };
+    let how = if not_public {
+        ", answering 404"
+    } else if bad_hash {
+        ", its manifest's SHA-256 not the zip's"
+    } else {
+        ""
+    };
+    note(&format!("serve-updates: {version} of {}{how}", exe.display()));
+    note(&format!("serve-updates: listening on {}", service.url()));
+    let mut said = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let requests = service.requests();
+        for request in &requests[said..] {
+            let agent = request.user_agent.as_deref().unwrap_or("none");
+            let key = if request.authorization.is_some() { "an Authorization" } else { "no Authorization" };
+            note(&format!("serve-updates: {} (User-Agent {agent}, {key})", request.path));
+        }
+        said = requests.len();
     }
 }
 

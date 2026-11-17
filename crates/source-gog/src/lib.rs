@@ -12,6 +12,15 @@
 //! [`Gog`] is the source the library reads (`model::Source`). A GOG game has no launcher check, so it is started
 //! as its own program, with the `.info` file's primary play task: no client is needed. Galaxy is asked to install
 //! a game where it is installed; a game's own uninstaller uninstalls it.
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod fixture;
 pub mod galaxy;
 

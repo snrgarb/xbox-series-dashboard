@@ -29,6 +29,15 @@
 //!
 //! `Xbox::at(Some(dir))` reads a fake in place of the machine (`--xbox <dir>`, and `fixture`): `<dir>` stands for a
 //! drive, with its `.GamingRoot` and the folders it names, and no package manager. An empty folder has no games.
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod family;
 pub mod fixture;
 pub mod gaming_root;

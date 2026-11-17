@@ -138,6 +138,12 @@ pub enum Effect {
     /// Settings > System: turn shell mode on (the user has said yes) or off (docs/spec/shell-mode.md). The
     /// executable answers with how it is then, in `Options::shell`.
     ShellMode(bool),
+    /// Settings > About's Check for updates (docs/spec/updates.md): ask the update address for the newest release,
+    /// and download and check a newer one. The executable answers with how it goes, in `Options::updates`.
+    CheckForUpdates,
+    /// Settings > About's Install, with an update ready: put it in place and start it. The executable answers as
+    /// above; once the new one has started this one exits.
+    InstallUpdate,
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.
@@ -1360,6 +1366,9 @@ impl Dashboard {
             Some(state) if !state.is_empty() => format!("{place}; {state}"),
             // Settings > Discord: how the connection is, which the page has from the shell, not of its own.
             _ if place.starts_with("Settings: Discord: ") => format!("{place}; {}", self.discord.state_line()),
+            // Settings > About: where updates stand, which the page has from the shell, not of its own, so the line
+            // follows a check or an install at once rather than at the page's next draw.
+            _ if place.starts_with("Settings: About: ") => format!("{place}; {}", self.options.updates.state()),
             _ => place,
         }
     }
