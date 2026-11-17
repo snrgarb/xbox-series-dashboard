@@ -69,7 +69,7 @@ pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture) {
         let colour = if selected { Color::WHITE } else { UNSELECTED };
         let square = |side: f32| Rect::new(cx - side / 2.0, cy - side / 2.0, side, side);
         match tab {
-            Tab::Landing => marks::xbox_mark(ui, square(33.0), colour),
+            Tab::Landing => marks::guide_button(ui, square(33.0), colour),
             Tab::Discord => marks::discord_mark(ui, square(36.0), colour),
             Tab::ProfileAndSystem => {
                 // The disc shows where there is no picture; the picture is the same selected or not.

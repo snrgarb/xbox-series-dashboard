@@ -595,7 +595,7 @@ One banner, centred horizontally, its foot 64 above the screen's (E/ToastWindow.
 | Detail (Library updated only) | Segoe UI 26 under the line | 181-186 |
 | Prompt | "Press", the Xbox mark 32 x 32 (12 either side, 2 down), "to view"; Segoe UI 34 white | 187-214 |
 
-**Against the Bundle's picture** (`port-reference-20261115-200355/60-toast-greeting.jpg`, the greeting over Home): the card is x 756..1164, y 888..1016. It is 408 wide for a line about 140 wide: the card is as wide as the longer of the line and the prompt even for a Toast whose prompt never shows, since the prompt is laid out, unseen, in the line's place. The greeting's tile is the profile's picture, round and 80 across, bare on the card with no lighter square (the square is only under a kind's own icon); the port draws the same stand-in picture Home's top bar has until Profiles have pictures (M5). The Guide button's mark in the prompt is the plain disc the Guide's hint has (open question 5).
+**Against the Bundle's picture** (`port-reference-20261115-200355/60-toast-greeting.jpg`, the greeting over Home): the card is x 756..1164, y 888..1016. It is 408 wide for a line about 140 wide: the card is as wide as the longer of the line and the prompt even for a Toast whose prompt never shows, since the prompt is laid out, unseen, in the line's place. The greeting's tile is the profile's picture, round and 80 across, bare on the card with no lighter square (the square is only under a kind's own icon); the port draws the same stand-in picture Home's top bar has until Profiles have pictures (M5). The Guide button's mark in the prompt is the project's own drawing the Guide's hint has (10.1).
 
 **Text cycle.** When the Guide is on, the banner alternates between its line and the prompt, in place: line for 2.2 s, a 0.3 s linear cross-fade, prompt for 2.2 s, 0.3 s back; a 5 s loop, so a Toast shows each once (48-63). With the Guide off there is only the line.
 
@@ -692,7 +692,31 @@ Decided in #42. The Dashboard core keeps the notifications itself (`screens::toa
 | Gamertag and picture from the Bundle's Profiles | From the port's Profiles (profiles.md), as Home's top bar |
 | Prewarming the window offscreen; pictures cached as bitmaps; the close deadline timer; the blurred picture of the panel; the shadow as a nine-patch | Drop: WPF workarounds. Draw live |
 | Debug-only mouse clicks on entries | Drop. Keep Esc and the keyboard stand-in for the Guide button |
-| The Xbox mark, Discord mark and store marks as vector paths in the XAML | Not ours to ship: as `home.md`, drawn at runtime from what Windows has or a plain stand-in (open question 5) |
+| The Xbox mark, Discord mark and store marks as vector paths in the XAML | Not ours to ship: the project's own drawings in their places (10.1) |
+
+### 10.1 The Guide's and the Toasts' icons (#220)
+
+The user, on the TV PC: "no Xbox icons in the guide or the toasts". Every icon of the Guide and the Toasts is listed here with where the port's comes from. **Font** is Segoe Fluent Icons (`render::Font::Icons`), loaded from Windows at run time; code points are from Microsoft's list, <https://learn.microsoft.com/windows/apps/design/style/segoe-fluent-icons-font> (Segoe MDL2 Assets, <https://learn.microsoft.com/windows/apps/design/style/segoe-ui-symbol-font>, has the same at these points). Where there is no font (Linux, the screenshot tests) a font glyph is the outlined square `ui.icon` draws. **Drawn** is the project's own vector drawing (`screens::drawn`), the same on every machine.
+
+**The Guide button.** Neither font has a glyph of the Xbox logo or of the Guide button: Microsoft's lists have `XboxOneConsole` (E990, a console), `Game` (E7FC, a pad) and the pad's `ButtonA` to `ButtonX` (F093 to F096), `ButtonMenu` (EDE3) and `ButtonView2` (EECA), and nothing named Xbox, Guide or Nexus. So the Guide button is **drawn**: the pad's home button, a ring with a house in it (`Drawing::GuideButton`). The Xbox logo is a trademark and is never drawn by the project.
+
+| Where | The Bundle | The port before | The port now |
+|---|---|---|---|
+| Header: the landing tab | The Xbox mark, 33 | A plain disc | Drawn: the Guide button, 33, grey or white |
+| Header: the Discord tab | Discord's logo, 36 | A rounded bar | Drawn: chat, two speech bubbles (`Drawing::Chat`), 36 |
+| Header: the Profile & system tab | The profile's picture | The picture | Unchanged |
+| Hints beside the panel: "Hold for power options" | The Xbox mark | A plain disc | Drawn: the Guide button, 27 |
+| Hints: "More options" | The Menu button: a ring, three lines (E700) | The same | Unchanged (font) |
+| The landing tab's entries (Home, My games & apps), Profile & system's (Switch profile, Settings, Power), the Utilities row (Notifications, Audio, Search, Downloads), Power's tiles, the Flyouts' rows | Segoe Fluent Icons glyphs | The same glyphs | Unchanged (font) |
+| The landing tab's recent games' covers | Steam's or Xbox's logo | A plain disc | The launcher's drawing (home.md 3.3.1) |
+| The Discord tab: the account, a server, a person, a Call's Status mark | Discord's logo | A rounded bar | Drawn: chat |
+| Banner Toast's prompt, "Press (Guide) to view" / "to start" | The Xbox mark, 32 | A plain disc (the "blank white dot" seen on the TV) | Drawn: the Guide button |
+| Banner Toast's tile | Playnite's: a glyph or a picture | By kind (9.7) | Unchanged: the game's cover for Queued, Ready to play and Uninstalled (its kind's glyph until it is decoded, or with none); the profile's picture for the greeting; the bell (font) for a notification |
+| Achievement pill: the logo in the circle, 70 | The Xbox mark | A plain disc | Drawn: the Guide button |
+| Achievement pill's prompt | The Xbox mark, 34 | A plain disc | Drawn: the Guide button |
+| Achievement pill's icon | The achievement's icon, else the trophy (Segoe UI Symbol) | The same | Unchanged |
+
+What each is like on the TV is checked there: the screenshot tests show the drawings as they are everywhere, and the font glyphs as squares.
 
 ---
 
@@ -702,7 +726,7 @@ Decided in #42. The Dashboard core keeps the notifications itself (`screens::toa
 2. **Entries whose pages do not exist yet.** My games & apps, Search (M3), Settings (M3), Switch profile (M5). Draw them and make A inert, or leave them out until their page exists? Leaving out changes the layout the screenshots are compared with.
 3. **Freezing the game.** **Decided (#38): kept, as the Bundle has it**, with no setting of its own, since the Bundle has none (7.2). A game an anti-cheat guards refuses to be opened and is left running, which is said in the log.
 4. **Exclusive fullscreen and elevated games.** **Decided (#38): the Bundle's limits are accepted** and said in the log when they are met: `overlay: Windows says a Direct3D program has the screen to itself (exclusive fullscreen)` as the Guide opens over such a game, `overlay: Windows did not give the Overlay the foreground` over a game that runs elevated, and `freeze: Windows won't let <name> (<id>) be frozen` for a process it can't suspend. Nothing is done to work around either.
-5. **The Xbox mark** on the landing tab, the Guide hint and the Toast prompt, and the store badges: what is drawn in a repository that may go public?
+5. ~~**The Xbox mark** on the landing tab, the Guide hint and the Toast prompt, and the store badges: what is drawn in a repository that may go public?~~ Decided (#189, #220): the project's own drawings, section 10.1 and home.md 3.3.1.
 6. ~~**Power.** The fourth option's name ("Exit", "Exit to desktop"); whether "Turn off PC" keeps the hybrid shutdown; whether Exit plays `PowerOff.wav` when the media folder has it.~~ Decided in #39: section 13.
 7. **One window or two.** The Bundle has an Overlay window (activatable) and a Toast window (passive, a strip). The port's Overlay window has both modes (#27) but a Toast must stay passive while the Guide is active and must show while the Guide is closed. Two windows as the Bundle is the recommendation. **One Guide (#38):** the Guide is on the Overlay over Home as it is over a game, as in the Bundle; only where no Overlay can be made is it drawn in Home's window. **Two windows (#42):** the Toast has its own, as the Bundle (9.1).
 8. **Layered window not updating on the VM** (#23) blocks checking Toasts there if the passive window is the layered kind. The strip is made as the Overlay is, whose picture does show on the VM; `e2e/payloads/toast` checks the Toast by the screen's pixels.

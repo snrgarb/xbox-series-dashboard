@@ -25,7 +25,7 @@ pub fn draw(ui: &mut Ui, has_menu: bool) {
             ui.ring(glyph, Color::WHITE, 999.0, 2.0);
             ui.icon(glyph.center().0, middle, MENU, 12.0, Color::WHITE);
         } else {
-            marks::xbox_mark(ui, glyph, Color::WHITE);
+            marks::guide_button(ui, glyph, Color::WHITE);
         }
         ui.label_middle(glyph.right() + 14.0, middle, text, &BODY);
     }

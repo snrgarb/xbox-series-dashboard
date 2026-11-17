@@ -609,7 +609,7 @@ fn prompt(ui: &mut Ui, column: Rect, then: &str) {
     let x = column.x + (column.w - whole) / 2.0;
     let cy = column.y + column.h / 2.0;
     ui.label_middle(x, cy, "Press", &TEXT);
-    marks::xbox_mark(ui, Rect::new(x + press + 16.0, cy + 1.0 - MARK / 2.0, MARK, MARK), Color::WHITE);
+    marks::guide_button(ui, Rect::new(x + press + 16.0, cy + 1.0 - MARK / 2.0, MARK, MARK), Color::WHITE);
     ui.label_middle(x + press + 16.0 + MARK + 22.0, cy, then, &TEXT);
 }
 
@@ -634,7 +634,7 @@ fn circle(ui: &mut Ui, pose: &Pose, palette: Palette, rare: bool, icon: Option<&
         round(ui, CIRCLE * pose.dark_scale, palette.dark, pose.dark);
         round(ui, CIRCLE, palette.bright, pose.bright);
         if pose.logo > 0.0 && pose.logo_scale > 0.0 {
-            ui.with_alpha(pose.logo, |ui| marks::xbox_mark(ui, disc(70.0 * pose.logo_scale), Color::WHITE));
+            ui.with_alpha(pose.logo, |ui| marks::guide_button(ui, disc(70.0 * pose.logo_scale), Color::WHITE));
         }
         if rare && pose.gem > 0.0 {
             ui.with_alpha(pose.gem, |ui| gem(ui, (cx, cy), scale, pose, frame));

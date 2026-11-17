@@ -1,5 +1,5 @@
 //! Pictures the Dashboard draws itself from vector paths, in one colour: the launchers' marks (docs/spec/home.md,
-//! 3.3.1). Each is the project's own drawing of an idea its launcher brings to mind, never a company's logo or a
+//! 3.3.1), and the Guide button's and the chat's marks the Guide and the Toasts carry (docs/spec/guide.md, 10.1). Each is the project's own drawing of an idea its launcher brings to mind, never a company's logo or a
 //! tracing of one. A drawing is laid out on a 24 x 24 grid, as an icon font's glyph is, painted with tiny-skia once
 //! per size it is asked at (a picture a little larger than it is shown, so it is never stretched up), in white, and
 //! drawn in whatever colour it is asked for.
@@ -31,10 +31,15 @@ pub enum Drawing {
     App,
     /// A launcher of no drawing of its own: a box, as a cube.
     Launcher,
+    /// The Guide button, the pad's home button: a ring with a house in it. Never the Xbox logo, and Windows' icon
+    /// fonts have no glyph of the button (docs/spec/guide.md, 10.1).
+    GuideButton,
+    /// Chat, where the Bundle has Discord's logo: two speech bubbles, the front one cut clear of the back.
+    Chat,
 }
 
 impl Drawing {
-    pub const ALL: [Drawing; 10] = [
+    pub const ALL: [Drawing; 12] = [
         Drawing::Steam,
         Drawing::Epic,
         Drawing::Gog,
@@ -45,6 +50,8 @@ impl Drawing {
         Drawing::Manual,
         Drawing::App,
         Drawing::Launcher,
+        Drawing::GuideButton,
+        Drawing::Chat,
     ];
 
     /// Its name, which is the painted picture's.
@@ -60,6 +67,8 @@ impl Drawing {
             Drawing::Manual => "manual",
             Drawing::App => "app",
             Drawing::Launcher => "launcher",
+            Drawing::GuideButton => "guide-button",
+            Drawing::Chat => "chat",
         }
     }
 }
@@ -95,7 +104,7 @@ fn painter(drawing: Drawing, size: usize) -> Painter {
             }
         };
     }
-    table!(0 1 2 3 4 5 6 7 8 9)
+    table!(0 1 2 3 4 5 6 7 8 9 10 11)
 }
 
 /// The drawing, `size` pixels square: white, its shape in the alpha.
@@ -192,7 +201,56 @@ fn shape(c: &mut Canvas, drawing: Drawing) {
             c.cut_stroke(polyline(&[(2.3, 6.4), (12.0, 12.0), (21.7, 6.4)]), 1.7);
             c.cut_stroke(polyline(&[(12.0, 12.0), (12.0, 23.2)]), 1.7);
         }
+        Drawing::GuideButton => {
+            c.stroke(ellipse(12.0, 12.0, 10.6, 10.6, 0.0, 0.0, std::f32::consts::TAU), 2.0);
+            c.fill(polygon(&[
+                (12.0, 5.6),
+                (18.2, 11.4),
+                (16.4, 11.4),
+                (16.4, 17.6),
+                (13.4, 17.6),
+                (13.4, 13.8),
+                (10.6, 13.8),
+                (10.6, 17.6),
+                (7.6, 17.6),
+                (7.6, 11.4),
+                (5.8, 11.4),
+            ]));
+        }
+        Drawing::Chat => {
+            c.fill(bubble(1.0, 2.0, 15.0, 11.0, false));
+            let front = bubble(8.0, 8.5, 15.0, 11.0, true);
+            c.cut_stroke(front.clone(), 2.4);
+            c.fill(front);
+        }
     }
+}
+
+/// A speech bubble: a rounded box with a tail under it, at its left or (`right`) its right.
+fn bubble(x: f32, y: f32, w: f32, h: f32, right: bool) -> sk::Path {
+    let r = 3.0;
+    let (rx, bottom) = (x + w, y + h);
+    let mut path = sk::PathBuilder::new();
+    path.move_to(x + r, y);
+    path.line_to(rx - r, y);
+    path.quad_to(rx, y, rx, y + r);
+    path.line_to(rx, bottom - r);
+    path.quad_to(rx, bottom, rx - r, bottom);
+    if right {
+        path.line_to(rx - 3.0, bottom);
+        path.line_to(rx - 1.0, bottom + 3.5);
+        path.line_to(rx - 7.0, bottom);
+    } else {
+        path.line_to(x + 7.0, bottom);
+        path.line_to(x + 1.0, bottom + 3.5);
+        path.line_to(x + 3.0, bottom);
+    }
+    path.line_to(x + r, bottom);
+    path.quad_to(x, bottom, x, bottom - r);
+    path.line_to(x, y + r);
+    path.quad_to(x, y, x + r, y);
+    path.close();
+    path.finish().expect("a bubble")
 }
 
 /// A sword standing on its point, the length of the grid: blade, guard, grip and pommel, each a path of its own so

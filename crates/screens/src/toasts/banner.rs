@@ -224,7 +224,7 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
             ui.with_alpha(1.0 - pose.line, |ui| {
                 ui.label_middle(across(text), cy, "Press", &style);
                 let mark = Rect::new(text + press + MARK_GAP, cy - MARK / 2.0 + MARK_DOWN, MARK, MARK);
-                marks::xbox_mark(ui, at(mark), Color::WHITE);
+                marks::guide_button(ui, at(mark), Color::WHITE);
                 ui.label_middle(across(mark.right() + MARK_GAP), cy, toast.kind.prompt(), &style);
             });
         });
