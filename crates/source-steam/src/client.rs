@@ -42,12 +42,28 @@
 //!   mid-download on the TV PC (2026-11-17), Steam removed the files but left the manifest at StateFlags 514; the
 //!   wait is a guess at avoiding that, to be tried there.
 //!
-//! **Steam's main window.** `OpenInstallWizard` has Steam open its Install dialog (a page titled `Install`), which
-//! closes itself after `ContinueInstall`, and bring its main window up over the Dashboard, where it stays. So an
-//! install looks first at how the main window stands ([`main_window`]: the window itself on Windows, its page
-//! [`MAIN`] besides), and puts it back that way straight after ([`put_back`]): hidden again with
-//! `SteamClient.Window.HideWindow()` on its page (seen to work on the TV PC), or minimized; left where it was
-//! showing. The installer then has the Dashboard put in front again (`model::Opener::front`).
+//! **Steam's windows.** `OpenInstallWizard` has Steam open its Install dialog (a page titled `Install`, where Steam
+//! shows its own storage choice and licence agreements), which closes itself after `ContinueInstall` or
+//! `CancelInstall`, and bring its main window up over the Dashboard, where it stays. Before #245 they were seen: the
+//! main window for a moment, the dialog for as long as the Dashboard's own prompt was up. Now none is seen at all:
+//! - The installer keeps the Dashboard in front of every window of Steam's from before the first script reaches it
+//!   until this returns, whichever way the wizard ended (`model::Opener::keep_front`, `shell::front`): Home's window
+//!   topmost, so Steam's come up beneath it; the foreground locked, so Steam cannot take it, nor with it the keyboard
+//!   and Steam's own controller navigation (the pad's A on Steam's dialog); and a look every 15 ms that takes the
+//!   foreground back from a window of Steam's that has it all the same, and puts Home's window above one of Steam's
+//!   that came above it. Each is a `front:` line in the log.
+//! - Steam's windows are left as they were found. An install looks first at how the main window stands
+//!   ([`main_window`]: the window itself on Windows, its page [`MAIN`] besides), and puts it back that way after
+//!   each step that may have brought it up and once more at the end ([`put_back`]): hidden again with
+//!   `SteamClient.Window.HideWindow()` on its page (seen to work on the TV PC), or minimized; left where it was
+//!   showing. The Install dialog is left to close itself, as it does; hiding it in mid-wizard (HideWindow on its own
+//!   page) is not done: whether Steam's wizard goes on the same with its dialog hidden is not known, and with
+//!   Home's window kept in front nothing of it is seen anyway.
+//! - The Dashboard is put in front again after (`model::Opener::front`), where it no longer was.
+//!
+//! An install with no call that opens a dialog would need none of this: the console's `app_install` (#132) installs
+//! with no window but passes over the licence agreements the user must accept (#230), and whether `SetAppList` and
+//! `ContinueInstall` work without `OpenInstallWizard` is docs/research/installs.md's open question S1.
 //!
 //! **What comes back.** Each script runs every call in turn, catching what each throws, and gives back as JSON
 //! whether it got to the end and, for each call, what it returned or threw ([`Answer`]). Every step is a line in the
@@ -696,7 +712,8 @@ impl Steps<'_> {
         self.cancel(Outcome::Stopped(model::Stop::Failed(words.to_string())))
     }
 
-    /// Steam's main window hidden again as it stood, and the Dashboard in front: before the user is asked.
+    /// Steam's main window hidden again as it stood: after a step that may have brought it up, and before the user
+    /// is asked. The Dashboard is kept in front of it meanwhile (the module's "Steam's windows").
     fn put_back(&mut self) {
         if self.reached {
             put_back(self.ports, self.before, self.what);

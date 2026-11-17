@@ -93,8 +93,9 @@ impl Steam {
     }
 
     /// Asks Steam's client `call` on a thread of its own (the Dashboard's window never waits on its debugger), and
-    /// where it is not taken, opens `fallback` with `open`: Steam's own program, as before #171. After an install,
-    /// whose wizard brings Steam's main window up, the Dashboard is put in front again (`Opener::front`). An
+    /// where it is not taken, opens `fallback` with `open`: Steam's own program, as before #171. An install's wizard
+    /// brings Steam's Install dialog and main window up: the Dashboard is kept in front of them throughout
+    /// (`Opener::keep_front`, #245), and put in front again after (`Opener::front`). An
     /// install's licence agreements are put before the user through `open` (`Opener::agreement`), and an install
     /// that stopped is told of there too (`Opener::stopped`, #230): neither falls back to `steam.exe`, which would go
     /// round them.
@@ -111,11 +112,21 @@ impl Steam {
             let mut fallback = fallback;
             let outcome = match &mut fallback {
                 Some((_, open)) if install => {
+                    // Home's window in front of every window of Steam's from before the wizard opens until its
+                    // windows are put back, whichever way it ends (#245): dropped as `ask_user` returns.
+                    let kept = root.as_deref().and_then(|root| open.keep_front(root, &call.what()));
+                    client::log(&format!(
+                        "{}: the Dashboard {} in front of Steam's windows while its wizard runs",
+                        call.what(),
+                        if kept.is_some() { "kept" } else { "not kept" }
+                    ));
                     let mut asked = |agreement: &model::Agreement| {
                         open.front();
                         open.agreement(&game, agreement)
                     };
-                    client::ask_user(&ports, root.as_deref(), &call, &mut asked)
+                    let outcome = client::ask_user(&ports, root.as_deref(), &call, &mut asked);
+                    drop(kept);
+                    outcome
                 }
                 _ => client::ask(&ports, root.as_deref(), &call),
             };
@@ -782,9 +793,19 @@ mod tests {
         }
     }
 
-    /// An opener a thread can keep, as the shell's are: what it opened, shared.
+    /// An opener a thread can keep, as the shell's are: what it opened, shared; and, in order, when it was asked to
+    /// keep the Dashboard in front, when that was let go, and each stop it was told of.
     #[derive(Clone, Default)]
-    struct Shared(Arc<Mutex<Vec<String>>>);
+    struct Shared(Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<String>>>);
+
+    /// What [`Shared::keep_front`] gives: says it was let go as it is dropped.
+    struct LetGo(Arc<Mutex<Vec<String>>>);
+
+    impl Drop for LetGo {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().push("let go".into());
+        }
+    }
 
     impl Opener for Shared {
         fn open(&mut self, start: &Start) -> Result<(), String> {
@@ -795,6 +816,56 @@ mod tests {
         fn detached(&self) -> Option<Box<dyn Opener + Send>> {
             Some(Box::new(self.clone()))
         }
+
+        fn keep_front(&mut self, client: &Path, what: &str) -> Option<model::KeptInFront> {
+            self.1.lock().unwrap().push(format!("kept for {what} from {}", client.display()));
+            Some(Box::new(LetGo(self.1.clone())))
+        }
+
+        fn stopped(&mut self, _game: &Game, stop: &model::Stop) {
+            self.1.lock().unwrap().push(format!("stopped: {stop:?}"));
+        }
+    }
+
+    /// #245: the Dashboard is kept in front of Steam's windows from before its wizard opens until it is over, and
+    /// let go before the user is told why an install stopped; a steer or an uninstall, which brings no window up,
+    /// keeps nothing.
+    #[test]
+    fn the_dashboard_is_kept_in_front_while_steams_install_wizard_runs_and_let_go_whichever_way_it_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let steam = standin(&root);
+        std::fs::write(root.join(cef::FILE), "").unwrap();
+        let debugger = debugger::Debugger::start(&root, |_| {}).unwrap();
+        let installer = steam.installer().unwrap();
+        let opened = Shared::default();
+        let said = || opened.1.lock().unwrap().clone();
+        let state = || installs::under_way(&libraries(&root), &|_| false).first().map(|found| found.1);
+        let kept = format!("kept for install 9100040 into Steam's default library from {}", root.display());
+
+        // Too big: refused, the hold let go before the user is told.
+        let needed = fixture::needed(9_100_040);
+        fixture::WizardSetUp { free: Some(needed - 1), ..fixture::WizardSetUp::default() }.write(&root).unwrap();
+        installer.install(&steam_game("9100040"), None, &mut opened.clone()).unwrap();
+        assert!(soon(|| said().len() == 3), "{:?}", said());
+        let stop = format!("stopped: {:?}", model::Stop::NoSpace { needed, free: needed - 1 });
+        assert_eq!(said(), [kept.clone(), "let go".to_string(), stop]);
+        assert_eq!(debugger.windows(), (client::Shown::Hidden, false), "Steam's windows as they were");
+
+        // Taken: kept, and let go once Steam's main window is put back.
+        fixture::WizardSetUp::default().write(&root).unwrap();
+        opened.1.lock().unwrap().clear();
+        installer.install(&steam_game("9100040"), None, &mut opened.clone()).unwrap();
+        assert!(soon(|| state() == Some(model::InstallState::Queued) && said().len() == 2), "{:?}", said());
+        assert_eq!(said(), [kept, "let go".to_string()]);
+        assert_eq!(debugger.windows(), (client::Shown::Hidden, false));
+
+        // A pause brings no window up: nothing kept.
+        opened.1.lock().unwrap().clear();
+        fixture::write_progress(&root, 9_100_040, fixture::Progress::Downloading { done: 25, total: 100 }).unwrap();
+        installer.steer(&steam_game("9100040"), Steer::Pause, &mut opened.clone()).unwrap();
+        assert!(soon(|| state() == Some(model::InstallState::Paused { done: 25, total: 100 })));
+        assert!(said().is_empty(), "{:?}", said());
     }
 
     fn steam_game(appid: &str) -> Game {

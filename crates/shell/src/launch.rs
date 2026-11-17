@@ -4,7 +4,8 @@
 //! stays, not activated, until the game's window goes: it takes the foreground then, and Home comes back in it once
 //! the game has ended (docs/spec/launch-screen.md). The game's window is marked full screen for the shell, so the
 //! taskbar goes under the backdrop while the game is active. Home's window is otherwise left as it is: it is never
-//! made topmost, layered or clipped.
+//! made topmost, layered or clipped here. (An install's wizard keeps it topmost for a while, `crate::front`; that hold
+//! is let go as the launch opens the game, `SystemAddresses::open`, and is never taken over a game that runs.)
 use std::ffi::c_void;
 use std::path::Path;
 use std::sync::Arc;

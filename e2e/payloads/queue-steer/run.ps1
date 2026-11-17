@@ -15,7 +15,9 @@
 #   to install <appid> ...`; the Queue's `joined, asked for` and `queued`. The stand-in holds the scripts to the real
 #   client's signatures (#171, seen on the TV PC 2026-11-17: every call with the client id "0", the uninstall with
 #   three arguments) and, as the real one, brings its main window up on the install wizard: the Dashboard puts it
-#   back hidden (`steam: CEF: the main window, asked to Hide`) and keeps the foreground. Its download moved to 25% by
+#   back hidden (`steam: CEF: the main window, asked to Hide`) and keeps the foreground; the stand-in's windows are
+#   real ones (`steam: window: ...`), and Home's window is kept in front of them while the wizard runs (`front: Home's
+#   window kept in front for install <appid> ...`, then `... let go ...`, #245). Its download moved to 25% by
 #   `standin steam-install`.
 # - Manage Queue from Home's Downloads tile, Down to the row (`Installing... 25.0%`), View on it (`Back` on the virtual
 #   Xbox 360 pad, as Menu is `Start`): Pause installation first, then Cancel installation, and no Install (#171); the
@@ -193,6 +195,12 @@ try {
     Press A 'Recent\(\d+\)' | Out-Null
     Expect-Took "install $appid into Steam's default library" $mark $steamMark "$appid queued in" 'Install'
     Expect-Steam 'steam: CEF: the main window, asked to Hide: it was Showing, it is Hidden' $steamMark 'Install, Steam''s main window put back'
+    # #245: the stand-in's real windows came up beneath Home's window, kept in front, and are hidden again after.
+    Expect-Steam 'steam: window: Steam shown and brought to the top' $steamMark 'Install, the stand-in''s main window came up'
+    Expect-Logged "^front: Home's window kept in front for install $appid into Steam's default library: topmost true, " $mark 'Install, Home''s window kept in front' | Out-Null
+    Expect-Logged "^front: Home's window let go after \d+ ms \(the install is over\): topmost false, " $mark 'Install, let go' | Out-Null
+    Expect-Steam 'steam: window: Steam hidden' $steamMark 'Install, the stand-in''s main window hidden again'
+    Expect-Steam 'steam: window: Install closed' $steamMark 'Install, the stand-in''s Install dialog closed'
     $front = Get-Foreground
     if ($front.Title -ne 'Xbox Series Dashboard') { $failures += "after the install, '$($front.Title)' ($($front.Process)) has the foreground" }
     Expect-Logged "^queue: $name joined, asked for$" $mark 'Install, the Queue' | Out-Null

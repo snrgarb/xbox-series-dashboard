@@ -19,7 +19,9 @@
 //!   with the id and version given; `CancelInstall` takes it to 16 (`Canceled`) from 7 and back to 0 from anywhere
 //!   else, as the real one's did, the state staying until the next wizard. `GetInstallManagerInfo` says the state,
 //!   the app of the last wizard opened (`currentAppID`), what the app needs (`fixture::needed`) and what is free (`fixture::WizardSetUp`, which `standin
-//!   steam-wizard` writes). `OpenInstallWizard` brings Steam's main window up, as the real one's does.
+//!   steam-wizard` writes). `OpenInstallWizard` opens its Install dialog and brings Steam's main window up, as the
+//!   real one's does; the dialog closes as the install goes on (14) or the wizard is cancelled. The stand-in program
+//!   shows both as real windows that try to take the foreground, as Steam's do ([`Debugger::windows`], #245).
 //! - Steam's main window (`client::Window`), on a page of its own titled "Steam": how it stands, and hiding or
 //!   minimizing it.
 //! - The download overview (`crate::overview::SCRIPT`): the app downloading, at a made-up speed of [`SPEED`] bytes a
@@ -46,10 +48,14 @@ use crate::{cef, installs, overview};
 /// The speed the stand-in says it downloads at, in bytes a second: 20 Mbps.
 pub const SPEED: u64 = 2_500_000;
 
-/// What the stand-in client keeps between scripts: how its main window stands, and its install manager.
+/// What the stand-in client keeps between scripts: how its main window stands, whether its Install dialog is open,
+/// and its install manager.
 #[derive(Debug)]
 pub struct Client {
     pub main: Shown,
+    /// The Install dialog, open from `OpenInstallWizard` until the wizard is cancelled or the install goes on to 14,
+    /// as the real one closes itself (#245).
+    pub dialog: bool,
     pub manager: Manager,
 }
 
@@ -95,7 +101,7 @@ impl Debugger {
         listener.set_nonblocking(true)?;
         std::fs::write(root.join(cef::STANDIN_PORT), format!("{port}\n"))?;
         let stop = Arc::new(AtomicBool::new(false));
-        let client = Arc::new(Mutex::new(Client { main: Shown::Hidden, manager: Manager::default() }));
+        let client = Arc::new(Mutex::new(Client { main: Shown::Hidden, dialog: false, manager: Manager::default() }));
         let (served, stopped, kept) = (root.to_path_buf(), stop.clone(), client.clone());
         let thread = std::thread::spawn(move || serve(&listener, &served, &kept, port, &stopped, &say));
         Ok(Debugger { port, root: root.to_path_buf(), client, stop, thread: Some(thread) })
@@ -108,6 +114,13 @@ impl Debugger {
     /// How the stand-in client's main window stands.
     pub fn main_window(&self) -> Shown {
         self.client.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).main
+    }
+
+    /// How the stand-in client's windows stand: its main window, and whether its Install dialog is open. What the
+    /// stand-in program shows as real windows (#245).
+    pub fn windows(&self) -> (Shown, bool) {
+        let client = self.client.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        (client.main, client.dialog)
     }
 
     /// Puts the stand-in client's main window as the user might have left it.
@@ -450,8 +463,9 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
                 waiting: WAIT_APP_INFO,
                 app: *appid,
             };
-            // The wizard brings the main window up.
+            // The wizard opens its Install dialog and brings the main window up.
             client.main = Shown::Showing;
+            client.dialog = true;
         }
         Wizard::Look => {
             if manager.state == 5 {
@@ -477,6 +491,8 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
                 (7, Some(open)) if count(open.appid) > 0 && !all_accepted(&open) => manager.state = 8,
                 (7 | 8, Some(open)) if all_accepted(&open) => {
                     manager.state = 14;
+                    // The real Install dialog closes itself once the install goes on.
+                    client.dialog = false;
                     let what = Call::Install { appid: open.appid, folder: open.folder.clone() }.what();
                     match fixture::write_progress(root, open.appid, Progress::Queued) {
                         Ok(()) => {
@@ -516,6 +532,7 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
             // From ShowConfig the real one went to 16 (Canceled) and stayed there; from anywhere else, to 0.
             let state = if was == 7 { 16 } else { 0 };
             *manager = Manager { state, app: manager.app, ..Manager::default() };
+            client.dialog = false;
             say(&format!("CEF: install wizard cancelled: eInstallState {was} -> {state}"));
         }
     }
@@ -749,6 +766,7 @@ mod tests {
         let (outcome, seen) = ask(agreed, &[Decline]);
         assert_eq!(outcome, Outcome::Stopped(model::Stop::Declined));
         assert_eq!((debugger.install_state(), queued(agreed)), (0, false));
+        assert_eq!(debugger.windows(), (Shown::Hidden, false), "the dialog closed, the main window put back");
         assert_eq!(seen.len(), 1);
         let text = seen[0].text.as_ref().unwrap();
         assert!(text.starts_with("Stand-in Licence Agreement 1 of 2"), "{text}");
@@ -765,6 +783,7 @@ mod tests {
         let (outcome, seen) = ask(agreed, &[Accept, Accept]);
         assert_eq!(outcome, Outcome::Took);
         assert_eq!((debugger.install_state(), queued(agreed)), (14, true));
+        assert_eq!(debugger.windows(), (Shown::Hidden, false), "the dialog closed itself as the install went on");
         assert_eq!(seen.iter().map(|agreement| agreement.at).collect::<Vec<_>>(), [1, 2]);
         assert!(seen[1].text.as_ref().unwrap().starts_with("Stand-in Licence Agreement 2 of 2"));
         fixture::write_progress(&root, agreed, Progress::Dropped).unwrap();

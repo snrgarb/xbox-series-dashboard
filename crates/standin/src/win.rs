@@ -347,3 +347,103 @@ fn set_running(appid: u32, running: u32) {
         note(&format!("steam-url: could not set {appid}'s Running to {running} (error {status})"));
     }
 }
+
+/// The stand-in Steam's main window: magenta, (255, 0, 255), a colour nothing of the Dashboard's has.
+pub const STEAM_COLOUR: u32 = 0x00FF_00FF;
+/// Its Install dialog: orange, (255, 140, 0).
+pub const INSTALL_COLOUR: u32 = 0x0000_8CFF;
+
+/// The stand-in Steam client's two windows for `seconds` (#245), as the real client's: its main window, titled
+/// "Steam", and its Install dialog, titled "Install", both ordinary framed windows over the middle of the screen,
+/// shown as the debugger's scripts have them ([`source_steam::debugger::Debugger::windows`], looked at every 10 ms):
+/// brought up, to the top and given the foreground where Windows lets this process have it, as Steam's wizard brings
+/// its own up; hidden or minimized as they are put back. Each change is a `steam: window:` line in its log, with
+/// whether it got the foreground and who has it.
+pub fn steam_windows(debugger: &source_steam::debugger::Debugger, seconds: u64) {
+    use source_steam::client::Shown;
+    unsafe {
+        SetProcessDPIAware();
+        let instance = GetModuleHandleW(null());
+        let (width, height) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+        let make = |class: &str, title: &str, colour: u32, percent: i32| {
+            let class = wide(class);
+            let mut wc: WNDCLASSW = std::mem::zeroed();
+            wc.lpfnWndProc = Some(DefWindowProcW);
+            wc.hInstance = instance;
+            wc.hCursor = LoadCursorW(null_mut(), IDC_ARROW);
+            wc.hbrBackground = CreateSolidBrush(colour);
+            wc.lpszClassName = class.as_ptr();
+            RegisterClassW(&wc);
+            let (w, h) = (width * percent / 100, height * percent / 100);
+            let title = wide(title);
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                title.as_ptr(),
+                WS_OVERLAPPEDWINDOW,
+                (width - w) / 2,
+                (height - h) / 2,
+                w,
+                h,
+                null_mut(),
+                null_mut(),
+                instance,
+                null(),
+            )
+        };
+        let main = make("StandInSteam", "Steam", STEAM_COLOUR, 70);
+        let dialog = make("StandInSteamInstall", "Install", INSTALL_COLOUR, 40);
+        if main.is_null() || dialog.is_null() {
+            note("steam: window: its windows could not be made");
+        }
+        let foreground = || {
+            let mut text = [0u16; 128];
+            let len = GetWindowTextW(GetForegroundWindow(), text.as_mut_ptr(), text.len() as i32).max(0) as usize;
+            String::from_utf16_lossy(&text[..len])
+        };
+        let bring_up = |window: HWND, title: &str| {
+            ShowWindow(window, SW_SHOWNORMAL);
+            SetWindowPos(window, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            let took = SetForegroundWindow(window) != 0;
+            note(&format!(
+                "steam: window: {title} shown and brought to the top; SetForegroundWindow -> {took}; {:?} has the \
+                 foreground",
+                foreground()
+            ));
+        };
+        let until = std::time::Instant::now() + Duration::from_secs(seconds);
+        let (mut was_main, mut was_dialog) = (Shown::Hidden, false);
+        let mut message: MSG = std::mem::zeroed();
+        while std::time::Instant::now() < until {
+            while PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            let (main_now, dialog_now) = debugger.windows();
+            if main_now != was_main && !main.is_null() {
+                match main_now {
+                    Shown::Showing => bring_up(main, "Steam"),
+                    Shown::Minimized => {
+                        ShowWindow(main, SW_SHOWMINNOACTIVE);
+                        note("steam: window: Steam minimized");
+                    }
+                    Shown::Hidden => {
+                        ShowWindow(main, SW_HIDE);
+                        note("steam: window: Steam hidden");
+                    }
+                }
+                was_main = main_now;
+            }
+            if dialog_now != was_dialog && !dialog.is_null() {
+                if dialog_now {
+                    bring_up(dialog, "Install");
+                } else {
+                    ShowWindow(dialog, SW_HIDE);
+                    note("steam: window: Install closed");
+                }
+                was_dialog = dialog_now;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+}

@@ -54,6 +54,10 @@ impl Opener for Saying<'_> {
         self.addresses.front();
     }
 
+    fn keep_front(&mut self, client: &Path, what: &str) -> Option<model::KeptInFront> {
+        self.addresses.keep_front(client, what)
+    }
+
     fn agreement(&mut self, game: &Game, agreement: &model::Agreement) -> model::Reply {
         self.addresses.agreement(game, agreement)
     }
@@ -81,6 +85,10 @@ impl Opener for Detached {
 
     fn front(&mut self) {
         self.addresses.front();
+    }
+
+    fn keep_front(&mut self, client: &Path, what: &str) -> Option<model::KeptInFront> {
+        self.addresses.keep_front(client, what)
     }
 
     fn agreement(&mut self, game: &Game, agreement: &model::Agreement) -> model::Reply {
@@ -191,6 +199,9 @@ pub struct SystemAddresses;
 impl Addresses for SystemAddresses {
     #[cfg(windows)]
     fn open(&mut self, start: &Start) -> Result<(), String> {
+        // What opens (a game, a store's own window, an app) is the user's to see: Home's window is no longer kept
+        // in front of it (#245).
+        crate::front::let_go(&format!("{start} opens"));
         // Steam is asked without its windows coming forward (`crate::steam`).
         if crate::steam::is_steam(start).is_some() {
             return crate::steam::ask(start);
@@ -240,6 +251,10 @@ impl<A: Addresses> Opener for Home<A> {
 
     fn front(&mut self) {
         bring_front(self.home);
+    }
+
+    fn keep_front(&mut self, client: &Path, what: &str) -> Option<model::KeptInFront> {
+        crate::front::keep(self.home, client, what).map(|kept| Box::new(kept) as model::KeptInFront)
     }
 }
 
@@ -316,6 +331,10 @@ impl Opener for Asking {
     fn front(&mut self) {
         self.addresses.front();
     }
+
+    fn keep_front(&mut self, client: &Path, what: &str) -> Option<model::KeptInFront> {
+        self.addresses.keep_front(client, what)
+    }
 }
 
 /// [`Asking`], for a thread to keep: it tells the window, and waits for the user's answer to an agreement.
@@ -332,6 +351,10 @@ impl Opener for Telling {
 
     fn front(&mut self) {
         self.addresses.front();
+    }
+
+    fn keep_front(&mut self, client: &Path, what: &str) -> Option<model::KeptInFront> {
+        self.addresses.keep_front(client, what)
     }
 
     /// Waits for the user's answer for as long as they take. The window gone, or the question with it, is a

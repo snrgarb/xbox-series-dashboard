@@ -32,6 +32,15 @@ pub trait Opener {
     /// where it is in front already, and nothing by default.
     fn front(&mut self) {}
 
+    /// Keeps the Dashboard's window in front of every window of the store's client, the programs under `client`,
+    /// for as long as what it gives is kept (#245): while a store's own client is driven by script and may bring
+    /// its windows up (Steam's install wizard), none of them is seen over the Dashboard or takes the pad and the
+    /// keyboard from it. Dropped, the Dashboard's window is a window among others again, where it was. `what` is
+    /// what is under way, for the log. None (the default) where nothing is kept: a test, or anywhere but Windows.
+    fn keep_front(&mut self, _client: &std::path::Path, _what: &str) -> Option<KeptInFront> {
+        None
+    }
+
     /// Puts a licence agreement the store asks to be accepted before it installs `game` before the user, in the
     /// Dashboard's own prompt (#230), and waits for the user's answer: blocking, on the installer's own thread.
     /// Only the user's own Accept answers [`Reply::Accept`]; with nobody to ask (the default, a test, the Dashboard
@@ -44,6 +53,9 @@ pub trait Opener {
     /// Queue's row. Nothing by default.
     fn stopped(&mut self, _game: &Game, _stop: &Stop) {}
 }
+
+/// The Dashboard's window kept in front ([`Opener::keep_front`]) for as long as this is kept: dropping it lets go.
+pub type KeptInFront = Box<dyn Send>;
 
 /// A licence agreement a store asks the user to accept before it installs a game (Steam's EULAs, #230), as the
 /// Dashboard's prompt shows it: which of how many, and its text as read from the store's own page.
