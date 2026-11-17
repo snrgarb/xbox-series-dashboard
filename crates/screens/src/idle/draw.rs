@@ -2,9 +2,10 @@
 //! 3 and 4). Drawn last on the Overlay, over the Launch screen and the Guide, so only Toasts (a window above it) are
 //! over it.
 use model::Library;
-use ui::{Art, ArtKey, Button, Color, Crop, Ease, Font, Gradient, HAlign, Kind, Rect, TextStyle, Ui, VAlign};
+use ui::{Art, ArtKey, Color, Crop, Ease, Font, Gradient, HAlign, Kind, Rect, TextStyle, Ui, VAlign};
 
 use super::cards::{Card, Kind as CardKind};
+use super::pad;
 use super::{Idle, Stage};
 use crate::home::background::{hero_art, BLURRED_LIGHT};
 
@@ -141,12 +142,9 @@ fn card_at(ui: &mut Ui, panel: Rect, card: &Card, library: &Library) {
             ui.art_fitted(room, &key, 1.0, 1.0);
         }
     } else if tip {
-        pad(
-            ui,
-            Rect::new(panel.x + (panel.w - 4.0 - PAD.0) / 2.0, panel.y + 506.0, PAD.0, PAD.1),
-            card.buttons,
-            colour,
-        );
+        // Centred across the panel, 4 short of its right as the Bundle's margin has it, its top 506 down.
+        let at = (panel.x + (panel.w - 4.0 - pad::SIZE.0) / 2.0, panel.y + 506.0);
+        pad::draw(ui, at, card.buttons, colour);
     }
     // An achievement's icon, large over the art's middle, the art darkened by half again under it, its corners
     // rounded as a tile's, a soft shadow round it.
@@ -242,77 +240,4 @@ fn letter_ring(ui: &mut Ui, rect: Rect, letter: &str, colour: Color) {
     let style = TextStyle::new(Font::Ui, 36.0 * unit, 700).color(colour);
     let (cx, cy) = rect.center();
     ui.label_centered(cx, cy - 3.0 * unit, letter, &style);
-}
-
-/// A tip's pad, 442 by 312.
-const PAD: (f32, f32) = (442.0, 312.0);
-const LINE: f32 = 3.2;
-
-/// A tip's pad from the front in white line, as the console's tip has it, in plain shapes (a stand-in for the
-/// Bundle's traced outline and the Guide button's mark): a body and two grips, the bumpers, the sticks, the D-pad,
-/// View and Menu, A, B, X and Y, and the Guide button. A button the tip is about is filled white, with its letter
-/// in the panel's colour.
-fn pad(ui: &mut Ui, at: Rect, buttons: &[Button], panel: Color) {
-    let place = |x: f32, y: f32, w: f32, h: f32| Rect::new(at.x + x, at.y + y, w, h);
-    let lit = |button: Button| buttons.contains(&button);
-    // The bumpers, under the body's top edge.
-    for (button, x) in [(Button::LeftBumper, 66.0), (Button::RightBumper, 284.0)] {
-        let bumper = place(x, 1.0, 92.0, 34.0);
-        if lit(button) {
-            ui.fill(bumper, Color::WHITE, 16.0);
-        } else {
-            ui.ring(bumper, Color::WHITE, 16.0, LINE);
-        }
-    }
-    // The body and its grips, one outline: their shapes filled white, then the panel's colour inside each.
-    let shapes = [
-        (place(34.0, 13.0, 374.0, 214.0), 72.0),
-        (place(3.0, 104.0, 140.0, 206.0), 66.0),
-        (place(299.0, 104.0, 140.0, 206.0), 66.0),
-    ];
-    for (shape, radius) in shapes {
-        ui.fill(shape, Color::WHITE, radius);
-    }
-    for (shape, radius) in shapes {
-        ui.fill(shape.grow(-LINE), panel, radius - LINE);
-    }
-    let circle = |cx: f32, cy: f32, r: f32| place(cx - r, cy - r, r * 2.0, r * 2.0);
-    let button_at = |ui: &mut Ui, rect: Rect, on: bool, letter: Option<&str>| {
-        if on {
-            ui.fill(rect, Color::WHITE, 999.0);
-            if let Some(letter) = letter {
-                let (cx, cy) = rect.center();
-                ui.label_centered(cx, cy, letter, &TextStyle::new(Font::Ui, 22.0, 700).color(panel));
-            }
-        } else {
-            ui.ring(rect, Color::WHITE, 999.0, LINE);
-        }
-    };
-    // The sticks.
-    button_at(ui, circle(105.0, 88.4, 24.5 + LINE / 2.0), lit(Button::LeftStick), None);
-    button_at(ui, circle(281.0, 159.6, 24.5 + LINE / 2.0), false, None);
-    // The D-pad, a plus.
-    let arms = [place(152.2, 127.3, 20.0, 64.6), place(129.9, 149.6, 64.6, 20.0)];
-    let dpad = [Button::Up, Button::Down, Button::Left, Button::Right].into_iter().any(lit);
-    for arm in arms {
-        ui.fill(arm.grow(LINE / 2.0), Color::WHITE, 3.0);
-    }
-    if !dpad {
-        for arm in arms {
-            ui.fill(arm.grow(-LINE / 2.0), panel, 1.5);
-        }
-    }
-    // View and Menu, then the face buttons with their letters.
-    button_at(ui, circle(188.1, 88.4, 9.5 + LINE / 2.0), lit(Button::View), None);
-    button_at(ui, circle(253.6, 88.4, 9.5 + LINE / 2.0), lit(Button::Menu), None);
-    for (button, letter, cx, cy) in [
-        (Button::X, "X", 306.6, 88.4),
-        (Button::Y, "Y", 337.2, 58.1),
-        (Button::B, "B", 367.6, 88.4),
-        (Button::A, "A", 337.2, 117.7),
-    ] {
-        button_at(ui, circle(cx, cy, 13.8 + LINE / 2.0), lit(button), Some(letter));
-    }
-    // The Guide button: a ring standing in for its mark, filled when the tip is about it.
-    button_at(ui, circle(221.0, 43.3, 19.5), lit(Button::Guide), None);
 }
