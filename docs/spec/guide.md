@@ -314,6 +314,8 @@ It does **not** close when the game exits on its own while the Guide is open: it
 
 On B, the window that had the foreground when the Guide opened gets it back, on the button's release (so the game does not see the B press), or after 1 s if no release is seen (C/ExtensionCore.cs:77, 2160-2166). On a tap of the Guide button, at once (881-927).
 
+**In the port (#123):** a window that took the foreground from the Overlay while the Guide was up keeps it only if it covers at least 60% of its monitor, as a game's window does (a game that started under the Guide); a smaller one, such as Steam's "Controller Connected" toast (class `SDL_app`), does not, and the foreground goes back to the recorded window all the same. The log says which: `overlay: the foreground has gone to <window> meanwhile, and stays there`, or `..., a window smaller than a game's: it goes back all the same`, then `overlay: foreground given back to <window>: true`. A toast that takes the foreground after the Guide has handed it back is not caught by this.
+
 ### 3.6 Hints
 
 Beside the panel, a column from (675, 168), each row 45 high (E/OverlayWindow.xaml:936-973):

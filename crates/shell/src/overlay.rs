@@ -41,6 +41,19 @@ pub enum Key {
 #[cfg(windows)]
 pub use win::Overlay;
 
+/// A window that came to the front while the Guide was up keeps the foreground when the Guide closes only if it
+/// covers this much of its monitor, as a game's does (the Launch screen's rule for a game's window). A small one, such
+/// as Steam's "Controller Connected" toast (`SDL_app`, #123), does not: the foreground goes back where it was.
+const KEEPS_FOREGROUND: f64 = 0.6;
+
+/// Whether a window `window` big (width, height), on a monitor `monitor` big, is one that keeps the foreground it
+/// took while the Guide was up.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn keeps_foreground(window: (i32, i32), monitor: (i32, i32)) -> bool {
+    let area = |(w, h): (i32, i32)| w.max(0) as f64 * h.max(0) as f64;
+    area(monitor) > 0.0 && area(window) >= area(monitor) * KEEPS_FOREGROUND
+}
+
 /// Anywhere but Windows there is no Overlay: `new` makes none, so nothing else here is ever called.
 #[cfg(not(windows))]
 pub struct Overlay(());
@@ -91,7 +104,7 @@ pub(crate) mod win {
     use windows::Win32::Graphics::DirectComposition::{
         DCompositionCreateDevice2, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
     };
-    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY,
     };
@@ -102,7 +115,7 @@ pub(crate) mod win {
     use windows_sys::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_RUNNING_D3D_FULL_SCREEN};
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    use super::{Gpu, Key, Mode};
+    use super::{keeps_foreground, Gpu, Key, Mode};
     use crate::{describe, take_foreground, wide};
 
     /// Whether the window is being clicked through. Read by the window procedure.
@@ -479,13 +492,21 @@ pub(crate) mod win {
         }
 
         /// Gives the foreground back while it is still the Overlay's to give: hiding first lets Windows pick. If
-        /// another window has taken it meanwhile (a game that was started from the Guide), it is left there.
+        /// another window as big as a game's has taken it meanwhile (a game that started under the Guide), it is
+        /// left there; a small one (a store's toast, #123) is not, and the foreground goes back all the same.
         unsafe fn give_foreground_back(&mut self) {
             let to = std::mem::replace(&mut self.foreground_before, null_mut());
             let front = GetForegroundWindow();
             if front != self.hwnd && front != to {
-                log(&format!("the foreground has gone to {} meanwhile, and stays there", describe(front)));
-                return;
+                if !front.is_null() && keeps_foreground(Self::window_size(front), Self::monitor_size(front)) {
+                    log(&format!("the foreground has gone to {} meanwhile, and stays there", describe(front)));
+                    return;
+                }
+                log(&format!(
+                    "the foreground has gone to {} meanwhile, a window smaller than a game's: it goes back all the \
+                     same",
+                    describe(front)
+                ));
             }
             if to.is_null() || IsWindow(to) == 0 {
                 log("the window that had the foreground is gone: Windows picks the next");
@@ -500,6 +521,26 @@ pub(crate) mod win {
                 log("Windows refused to hand the foreground back, as it does to a game that runs elevated \
                      (docs/spec/guide.md, 7.2)");
             }
+        }
+
+        /// A window's outer size, (0, 0) when Windows won't say.
+        unsafe fn window_size(window: HWND) -> (i32, i32) {
+            let mut rect: RECT = std::mem::zeroed();
+            if GetWindowRect(window, &mut rect) == 0 {
+                return (0, 0);
+            }
+            (rect.right - rect.left, rect.bottom - rect.top)
+        }
+
+        /// The size of the monitor a window is on, (0, 0) when Windows won't say.
+        unsafe fn monitor_size(window: HWND) -> (i32, i32) {
+            let mut info: MONITORINFO = std::mem::zeroed();
+            info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &mut info) == 0 {
+                return (0, 0);
+            }
+            let area = info.rcMonitor;
+            (area.right - area.left, area.bottom - area.top)
         }
 
         /// Puts it above every other topmost window, as a game that is itself topmost may be: the last window
@@ -598,5 +639,21 @@ pub(crate) mod win {
             }
         }
         (!errors.is_empty()).then(|| errors.join("; "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keeps_foreground;
+
+    /// #123: a game's window keeps the foreground it took under the Guide; Steam's toast in a corner does not.
+    #[test]
+    fn only_a_window_as_big_as_a_games_keeps_the_foreground() {
+        let screen = (3840, 2160);
+        assert!(keeps_foreground(screen, screen), "a fullscreen game");
+        assert!(keeps_foreground((3200, 1800), screen), "a big window");
+        assert!(!keeps_foreground((480, 140), screen), "a toast");
+        assert!(!keeps_foreground((1920, 1080), screen), "a quarter of the screen");
+        assert!(!keeps_foreground((0, 0), screen) && !keeps_foreground(screen, (0, 0)), "sizes Windows didn't give");
     }
 }
