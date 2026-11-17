@@ -3,7 +3,8 @@
 # actions and up to its cards; the last action turns between its two pages; Manage and Menu open the game's Tile menu over the hub, and B closes it onto the hub; B is Home again with
 # focus on the tile; a game that is not installed has Install where Play is, and A there closes the hub and asks
 # Steam for the game; A on Your game stats opens the game's Achievements page and B comes back; and A twice, as close
-# as the pad can make them, on a tile plays the game by way of its hub: the second A is not swallowed.
+# as the pad can make them, on a tile plays the game by way of its hub: the second A is not swallowed. Over the
+# running game, the Guide's Home and A on the game's tile is its hub on Running, and A there is the game again.
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: GameHub: 9100010 Hub Play` is the hub
 # of the game with that appid, on its Game hub page, focus on Play (the page's name, the game, the page of the two,
@@ -205,6 +206,26 @@ try {
     if (-not (Wait-DashboardLog 'the game has booted' 60)) { throw 'The game never counted as booted' }
     Start-Sleep -Milliseconds 1500
     Save-Screen '07-game-after-a-twice'
+
+    # The running game's own hub: the Guide's Home puts Home in front of the game, A on the game's tile is its hub
+    # with focus on Running, and A there is the game again, as the tile's double tap used to be (#214).
+    $mark = Get-DashboardLogLength
+    Push-Button Guide
+    if (-not (Wait-DashboardLog '^guide: Landing Entry\(0\)$' 10 $mark)) { throw "The Guide did not open over the game (log: $((Get-DashboardLog | Select-Object -Last 3) -join ' | '))" }
+    $mark = Get-DashboardLogLength
+    Push-Button A
+    Expect-Logged '^launch: Home in front of the game' $mark "the Guide's Home over the game"
+    foreach ($press in 1..8) {
+        if ((Focus-Now) -match 'Recent\(0\)$') { break }
+        Push-Button Left
+        Start-Sleep -Milliseconds 800
+    }
+    Press A "$hub Hub Running" '07b-hub-running'
+    $mark = Get-DashboardLogLength
+    Push-Button A
+    Expect-Logged '^launch: back to the game' $mark 'A on Running'
+    Start-Sleep -Milliseconds 1500
+    if ((Get-Foreground).Title -eq 'Xbox Series Dashboard') { $failures += 'the Dashboard is still in front after A on Running' }
 
     # The game ends: Home again, and the pad is Home's.
     if (-not @(Get-StandInGame).Count) { $failures += 'the game was not running when the test came to stop it' }

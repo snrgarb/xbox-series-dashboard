@@ -265,9 +265,12 @@ impl Page for GameHub {
             }
             (Button::A, Focus::Action(Action::Main)) => match self.main {
                 Main::Play => return place.map(|place| PageAction::Effect(Effect::Launch(place))),
+                // The running game's own hub: back to the game, as the Guide's entry for it goes, and as the tile's
+                // double tap went before there was none (#214). The Bundle's Running does nothing.
+                Main::Running => return place.map(|place| PageAction::Effect(Effect::Launch(place))),
                 // Its store is asked for the game, and the hub closes, as the Bundle's does.
                 Main::Install => return Some(tile_menu::install(game, around.library)),
-                Main::Running | Main::Queued | Main::Installing => {}
+                Main::Queued | Main::Installing => {}
             },
             // Manage Queue over the hub, which B there comes back to, focus still on Queue.
             (Button::A, Focus::Action(Action::Queue)) => {
@@ -470,7 +473,9 @@ mod tests {
         assert_eq!(hub.hub.press(Press { button: Button::A, repeat: true }, around), None);
         assert_eq!(hub.go(&[Button::Up, Button::A]), "10 Hub Cover");
         hub.playing = Some(0);
-        assert_eq!(hub.go(&[Button::Down, Button::A]), "10 Hub Running");
+        assert_eq!(hub.go(&[Button::Down]), "10 Hub Running");
+        // On Running, A is the game again: the Dashboard's play of the running game shows it.
+        assert_eq!(hub.press(Button::A), Some(PageAction::Effect(Effect::Launch(0))));
         // The other buttons have nothing to do here.
         let mut other = Hub::open(20);
         let idle = [Button::X, Button::Y, Button::View, Button::LeftBumper];
