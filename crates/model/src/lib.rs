@@ -8,6 +8,7 @@ pub mod media;
 pub mod post;
 pub mod profile;
 pub mod queue;
+pub mod shell_mode;
 pub mod sound;
 pub mod source;
 

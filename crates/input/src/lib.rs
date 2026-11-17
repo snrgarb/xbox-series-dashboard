@@ -399,6 +399,40 @@ impl Pad {
     }
 }
 
+/// Each pad's buttons as XInput gives them, the Guide button's bit (0x0400) among them, none for a pad not
+/// connected: what shell mode's --shell process reads, with no Dashboard running (docs/spec/shell-mode.md). Nothing
+/// anywhere but Windows.
+pub struct RawPads {
+    #[cfg(windows)]
+    reader: Reader,
+}
+
+impl Default for RawPads {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RawPads {
+    pub fn new() -> Self {
+        Self {
+            #[cfg(windows)]
+            reader: Reader::new(),
+        }
+    }
+
+    pub fn read(&self) -> [Option<u16>; 4] {
+        #[cfg(windows)]
+        {
+            self.reader.read().2.map(|reading| reading.map(|reading| reading.buttons))
+        }
+        #[cfg(not(windows))]
+        {
+            [None; 4]
+        }
+    }
+}
+
 #[cfg(windows)]
 impl Reader {
     fn new() -> Self {

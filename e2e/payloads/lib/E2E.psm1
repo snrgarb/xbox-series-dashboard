@@ -9,6 +9,7 @@
 # so the machine's own library is never read), with --dry-power, --open-addresses-with standin.exe (the stand-in
 # stores take the addresses the registry would have given to the real ones: handlers.json beside standin.exe names
 # the fakes) and a data folder of its own, and only processes started from the payload's folder are ever stopped.
+# Shell mode is only ever dry-run there (--dry-shell): the payload that turns it on for real refuses safe mode.
 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
 
 $script:Out = $env:E2E_OUT
@@ -408,6 +409,9 @@ function Get-SafeArguments([string[]] $Given) {
     }
     if ($Given -notcontains '--open-addresses-with') { $added += '--open-addresses-with', "`"$(Join-Path $script:Payload 'standin.exe')`"" }
     if ($Given -notcontains '--dry-power') { $added += '--dry-power' }
+    # Settings > System says what it would write to turn shell mode on or off, and writes nothing
+    # (docs/spec/shell-mode.md): the TV PC never has shell mode turned on by a test.
+    if ($Given -notcontains '--dry-shell') { $added += '--dry-shell' }
     # A pipe no Discord listens on, and no token endpoint: the user's own Discord is never reached (docs/discord.md).
     if ($Given -notcontains '--discord-pipe') { $added += '--discord-pipe', 'e2e-no-discord' }
     if ($Given -notcontains '--data-dir') {

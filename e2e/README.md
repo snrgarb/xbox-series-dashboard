@@ -24,7 +24,9 @@ What comes back:
 - `standin.log`: what the stand-in Steam and games did.
 - `fake-steam.json`: the fake library as the Dashboard's Steam reader read it.
 - `*.png`: the screen at each step. `error.png` is the screen when the test threw.
-- `boot.log`, `exitcode.txt`: the harness's own.
+- `boot.log`, `exitcode.txt`: the harness's own. On the VM, run.ps1's own output is in `run.out.log` and
+  `run.err.log`, and `boot-error.txt` says so if run.ps1 was ended for running past the limit (the timeout less two
+  minutes; exit code 124): out.zip goes back either way.
 
 The VM's settings and API token are in `~/.config/xbox-e2e/proxmox.env`, outside the repository; `proxmox/vm.sh`'s header
 says what goes in it.
@@ -221,6 +223,50 @@ A test never names `C:\e2e\...`, `%TEMP%` or the Dashboard's data folder itself,
 alone: it asks the module (`Get-FakeRoot`, `Get-TestFolder`, `Get-DashboardDataDir`, `Get-OwnProcess`), so that the same
 `run.ps1` runs on the VM and on the TV PC. A folder passed to the Dashboard is put in quotes: Start-Process quotes
 nothing, and on the TV PC the test's folder is under the user's profile.
+
+## Shell mode
+
+Two payloads (docs/spec/shell-mode.md):
+
+- **`shell-dry`**, safe anywhere, the TV PC included: `dashboard.exe --shell-on --dry-shell --as-installed` and
+  `--shell-off --dry-shell`. They read the PC for real and write nothing. It passes when the lines say a dry run, the
+  four writes in order (or each refusal, where the PC refuses, as the TV with the Bundle's Boot shell would), the
+  `Shell` line exactly, no line says it wrote, and `reg query` and `schtasks /Query` read every place the same before
+  and after. Then it starts `dashboard.exe --from-shell --dry-shell` (the window as the shell starts it, topmost for
+  Start-up, the shell's events left alone) and needs `first frame presented` in `<data>\shell\logs\dashboard-*.log`
+  with no `window: ERROR`: run it before `shell-mode`. Last, a plain start (ShellExecute, as Explorer starts it) must
+  show the Dashboard's window and no console window (conhost's or Windows Terminal's). It ends within 170 s whatever happens: every process it starts
+  has its output in files of its own, is waited on with a limit, and is ended with its whole tree, by pid. `e2e/run.sh shell-dry`, or `e2e/htpc/run.sh shell-dry`.
+- **`shell-mode`**, the VM only: it turns shell mode on for real and restarts the VM five times. In safe mode it
+  throws at once (`Assert-VmOnly`). It needs longer than the default wait:
+
+  ```sh
+  cargo build --release --target x86_64-pc-windows-gnullvm -j 3
+  e2e/run.sh shell-mode --timeout 3600            # add --keep to look at the VM in the Proxmox console after
+  ```
+
+  It runs in six phases, one per sign-in. Each phase keeps its state in `C:\e2e\shell-mode\state.json`, registers the
+  next as a logon task (`xbox-e2e-shell-next`, interactive, this user, highest) and restarts with `shutdown /r`; it never
+  returns before the restart, so `boot.ps1` sends nothing back early. The last phase (or the first error after phase 1)
+  turns shell mode off, copies `%LOCALAPPDATA%\XboxSeriesDashboard\shell\logs` to `shell-logs\`, and sends the output
+  itself to `$env:E2E_UPLOAD`, which `vm.sh`'s `boot.ps1` now sets. A restart signs in again by the template's autologon.
+
+  | Phase | Signed in with | What it proves (research section 9) |
+  |---|---|---|
+  | 1 | explorer | Copies `dashboard.exe` to the installed path. P2: a Bundle sentinel, another HKCU `Shell`, HKLM `Shell` = cmd.exe, `OverrideShellProgram` = 1 (the payload runs elevated, and puts each back) and the payload's own copy are each refused, exit 3, nothing written. P1: the dry run says the four writes and writes nothing; then on for real, read back value by value, the record there, HKLM unchanged, on twice says on already. |
+  | 2 | `--shell` | P3: the shell log's black up, `ShellDesktopSwitchEvent`, events, the start, FirstFrame, black down, BootVideoEnded, explorer started; the shell window is that explorer's; no File Explorer window; the sentinel did nothing. P4: Exit to desktop from the Guide's Power (exit 0, stays down, a desktop), Guide brings it back, View+Menu held 6.5 s closes it. P5: the test's crash marker at 3: three starts, three crashes, the fallback line, the desktop, nothing more; Guide brings it back. P6b: `--shell` killed after explorer changes nothing. P7: deletes HKCU `Shell`. |
+  | 3 | explorer | P7: the sentinel saw no `--shell`, wrote `Shell` back, started the Dashboard; no `--shell` log this sign-in. |
+  | 4 | `--shell` | P6a: kills `--shell` as soon as the logon task runs. If explorer wasn't up yet: the safety net's line within 150 s, then the sentinel's. If it was, a `note:` line says P6a wasn't reached. P8: renames the running `dashboard.exe` aside and copies a new one in. |
+  | 5 | `--shell` | P8: the copy runs as `--shell`; the old file can be deleted. P9: off for real, each place as phase 1 read it before, the record renamed, off twice says off already. |
+  | 6 | explorer | P9: no `--shell` this sign-in, explorer is the shell, no Dashboard runs. |
+
+  What to check by eye in the output: `p3-signed-in.png` (Start-up over everything, no taskbar), `p5-fallback-line.png`
+  (the line on black), `p4-desktop.png`, `p9-desktop.png`; and `shell-logs\shell-*.log` read through once, a line a
+  thing done.
+
+  Not proved here: P10 (the uninstaller is #155's) and P8's handover and rollback (the updater is #156's); a Game Pass
+  launch; the real black gap and cold-boot time (WARP); the audio device settling on HDMI; F6, a `Shell` naming a
+  missing exe (try it with `--keep` and look in the console).
 
 ## On the TV PC
 

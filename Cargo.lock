@@ -95,10 +95,12 @@ dependencies = [
  "library",
  "media",
  "model",
+ "pollster",
  "render",
  "screens",
  "serde_json",
  "shell",
+ "shell-mode",
  "source-battlenet",
  "source-ea",
  "source-epic",
@@ -2213,6 +2215,19 @@ dependencies = [
  "source-steam",
  "tempfile",
  "wgpu",
+ "windows",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "shell-mode"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "input",
+ "model",
+ "serde_json",
+ "tempfile",
  "windows",
  "windows-sys 0.61.2",
 ]

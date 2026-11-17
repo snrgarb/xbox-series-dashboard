@@ -65,6 +65,20 @@ impl Addresses for SystemAddresses {
         if crate::steam::is_steam(start).is_some() {
             return crate::steam::ask(start);
         }
+        // A packaged app (the Xbox source's games, Store apps) is activated as Windows activates it, which works
+        // with no shell window, as under shell mode before explorer is up (docs/research/shell.md, 5); the
+        // address is opened as any other if that fails.
+        if let Start::Address(address) = start {
+            if let Some(aumid) = apps_folder(address) {
+                match activate(aumid) {
+                    Ok(pid) => {
+                        eprintln!("store: activated {aumid}, pid {pid}");
+                        return Ok(());
+                    }
+                    Err(why) => eprintln!("store: couldn't activate {aumid} ({why}); opening {address}"),
+                }
+            }
+        }
         // Home has the foreground, and with it the right to let the store's window take it.
         match crate::shell_open(start) {
             result if result > 32 => Ok(()),
@@ -75,6 +89,30 @@ impl Addresses for SystemAddresses {
     #[cfg(not(windows))]
     fn open(&mut self, _start: &Start) -> Result<(), String> {
         Err("only Windows opens anything".into())
+    }
+}
+
+/// The app user model ID in a `shell:AppsFolder\<AUMID>` address, as Windows reads it: any case.
+pub fn apps_folder(address: &str) -> Option<&str> {
+    const PREFIX: &str = r"shell:AppsFolder\";
+    let head = address.get(..PREFIX.len())?;
+    let aumid = &address[PREFIX.len()..];
+    (head.eq_ignore_ascii_case(PREFIX) && aumid.contains('!')).then_some(aumid)
+}
+
+/// `IApplicationActivationManager::ActivateApplication`: the app's pid.
+#[cfg(windows)]
+fn activate(aumid: &str) -> Result<u32, String> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager, AO_NONE};
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let manager: IApplicationActivationManager =
+            CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER).map_err(|e| e.message())?;
+        manager.ActivateApplication(&HSTRING::from(aumid), None, AO_NONE).map_err(|e| e.message())
     }
 }
 
@@ -154,6 +192,15 @@ mod tests {
         ask(&game(""), Some(&Fake), Ask::Uninstall, &mut addresses);
         ask(&game("5"), None, Ask::Uninstall, &mut addresses);
         assert_eq!(addresses.opened, ["fake://install/9100040", "fake://uninstall/9100010"]);
+    }
+
+    #[test]
+    fn a_packaged_apps_address_gives_its_app_user_model_id() {
+        assert_eq!(apps_folder(r"shell:AppsFolder\Calc_8wekyb3d8bbwe!App"), Some("Calc_8wekyb3d8bbwe!App"));
+        assert_eq!(apps_folder(r"SHELL:appsfolder\Calc_8wekyb3d8bbwe!App"), Some("Calc_8wekyb3d8bbwe!App"));
+        assert_eq!(apps_folder(r"shell:AppsFolder\Calc"), None);
+        assert_eq!(apps_folder("steam://run/10"), None);
+        assert_eq!(apps_folder("shell:"), None);
     }
 
     #[test]

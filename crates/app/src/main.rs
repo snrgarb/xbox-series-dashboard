@@ -1,4 +1,11 @@
-//! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG.
+//! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG; or one of shell mode's
+//! jobs (`shell_mode::run_job`: --shell, --sentinel, --shell-on, --shell-off, --shell-probe).
+//!
+//! On Windows a GUI program: no console window opens for it. Run from a terminal it prints there
+//! (`shell_mode::dashboard::attach_parent_console`), but cmd and PowerShell don't wait for a GUI program: `start
+//! /wait dashboard.exe ...`, or `Start-Process -Wait -NoNewWindow`, to wait for it and have its exit code.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+mod as_shell;
 mod games;
 mod media_folder;
 mod offscreen;
@@ -89,6 +96,16 @@ pub struct Args {
     /// Discord's own, `--discord-token-url` its token endpoint and `--discord-cdn-url` where avatars come from. With
     /// a pipe and no endpoint or CDN there is none: a test never reaches the real Discord.
     discord: discord::Place,
+    /// Started by shell mode's --shell process (docs/spec/shell-mode.md, 6): the log goes to the data folder, the
+    /// two events are set, and Start-up stays over everything.
+    from_shell: bool,
+    /// Settings > System says what it would write to turn shell mode on or off, and writes nothing: what every test
+    /// starts the Dashboard with.
+    dry_shell: bool,
+    /// Where the log goes (appended), in place of stderr. Without it, a start whose stderr goes nowhere (by
+    /// Explorer, a shortcut or another program: a GUI program has no console) logs to
+    /// `<data>\logs\dashboard-<stamp>.log`.
+    log_file: Option<PathBuf>,
 }
 
 impl Args {
@@ -118,6 +135,9 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
+                 [--from-shell] [--dry-shell] [--log-file <file>]
+       dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
+       dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
@@ -204,6 +224,9 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--discord-pipe" => args.discord.pipe = Some(value()?),
             "--discord-token-url" => args.discord.token_url = Some(value()?),
             "--discord-cdn-url" => args.discord.cdn_url = Some(value()?),
+            "--from-shell" => args.from_shell = true,
+            "--dry-shell" => args.dry_shell = true,
+            "--log-file" => args.log_file = Some(value()?.into()),
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -217,7 +240,35 @@ fn fail(message: &str) -> ! {
 
 fn main() {
     since_start();
-    let args = parse_args(std::env::args().skip(1)).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    let given: Vec<String> = std::env::args().skip(1).collect();
+    // A GUI program, so no console window opens for it however it is started; run from a terminal it prints there.
+    // The --shell process and the sentinel never take a terminal's console, which would tie them to it.
+    if !matches!(given.first().map(String::as_str), Some(shell_mode::contract::SHELL | shell_mode::contract::SENTINEL))
+    {
+        shell_mode::dashboard::attach_parent_console();
+    }
+    // Shell mode's jobs come before anything of the Dashboard's: the --shell process never touches the GPU.
+    if let Some(code) = shell_mode::run_job(&given, library::data_dir()) {
+        std::process::exit(code);
+    }
+    let args = parse_args(given).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    // A log for every start: --log-file's; under shell mode its own place (as_shell); otherwise, where its lines
+    // would go nowhere, the data folder's logs\.
+    let data = args.data_dir.clone().or_else(library::data_dir);
+    if let Some(path) = &args.log_file {
+        if !shell_mode::dashboard::log_to_path(path) {
+            eprintln!("dashboard: couldn't open --log-file {}", path.display());
+        }
+    } else if !args.from_shell && !shell_mode::dashboard::errors_go_somewhere() {
+        if let Some(data) = &data {
+            shell_mode::dashboard::log_to_file(&data.join("logs"));
+        }
+    }
+    // One Dashboard at a time, and under shell mode its log in the data folder from its first line.
+    let as_shell = args.screenshot.is_none().then(|| {
+        let own_log = args.from_shell && args.log_file.is_none();
+        as_shell::AsShell::start(args.from_shell, own_log, args.dry_shell, args.data_dir.clone(), data.clone())
+    });
     let (library, mut store) = store::open(&args);
     if args.screenshot.is_some() {
         // Art for the games a store's files gave none for, before the picture is taken, where there is a data
@@ -238,7 +289,7 @@ fn main() {
         if args.log_queue_sources {
             log_queue_sources(&args);
         }
-        window::run(&args, library, store);
+        window::run(&args, library, store, as_shell.expect("made without --screenshot"));
     }
 }
 
@@ -274,6 +325,14 @@ mod tests {
         assert!(args.dry_power);
         assert_eq!(parse(&[]).unwrap().open_addresses_with, None);
         assert!(parse(&["--open-addresses-with"]).is_err());
+    }
+
+    #[test]
+    fn log_file_names_where_the_log_goes_and_needs_one() {
+        let args = parse(&["--log-file", r"C:\Users\Test User\dashboard.log"]).unwrap();
+        assert_eq!(args.log_file, Some(PathBuf::from(r"C:\Users\Test User\dashboard.log")));
+        assert_eq!(parse(&[]).unwrap().log_file, None);
+        assert!(parse(&["--log-file"]).is_err());
     }
 
     #[test]

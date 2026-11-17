@@ -79,6 +79,8 @@ struct State {
 
 struct App {
     windowed: bool,
+    /// Shell mode, the Dashboard's side of it (docs/spec/shell-mode.md, 6).
+    as_shell: crate::as_shell::AsShell,
     dashboard: Dashboard,
     pad: Pad,
     /// Keys pressed since the pad was last looked at, as the buttons they stand for, or as the text they type.
@@ -291,7 +293,41 @@ const AUDIO_EVERY: Duration = Duration::from_millis(250);
 /// How often --log-frames says what was drawn.
 const FRAMES_EVERY: Duration = Duration::from_secs(5);
 
-pub fn run(args: &Args, library: Library, store: Store) {
+/// Configures `surface` for `window`: its size, a format that isn't sRGB, vsync. Windows' refusal of the swap chain
+/// comes back as an error, caught by an error scope, where wgpu would otherwise panic.
+fn configure(
+    gpu: &gpu::Gpu,
+    surface: &wgpu::Surface<'static>,
+    window: &Window,
+) -> Result<wgpu::SurfaceConfiguration, String> {
+    let size = window.inner_size();
+    let mut config = surface
+        .get_default_config(&gpu.adapter, size.width.max(1), size.height.max(1))
+        .ok_or("the adapter can't draw to the window")?;
+    // Not an sRGB target, as the offscreen one isn't: the renderer blends in gamma space.
+    let formats = surface.get_capabilities(&gpu.adapter).formats;
+    config.format = formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(config.format);
+    config.present_mode = wgpu::PresentMode::AutoVsync;
+    let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    surface.configure(&gpu.device, &config);
+    match pollster::block_on(scope.pop()) {
+        None => Ok(config),
+        Some(error) => {
+            Err(format!("{error} ({}x{}, {:?}, {:?})", config.width, config.height, config.format, config.alpha_mode))
+        }
+    }
+}
+
+/// What the window is, as Windows has it, for the log.
+fn describe(window: &Window) -> String {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().map(|handle| handle.as_raw()) {
+        Ok(RawWindowHandle::Win32(handle)) => shell_mode::dashboard::describe_window(handle.hwnd.get()),
+        _ => format!("window of {:?}", window.inner_size()),
+    }
+}
+
+pub fn run(args: &Args, library: Library, store: Store, as_shell: crate::as_shell::AsShell) {
     shell::log_wgpu();
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
@@ -343,6 +379,7 @@ pub fn run(args: &Args, library: Library, store: Store) {
     }
     let mut app = App {
         windowed: args.windowed,
+        as_shell,
         dashboard,
         pad: Pad::start({
             let proxy = event_loop.create_proxy();
@@ -430,6 +467,11 @@ pub fn run(args: &Args, library: Library, store: Store) {
         idle_after: args.idle_after,
         discord,
     };
+    // Where shell mode stands, for Settings > System: asked off the frame's thread, as schtasks is slow.
+    let proxy = event_loop.create_proxy();
+    app.as_shell.ask(None, move || {
+        let _ = proxy.send_event(());
+    });
     event_loop.run_app(&mut app).expect("event loop");
 }
 
@@ -878,6 +920,13 @@ impl App {
                     self.dashboard.set_discord(self.discord.discord());
                     self.stale = true;
                 }
+                // Settings > System: done off the frame's thread, and the page shows how it stands after.
+                Effect::ShellMode(on) => {
+                    let proxy = self.proxy.clone();
+                    self.as_shell.ask(Some(on), move || {
+                        let _ = proxy.send_event(());
+                    });
+                }
                 Effect::ClearArt => {
                     self.art = None;
                     let cleared = self.store.clear_art();
@@ -941,6 +990,7 @@ impl App {
         if playing.ended(self.dashboard.boot_video_playing()).is_some() {
             self.boot_video = None;
             self.dashboard.boot_video_ended();
+            self.as_shell.boot_video_ended();
         }
         self.stale = true;
         self.overlay_stale = true;
@@ -1105,28 +1155,57 @@ impl ApplicationHandler for App {
         if self.state.is_some() {
             return;
         }
-        let attributes = Window::default_attributes().with_title("Xbox Series Dashboard");
-        let attributes = if self.windowed {
-            attributes.with_inner_size(PhysicalSize::new(1280, 720))
-        } else {
-            attributes.with_fullscreen(Some(Fullscreen::Borderless(event_loop.primary_monitor())))
+        // The window is made plain, and its swap chain on it, before anything else is asked of it: under shell mode
+        // Start-up is made topmost only once the surface is configured (docs/spec/shell-mode.md, 6).
+        let windowed = self.windowed;
+        let make_window = |event_loop: &ActiveEventLoop| {
+            let attributes = Window::default_attributes().with_title(shell_mode::dashboard::WINDOW_TITLE);
+            let attributes = if windowed {
+                attributes.with_inner_size(PhysicalSize::new(1280, 720))
+            } else {
+                attributes.with_fullscreen(Some(Fullscreen::Borderless(event_loop.primary_monitor())))
+            };
+            let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
+            window.set_cursor_visible(windowed);
+            window
         };
-        let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
-        window.set_cursor_visible(self.windowed);
+        let window = make_window(event_loop);
 
         let window_ready = since_start();
         let instance = gpu::instance(Some(Box::new(event_loop.owned_display_handle())));
         let surface = instance.create_surface(window.clone()).expect("create surface");
         let gpu = gpu::init(instance, Some(&surface));
         self.cpu_renderer = gpu.adapter.get_info().device_type == wgpu::DeviceType::Cpu;
-        let size = window.inner_size();
-        let mut config = surface
-            .get_default_config(&gpu.adapter, size.width.max(1), size.height.max(1))
-            .expect("the adapter can't draw to the window");
-        // Not an sRGB target, as the offscreen one isn't: the renderer blends in gamma space.
-        let formats = surface.get_capabilities(&gpu.adapter).formats;
-        config.format = formats.iter().copied().find(|f| !f.is_srgb()).unwrap_or(config.format);
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        // A swap chain Windows refuses is never a panic: said, with what the window was, and tried once more on a
+        // new window with nothing of shell mode's on it (topmost dropped for good); a second refusal ends it.
+        let mut topmost = self.as_shell.topmost_start_up() && self.dashboard.starting_up();
+        let (window, surface, config) = match configure(&gpu, &surface, &window) {
+            Ok(config) => (window, surface, config),
+            Err(why) => {
+                eprintln!("window: ERROR: the swap chain couldn't be made: {why}; {}", describe(&window));
+                drop(surface);
+                drop(window);
+                let dropped = if topmost { "topmost for Start-up" } else { "nothing but the window itself" };
+                topmost = false;
+                eprintln!("window: trying once more on a new plain window; dropped: {dropped}");
+                let window = make_window(event_loop);
+                let surface = gpu.instance.create_surface(window.clone()).expect("create surface");
+                match configure(&gpu, &surface, &window) {
+                    Ok(config) => {
+                        eprintln!("window: the plain window's swap chain was made");
+                        (window, surface, config)
+                    }
+                    Err(why) => {
+                        eprintln!("window: ERROR: again: {why}; {}", describe(&window));
+                        crate::fail("no swap chain for the window, twice");
+                    }
+                }
+            }
+        };
+        if topmost {
+            window.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
+            eprintln!("window: topmost while Start-up shows; {}", describe(&window));
+        }
         if self.frames.is_some() {
             let hertz = window.current_monitor().and_then(|monitor| monitor.refresh_rate_millihertz());
             let hertz = hertz.map_or("unknown".to_string(), |rate| format!("{:.1} Hz", f64::from(rate) / 1000.0));
@@ -1135,7 +1214,6 @@ impl ApplicationHandler for App {
                 config.width, config.height, config.present_mode
             );
         }
-        surface.configure(&gpu.device, &config);
 
         let gpu_ready = since_start();
 
@@ -1164,6 +1242,13 @@ impl ApplicationHandler for App {
         }
         if self.state.is_none() {
             return;
+        }
+        // Settings > System: where shell mode stands, as a thread found it. Under `shell:`, not `settings:`, which is
+        // only ever an option set or saved.
+        if let Some(shell) = self.as_shell.answer() {
+            eprintln!("shell: Settings > System shows {}", screens::settings::system::state(shell));
+            self.dashboard.set_options(screens::Options { shell, ..self.dashboard.options() });
+            self.stale = true;
         }
         // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
         let focus = self.dashboard.focus_line();
@@ -1577,6 +1662,10 @@ impl ApplicationHandler for App {
                 if self.home_presented.is_none() && !self.dashboard.starting_up() {
                     self.home_presented = Some(Instant::now());
                     eprintln!("startup: Home's first frame at {:.0} ms", since_start());
+                    // Start-up is over: the Dashboard is a window among others again.
+                    if self.as_shell.topmost_start_up() {
+                        state.window.set_window_level(winit::window::WindowLevel::Normal);
+                    }
                 }
                 if self.frames.is_some() {
                     self.frame_times[0].frame(now, acquired, Instant::now(), self.moving);
@@ -1595,6 +1684,12 @@ impl ApplicationHandler for App {
                          at {renderer:.0} ms, first frame begun at {began:.0} ms"
                     );
                     eprintln!("first frame presented at {:.0} ms since process start", since_start());
+                    // Shell mode's --shell process takes its black down; with no Boot video playing, explorer may
+                    // start behind the Dashboard now.
+                    self.as_shell.first_frame();
+                    if self.boot_video.is_none() {
+                        self.as_shell.boot_video_ended();
+                    }
                     self.log_profile();
                     if self.log_focus {
                         self.log_groups();
