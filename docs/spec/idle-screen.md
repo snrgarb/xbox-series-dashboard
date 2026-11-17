@@ -43,7 +43,7 @@ Toasts neither wake the screen nor count as input. A game stopping changes nothi
   - The description, 30 under the label: 46.
 - **Art:** the panel's bottom 540. It is a game's hero art (UniformToFill, centred, top-aligned) rising out of the panel's colour: none of it a tenth of the way down, half at 35%, all of it at 60%. A shade goes over its lower half (`#00000000` to `#59000000`).
   - A game with no hero art has its cover there instead, blurred and darkened (`#99000000`). The cover itself sits on top, whole, 320 tall and 600 down, centred.
-  - A tip has its pad in the art's place: 442×312 at y 506. The buttons it is about are filled.
+  - A tip has its pad in the art's place: 442×312 at y 506, centred across the panel 4 short of its right, in white line 3.2 wide, round-joined. The buttons it is about are filled white over their line: A, B, X and Y with their letter (22 bold) in the panel's colour, View and Menu with their mark cut out, the D-pad's four arms as one, the bumpers, the sticks and the Guide button. The triggers are not drawn.
 - **Y prompt:** a 72 ring with Y in it, 62 up from the foot, then its words, 46 bold, 26 after it. A tip's prompt is at 60%.
 - **Cards:** each shows for **20 s**, then crossfades to the next over **800 ms**. They come in a shuffled turn, reshuffled when the pool runs out, and never the same card twice running.
 
@@ -107,5 +107,5 @@ Last on the **Overlay** (`docs/spec/guide.md`), over the Launch screen, the Guid
 - **The nearly-finished card's achievement** is the game's locked one most players have (`model::achievement::nearest_locked`: the highest known rarity, secret ones and unnamed ones never), where PlayniteAchievements names it.
 - **The Score tip** says "across every game" where the Bundle's says "across every platform": the port reads Steam's alone. It is in the pool only while there is a Score.
 - **Tips:** the ones about Discord and the Boot video are left out until those come. The button tokens are written as words ("Y", "Menu", "the Guide button") rather than drawn as glyphs in the line.
-- **The tip's pad** is plain shapes (rings and rounded rectangles), not the Bundle's traced outline. The Guide button is a ring.
+- **The tip's pad's Guide button** is a plain ring where the Bundle outlines the Xbox sphere (Kenney's), and, lit, a white disc with a ring cut out of it where the Bundle cuts the sphere out (`idle::pad::guide_mark`, a hook). The rest of the pad is the Bundle's: its traced body, bumpers and D-pad are the XAML's path data, carried over by the user's request (#251), and its buttons the XAML's circles, all 3.2 wide.
 - **Dim after on Never** keeps the screen awake. The Bundle turns the display off; the port does not touch the display (an open question for the plan).

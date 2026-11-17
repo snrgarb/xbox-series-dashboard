@@ -7,6 +7,7 @@
 //! two times; [`cards`] is what the panel shows; [`draw`] draws the dim and the panel.
 pub mod cards;
 mod draw;
+mod pad;
 
 use std::time::{Duration, Instant};
 

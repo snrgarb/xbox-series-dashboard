@@ -26,6 +26,7 @@ pub mod menu_panel;
 pub mod my_games;
 pub mod now_playing;
 pub mod pages;
+mod path_data;
 pub mod profile;
 pub mod search;
 pub mod settings;
