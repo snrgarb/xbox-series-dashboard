@@ -163,6 +163,9 @@ pub enum Effect {
     /// Settings > About's Install, with an update ready: put it in place and start it. The executable answers as
     /// above; once the new one has started this one exits.
     InstallUpdate,
+    /// Settings > Helpers (docs/spec/helpers.md): fetch, check and keep a helper on the user's Yes, its licence and
+    /// source in front of them, or remove it. The executable answers with how each stands, in `Library::helpers`.
+    Helper(model::helper::HelperAsk),
 }
 
 /// A secret the user typed: shown nowhere, in no log and no `Debug`.
@@ -401,6 +404,24 @@ impl Dashboard {
 
     /// How a refresh of every game's art goes (Settings > Art, `Library::art_refresh`), with no new snapshot: a page
     /// that shows it is told, as of any change to the library. Whether it changed.
+    /// How the helpers stand (Settings > Helpers), without a new snapshot: whether that changed anything.
+    pub fn set_helpers(&mut self, helpers: Vec<model::helper::Helper>) -> bool {
+        if self.library.helpers == helpers {
+            return false;
+        }
+        self.library.helpers = helpers;
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+            discord: &self.discord,
+        };
+        self.pages.library_changed(around);
+        true
+    }
+
     pub fn set_art_refresh(&mut self, refresh: model::ArtRefresh) -> bool {
         if self.library.art_refresh == refresh {
             return false;

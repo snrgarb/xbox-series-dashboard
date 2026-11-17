@@ -18,6 +18,7 @@ pub mod audio;
 pub mod clipboard;
 pub mod drives;
 pub mod freeze;
+pub mod helper;
 pub mod idle;
 mod launch;
 pub mod media;

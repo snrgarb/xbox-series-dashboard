@@ -4,6 +4,7 @@ pub mod art_picker;
 pub mod audio;
 pub mod by_hand;
 pub mod discord;
+pub mod helper;
 pub mod installer;
 pub mod launcher;
 pub mod media;
@@ -430,6 +431,10 @@ pub struct Library {
     /// snapshot, as it does the Store apps.
     #[serde(default)]
     pub storage: Storage,
+    /// The helper programs (Settings > Helpers, #174), each as it stands on this PC. Not the database's: the
+    /// executable carries them in every snapshot.
+    #[serde(default)]
+    pub helpers: Vec<helper::Helper>,
 }
 
 /// How a refresh of every game's art and details is going: everything downloaded forgotten, then fetched again in

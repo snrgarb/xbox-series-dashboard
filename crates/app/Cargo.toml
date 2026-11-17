@@ -31,6 +31,8 @@ discord = { path = "../discord" }
 shell-mode = { path = "../shell-mode" }
 # Updates (docs/spec/updates.md): the release asked for, downloaded, checked and put in place.
 update = { path = "../update" }
+# The helper programs some stores install through (docs/spec/helpers.md): fetched, checked and removed.
+helpers = { path = "../helpers" }
 wgpu = "30"
 winit = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }

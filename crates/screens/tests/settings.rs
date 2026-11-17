@@ -106,7 +106,7 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
     // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord beside it, then
-    // Games & apps and Launchers, then Art, then System. The row's end, the top and the foot stop.
+    // Games & apps and Launchers, then Art, then Helpers, then System. The row's end, the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
     // Down from Idle is Discord; Right there stops, Left is Guide.
@@ -116,22 +116,24 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Down, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
-    // Down from Launchers is Storage, beside Art, and About is under it, where the foot stops, with System beside
-    // it, where the row starts.
+    // Down from Launchers is Storage, beside Art; Helpers is the fifth row's one box, under both, and System
+    // under that, where the foot stops, with About beside it, where the row ends.
     press(&mut dashboard, &[Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
+    press(&mut dashboard, &[Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Helpers");
     press(&mut dashboard, &[Down, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
     press(&mut dashboard, &[Right, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: About");
-    // Up from About is Storage; Up from Art is Games & apps above it.
+    // Up from About is Helpers, the row above having one box; Up from Helpers is Art, and from Art Games & apps.
     press(&mut dashboard, &[Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Helpers");
     press(&mut dashboard, &[Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: About");
-    press(&mut dashboard, &[Up, Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
+    press(&mut dashboard, &[Up, Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
@@ -1016,7 +1018,7 @@ fn settings_system() {
         stage.dashboard.set_options(Options { shell, ..options });
     };
     shell(&mut stage, ShellMode::Off);
-    stage.press(&[Right, Down, Down, Down, Down]);
+    stage.press(&[Right, Down, Down, Down, Down, Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
     stage.press(&[A]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
@@ -1057,7 +1059,7 @@ fn about_stage(updates: model::update::Updates) -> Stage {
     let mut stage = settings_stage();
     let options = stage.dashboard.options();
     stage.dashboard.set_options(Options { build: Build { version: "1.2.3", commit: "0123abc" }, updates, ..options });
-    stage.press(&[Right, Down, Down, Down, Down, Right]);
+    stage.press(&[Right, Down, Down, Down, Down, Down, Right]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
     stage.press(&[A]);
     stage
@@ -1421,4 +1423,72 @@ fn settings_launchers() {
     stage.press(&[A, A]);
     assert!(stage.dashboard.focus_line().contains("; refused: Quit "), "{}", stage.dashboard.focus_line());
     stage.check("settings-launchers-refused");
+}
+
+// --- Theme settings > Helpers (docs/spec/helpers.md) ---
+
+/// The two helpers as the table has them: legendary as `legendary` stands, gogdl added.
+fn helpers_shown(legendary: model::helper::HelperState) -> Vec<model::helper::Helper> {
+    use model::helper::{Helper, HelperState};
+    let helper = |key: &str, store: &str, version: &str, source: &str, state| Helper {
+        key: key.into(),
+        store: store.into(),
+        version: version.into(),
+        licence: "GPL-3.0".into(),
+        source: source.into(),
+        state,
+    };
+    vec![
+        helper("legendary", "Epic Games", "0.21.1", "https://github.com/legendary-gl/legendary", legendary),
+        helper(
+            "gogdl",
+            "GOG",
+            "1.4.0",
+            "https://github.com/Heroic-Games-Launcher/heroic-gogdl",
+            HelperState::Added { version: "1.4.0".into() },
+        ),
+    ]
+}
+
+/// Helpers, under Art: each helper with its licence and source and how it stands; Add asks first, the licence and
+/// source in the question, and only Yes asks the executable; Remove asks too; the page follows the snapshot.
+#[test]
+fn settings_helpers() {
+    use model::helper::{HelperAsk, HelperState};
+    let mut stage = settings_stage();
+    stage.dashboard.set_helpers(helpers_shown(HelperState::NotAdded));
+    stage.press(&[Right, Down, Down, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Helpers");
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Helpers: legendary; Add; not added");
+    stage.check("settings-helpers");
+
+    // Add asks; B, or No, fetches nothing.
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Helpers: legendary; Add; not added; asking Add legendary?");
+    stage.check("settings-helpers-question");
+    stage.press(&[B]);
+    assert!(asked(&mut stage).is_empty());
+    stage.press(&[A, Down, A]);
+    assert!(asked(&mut stage).is_empty());
+    stage.press(&[A, A]);
+    assert_eq!(asked(&mut stage), [Effect::Helper(HelperAsk::Add("legendary".into()))]);
+
+    // Fetching: no button, a spinner; then refused, Add again with why.
+    stage.dashboard.set_helpers(helpers_shown(HelperState::Fetching));
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Helpers: legendary; busy; fetching");
+    stage.press(&[A]);
+    assert!(asked(&mut stage).is_empty());
+    let refused = "The download wasn't the file expected, so it wasn't kept.".to_string();
+    stage.dashboard.set_helpers(helpers_shown(HelperState::Failed(refused)));
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Helpers: legendary; Add; failed");
+    stage.check("settings-helpers-refused");
+
+    // gogdl, added: Remove asks, and Remove removes.
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Helpers: gogdl; Remove; added 1.4.0");
+    stage.press(&[A, A]);
+    assert_eq!(asked(&mut stage), [Effect::Helper(HelperAsk::Remove("gogdl".into()))]);
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Helpers");
 }

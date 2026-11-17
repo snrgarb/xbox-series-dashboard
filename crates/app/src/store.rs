@@ -69,6 +69,8 @@ pub struct Store {
     looking: Option<Receiver<model::Storage>>,
     /// Asked to read them again while a read was under way: once more when it is done.
     look_again: bool,
+    /// Settings > Helpers: how each stands, as every snapshot carries them (`Library::helpers`).
+    helpers: Vec<model::helper::Helper>,
 }
 
 /// What an update of the launchers came to: what it changed, in a few words; none when it could not be done.
@@ -726,6 +728,10 @@ impl Store {
         self.database.as_ref().is_some_and(|database| database.refreshing().unwrap_or(false))
     }
 
+    pub fn set_helpers(&mut self, helpers: Vec<model::helper::Helper>) {
+        self.helpers = helpers;
+    }
+
     pub fn set_art_refresh(&mut self, refresh: model::ArtRefresh) {
         self.art_refresh = refresh;
     }
@@ -834,6 +840,7 @@ impl Store {
         library.launchers.update = self.update.clone();
         library.art_refresh = self.art_refresh;
         library.storage = self.storage.clone();
+        library.helpers = self.helpers.clone();
     }
 
     /// Switches a launcher on or off (Settings > Launchers): its games leave every list at once, or come back as

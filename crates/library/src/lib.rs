@@ -478,6 +478,7 @@ impl Database {
             launchers: self.launchers()?,
             art_refresh: Default::default(),
             storage: Default::default(),
+            helpers: Vec::new(),
         })
     }
 

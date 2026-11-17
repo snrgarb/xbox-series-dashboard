@@ -241,7 +241,7 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
-The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, **Launchers** (U+E8F1, [launchers.md](launchers.md); #163) beside it at (1, 2), Art (16.8) on the row under those at (0, 3), and **Storage** (U+EDA2, [storage.md](storage.md); #179) beside Art at (1, 3).
+The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, **Launchers** (U+E8F1, [launchers.md](launchers.md); #163) beside it at (1, 2), Art (16.8) on the row under those at (0, 3), and **Storage** (U+EDA2, [storage.md](storage.md); #179) beside Art at (1, 3), and **Helpers** (U+E896, [helpers.md](helpers.md); #174) on a row of its own under them at (0, 4).
 
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
@@ -743,7 +743,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 | Pane | Boxes |
 |---|---|
-| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art with Storage (#179) beside it, then System (16.9) on the row under Art with About (16.10) beside it. |
+| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art with Storage (#179) beside it, then Helpers (#174) on a row of its own, then System (16.9) on the row under Helpers with About (16.10) beside it. |
 | Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Who's playing today?** (0, 1) (start-up.md 9), at the Bundle's place, and **Groups** (1, 1) (filters.md 6.1), in the Bundle's empty slot; then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
 | Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
 | Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
@@ -819,7 +819,7 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 
 The Bundle has no such page: Playnite's metadata sources fetched missing art (section 14, "Download metadata"). The port's is the user's own SteamGridDB key, a way to take away what was downloaded, and a switch for all art online (#110) (docs/sources.md, "Art"), and is decided here.
 
-- **Its box**: **Art**, icon U+EB9F, at (0, 3) (x 520..957, y 657..788), on a row of its own under Games & apps, since Launchers took its place beside Games & apps (#163; launchers.md 1). Down from Games & apps is Art and from Launchers Storage, beside it (#179; storage.md 2); Up from Art is Games & apps.
+- **Its box**: **Art**, icon U+EB9F, at (0, 3) (x 520..957, y 657..788), on a row of its own under Games & apps, since Launchers took its place beside Games & apps (#163; launchers.md 1). Down from Games & apps is Art and from Launchers Storage, beside it (#179; storage.md 2); Up from Art is Games & apps; Down from Art or Storage is Helpers (helpers.md 2).
 - **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190:
 
 | Element | y | Notes |
