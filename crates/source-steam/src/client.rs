@@ -15,16 +15,19 @@
 //!   GetInstallFolders()` (the libraries, to find the chosen one's `nFolderIndex`, or the one Steam marks
 //!   `bIsDefaultFolder`) and `Installs.OpenInstallWizard([appid], "0")`; the manager waited on until its
 //!   `eInstallState` is past 0 and the states on the way (1, 3, 5, 9: [`State`]), and is not a state an earlier
-//!   install left (7 within half a second on the TV PC; still 0 after [`WIZARD_WAIT`]: not taken);
+//!   wizard left (14 Complete or 16 Canceled, which stay until the next wizard opens) nor on another app
+//!   (`currentAppID`, `rgApps`) (7 within half a second on the TV PC; still 0 after [`WIZARD_WAIT`]: not taken);
 //!   `Installs.SetInstallFolder(index)` and `Installs.SetCreateShortcuts(false, false)`; the manager's own
 //!   `nDiskSpaceRequired` against `nDiskSpaceAvailable`, as Steam's own UI holds them (`BShowDiskSettingsForInstall`):
 //!   needed at least what is free, the install is refused with both; `Installs.ContinueInstall()`, and the manager
-//!   waited on until it moves on. **Taken only at 14, a started install** (#230: 8 was once taken for success). At 8
+//!   waited on until it moves on. **Taken only at 14 (Complete), a started install** (#230: 8 was once taken for
+//!   success); 15 (Failed) is a failure the user is told of. At 8
 //!   (`ShowEULAs`) `Apps.LoadEula(appid)` gives the agreements (`[{id, url, version}]`), each put before the user in
 //!   the Dashboard's own prompt with its text read from its url ([`crate::eula`]), and only the user's own Accept
 //!   calls `Apps.MarkEulaAccepted(appid, id, version)`; once all are, `ContinueInstall()` again. Any other state (2, 4,
-//!   6, an unknown one), a Decline, a failure once the wizard is open, and not enough space all end in
-//!   `Installs.CancelInstall()`, which takes the manager back to 0 and closes Steam's dialog, and the user is told
+//!   6, 10 to 13, an unknown one), a Decline, a failure once the wizard is open, and not enough space all end in
+//!   `Installs.CancelInstall()`, which takes the manager back to 0 (from `ShowConfig`, to 16 Canceled: seen on the TV
+//!   PC 2026-11-18, both a clean cancel) and closes Steam's dialog, and the user is told
 //!   why ([`Outcome::Stopped`]); never a fall back to `steam.exe`, which would go round them. No `SetAppList`:
 //!   Steam's own flow does not call it before the wizard. Every state is said in the log by its name and number.
 //! - Uninstall: `Installs.OpenUninstallWizard([appid], "0", true)`, the `true` passing over Steam's own question:
@@ -233,7 +236,8 @@ const WIZARD_HEADER: &str = "/* xbox-series-dashboard wizard ";
 pub const LOOK: &str = "SteamClient.Installs.GetInstallManagerInfo()";
 /// `SteamClient.Installs.ContinueInstall()`.
 pub const CONTINUE: &str = "SteamClient.Installs.ContinueInstall()";
-/// `SteamClient.Installs.CancelInstall()`: the wizard closed, the manager back to 0 (seen on the TV PC).
+/// `SteamClient.Installs.CancelInstall()`: the wizard closed, the manager back to 0, or at 16 (Canceled) from
+/// `ShowConfig` (both seen on the TV PC, 2026-11-18).
 pub const CANCEL: &str = "SteamClient.Installs.CancelInstall()";
 
 /// A step of Steam's install wizard, each a script of its own, so that what comes between them (the state looked
@@ -347,7 +351,8 @@ impl Wizard {
 }
 
 /// Steam's install manager's `eInstallState`, as its own script names them (#230, read there on the TV PC,
-/// 2026-11-17), and 14, which a started install read.
+/// 2026-11-17 and 2026-11-18). A started install reads 14 (Complete); a cancel leaves 0, or 16 (Canceled) from
+/// `ShowConfig`; either of 14 and 16 stays until the next wizard opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct State(pub i64);
 
@@ -355,8 +360,12 @@ impl State {
     pub const NONE: State = State(0);
     pub const SHOW_CONFIG: State = State(7);
     pub const SHOW_EULAS: State = State(8);
-    /// What the manager read once an install had started (seen on the TV PC).
+    /// `Complete`: what the manager read once an install had started (seen on the TV PC).
     pub const STARTED: State = State(14);
+    /// `Failed`.
+    pub const FAILED: State = State(15);
+    /// `Canceled`: where `CancelInstall()` from `ShowConfig` left the manager (seen on the TV PC).
+    pub const CANCELED: State = State(16);
 
     /// Its name, as Steam's script has it.
     pub fn name(self) -> &'static str {
@@ -371,7 +380,13 @@ impl State {
             7 => "ShowConfig",
             8 => "ShowEULAs",
             9 => "CreateApps",
-            14 => "an install started",
+            10 => "ReadFromMedia",
+            11 => "ShowChangeMedia",
+            12 => "WaitLegacyCDKeys",
+            13 => "ShowSignup",
+            14 => "Complete",
+            15 => "Failed",
+            16 => "Canceled",
             _ => "a state the Dashboard does not know",
         }
     }
@@ -382,14 +397,23 @@ impl State {
         matches!(self.0, 1 | 3 | 5 | 9)
     }
 
+    /// No wizard open: none, or what a wizard left behind it (Complete, Canceled), which stays until the next opens.
+    pub fn closed(self) -> bool {
+        matches!(self.0, 0 | 14 | 16)
+    }
+
     /// What Steam asks for in a state only its own window answers, as the user is told it: the rest of the wizard's
-    /// states but those the Dashboard goes through (none, on the way, the config, the agreements, started).
+    /// states but those the Dashboard goes through (none, on the way, the config, the agreements, complete) and
+    /// those that end it (failed, cancelled).
     pub fn asks(self) -> Option<&'static str> {
         match self.0 {
-            0 | 1 | 3 | 5 | 7 | 8 | 9 | 14 => None,
+            0 | 1 | 3 | 5 | 7 | 8 | 9 | 14 | 15 | 16 => None,
             2 => Some("a licence it is waiting for"),
             4 => Some("a product key"),
             6 => Some("a password"),
+            10 | 11 => Some("the game's install discs"),
+            12 => Some("a CD key"),
+            13 => Some("a sign-up"),
             _ => Some("something the Dashboard can't answer"),
         }
     }
@@ -402,17 +426,19 @@ impl std::fmt::Display for State {
     }
 }
 
-/// What the install manager said: its state, and the bytes the install needs and has free where it goes, where
-/// it says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What the install manager said: its state, the apps its wizard is on where it says, and the bytes the install
+/// needs and has free where it goes, where it says.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manager {
     pub state: State,
+    pub apps: Vec<u32>,
     pub needed: Option<u64>,
     pub free: Option<u64>,
 }
 
 impl Manager {
-    /// From `GetInstallManagerInfo()`'s answer: `eInstallState` (0 where there is none), `nDiskSpaceRequired` and
+    /// From `GetInstallManagerInfo()`'s answer: `eInstallState` (0 where there is none), the apps (`currentAppID`,
+    /// and `rgApps`, each an appid or an object with `nAppID` or `appid`), `nDiskSpaceRequired` and
     /// `nDiskSpaceAvailable`, each a number or a number written as text.
     pub fn of(value: Option<&serde_json::Value>) -> Manager {
         let number = |key: &str| {
@@ -423,7 +449,24 @@ impl Manager {
                 .or_else(|| field.as_str().and_then(|text| text.trim().parse().ok()))
         };
         let state = value.and_then(|value| value.get("eInstallState")).and_then(serde_json::Value::as_i64).unwrap_or(0);
-        Manager { state: State(state), needed: number("nDiskSpaceRequired"), free: number("nDiskSpaceAvailable") }
+        let appid = |v: &serde_json::Value| {
+            let v = v.get("nAppID").or_else(|| v.get("appid")).unwrap_or(v);
+            v.as_u64().or_else(|| v.as_str().and_then(|text| text.trim().parse().ok())).map(|n| n as u32)
+        };
+        let mut apps: Vec<u32> = Vec::new();
+        let current = value.and_then(|value| value.get("currentAppID")).and_then(appid).filter(|&app| app != 0);
+        let listed = value.and_then(|value| value.get("rgApps")).and_then(serde_json::Value::as_array);
+        for app in current.into_iter().chain(listed.into_iter().flatten().filter_map(appid)) {
+            if app != 0 && !apps.contains(&app) {
+                apps.push(app);
+            }
+        }
+        Manager { state: State(state), apps, needed: number("nDiskSpaceRequired"), free: number("nDiskSpaceAvailable") }
+    }
+
+    /// Whether the wizard may be on `appid`: it says so, or names no app.
+    pub fn on(&self, appid: u32) -> bool {
+        self.apps.is_empty() || self.apps.contains(&appid)
     }
 
     /// Not enough room, as Steam's own UI weighs it: needed at least what is free. Not where either is not said,
@@ -590,6 +633,11 @@ impl Steps<'_> {
     /// Looks at the manager every [`LOOK_EVERY`] until `done` says so of its state, [`WIZARD_WAIT`] at most, and
     /// says in the log each state it passed through. The manager as last seen, and whether `done` said so.
     fn wait(&mut self, name: &str, done: impl Fn(State) -> bool) -> Result<(Manager, bool), Outcome> {
+        self.wait_on(name, |manager| done(manager.state))
+    }
+
+    /// [`Steps::wait`], `done` told the whole manager.
+    fn wait_on(&mut self, name: &str, done: impl Fn(&Manager) -> bool) -> Result<(Manager, bool), Outcome> {
         let start = Instant::now();
         let mut said: Option<State> = None;
         loop {
@@ -603,7 +651,7 @@ impl Steps<'_> {
                 ));
                 said = Some(manager.state);
             }
-            if done(manager.state) {
+            if done(&manager) {
                 return Ok((manager, true));
             }
             if start.elapsed() >= WIZARD_WAIT {
@@ -619,20 +667,24 @@ impl Steps<'_> {
         }
     }
 
-    /// `CancelInstall()`, then the manager waited on until it is back at 0: whatever comes of it is said in the log,
-    /// and the stop given back as it was.
+    /// `CancelInstall()`, then the manager waited on until it is back at 0 or at 16 (Canceled), either a clean
+    /// cancel: whatever comes of it is said in the log, and the stop given back as it was.
     fn cancel(&mut self, stop: Outcome) -> Outcome {
         match self.step(&Wizard::Cancel) {
-            Ok(_) => match self.wait("the wizard cancelled", |state| state == State::NONE) {
-                Ok((manager, true)) => {
-                    log(&format!("{}: the wizard is closed, eInstallState {}", self.what, manager.state))
+            Ok(_) => {
+                match self.wait("the wizard cancelled", |state| state == State::NONE || state == State::CANCELED) {
+                    Ok((manager, true)) => {
+                        log(&format!("{}: the wizard is closed, eInstallState {}", self.what, manager.state))
+                    }
+                    Ok((manager, false)) => log(&format!(
+                        "{}: the wizard was cancelled and eInstallState is still {}: Steam's dialog may be left open",
+                        self.what, manager.state
+                    )),
+                    Err(why) => {
+                        log(&format!("{}: the wizard was cancelled and not looked at again: {why:?}", self.what))
+                    }
                 }
-                Ok((manager, false)) => log(&format!(
-                    "{}: the wizard was cancelled and eInstallState is still {}: Steam's dialog may be left open",
-                    self.what, manager.state
-                )),
-                Err(why) => log(&format!("{}: the wizard was cancelled and not looked at again: {why:?}", self.what)),
-            },
+            }
             Err(why) => log(&format!("{}: CancelInstall() did not go through: {why:?}", self.what)),
         }
         stop
@@ -655,7 +707,8 @@ impl Steps<'_> {
 /// The install's wizard, step by step (the module's "Install"): taken only once the manager reads a started install
 /// (14), stopped with the wizard cancelled at anything else once it is open.
 fn install(wizard: &mut Steps, appid: u32, folder: Option<String>) -> Outcome {
-    // Where an earlier install left the manager past the wizard (14), the same state again is no wizard opened.
+    // Where an earlier wizard left the manager (14 Complete, 16 Canceled), that state is no wizard opened; nor is
+    // one that says it is on another app.
     let was = match wizard.look() {
         Ok(manager) => manager.state,
         Err(Outcome::NotTaken(why)) => return Outcome::NotTaken(why),
@@ -665,16 +718,22 @@ fn install(wizard: &mut Steps, appid: u32, folder: Option<String>) -> Outcome {
         Ok(value) => value.and_then(|value| value.get("index").and_then(serde_json::Value::as_i64)),
         Err(outcome) => return outcome,
     };
-    let opened =
-        |state: State| state != State::NONE && !state.on_the_way() && (state != was || state == State::SHOW_CONFIG);
-    let (manager, settled) = match wizard.wait(WIZARD_OPEN, opened) {
+    let opened = |manager: &Manager| {
+        let state = manager.state;
+        manager.on(appid)
+            && state != State::NONE
+            && state != State::CANCELED
+            && !state.on_the_way()
+            && (state != was || state == State::SHOW_CONFIG)
+    };
+    let (manager, settled) = match wizard.wait_on(WIZARD_OPEN, opened) {
         Ok(seen) => seen,
         Err(Outcome::NotTaken(why)) => return wizard.failed(Outcome::NotTaken(why), "Steam's install didn't open"),
         Err(lost) => return wizard.failed(lost, "Steam's install didn't open"),
     };
     if !settled {
         // Never opened: safe to ask another way. Opened and stuck on the way: closed again, and told.
-        if manager.state == State::NONE || manager.state == was {
+        if manager.state.closed() || manager.state == was || !manager.on(appid) {
             return Outcome::NotTaken(format!(
                 "eInstallState still {} after {} ms: Steam did not take it",
                 manager.state,
@@ -691,6 +750,7 @@ fn install(wizard: &mut Steps, appid: u32, folder: Option<String>) -> Outcome {
         State::SHOW_CONFIG => {}
         State::SHOW_EULAS => return agreements(wizard, appid),
         State::STARTED => return Outcome::Took,
+        State::FAILED => return failed_in_steam(wizard),
         state => return asks(wizard, state),
     }
     if let Err(why) = wizard.step(&Wizard::Prepare { index: chosen }) {
@@ -737,12 +797,18 @@ fn go_on(wizard: &mut Steps, appid: u32, from: State) -> Outcome {
             wizard.failed(Outcome::NotTaken(format!("still {}", manager.state)), "Steam didn't start the install")
         }
         State::SHOW_EULAS => agreements(wizard, appid),
-        State::NONE => {
+        State::NONE | State::CANCELED => {
             log(&format!("{}: Steam closed its install wizard by itself", wizard.what));
             Outcome::Stopped(model::Stop::Failed("Steam closed its install without starting it.".into()))
         }
+        State::FAILED => failed_in_steam(wizard),
         state => asks(wizard, state),
     }
+}
+
+/// Steam's wizard says its install failed (15): closed, and the user told.
+fn failed_in_steam(wizard: &mut Steps) -> Outcome {
+    wizard.failed(Outcome::NotTaken(format!("eInstallState {}", State::FAILED)), "Steam's install failed")
 }
 
 /// A state only Steam's own window answers (a product key, a password, one not known): cancelled, and the user told
@@ -1149,6 +1215,31 @@ mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The manager's states by Steam's own names; which a wizard leaves behind it, which ask for what only Steam's
+    /// window gives; the apps it says it is on.
+    #[test]
+    fn the_managers_states_and_apps_read_as_steams_script_has_them() {
+        assert_eq!(State(14).to_string(), "14 (Complete)");
+        assert_eq!(State(16).to_string(), "16 (Canceled)");
+        assert_eq!(State(15).name(), "Failed");
+        assert!(State::NONE.closed() && State::STARTED.closed() && State::CANCELED.closed());
+        assert!(!State::SHOW_CONFIG.closed());
+        assert_eq!(State(12).asks(), Some("a CD key"));
+        assert_eq!(State(13).asks(), Some("a sign-up"));
+        assert_eq!(State(10).asks(), State(11).asks());
+        assert!(State(10).asks().is_some());
+        assert_eq!((State::FAILED.asks(), State::CANCELED.asks()), (None, None));
+
+        let info = serde_json::json!({ "eInstallState": 16, "currentAppID": 620,
+            "rgApps": [620, { "nAppID": 730 }, "440"], "nDiskSpaceRequired": "5", "nDiskSpaceAvailable": 9 });
+        let manager = Manager::of(Some(&info));
+        assert_eq!((manager.state, manager.apps.as_slice()), (State::CANCELED, [620, 730, 440].as_slice()));
+        assert!(manager.on(730) && !manager.on(1));
+        // Naming no app, it may be on any.
+        let manager = Manager::of(Some(&serde_json::json!({ "eInstallState": 7, "currentAppID": 0 })));
+        assert!(manager.apps.is_empty() && manager.on(1));
+    }
 
     #[test]
     fn every_script_says_what_it_asks_on_its_first_line() {

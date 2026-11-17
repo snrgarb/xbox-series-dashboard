@@ -16,8 +16,9 @@
 //!   agreements, else 14 and the app queued in the library chosen; at 8, `LoadEula(appid)` gives the app's
 //!   agreements as `[{id, url, version}]`, each url a page this debugger serves (`/eula/<appid>/<n>`), and
 //!   `ContinueInstall` leaves 8 only once `MarkEulaAccepted(appid, id, version)` has been called for each of them
-//!   with the id and version given; `CancelInstall` takes it back to 0 from anywhere. `GetInstallManagerInfo` says
-//!   the state, what the app needs (`fixture::needed`) and what is free (`fixture::WizardSetUp`, which `standin
+//!   with the id and version given; `CancelInstall` takes it to 16 (`Canceled`) from 7 and back to 0 from anywhere
+//!   else, as the real one's did, the state staying until the next wizard. `GetInstallManagerInfo` says the state,
+//!   the app of the last wizard opened (`currentAppID`), what the app needs (`fixture::needed`) and what is free (`fixture::WizardSetUp`, which `standin
 //!   steam-wizard` writes). `OpenInstallWizard` brings Steam's main window up, as the real one's does.
 //! - Steam's main window (`client::Window`), on a page of its own titled "Steam": how it stands, and hiding or
 //!   minimizing it.
@@ -61,6 +62,8 @@ pub struct Manager {
     pub open: Option<Opened>,
     /// Looks left at 5 before it moves on.
     pub waiting: u8,
+    /// The app its last wizard was on, which `currentAppID` still says once it is closed, as its state does.
+    pub app: u32,
 }
 
 /// An install whose wizard is open.
@@ -445,6 +448,7 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
                 state: 5,
                 open: Some(Opened { appid: *appid, folder: folder.clone(), library, accepted: Vec::new() }),
                 waiting: WAIT_APP_INFO,
+                app: *appid,
             };
             // The wizard brings the main window up.
             client.main = Shown::Showing;
@@ -460,8 +464,8 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
             }
             let needed = manager.open.as_ref().map_or(0, |open| fixture::needed(open.appid));
             let free = if manager.open.is_some() { set_up.free() } else { 0 };
-            value = serde_json::json!({ "eInstallState": manager.state, "nDiskSpaceRequired": needed,
-                "nDiskSpaceAvailable": free });
+            value = serde_json::json!({ "eInstallState": manager.state, "currentAppID": manager.app,
+                "nDiskSpaceRequired": needed, "nDiskSpaceAvailable": free });
         }
         Wizard::Prepare { .. } => {}
         Wizard::Continue => {
@@ -509,8 +513,10 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
             }
         }
         Wizard::Cancel => {
-            *manager = Manager::default();
-            say(&format!("CEF: install wizard cancelled: eInstallState {was} -> 0"));
+            // From ShowConfig the real one went to 16 (Canceled) and stayed there; from anywhere else, to 0.
+            let state = if was == 7 { 16 } else { 0 };
+            *manager = Manager { state, app: manager.app, ..Manager::default() };
+            say(&format!("CEF: install wizard cancelled: eInstallState {was} -> {state}"));
         }
     }
     if manager.state != was && !matches!(step, Wizard::Cancel) {
@@ -524,8 +530,8 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
     Answer { done: true, steps, value: (!value.is_null()).then_some(value) }
 }
 
-/// The stand-in's page for an agreement, `<appid>/<n>`: a whole page as a store's is, its frame, scripts and styles
-/// round it, and enough paragraphs to scroll through. None for one no app of the fake's set-up has.
+/// The stand-in's page for an agreement, `<appid>/<n>`: a whole page as a store's is, its frame, scripts, styles and
+/// a language picker above it, and enough paragraphs to scroll through. None for one no app of the fake's set-up has.
 fn agreement_page(root: &Path, path: &str) -> Option<String> {
     let (appid, n) = path.split_once('/')?;
     let (appid, n): (u32, u32) = (appid.parse().ok()?, n.parse().ok()?);
@@ -552,7 +558,8 @@ fn agreement_page(root: &Path, path: &str) -> Option<String> {
     Some(format!(
         "<!DOCTYPE html>\n<html><head><title>Licence agreement</title><style>body {{ color: #ccc }}</style>\
          <script>window.stand_in = '<p>never shown</p>';</script></head>\n<body><header>Stand-in store</header>\
-         <nav>Store | Library</nav>\n<div class=\"eula\">{body}</div><footer>Stand-in footer</footer></body></html>"
+         <nav>Store | Library</nav>\n<div class=\"lang\">Language: <select><option>English</option>\
+         </select></div>\n<div class=\"eula\">{body}</div><footer>Stand-in footer</footer></body></html>"
     ))
 }
 
@@ -704,7 +711,8 @@ mod tests {
 
     /// #230: the wizard's states as the real client's went, walked through Steam's own calls: a licence agreement
     /// declined, then accepted (two of them, one after another), a product key asked for, and a game too big for
-    /// the drive. Every stop cancels the wizard back to 0, and nothing but the user's own Accept marks one accepted.
+    /// the drive. Every stop cancels the wizard (to 16 from the config, else to 0, as Steam's went), and nothing but
+    /// the user's own Accept marks one accepted.
     #[test]
     fn the_stand_ins_install_wizard_goes_as_steams_and_the_install_stops_where_it_must() {
         let dir = tempfile::tempdir().unwrap();
@@ -745,6 +753,7 @@ mod tests {
         let text = seen[0].text.as_ref().unwrap();
         assert!(text.starts_with("Stand-in Licence Agreement 1 of 2"), "{text}");
         assert!(!text.contains("never shown") && !text.contains("Stand-in footer") && !text.contains("<p>"));
+        assert!(!text.contains("Language:") && !text.contains("English"), "the language picker: {text}");
         assert_eq!((seen[0].at, seen[0].of), (1, 2));
 
         // The first accepted and the second declined: still nothing.
@@ -771,8 +780,11 @@ mod tests {
         // Too big for what is free: refused with the manager's own figures, before ContinueInstall.
         let needed = fixture::needed(plain);
         set_up(Some(needed - 1));
+        // Cancelled from the config, the manager at 16 is a clean cancel: not waited out.
+        let start = std::time::Instant::now();
         assert_eq!(ask(plain, &[]).0, Outcome::Stopped(model::Stop::NoSpace { needed, free: needed - 1 }));
-        assert_eq!((debugger.install_state(), queued(plain)), (0, false));
+        assert!(start.elapsed() < client::WIZARD_WAIT, "{:?}", start.elapsed());
+        assert_eq!((debugger.install_state(), queued(plain)), (16, false));
         set_up(Some(needed));
         assert_eq!(ask(plain, &[]).0, Outcome::Stopped(model::Stop::NoSpace { needed, free: needed }), "as Steam: >=");
         // With room, a game with no agreement is taken without the user being asked.
@@ -789,7 +801,7 @@ mod tests {
         assert!(has(&format!("CEF: licence agreement \"{agreed}_eula_1\" version 3 of {agreed} marked accepted")));
         assert!(has("CEF: install wizard cancelled: eInstallState 8 -> 0"), "{said:#?}");
         assert!(has("CEF: install wizard cancelled: eInstallState 4 -> 0"), "{said:#?}");
-        assert!(has("CEF: install wizard cancelled: eInstallState 7 -> 0"), "{said:#?}");
+        assert!(has("CEF: install wizard cancelled: eInstallState 7 -> 16"), "{said:#?}");
         assert!(said.iter().any(|line| line.starts_with(&format!(
             "CEF: asked to install {agreed} into Steam's default library: {agreed} queued in "
         ))));

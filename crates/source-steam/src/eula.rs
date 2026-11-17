@@ -1,9 +1,12 @@
 //! A licence agreement's text, for the Dashboard's own prompt (#230): read from the url Steam's `LoadEula` gives
 //! (on the real client one on store.steampowered.com, `?l=english&cc=..&client=1`; on the stand-in its own page on
 //! 127.0.0.1), on the install's own thread and never the window's, within [`TIME_LIMIT`], and the page's HTML
-//! reduced to text that reads plainly ([`plain_text`]). What the store's real page looks like inside has not been
-//! seen: the reduction is a general one, which keeps the words of the page's body and its paragraphs and lists, and
-//! drops its scripts, styles, forms and the parts a page's frame is made of (`nav`, `header`, `footer`).
+//! reduced to the agreement's own text, read plainly ([`agreement_text`]). The reduction is a general one, which
+//! keeps the words of the page's body and its paragraphs and lists, and drops its scripts, styles, forms and the
+//! parts a page's frame is made of (`nav`, `header`, `footer`). The store's real page (read on the TV PC,
+//! 2026-11-18) has its language picker above the text, which left "Language:" as the text's first line: the
+//! agreement's own element is taken where the page has one (an id or class naming `eula`), and a first line
+//! "Language:" is dropped where it is left.
 use std::time::Duration;
 
 /// How long reading an agreement may take, all told.
@@ -38,11 +41,71 @@ pub fn fetch(url: &str) -> Result<String, String> {
         .limit(MOST_BYTES)
         .read_to_string()
         .map_err(|_| "Steam's store's answer could not be read".to_string())?;
-    let text = plain_text(&body);
+    let text = agreement_text(&body);
     if text.trim().is_empty() {
         return Err("the page Steam gave has no text".into());
     }
     Ok(text)
+}
+
+/// A store's agreement page as the agreement's own text: the element that holds it where the page has one
+/// ([`container`]), its words read plainly ([`plain_text`]), a language picker's "Language:" left above it dropped.
+pub fn agreement_text(html: &str) -> String {
+    let text = container(html).map(plain_text).filter(|text| !text.is_empty()).unwrap_or_else(|| plain_text(html));
+    let mut lines = text.lines();
+    let first = text.lines().next().unwrap_or_default();
+    // The picker's word alone: its languages are a `select`'s, never read.
+    if !first.trim().eq_ignore_ascii_case("language:") {
+        return text;
+    }
+    lines.next();
+    tidy(&lines.collect::<Vec<_>>().join("\n"))
+}
+
+/// The inside of the page's first element whose id or class names `eula` (as `id="eula_content"` or
+/// `class="eula"`), but the page's `html` and `body`, where it has one.
+fn container(html: &str) -> Option<&str> {
+    // Lower case byte for byte: its offsets are the page's.
+    let lower = html.to_ascii_lowercase();
+    let name_of = |tag: &str| -> String { tag.chars().take_while(|c| c.is_ascii_alphanumeric()).collect() };
+    let names_eula = |tag: &str| {
+        ["id=", "class="].iter().any(|key| {
+            tag.match_indices(key).any(|(at, _)| {
+                let value = tag[at + key.len()..].trim_start_matches(['"', '\'']);
+                let end = value.find(['"', '\'', ' ', '>']).unwrap_or(value.len());
+                value[..end].contains("eula")
+            })
+        })
+    };
+    let mut at = 0;
+    while let Some(open) = lower[at..].find('<').map(|i| at + i) {
+        let close = open + lower[open..].find('>')?;
+        let tag = &lower[open + 1..close];
+        at = close + 1;
+        let name = name_of(tag);
+        if name.is_empty() || matches!(name.as_str(), "html" | "body") || !names_eula(&tag[name.len()..]) {
+            continue;
+        }
+        // Its end: the close of the same name at its own depth.
+        let (mut depth, mut scan) = (1, at);
+        loop {
+            let next = scan + lower[scan..].find('<')?;
+            let end = next + lower[next..].find('>')?;
+            let inner = &lower[next + 1..end];
+            if name_of(inner.trim_start_matches('/')) == name {
+                if inner.starts_with('/') {
+                    depth -= 1;
+                } else if !inner.ends_with('/') {
+                    depth += 1;
+                }
+            }
+            if depth == 0 {
+                return Some(&html[at..next]);
+            }
+            scan = end + 1;
+        }
+    }
+    None
 }
 
 /// Elements whose content is never text to read.
@@ -250,6 +313,25 @@ mod tests {
         assert_eq!(plain_text("<html><head><title>x</title></head><body></body></html>"), "");
         // A tag left open at the end is not text.
         assert_eq!(plain_text("words <p"), "words");
+    }
+
+    /// A page shaped as the store's: its language picker above the agreement, the agreement in an element of its
+    /// own (the words here made up).
+    #[test]
+    fn a_store_page_reads_as_its_agreement_without_the_language_picker() {
+        let page = r#"<!DOCTYPE html><html><head><title>Agreement</title></head><body class="v6">
+            <div class="page_header"><div class="lang">Language: <select><option>English</option>
+            <option>Deutsch</option></select></div></div>
+            <div id="eula_content"><div><h2>Made-up Agreement</h2><p>First made-up term.</p></div>
+            <p>Second made-up term.</p></div>
+            <div class="footer_links">Store home</div></body></html>"#;
+        assert_eq!(agreement_text(page), "Made-up Agreement\n\nFirst made-up term.\n\nSecond made-up term.");
+        // No element of its own: the picker's word dropped, the rest kept.
+        let page = r#"<html><body><div>Language: <select><option>English</option></select></div>
+            <h2>Made-up Agreement</h2><p>A term.</p></body></html>"#;
+        assert_eq!(agreement_text(page), "Made-up Agreement\n\nA term.");
+        // Only a first line that is the picker's: one that speaks of language is kept.
+        assert_eq!(agreement_text("<p>Language: English only.</p><p>Hi</p>"), "Language: English only.\n\nHi");
     }
 
     #[test]

@@ -245,7 +245,8 @@ try {
     Press A 'Recent\(\d+\)' | Out-Null
     $bigInstall = "install $bigId into Steam's default library"
     Expect-Logged "^steam client: ${bigInstall}: not enough space: \d+ bytes needed, 1000000000 free; not continued$" $mark 'Too big, refused' | Out-Null
-    Expect-Steam 'steam: CEF: install wizard cancelled: eInstallState 7 -> 0' $steamMark 'Too big, the wizard cancelled'
+    Expect-Steam 'steam: CEF: install wizard cancelled: eInstallState 7 -> 16' $steamMark 'Too big, the wizard cancelled'
+    Expect-Logged "^steam client: ${bigInstall}: the wizard is closed, eInstallState 16 \(Canceled\)$" $mark 'Too big, a clean cancel at 16' | Out-Null
     if ((Count-Steam "asked to install $bigId" $steamMark) -ne 0) { Fail 'Too big: the stand-in queued the install all the same' }
     Expect-Logged "^queue: $bigName stopped: Not enough space: It needs [\d.]+ GB and 953\.7 MB is free\. Free up space in Settings > Storage, or install it somewhere else\.$" $mark 'Too big, the Queue says why' | Out-Null
     Expect-Logged '^toasts: shown "Not enough space" \(Stopped\)' $mark 'Too big, its Toast' | Out-Null
