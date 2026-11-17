@@ -284,7 +284,8 @@ impl Store {
                 } else {
                     sync(database, &read)?
                 };
-                Ok(library != shown)
+                // When each launcher was read is no news: this read is a moment after the one shown.
+                Ok(unstamped(library) != unstamped(shown.clone()))
             };
             let news = match Database::open(&path).and_then(|mut database| read_and_sync(&mut database)) {
                 Ok(news) => news,
@@ -785,6 +786,12 @@ impl Store {
     }
 }
 
+/// `library` without when each launcher was last read.
+fn unstamped(mut library: Library) -> Library {
+    library.launchers.list.iter_mut().for_each(|launcher| launcher.read = None);
+    library
+}
+
 /// Reads the launchers switched on (`only`: these alone, if they are on) into the database at `path`, and says what
 /// that changed in the log: `launchers: update: steam, epic read in 12 ms: 1 new game, play time for 1`.
 fn update(path: &std::path::Path, sources: &[Arc<dyn Source>], only: Option<&[String]>) -> Updated {
@@ -866,6 +873,19 @@ mod tests {
         let file = dir.path().join("library.json");
         std::fs::write(&file, serde_json::to_string(&screens::fake_library()).unwrap()).unwrap();
         open(&Args { library: Some(file), ..Args::default() })
+    }
+
+    #[test]
+    fn a_launcher_read_again_a_moment_later_is_no_news_but_what_it_found_is() {
+        use model::launcher::{Found, Launcher};
+        let launcher = |read, games| Launcher { key: "steam".into(), on: true, found: Found::Installed, read, games };
+        let at = |read, games| {
+            let mut library = screens::fake_library();
+            library.launchers.list = vec![launcher(read, games)];
+            library
+        };
+        assert_eq!(super::unstamped(at(Some(100), 5)), super::unstamped(at(Some(101), 5)));
+        assert_ne!(super::unstamped(at(Some(100), 5)), super::unstamped(at(Some(101), 6)));
     }
 
     #[test]
