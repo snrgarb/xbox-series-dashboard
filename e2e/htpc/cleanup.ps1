@@ -1,6 +1,7 @@
 # Run over ssh by e2e/htpc/run.sh after every test, whatever happened: ends what the test left running, and only that.
 # A process is the test's when its program is under this folder (the Dashboard, the stand-ins, the fake games), or when
-# it is the launcher, run.cmd or the payload's run.ps1 from this folder. Nothing is stopped by its name alone.
+# it is the launcher, run.cmd or the payload's run.ps1 from this folder. Nothing is stopped by its name alone. Then the
+# live Dashboard, if the launcher stopped it for the test and it is not back, is started again as the shell.
 $ErrorActionPreference = 'Continue'
 Add-Type @'
 using System;
@@ -29,3 +30,13 @@ foreach ($process in $ours) {
     "stopped $($process.Name) (pid $($process.ProcessId)): $($process.ExecutablePath)"
 }
 if (-not $ours.Count) { 'nothing of the test was running' }
+
+# The live shell, if the launcher stopped it and did not start it again (it was ended by a timeout, or the run was
+# stopped from the Linux side): started again here, in the signed-in session, through a task of its own (shell.ps1).
+$stoppedMarker = Join-Path $PSScriptRoot 'shell-stopped.txt'
+if (Test-Path $stoppedMarker) {
+    . (Join-Path $PSScriptRoot 'shell.ps1')
+    # Write-Host: the lines must not become Start-LiveShell's answer.
+    if (Start-LiveShell { param($Text) Write-Host "shell: $Text" }) { Remove-Item $stoppedMarker -Force -ErrorAction SilentlyContinue }
+    else { "shell: NOT started again: start it by hand on the TV PC: `"$LiveShellExe`" --shell" }
+}

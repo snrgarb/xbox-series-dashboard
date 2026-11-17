@@ -16,8 +16,10 @@
 #
 # Safe mode (e2e/payloads/lib/E2E.psm1) writes nothing to the registry, reads none of the TV's own games, never turns
 # the machine off or restarts it (--dry-power) and installs nothing; everything it makes is in the test's folder. The
-# test does not start while the TV is in use: a full-screen window other than the desktop in front, or the Dashboard
-# or Playnite running (exit 3).
+# test does not start while the TV is in use: a game running, a full-screen window other than the desktop's or the
+# live Dashboard's in front (or behind the live Dashboard), or another Dashboard or Playnite running (exit 3). The live
+# Dashboard as the TV's shell alone is not in use: the launcher stops it for the test and starts `dashboard.exe
+# --shell` again afterwards, and the cleanup does if the launcher could not (e2e/htpc/shell.ps1).
 #
 # Results land in artifacts/e2e/htpc-<test>-<time>/; exits with the test's code: 0 passed, 1 failed, 3 the TV was in use,
 # 124 timed out, 2 for a bad call.
@@ -61,7 +63,7 @@ tv_says() { local said; said="$(on_tv "$1" || true)"; [[ "$said" == *"$2"* ]]; }
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 stage_payload "$test" "$exe" "$standin" "$stage"
-cp "$here/htpc/launcher.ps1" "$here/htpc/cleanup.ps1" "$stage/"
+cp "$here/htpc/launcher.ps1" "$here/htpc/cleanup.ps1" "$here/htpc/shell.ps1" "$stage/"
 # cmd reads a batch file best with Windows' line ends.
 printf '@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%%~dp0launcher.ps1"\r\n' >"$stage/run.cmd"
 
