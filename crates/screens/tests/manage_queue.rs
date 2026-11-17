@@ -274,7 +274,29 @@ fn a_rows_menu_pauses_resumes_and_cancels_its_install() {
     assert_eq!(after(&mut page, &[]), "Row(1) of Ember Choir");
 }
 
-/// A store that cannot steer its installs (the real Steam until #171): the row's menu is the Bundle's.
+/// Glasswing Atlas installed, three of its twelve Workshop items in (#188), before Dune Cartographer's download.
+fn workshop(library: &Library) -> Queue {
+    let extras = InstallState::Extras { items_done: 3, items: 12, done: 0, total: 0 };
+    let fetching = Queued { can: STEERS, ..Queued::new(id(library, "Glasswing Atlas"), extras, 5) };
+    Queue::new(vec![fetching, downloading(library)], Vec::new())
+}
+
+/// #188: a game installed whose Workshop items are coming in reads so, with its items, its share by them and no
+/// speed; its menu is an installed game's, Play first and no Pause or Cancel, whatever its store can.
+#[test]
+fn a_workshop_row_says_what_it_is_and_its_game_is_played_as_an_installed_one() {
+    let mut page = on_page(with_queue(library(), workshop));
+    press(&mut page, &[Down]);
+    let line = page.focus_line();
+    assert!(line.ends_with("; Downloading Workshop content 3 of 12 items 25.0%"), "{line}");
+    assert!(line.starts_with("ManageQueue: Row(0) of Glasswing Atlas"), "{line}");
+    press(&mut page, &[View]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Play game) of Glasswing Atlas");
+    press(&mut page, &[Down]);
+    assert_ne!(page.focus_line(), "TileMenu: Menu(Pause installation) of Glasswing Atlas");
+}
+
+/// A store that cannot steer its installs (Steam with its debugger off): the row's menu is the Bundle's.
 #[test]
 fn a_rows_menu_has_no_pause_or_cancel_where_its_store_cannot() {
     let library = with_queue(library(), |library| {
@@ -411,6 +433,27 @@ fn manage_queue_one_download() {
     );
     stage.press(&[Down]);
     stage.check("manage_queue_one_download");
+}
+
+/// A game installed whose Workshop items are coming in (#188), focus on its row: Downloading Workshop content, 3 of 12
+/// items, 25.0% and its bar a quarter full, no speed; the download under it as before.
+#[test]
+fn manage_queue_workshop() {
+    let mut stage = Stage::new(with_queue(library(), workshop), screens::manage_queue::open());
+    stage.press(&[Down]);
+    stage.check("manage_queue_workshop");
+}
+
+/// The same with the bytes of every item known: the items and their bytes, the share by the bytes.
+#[test]
+fn manage_queue_workshop_bytes() {
+    let sized = |library: &Library| {
+        let extras = InstallState::Extras { items_done: 3, items: 12, done: 82 * MB, total: 1229 * MB };
+        Queue::new(vec![Queued::new(id(library, "Glasswing Atlas"), extras, 5)], Vec::new())
+    };
+    let mut stage = Stage::new(with_queue(library(), sized), screens::manage_queue::open());
+    stage.press(&[Down]);
+    stage.check("manage_queue_workshop_bytes");
 }
 
 /// The current download, one paused (Paused, with its amount and share, #170) and one waiting (Queued, 0.0%), focus

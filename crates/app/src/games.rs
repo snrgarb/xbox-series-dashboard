@@ -91,16 +91,17 @@ mod tests {
     }
 
     #[test]
-    fn the_real_steam_is_not_asked_to_pause_and_the_stand_in_is() {
+    fn steam_is_not_asked_to_pause_with_its_debugger_off_and_nothing_is_opened() {
         let mut addresses = Recorded::default();
         assert!(!steer(&library(), &sources(), 3, model::Steer::Pause, &mut addresses));
+        // The stand-in, its debugger not up: no port to ask.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("steam.exe"), "").unwrap();
         std::fs::write(dir.path().join(source_steam::fixture::STANDIN_CLIENT), "").unwrap();
+        std::fs::write(dir.path().join(source_steam::cef::FILE), "").unwrap();
         let standin = crate::sources::all(&crate::Args { steam: Some(dir.path().to_path_buf()), ..Default::default() });
-        assert!(steer(&library(), &standin, 3, model::Steer::Cancel, &mut addresses));
-        let exe = dir.path().join("steam.exe");
-        assert_eq!(addresses.opened, [format!("{} -silent +standin_cancel 9100040", exe.display())]);
+        assert!(!steer(&library(), &standin, 3, model::Steer::Cancel, &mut addresses));
+        assert!(addresses.opened.is_empty());
     }
 
     #[test]

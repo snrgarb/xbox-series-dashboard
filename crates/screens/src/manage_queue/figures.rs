@@ -6,12 +6,15 @@ use model::{InstallState, Queued};
 /// One game in the Queue, as its row reads.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Figures {
-    /// "Installing...", "Queued" or "Paused".
+    /// "Installing...", "Queued", "Paused", or "Downloading Workshop content" (#188).
     pub state: &'static str,
     /// "106 Mbps", "323 Kbps": none while it waits, or until its bytes have first moved.
     pub speed: Option<String>,
     /// "67.80 MB of 3.55 GB": none while it waits, or while its client does not know the whole yet.
     pub amount: Option<String>,
+    /// "12 of 160 items": a game installed whose Workshop items are coming in (#188), where its store says how
+    /// many; none for anything else.
+    pub items: Option<String>,
     /// "1.9%"; "0.0%" while it waits, whatever of it is down already, as on the console. None while it installs
     /// with no whole known (its client gives no count yet): the row says "Installing..." alone, as the Bundle's
     /// does for a store that gives no bytes, rather than a share that stands at 0.0% (#132).
@@ -29,6 +32,7 @@ impl Figures {
                     state: entry.state.status(),
                     speed: entry.speed.map(speed),
                     amount: (total > 0).then(|| format!("{} of {}", size(done, 2), size(total, 2))),
+                    items: None,
                     percent: (total > 0).then(|| percent(fraction)),
                     fraction: fraction as f32,
                 }
@@ -40,6 +44,7 @@ impl Figures {
                     state: model::queue::PAUSED,
                     speed: None,
                     amount: (total > 0).then(|| format!("{} of {}", size(done, 2), size(total, 2))),
+                    items: None,
                     percent: Some(percent(fraction)),
                     fraction: fraction as f32,
                 }
@@ -49,13 +54,23 @@ impl Figures {
                 state: entry.state.status(),
                 speed: None,
                 amount: None,
+                items: None,
                 percent: Some(percent(0.0)),
                 fraction: 0.0,
             },
-            // The game installed, its extras still coming in (#188): Installing... alone until #188 says what of
-            // them is in, and never a speed of 0.
-            InstallState::Extras { .. } => {
-                Figures { state: entry.state.status(), speed: None, amount: None, percent: None, fraction: 0.0 }
+            // The game installed, its Workshop items still coming in (#188): what they are, how many are in, their
+            // bytes where known, and the share by the bytes, else by the items. Never a speed: Steam's is not known
+            // to be theirs, and a speed of 0 said nothing true of them on the real machine.
+            InstallState::Extras { items_done, items, done, total } => {
+                let fraction = entry.state.fraction();
+                Figures {
+                    state: model::queue::WORKSHOP,
+                    speed: None,
+                    amount: (total > 0).then(|| format!("{} of {}", size(done, 2), size(total, 2))),
+                    items: (items > 0).then(|| format!("{items_done} of {items} items")),
+                    percent: fraction.map(percent),
+                    fraction: fraction.unwrap_or(0.0) as f32,
+                }
             }
         }
     }
@@ -141,9 +156,18 @@ mod tests {
         let figures = Figures::of(&queued);
         assert_eq!((figures.state, figures.percent.as_deref(), figures.fraction), ("Queued", Some("0.0%"), 0.0));
         assert_eq!((figures.speed, figures.amount), (None, None));
-        // Installed, its extras coming in: Installing... alone.
-        let extras = Queued { state: InstallState::Extras { done: 0, total: 0 }, ..downloading };
+        // Installed, its Workshop items coming in: what it is, the items in, the share by them, and never a speed.
+        let extras = Queued { state: InstallState::Extras { items_done: 3, items: 12, done: 0, total: 0 }, ..downloading };
         let figures = Figures::of(&extras);
-        assert_eq!((figures.state, figures.percent, figures.speed), ("Installing...", None, None));
+        assert_eq!((figures.state, figures.percent.as_deref(), figures.speed), ("Downloading Workshop content", Some("25.0%"), None));
+        assert_eq!((figures.items.as_deref(), figures.amount, figures.fraction), (Some("3 of 12 items"), None, 0.25));
+        // Their bytes known: the share by them.
+        let sized = InstallState::Extras { items_done: 3, items: 12, done: GB / 2, total: 2 * GB };
+        let figures = Figures::of(&Queued { state: sized, ..extras });
+        assert_eq!((figures.amount.as_deref(), figures.percent.as_deref()), (Some("512.00 MB of 2.00 GB"), Some("25.0%")));
+        // Nothing said of them: the words alone.
+        let unknown = Queued { state: InstallState::Extras { items_done: 0, items: 0, done: 0, total: 0 }, ..extras };
+        let figures = Figures::of(&unknown);
+        assert_eq!((figures.items, figures.percent, figures.fraction), (None, None, 0.0));
     }
 }

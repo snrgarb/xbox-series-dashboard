@@ -18,6 +18,14 @@ use crate::{Game, Start};
 /// Opens an address with whatever program is registered for it, or runs a program. Says why when nothing took it.
 pub trait Opener {
     fn open(&mut self, start: &Start) -> Result<(), String>;
+
+    /// An opener of its own, the same as this one, that a thread may keep: for an installer whose own route answers
+    /// later, on a thread of its own, and falls back to the store's way only then (Steam's client over its
+    /// debugger, which may not answer). None (the default) where there is none to give: the installer then takes
+    /// the store's way at once.
+    fn detached(&self) -> Option<Box<dyn Opener + Send>> {
+        None
+    }
 }
 
 /// What a store's installer can do on this machine, as it is now: each false where the route it would take is not

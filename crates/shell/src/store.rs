@@ -21,23 +21,48 @@ pub use model::Opener as Addresses;
 /// is taken on a thread of its own, `crate::steam`, which says which in a line of its own).
 struct Saying<'a> {
     addresses: &'a mut dyn Addresses,
-    store: &'a str,
-    what: &'a str,
+    store: &'static str,
+    what: &'static str,
     game: &'a Game,
+}
+
+/// What [`Saying`] says, for what it opened.
+fn say(store: &str, what: &str, name: &str, start: &Start, opened: &Result<(), String>) {
+    match (opened, start) {
+        (Ok(()), Start::Program { args, .. }) if crate::steam::is_steam(start).is_some() => {
+            let command = source_steam::cef::console_command(args).unwrap_or_else(|| args.join(" "));
+            eprintln!("store: asking {store} to {what} {name}: {command}");
+        }
+        (Ok(()), _) => eprintln!("store: asked {store} to {what} {name}: {start}"),
+        (Err(_), _) => eprintln!("store: nothing took {start}: {name} is as it was"),
+    }
 }
 
 impl Opener for Saying<'_> {
     fn open(&mut self, start: &Start) -> Result<(), String> {
         let opened = self.addresses.open(start);
-        let (store, what, name) = (self.store, self.what, &self.game.name);
-        match (&opened, start) {
-            (Ok(()), Start::Program { args, .. }) if crate::steam::is_steam(start).is_some() => {
-                let command = source_steam::cef::console_command(args).unwrap_or_else(|| args.join(" "));
-                eprintln!("store: asking {store} to {what} {name}: {command}");
-            }
-            (Ok(()), _) => eprintln!("store: asked {store} to {what} {name}: {start}"),
-            (Err(_), _) => eprintln!("store: nothing took {start}: {name} is as it was"),
-        }
+        say(self.store, self.what, &self.game.name, start, &opened);
+        opened
+    }
+
+    fn detached(&self) -> Option<Box<dyn Opener + Send>> {
+        let addresses = self.addresses.detached()?;
+        Some(Box::new(Detached { addresses, store: self.store, what: self.what, name: self.game.name.clone() }))
+    }
+}
+
+/// [`Saying`], for a thread to keep: an installer's fallback that is taken later (Steam's client not answering).
+struct Detached {
+    addresses: Box<dyn Opener + Send>,
+    store: &'static str,
+    what: &'static str,
+    name: String,
+}
+
+impl Opener for Detached {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
+        let opened = self.addresses.open(start);
+        say(self.store, self.what, &self.name, start, &opened);
         opened
     }
 }
@@ -151,6 +176,10 @@ impl Addresses for SystemAddresses {
     fn open(&mut self, _start: &Start) -> Result<(), String> {
         Err("only Windows opens anything".into())
     }
+
+    fn detached(&self) -> Option<Box<dyn Opener + Send>> {
+        Some(Box::new(SystemAddresses))
+    }
 }
 
 /// The app user model ID in a `shell:AppsFolder\<AUMID>` address, as Windows reads it: any case.
@@ -207,6 +236,10 @@ impl ProgramAddresses {
 impl Addresses for ProgramAddresses {
     fn open(&mut self, start: &Start) -> Result<(), String> {
         SystemAddresses.open(&self.through(start))
+    }
+
+    fn detached(&self) -> Option<Box<dyn Opener + Send>> {
+        Some(Box::new(self.clone()))
     }
 }
 

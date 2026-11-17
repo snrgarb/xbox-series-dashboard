@@ -121,6 +121,8 @@ const MIGRATIONS: &[&str] = &[
     profiles::MIGRATION,
     // 7: the games' achievements (docs/achievements.md).
     achievements::MIGRATION,
+    // 8: the Queue's extras' items (#188).
+    queue::ITEMS_MIGRATION,
 ];
 
 /// What a sync changed.

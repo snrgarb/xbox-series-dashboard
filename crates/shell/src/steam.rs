@@ -134,7 +134,8 @@ mod win {
         let running = steam_running(folder);
         let command = cef::console_command(args).unwrap_or_else(|| args.join(" "));
         if running.is_some() && cef::enabled(folder) {
-            match cef::evaluate(&cef::PORTS, cef::SHARED, &cef::console_script(&command)) {
+            // A real Steam's ports, or the stand-in's own (never the other's).
+            match cef::evaluate(&cef::ports(folder), cef::SHARED, &cef::console_script(&command)) {
                 Ok(Evaluated::Value(value)) if value == "asked" => {
                     log(&format!("asked Steam through its console over its CEF debugger: {command}; no window raised"));
                     return;

@@ -10,15 +10,22 @@
 //!       Dashboard asks the real one (`source_steam::command`): says in the log what it was asked (`steam: asked to
 //!       install <appid>: ...`), and puts the game in its queue, Queued (its app manifest written as Steam writes
 //!       one), or uninstalls it (its manifest removed). Nothing is downloaded or deleted.
-//!   steam.exe -silent +standin_pause <appid> | +standin_resume <appid> | +standin_cancel <appid>
-//!       The same client asked to pause, resume or cancel an install under way, which only the stand-in takes
-//!       (`source_steam::fixture::steer_command`, #170; make-steam marks its folder so, `STANDIN_CLIENT`): its
-//!       manifest rewritten paused or downloading at the bytes it has, or removed (`steam: asked to pause
-//!       <appid>: ...`). Exits 1, having done nothing, when nothing of the app's is under way.
+//!   steam.exe --standin-client [--seconds <n>]
+//!       The same client, running (for <n> seconds, 1800 without), as the Dashboard sees a running Steam by its
+//!       process. While `.cef-enable-remote-debugging` is in its folder as it starts it opens its CEF debugger
+//!       (`source_steam::debugger`, #171) on a free port of 127.0.0.1, written down in `standin-cef-port.txt` (never
+//!       8080 or 8081, where a real Steam's may be): Steam's own calls to install, uninstall, pause, resume and cancel
+//!       are taken there and done to the fake's files (`steam: CEF: asked to pause <appid>: ...`), and its download
+//!       overview given, as the real client's are. make-steam marks its folder so (`STANDIN_CLIENT`), which is how
+//!       the Dashboard knows to ask that port and no other.
 //!   standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
 //!       Moves the fake Steam's install of <appid> at <dir> along, by rewriting its app manifest as Steam's client
 //!       would (`fixture::write_progress`): waiting, so many bytes of so many downloaded, paused there, installed
 //!       (with this program as its `game.exe`), or dropped (the manifest gone).
+//!   standin steam-workshop <dir> <appid> <done>/<items>
+//!       Writes the fake Steam's Workshop record of <appid> (#188, `fixture::write_workshop`): <items> subscribed
+//!       items, <done> of them in their folders under `steamapps/workshop/content/<appid>`, and Steam still fetching
+//!       until all are in. A test calls it again and again to fill the folder over time.
 //!   standin steam-change <dir> add-game | played <appid> <minutes>
 //!       Changes the fake Steam at <dir>, written by make-steam without --full-shelf, as Steam's own files change
 //!       while the Dashboard runs (`fixture::change`): add-game makes Paper Lighthouse (9100800) the user's,
@@ -184,10 +191,11 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
                      [--no-previous] [--seconds <n>]
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
+       standin steam-workshop <dir> <appid> <done>/<items>
        standin unlock-achievement <dir> <key>
        standin steam-change <dir> add-game | played <appid> <minutes>
        steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>
-       steam.exe -silent +standin_pause <appid> | +standin_resume <appid> | +standin_cancel <appid>";
+       steam.exe --standin-client [--seconds <n>]";
 
 /// The file beside this program that names the fakes `open-address` takes addresses for.
 const HANDLERS_FILE: &str = "handlers.json";
@@ -401,7 +409,7 @@ fn make_steam(dir: &Path, json: Option<&Path>, mut spec: Fixture) -> Result<(), 
     let client = dir.join(STEAM_EXE);
     std::fs::copy(&exe, &client).map_err(|e| format!("{}: {e}", client.display()))?;
     let marker = dir.join(fixture::STANDIN_CLIENT);
-    std::fs::write(&marker, "the stand-in Steam: takes +standin_pause, +standin_resume and +standin_cancel\n")
+    std::fs::write(&marker, "the stand-in Steam: its CEF debugger's port is in standin-cef-port.txt while it is up\n")
         .map_err(|e| format!("{}: {e}", marker.display()))?;
     for game in spec.games.iter().filter(|g| g.installed) {
         // Each game's window is titled with its name, so a test can tell which one is in front.
@@ -469,29 +477,22 @@ fn steam_install(root: &Path, appid: u32, progress: fixture::Progress) -> Result
 /// Dashboard gives the real one, `-silent +app_install <appid>` or `-silent -console +app_uninstall <appid>`, it
 /// puts the game in its queue, Queued (its manifest written as Steam writes one as it takes an install on), or
 /// uninstalls it (its manifest removed); a test then moves the install along with `steam-install`.
+/// Given `--standin-client [--seconds <n>]` it is the client running: it stays up (for <n> seconds, 1800 without),
+/// and while `.cef-enable-remote-debugging` is in its folder as it starts, opens its CEF debugger
+/// (`source_steam::debugger`), which takes Steam's own calls (#171).
 fn steam_client(args: &[String]) -> i32 {
     let root = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.to_path_buf()));
     let asked = |command: &str| {
         let at = args.iter().position(|arg| arg.eq_ignore_ascii_case(command))?;
         args.get(at + 1)?.parse::<u32>().ok().filter(|&id| id != 0)
     };
-    if let Some((steer, appid)) = fixture::steer_asked(args) {
-        note(&format!("steam: asked to {} {appid}: {}", steer.verb(), args.join(" ")));
+    if args.first().is_some_and(|arg| arg == "--standin-client") {
         let Some(root) = root else { return 1 };
-        let steered = fixture::steered(&root, appid, steer).and_then(|progress| {
-            fixture::write_progress(&root, appid, progress)?;
-            Ok(progress)
-        });
-        return match steered {
-            Ok(progress) => {
-                note(&format!("steam: {appid} is {progress:?}"));
-                0
-            }
-            Err(e) => {
-                note(&format!("steam: {}: {e}", root.display()));
-                1
-            }
+        let seconds = match args.get(1..) {
+            Some([flag, n]) if flag == "--seconds" => n.parse().unwrap_or(1800),
+            _ => 1800,
         };
+        return running_client(&root, seconds);
     }
     let (verb, appid, progress) = match (asked("+app_install"), asked("+app_uninstall")) {
         (Some(appid), _) => ("install", appid, fixture::Progress::Queued),
@@ -510,6 +511,39 @@ fn steam_client(args: &[String]) -> i32 {
             1
         }
     }
+}
+
+/// The stand-in Steam client running from the fake at `root` for `seconds`: its debugger open while the debugger's
+/// file is there as it starts, as the real client's is. The Dashboard knows it is running by its process.
+fn running_client(root: &Path, seconds: u64) -> i32 {
+    let debugger = if source_steam::cef::enabled(root) {
+        match source_steam::debugger::Debugger::start(root, |line| note(&format!("steam: {line}"))) {
+            Ok(debugger) => {
+                note(&format!("steam: running, its CEF debugger on 127.0.0.1:{}", debugger.port()));
+                Some(debugger)
+            }
+            Err(e) => {
+                note(&format!("steam: running, but its CEF debugger could not be opened: {e}"));
+                None
+            }
+        }
+    } else {
+        note(&format!("steam: running, its CEF debugger off (no {} in its folder)", source_steam::cef::FILE));
+        None
+    };
+    std::thread::sleep(std::time::Duration::from_secs(seconds));
+    drop(debugger);
+    note("steam: the running client stops");
+    0
+}
+
+/// `standin steam-workshop <dir> <appid> <done>/<items>`: the fake Steam's Workshop record of the app with that many
+/// of its items in (`fixture::write_workshop`).
+fn steam_workshop(root: &Path, appid: u32, done: u32, items: u32) -> Result<(), String> {
+    let root = std::path::absolute(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    fixture::write_workshop(&root, appid, done, items).map_err(|e| format!("{}: {e}", root.display()))?;
+    note(&format!("steam-workshop: {appid} {done} of {items} items at {}", root.display()));
+    Ok(())
 }
 
 /// Writes the fake `store` (ea, ubisoft, battlenet or xbox) at `dir`, with this program as every installed game's
@@ -910,6 +944,21 @@ fn run(args: &[String]) -> i32 {
             }
         },
         Some("wake") => wake(),
+        Some("steam-workshop") => {
+            let counts = |text: &str| {
+                let (done, items) = text.split_once('/')?;
+                Some((done.parse::<u32>().ok()?, items.parse::<u32>().ok()?))
+            };
+            let parsed = match &args[1..] {
+                [dir, appid, of] => appid.parse::<u32>().ok().zip(counts(of)).map(|got| (Path::new(dir), got)),
+                _ => None,
+            };
+            let Some((dir, (appid, (done, items)))) = parsed else {
+                note(USAGE);
+                return 2;
+            };
+            made("steam-workshop", dir, steam_workshop(dir, appid, done, items))
+        }
         Some("steam-install") => {
             let parsed = match &args[1..] {
                 [root, appid, rest @ ..] => appid.parse::<u32>().ok().zip(progress_of(rest)).map(|got| (root, got)),

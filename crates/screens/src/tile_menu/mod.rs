@@ -493,7 +493,8 @@ mod tests {
         assert_eq!(steerable(&paused, 7, Steer::Cancel), effect(Steer::Cancel));
         // Gone from the Queue, or installed with its extras coming in: nothing.
         assert_eq!(steerable(&Library::default(), 7, Steer::Cancel), None);
-        assert_eq!(steerable(&at(model::InstallState::Extras { done: 0, total: 0 }), 7, Steer::Cancel), None);
+        let extras = model::InstallState::Extras { items_done: 0, items: 0, done: 0, total: 0 };
+        assert_eq!(steerable(&at(extras), 7, Steer::Cancel), None);
     }
 
     /// docs/spec/tile-menu.md, section 3.1.

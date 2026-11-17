@@ -123,24 +123,34 @@ struct Row {
     state: InstallState,
 }
 
-fn state_of(kind: &str, done: i64, total: i64) -> InstallState {
+/// The state a row's columns say: its kind, its bytes, and an extras' items.
+fn state_of(kind: &str, done: i64, total: i64, items_done: i64, items: i64) -> InstallState {
     let (done, total) = (done.max(0) as u64, total.max(0) as u64);
+    let count = |n: i64| n.clamp(0, u32::MAX as i64) as u32;
     match kind {
         "downloading" => InstallState::Downloading { done, total },
         "paused" => InstallState::Paused { done, total },
-        "extras" => InstallState::Extras { done, total },
+        "extras" => InstallState::Extras { items_done: count(items_done), items: count(items), done, total },
         _ => InstallState::Queued,
     }
 }
 
-fn columns(state: InstallState) -> (&'static str, i64, i64) {
+/// The columns a state is kept in: its kind, its bytes, and an extras' items (0 for the rest).
+fn columns(state: InstallState) -> (&'static str, i64, i64, i64, i64) {
     match state {
-        InstallState::Queued => ("queued", 0, 0),
-        InstallState::Downloading { done, total } => ("downloading", done as i64, total as i64),
-        InstallState::Paused { done, total } => ("paused", done as i64, total as i64),
-        InstallState::Extras { done, total } => ("extras", done as i64, total as i64),
+        InstallState::Queued => ("queued", 0, 0, 0, 0),
+        InstallState::Downloading { done, total } => ("downloading", done as i64, total as i64, 0, 0),
+        InstallState::Paused { done, total } => ("paused", done as i64, total as i64, 0, 0),
+        InstallState::Extras { items_done, items, done, total } => {
+            ("extras", done as i64, total as i64, items_done as i64, items as i64)
+        }
     }
 }
+
+/// Migration 8: an extras' items, done and in all (#188).
+pub const ITEMS_MIGRATION: &str = "-- Of a game installed whose extras are coming in: its items in, and in all.
+    ALTER TABLE queue ADD COLUMN items_done INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE queue ADD COLUMN items INTEGER NOT NULL DEFAULT 0;";
 
 /// Whether a change of state is worth a line in the log: another kind, or another whole percent.
 fn moved(was: InstallState, now: InstallState) -> bool {
@@ -172,7 +182,8 @@ impl Database {
 
     fn rows(&self) -> Result<Vec<Row>> {
         let mut rows = self.conn.prepare(&format!(
-            "SELECT queue.game, source, gone, started, asked, reported, state, done, total, source IN {}
+            "SELECT queue.game, source, gone, started, asked, reported, state, done, total, source IN {},
+                    items_done, items
              FROM queue JOIN games ON games.id = queue.game",
             crate::launchers::OFF
         ))?;
@@ -185,7 +196,7 @@ impl Database {
                 started: row.get::<_, i64>(3)?.max(0) as u64,
                 asked: row.get::<_, Option<i64>>(4)?.map(|asked| asked.max(0) as u64),
                 reported: row.get(5)?,
-                state: state_of(&row.get::<_, String>(6)?, row.get(7)?, row.get(8)?),
+                state: state_of(&row.get::<_, String>(6)?, row.get(7)?, row.get(8)?, row.get(10)?, row.get(11)?),
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -212,19 +223,21 @@ impl Database {
     }
 
     fn join(&self, game: i64, now: u64, asked: bool, state: InstallState) -> Result<()> {
-        let (kind, done, total) = columns(state);
+        let (kind, done, total, items_done, items) = columns(state);
         self.conn.execute(
-            "INSERT INTO queue (game, started, asked, reported, state, done, total) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![game, now as i64, asked.then_some(now as i64), !asked, kind, done, total],
+            "INSERT INTO queue (game, started, asked, reported, state, done, total, items_done, items)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![game, now as i64, asked.then_some(now as i64), !asked, kind, done, total, items_done, items],
         )?;
         Ok(())
     }
 
     fn set_state(&self, game: i64, state: InstallState) -> Result<()> {
-        let (kind, done, total) = columns(state);
+        let (kind, done, total, items_done, items) = columns(state);
         self.conn.execute(
-            "UPDATE queue SET reported = 1, state = ?2, done = ?3, total = ?4 WHERE game = ?1",
-            params![game, kind, done, total],
+            "UPDATE queue SET reported = 1, state = ?2, done = ?3, total = ?4, items_done = ?5, items = ?6
+             WHERE game = ?1",
+            params![game, kind, done, total, items_done, items],
         )?;
         Ok(())
     }
@@ -571,6 +584,10 @@ pub fn describe(change: &Change, name: &dyn Fn(i64) -> String) -> String {
         Change::State { game, state } => {
             let how = match (state, state.bytes(), state.percent()) {
                 (InstallState::Queued, ..) => "queued".to_string(),
+                (&InstallState::Extras { items_done, items, done, total }, ..) => {
+                    let bytes = (total > 0).then(|| format!(", {} of {total} bytes", done.min(total)));
+                    format!("{}, {items_done} of {items} items{}", kind(*state), bytes.unwrap_or_default())
+                }
                 (state, Some((_, total)), Some(percent)) => format!("{}, {percent}% of {total} bytes", kind(*state)),
                 (state, ..) => kind(*state).to_string(),
             };
@@ -592,7 +609,7 @@ pub fn describe(change: &Change, name: &dyn Fn(i64) -> String) -> String {
 fn kind(state: InstallState) -> &'static str {
     match state {
         InstallState::Paused { .. } => "paused",
-        InstallState::Extras { .. } => "fetching extras",
+        InstallState::Extras { .. } => "downloading Workshop content",
         _ => "downloading",
     }
 }
@@ -909,7 +926,7 @@ mod tests {
         world.fake.report(&[("1", InstallState::Downloading { done: 10, total: 10 })]);
         world.poll(1);
         // Steam's manifest says installed; its Workshop items are still coming.
-        let extras = InstallState::Extras { done: 0, total: 0 };
+        let extras = InstallState::Extras { items_done: 1, items: 4, done: 0, total: 0 };
         world.fake.set_installed("1", true);
         world.fake.report(&[("1", extras)]);
         let polled = world.poll(2);
@@ -920,8 +937,18 @@ mod tests {
         let snapshot = world.db.snapshot().unwrap();
         assert_eq!((snapshot.queue.status(moss), snapshot.queue.get(moss).map(|e| e.state)), (None, Some(extras)));
         assert_eq!(snapshot.queue.installed.first().map(|done| done.game), Some(moss));
-        // Still fetching: nothing more.
+        // Still fetching, as it was: nothing more, its items kept as they were said.
         assert!(world.poll(3).changes.is_empty());
+        // More items in: the row moves on, and the log says so.
+        let more = InstallState::Extras { items_done: 3, items: 4, done: 300, total: 400 };
+        world.fake.report(&[("1", more)]);
+        assert_eq!(world.poll(3).changes, [Change::State { game: moss, state: more }]);
+        assert_eq!(world.db.snapshot().unwrap().queue.get(moss).map(|e| e.state), Some(more));
+        let name = |_| "Moss".to_string();
+        assert_eq!(
+            describe(&Change::State { game: moss, state: more }, &name),
+            "queue: Moss downloading Workshop content, 3 of 4 items, 300 of 400 bytes"
+        );
         // Done: it leaves, with no second Toast.
         world.fake.report(&[]);
         let polled = world.poll(4);
@@ -930,12 +957,14 @@ mod tests {
         let snapshot = world.db.snapshot().unwrap();
         assert!(snapshot.queue.is_empty());
         assert_eq!(snapshot.queue.installed.first().map(|done| done.game), Some(moss));
-        let name = |_| "Moss".to_string();
         assert_eq!(
             describe(&Change::Playable(moss), &name),
             "queue: Moss installed; its store is still fetching more for it"
         );
-        assert_eq!(describe(&Change::State { game: moss, state: extras }, &name), "queue: Moss fetching extras");
+        assert_eq!(
+            describe(&Change::State { game: moss, state: extras }, &name),
+            "queue: Moss downloading Workshop content, 1 of 4 items"
+        );
     }
 
     #[test]

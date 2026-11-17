@@ -89,10 +89,13 @@ the TV PC, not for here.
   and writes the game's app manifest as Steam does as it takes an install on (queued), or removes it (uninstalled). A
   test then moves the install along as Steam's download would, by rewriting that manifest: **`standin steam-install
   <root> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop`** (done copies the stand-in game in as
-  the game's `game.exe`). Asked `-silent +standin_pause | +standin_resume | +standin_cancel <appid>` (the stand-in's
-  own commands, which the Dashboard gives it for Pause, Resume and Cancel in the Queue, `make-steam` marking its
-  folder with `standin-client.txt`), it rewrites the manifest paused or downloading at the bytes it has, or removes it.
-  Nothing is ever downloaded, and nothing but the fake's own files is touched; it is the same on
+  the game's `game.exe`). Run as **`steam.exe --standin-client [--seconds <n>]`** with `.cef-enable-remote-debugging`
+  in its folder (`make-steam` marks the folder `standin-client.txt`), it stays up as Steam's client does and opens a
+  stand-in CEF debugger on a free port, written in `standin-cef-port.txt`: the Dashboard asks it Steam's own calls
+  (#171: install into a library, pause, resume, cancel, uninstall with no prompt; docs/sources.md, "Steam's own
+  calls") over it exactly as it asks the real one, and it does each to the fake's files (`steam: CEF: asked to pause
+  <appid>: <appid> is Paused ...`). **`standin steam-workshop <root> <appid> <done>/<items>`** writes the fake's
+  Workshop record for the app and fills its content folders to `<done>` (#188). Nothing is ever downloaded, and nothing but the fake's own files is touched; it is the same on
   the VM and in safe mode, no handler being involved.
 
 - **`standin toast <text>`** posts a notification to the running Dashboard, which lists it and shows its Toast: a
@@ -197,10 +200,11 @@ from the hub and the Tile menu, the fake install moved along by `standin steam-i
 tiles, the hub's Queue action, Downloads' count, Manage Queue from all three ways in (the hub, Downloads, Manage's
 box) and B back to each with focus restored, its row following the bytes, View on it, an install started in the
 client, one dropped, one done with Manage Queue up and focus going with it to Recently installed, and Uninstall seen
-through), `queue-steer` (#170: an install paused, resumed and cancelled from a queued game's menu in Manage Queue, its
-question declined once, the stand-in Steam taking each as `steam.exe -silent +standin_pause | +standin_resume |
-+standin_cancel <appid>`; the fake named with `--steam` on the VM too, as only a named install is taken for the
-stand-in), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
+through), `queue-steer` (#170, #171, #188: through the stand-in Steam's CEF debugger and Steam's own calls, an install paused,
+resumed and cancelled from a queued game's menu in Manage Queue, its question declined once; a second install to the
+end with its Workshop items coming in, Play offered and the Ready to play Toast meanwhile, the row reading Downloading
+Workshop content until all are in; and an uninstall with no prompt of Steam's; the fake named with `--steam` on the
+VM too, as only a named install is taken for the stand-in), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
 Home, in Games a screenful at a time and in Full library, a Game hub of each store's, Search finding two stores' games
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
 each), `launchers` (Settings > Launchers on the fake Steam and Epic, docs/spec/launchers.md: Steam switched off with

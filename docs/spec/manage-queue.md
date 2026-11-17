@@ -43,7 +43,7 @@ One row per Queue entry, the current download first and then the rest in the Que
 | Text column | 36 right of the cover, 40 short of the row's end, from 38 down |
 | Title | Segoe UI 26 **bold**, white, one line, ellipsis, 160 short of the column's end |
 | Speed | Right-aligned on the title's line: "106 Mbps", "323 Kbps"; decimal units, whole (C/ExtensionCore.Queue.cs `SpeedOf`) |
-| State | Under the title: "Installing..." while it downloads, "Queued" while it waits its turn or is paused (the port reads a paused one "Paused", section 8) |
+| State | Under the title: "Installing..." while it downloads, "Queued" while it waits its turn or is paused (the port reads a paused one "Paused", section 8, and a game installed whose Workshop items are coming in "Downloading Workshop content", section 9) |
 | Amount line | 34 under the state: "Network: {amount}" at the left, only when there is an amount; the share right-aligned, "1.9%" |
 | Amount | "67.80 MB of 3.55 GB": two decimals, a GB being 2^30 bytes, MB below 1 GB, TB from 1024 GB, the unit chosen by the value as rounded (C/MyGamesState.cs:300) |
 | Bar | 12 under the amount line, 5 tall, across the column: track `#FF4A4A4A`, the share filled white |
@@ -135,7 +135,7 @@ manner as remembered, the wording guessed where marked.
    picture); "Cancel installation" guessed to match.
 2. **Only where the store can.** Each row shows only where the game's store can be asked it: its installer's
    `Can` (docs/sources.md "Installs"), which the Queue's follower gives each entry (`Queued::can`). Pause and Resume
-   go together. A store that cannot (the real Steam until #171, every other store until its ticket) has the
+   go together. A store that cannot (Steam with its CEF debugger off, every other store until its ticket) has the
    Bundle's menu. A game installed whose extras are still coming in (#188) has none of them.
 3. **What they do.** Pause and Resume close the menu and ask the store (`Effect::Steer`); the row follows what the
    store then reports, a second or so later. Cancel asks first, in the menu's place as Uninstall does: "Cancel
@@ -147,7 +147,31 @@ manner as remembered, the wording guessed where marked.
 4. **A paused row** reads **Paused**, the console's word, with its amount and share as far as it got and the bar
    filled to that; no speed. (The Bundle reads it Queued, 0.0%, which said nothing true once the user can pause from
    here.) Its tiles still read Queued, as the Bundle's. The focus log: `Row(1) of <game>; ...; Paused 25.0%`.
-5. **The log.** `store: asking Steam to pause <game>: <command>` as for install; `store: Steam can't pause <game>'s
-   install from here` where it cannot; then the Queue's own `queue: <game> paused, 50% of 100 bytes`.
+5. **The log.** Steam is asked through its own client (#171): `steam client: pause <appid>: asking Steam's client
+   over its CEF debugger ...`, a line a call, then `steam client: pause <appid>: Steam's client took it` or `not
+   taken: <why>` (docs/sources.md, "Steam's own calls"); `store: Steam can't pause <game>'s install from here` where
+   it cannot; then the Queue's own `queue: <game> paused, 50% of 100 bytes`.
 6. **Which folder.** An install goes to its store's default folder (`Installer::folders`, `default_folder`): the
-   question where there is more than one is Settings > Storage's, #179.
+   question where there is more than one is Settings > Storage's, #179. Steam's default is the library Steam itself
+   marks default, asked of its client at the install.
+
+## 9. Workshop content (decided in #188)
+
+Neither the Bundle nor the console has this: a Steam game whose own files are in while Steam is still fetching the
+Workshop items the account subscribes to (Garry's Mod on the TV PC, #188: 3.9 GB of its own, then 160 items).
+
+1. **The game is installed.** Play is offered as soon as its own files are in, and the Ready to play Toast fires then
+   (the user's decision on #188); its tiles read it installed. Steam itself lets it be played.
+2. **Its row stays** in Installing until Steam has every item, and then leaves with nothing more said (no second
+   Toast). It is ordered with the downloads, first.
+3. **What the row reads.** The state line: **Downloading Workshop content**. The amount line, in the place of
+   "Network: ...": the items in of those subscribed to, `3 of 12 items`, then the bytes where Steam's record gives a
+   size for every item, `3 of 12 items, 82.00 MB of 1.20 GB`. The share at its right and the bar: by the bytes where
+   known, else by the items. **No speed**, ever: Steam's speed is not known to be the items', and "0 Kbps" said
+   nothing true of them (#188). With no item count known: the state line alone, the bar's empty track.
+4. **Its menu** is an installed game's: no Pause, Resume or Cancel.
+5. **The focus log**: `Row(0) of <game>; ...; Downloading Workshop content 3 of 12 items 25.0%`. The Queue's own:
+   `queue: <game> installed; its store is still fetching more for it` as it becomes playable, then `queue: <game>
+   downloading Workshop content, 3 of 12 items` (and `, <done> of <total> bytes` where known) at each whole percent,
+   and `queue: <game> has all its store was fetching for it` as it leaves.
+6. **The nav's foot** (section 6) shows only a download, not this.

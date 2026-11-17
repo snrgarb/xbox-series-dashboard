@@ -199,11 +199,11 @@ impl ManageQueue {
         self.counts = (rows.len(), covers.len());
         self.row = match self.focus {
             Focus::Row(i) => {
+                // Its state, a Workshop download's items, and its share: `Downloading Workshop content 3 of 12
+                // items 25.0%`.
                 let figures = Figures::of(&rows[i]);
-                Some(match &figures.percent {
-                    Some(percent) => format!("{} {percent}", figures.state),
-                    None => figures.state.to_string(),
-                })
+                let words = [Some(figures.state.to_string()), figures.items, figures.percent];
+                Some(words.into_iter().flatten().collect::<Vec<_>>().join(" "))
             }
             _ => None,
         };
@@ -402,7 +402,8 @@ impl Page for ManageQueue {
 
 /// A game in the Queue: its cover at the row's left; its name, bold, with its speed at the right; its state; then
 /// how much is down of the whole with the share at the right, over a thin white bar on a dim track filled to that
-/// share. Queued, only the share and the empty track.
+/// share. Queued, only the share and the empty track. Workshop content coming in (#188): the items in, and their
+/// bytes where known, in the amount's place: "3 of 12 items" or "3 of 12 items, 82.00 MB of 1.20 GB".
 fn row(ui: &mut Ui, rect: Rect, game: Option<&Game>, figures: &Figures) {
     ui.fill(rect, BOX, 0.0);
     let cover = Rect::new(rect.x, rect.y, ROW, ROW);
@@ -428,9 +429,14 @@ fn row(ui: &mut Ui, rect: Rect, game: Option<&Game>, figures: &Figures) {
     let percent = figures.percent.as_deref().unwrap_or("");
     let percent_width = ui.measure(&TEXT, percent).width;
     right_aligned(ui, third, percent);
-    if let Some(amount) = &figures.amount {
-        let network = format!("Network: {amount}");
-        ui.paragraph(line(third, percent_width), &network, &TEXT, HAlign::Left, VAlign::Top, 1);
+    let amount = match (&figures.items, &figures.amount) {
+        (Some(items), Some(amount)) => Some(format!("{items}, {amount}")),
+        (Some(items), None) => Some(items.clone()),
+        (None, Some(amount)) => Some(format!("Network: {amount}")),
+        (None, None) => None,
+    };
+    if let Some(amount) = amount {
+        ui.paragraph(line(third, percent_width), &amount, &TEXT, HAlign::Left, VAlign::Top, 1);
     }
     let bar = Rect::new(left, third + LINE + BAR_DOWN, right - left, BAR);
     ui.fill(bar, TRACK, 0.0);

@@ -11,12 +11,15 @@
 //!   and its hidden games (`collections`).
 //!
 //! [`Steam`] is the source the library reads (`model::Source`): it finds the install, reads it with [`load`],
-//! starts a game through Steam's own `steam://` address, installs and uninstalls one as the Bundle does, without
-//! Steam's windows ([`command`]; the shell types it into Steam's console over its CEF debugger where the user has
-//! that on, [`cef`]), all behind its `model::Installer`, and reports the installs Steam has under way from its app manifests ([`installs`]), how far
-//! each has got from Steam's own download overview where the debugger is on ([`overview`]) and else counted live
-//! ([`live`]), none said done while Steam is still at it ([`follow`]). [`probe`] is `--log-queue-sources`' look at
-//! every candidate count.
+//! starts a game through Steam's own `steam://` address, and installs, uninstalls, pauses, resumes and cancels
+//! through its `model::Installer`: Steam's own client calls over its CEF debugger where the user has that on
+//! ([`client`], #171), else as the Bundle does, without Steam's windows ([`command`]; the shell types it into
+//! Steam's console over the debugger where it can, [`cef`]). It reports the installs Steam has under way from its
+//! app manifests ([`installs`]), how far each has got from Steam's own download overview where the debugger is on
+//! ([`overview`]) and else counted live ([`live`]), none said done while Steam is still at it ([`follow`]), and a game
+//! installed whose Workshop items are still coming in as such, with how many are in ([`installs::workshop`],
+//! #188). [`probe`] is `--log-queue-sources`' look at every candidate count. [`debugger`] is the end-to-end tests'
+//! stand-in for the client's debugger.
 // Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
 // (crates/log-line). Defined before the modules, so they all take it rather than std's.
 #[allow(unused_macros)]
@@ -29,7 +32,9 @@ macro_rules! eprintln {
 pub mod achievements;
 pub mod appcache;
 pub mod cef;
+pub mod client;
 pub mod collections;
+pub mod debugger;
 pub mod fixture;
 pub mod follow;
 pub mod installs;
@@ -77,11 +82,30 @@ impl Steam {
         self.root.clone().or_else(find_steam_root)
     }
 
-    /// Whether the client is the end-to-end tests' stand-in Steam (`fixture::STANDIN_CLIENT` in a named install),
-    /// the one client that takes Pause, Resume and Cancel until the real Steam's are built (#171). Never so for
-    /// the install the registry names.
-    fn standin(&self) -> bool {
-        self.root.as_ref().is_some_and(|root| root.join(fixture::STANDIN_CLIENT).is_file())
+    /// The ports of the client's debugger, where the user has it on (`cef::enabled`) and there is a port to ask
+    /// (`cef::ports`: the stand-in's only once its debugger is up): the route for Steam's own calls ([`client`]).
+    /// Whether the client is running with it open is known only by asking.
+    fn debugger(&self) -> Option<Vec<u16>> {
+        let root = self.installed_root()?;
+        let ports = cef::ports(&root);
+        (cef::enabled(&root) && !ports.is_empty()).then_some(ports)
+    }
+
+    /// Asks Steam's client `call` on a thread of its own (the Dashboard's window never waits on its debugger), and
+    /// where it is not taken, opens `fallback` with `open`: Steam's own program, as before #171.
+    fn ask_client(&self, ports: Vec<u16>, call: client::Call, fallback: Option<(Start, Box<dyn Opener + Send>)>) {
+        std::thread::spawn(move || match (client::ask(&ports, &call), fallback) {
+            (client::Outcome::NotTaken(_), Some((start, mut open))) => {
+                client::log(&format!("{}: asking through steam.exe instead", call.what()));
+                if let Err(why) = open.open(&start) {
+                    client::log(&format!("{}: steam.exe could not be asked either: {why}", call.what()));
+                }
+            }
+            (client::Outcome::NotTaken(_), None) => {
+                client::log(&format!("{}: nothing else can do it: the Queue stays as it is", call.what()));
+            }
+            _ => {}
+        });
     }
 
     /// The install's root, unless it is a named folder left empty: a machine with no Steam, as a test names one so
@@ -165,15 +189,20 @@ impl Source for Steam {
         let busy = !found.is_empty() || follow.busy();
         let writes = if busy { live::writes(&root) } else { None };
         // Steam's own word, where it can be had: its debugger opened and its client running.
-        let overview = (writes.is_some() && cef::enabled(&root)).then(overview::read).and_then(Result::ok);
+        let read_overview = writes.is_some() && cef::enabled(&root);
+        let overview = read_overview.then(|| overview::read(&cef::ports(&root))).and_then(Result::ok);
         let dirs = steamapps_dirs(&root);
-        let mut found = follow.look(found, overview.as_ref(), writes, &updating, self.started.elapsed().as_secs_f64());
+        let workshop = |appid| installs::workshop_pending(&dirs, appid);
+        let at = self.started.elapsed().as_secs_f64();
+        let mut found = follow.look_with_workshop(found, overview.as_ref(), writes, &updating, &workshop, at);
         // #188: an app held installing while Steam fetches the Workshop items the account subscribes to is
-        // installed and playable; only its extras are still coming in. Their progress is #188's to read.
+        // installed and playable; only its extras are still coming in, read from its Workshop record and their
+        // folders. No speed: Steam's is not known to be theirs, and 0 would say nothing true.
         for install in &mut found {
             let held = install.source_id.parse().ok().filter(|&appid| follow.held(appid));
-            if held.is_some_and(|appid| installs::workshop_pending(&dirs, appid)) {
-                install.state = model::InstallState::Extras { done: 0, total: 0 };
+            let fetching = held.and_then(|appid| installs::workshop(&dirs, appid)).filter(|w| w.needs_download);
+            if let Some(workshop) = fetching {
+                install.state = workshop.state();
                 install.speed = None;
             }
         }
@@ -190,44 +219,66 @@ impl Source for Steam {
     }
 }
 
-/// Steam's installer: today's route, its console over the CEF debugger where the user has that on, else
-/// `steam.exe -silent` (what [`Source::ask`] gives, which the shell opens without Steam's windows). That route
-/// installs into Steam's default library and uninstalls with no prompt, and can neither choose a folder nor pause,
-/// resume or cancel: those are `SteamClient.Installs` and `.Downloads` over the debugger (#171), and answer
-/// [`Refusal::Unsupported`] until then. The stand-in Steam of the end-to-end tests takes Pause, Resume and Cancel as
-/// commands of its own ([`fixture::steer_command`]).
+/// Steam's installer (#171). Where the user has Steam's CEF debugger on, Steam's own client calls over it
+/// ([`client`]): install into a library, uninstall with no prompt, pause, resume and cancel. Each is asked on a
+/// thread of its own and says in the log what it asked and what came back; an install or uninstall the client does
+/// not take is asked as before, through `steam.exe -silent` (what [`Source::ask`] gives, which the shell opens
+/// without Steam's windows, typing it into the client's console first where it can). With the debugger off that is
+/// the only route: into Steam's default library, and no Pause, Resume or Cancel. The stand-in Steam of the
+/// end-to-end tests answers the same calls on a debugger of its own ([`debugger`]).
 impl Installer for Steam {
     fn can(&self) -> Can {
-        let standin = self.standin();
-        Can { pause: standin, cancel: standin, choose_folder: false, quiet_uninstall: true }
+        let client = self.debugger().is_some();
+        Can { pause: client, cancel: client, choose_folder: client && self.folders().len() > 1, quiet_uninstall: true }
     }
 
-    /// Steam's own library, its default: the console route has no way to name another.
+    /// Steam's libraries, as `libraryfolders.vdf` names them, each by its root (the folder that holds its
+    /// `steamapps`, as Steam's `GetInstallFolders` names it), the Steam folder's own last and taken as Steam's
+    /// default: Steam's own default is its `bIsDefaultFolder`, which only the client says, and an install to the
+    /// default asks the client for that one ([`client::Call::Install`]). Free space is not read.
     fn folders(&self) -> Vec<Folder> {
-        let root = self.installed_root();
-        root.map(|root| vec![Folder { path: root.join("steamapps"), free: None, default: true }]).unwrap_or_default()
+        let Some(root) = self.installed_root() else { return Vec::new() };
+        let dirs = steamapps_dirs(&root);
+        let last = dirs.len().saturating_sub(1);
+        let library = |dir: &Path| dir.parent().map_or_else(|| dir.to_path_buf(), Path::to_path_buf);
+        dirs.iter().enumerate().map(|(at, dir)| Folder { path: library(dir), free: None, default: at == last }).collect()
     }
 
-    /// As the Bundle asks, wherever `folder` says: Steam puts it in its default library.
-    fn install(&self, game: &Game, _folder: Option<&Folder>, open: &mut dyn Opener) -> Result<(), Refusal> {
+    /// Into `folder` through the client where the debugger is on: Steam's own default for the default folder or
+    /// none, the library named for any other. Else, or where the client does not take it, as the Bundle asks:
+    /// Steam puts it in its default library.
+    fn install(&self, game: &Game, folder: Option<&Folder>, open: &mut dyn Opener) -> Result<(), Refusal> {
         let start = self.ask(game, Ask::Install).ok_or(Refusal::Unsupported)?;
-        open.open(&start).map_err(Refusal::Failed)
+        let appid = appid(game).ok_or(Refusal::Unsupported)?;
+        match (self.debugger(), open.detached()) {
+            (Some(ports), Some(detached)) => {
+                let folder = folder.filter(|folder| !folder.default).map(|folder| folder.path.display().to_string());
+                self.ask_client(ports, client::Call::Install { appid, folder }, Some((start, detached)));
+                Ok(())
+            }
+            _ => open.open(&start).map_err(Refusal::Failed),
+        }
     }
 
+    /// Through the client where the debugger is on, else as the Bundle asks: either way with no prompt of Steam's.
     fn uninstall(&self, game: &Game, open: &mut dyn Opener) -> Result<(), Refusal> {
         let start = self.ask(game, Ask::Uninstall).ok_or(Refusal::Unsupported)?;
-        open.open(&start).map_err(Refusal::Failed)
+        let appid = appid(game).ok_or(Refusal::Unsupported)?;
+        match (self.debugger(), open.detached()) {
+            (Some(ports), Some(detached)) => {
+                self.ask_client(ports, client::Call::Uninstall { appid }, Some((start, detached)));
+                Ok(())
+            }
+            _ => open.open(&start).map_err(Refusal::Failed),
+        }
     }
 
-    fn steer(&self, game: &Game, steer: Steer, open: &mut dyn Opener) -> Result<(), Refusal> {
-        if !steer.allowed(self.can()) {
-            return Err(Refusal::Unsupported);
-        }
+    /// Only through the client: `steam.exe` has no word for it.
+    fn steer(&self, game: &Game, steer: Steer, _open: &mut dyn Opener) -> Result<(), Refusal> {
         let appid = appid(game).ok_or(Refusal::Unsupported)?;
-        let exe = self.exe().ok_or_else(|| Refusal::Failed("the stand-in Steam has no steam.exe".into()))?;
-        let args = fixture::steer_command(steer, appid);
-        open.open(&Start::Program { dir: exe.parent().map(Path::to_path_buf), path: exe, args })
-            .map_err(Refusal::Failed)
+        let ports = self.debugger().filter(|_| steer.allowed(self.can())).ok_or(Refusal::Unsupported)?;
+        self.ask_client(ports, client::Call::Steer { appid, steer }, None);
+        Ok(())
     }
 }
 
@@ -673,8 +724,104 @@ mod tests {
         }
     }
 
+    /// An opener a thread can keep, as the shell's are: what it opened, shared.
+    #[derive(Clone, Default)]
+    struct Shared(Arc<Mutex<Vec<String>>>);
+
+    impl Opener for Shared {
+        fn open(&mut self, start: &Start) -> Result<(), String> {
+            self.0.lock().unwrap().push(start.to_string());
+            Ok(())
+        }
+
+        fn detached(&self) -> Option<Box<dyn Opener + Send>> {
+            Some(Box::new(self.clone()))
+        }
+    }
+
     fn steam_game(appid: &str) -> Game {
         Game { source: SOURCE.into(), source_id: appid.into(), ..Game::default() }
+    }
+
+    /// Waits up to five seconds for `done`: the client is asked on a thread of its own.
+    fn soon(done: impl Fn() -> bool) -> bool {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !done() {
+            if std::time::Instant::now() > until {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        true
+    }
+
+    /// The fake Steam at `root`, as `standin make-steam` writes it: marked the stand-in, with a `steam.exe`.
+    fn standin(root: &Path) -> Steam {
+        fixture::write(root, &fixture::Fixture::standard()).unwrap();
+        std::fs::write(root.join("steam.exe"), "").unwrap();
+        std::fs::write(root.join(fixture::STANDIN_CLIENT), "").unwrap();
+        Steam::at(Some(root.to_path_buf()))
+    }
+
+    #[test]
+    fn with_the_debugger_on_steams_own_calls_install_steer_and_uninstall_and_nothing_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let steam = standin(&root);
+        let installer = steam.installer().unwrap();
+        // The debugger's file, but no debugger up yet: no port to ask, so nothing but the old route.
+        std::fs::write(root.join(cef::FILE), "").unwrap();
+        assert_eq!(installer.can(), Can { quiet_uninstall: true, ..Can::NOTHING });
+        let _debugger = debugger::Debugger::start(&root, |_| {}).unwrap();
+        assert_eq!(installer.can(), Can { pause: true, cancel: true, quiet_uninstall: true, choose_folder: false });
+
+        let quiet = "9100040";
+        let game = steam_game(quiet);
+        let state = || installs::under_way(&libraries(&root), &|_| false).first().map(|found| found.1);
+        let opened = Shared::default();
+        let mut open = opened.clone();
+        let folders = installer.folders();
+        assert_eq!(folders.len(), 1);
+        assert!(folders[0].default && folders[0].path == root);
+        installer.install(&game, model::installer::default_folder(&folders), &mut open).unwrap();
+        assert!(soon(|| state() == Some(model::InstallState::Queued)), "{:?}", state());
+        fixture::write_progress(&root, 9_100_040, fixture::Progress::Downloading { done: 25, total: 100 }).unwrap();
+        installer.steer(&game, Steer::Pause, &mut open).unwrap();
+        assert!(soon(|| state() == Some(model::InstallState::Paused { done: 25, total: 100 })));
+        installer.steer(&game, Steer::Resume, &mut open).unwrap();
+        assert!(soon(|| state() == Some(model::InstallState::Downloading { done: 25, total: 100 })));
+        installer.steer(&game, Steer::Cancel, &mut open).unwrap();
+        assert!(soon(|| state().is_none()));
+        // An installed game, uninstalled with no prompt.
+        let installed = steam_game("9100010");
+        assert!(load(&root).unwrap().games.iter().any(|g| g.source_id == "9100010" && g.installed));
+        installer.uninstall(&installed, &mut open).unwrap();
+        assert!(soon(|| !load(&root).unwrap().games.iter().any(|g| g.source_id == "9100010" && g.installed)));
+        assert!(opened.0.lock().unwrap().is_empty(), "steam.exe was asked: {:?}", opened.0.lock().unwrap());
+        // Another store's game is none of Steam's.
+        let other = Game { source: "gog".into(), ..steam_game(quiet) };
+        assert_eq!(installer.steer(&other, Steer::Pause, &mut open), Err(Refusal::Unsupported));
+    }
+
+    #[test]
+    fn a_client_that_does_not_answer_is_asked_through_steam_exe_and_cannot_be_steered() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        let steam = standin(&root);
+        std::fs::write(root.join(cef::FILE), "").unwrap();
+        // A port its debugger wrote down, and nothing listening there.
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        std::fs::write(root.join(cef::STANDIN_PORT), port.to_string()).unwrap();
+        let installer = steam.installer().unwrap();
+        let opened = Shared::default();
+        installer.install(&steam_game("9100040"), None, &mut opened.clone()).unwrap();
+        let exe = root.join("steam.exe").display().to_string();
+        let wanted = format!("{exe} -silent +app_install 9100040");
+        assert!(soon(|| opened.0.lock().unwrap().first() == Some(&wanted)), "{:?}", opened.0.lock().unwrap());
+        // An opener no thread can keep: asked at once, the old way.
+        let mut kept = Kept(Vec::new());
+        installer.uninstall(&steam_game("9100010"), &mut kept).unwrap();
+        assert_eq!(kept.0, [format!("{exe} -silent -console +app_uninstall 9100010")]);
     }
 
     /// Today's route behind the installer: what `ask` gives, opened, into Steam's own library whatever folder.
@@ -685,8 +832,7 @@ mod tests {
         let steam = Steam::at(Some(dir.path().to_path_buf()));
         let installer = steam.installer().expect("Steam has an installer");
         let folders = installer.folders();
-        assert_eq!(folders.len(), 1);
-        assert!(folders[0].default && folders[0].path == dir.path().join("steamapps"));
+        assert_eq!(folders, []);
         let mut kept = Kept(Vec::new());
         installer.install(&steam_game("620"), folders.first(), &mut kept).unwrap();
         installer.uninstall(&steam_game("620"), &mut kept).unwrap();
@@ -706,32 +852,25 @@ mod tests {
     }
 
     #[test]
-    fn the_stand_in_steam_takes_pause_resume_and_cancel_as_commands_of_its_own() {
+    fn a_game_installed_while_its_workshop_items_come_in_reads_so_with_how_many_are_in() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("steam.exe"), "").unwrap();
-        std::fs::write(dir.path().join(fixture::STANDIN_CLIENT), "").unwrap();
-        let steam = Steam::at(Some(dir.path().to_path_buf()));
-        let installer = steam.installer().unwrap();
-        assert_eq!(installer.can(), Can { pause: true, cancel: true, quiet_uninstall: true, choose_folder: false });
-        let mut kept = Kept(Vec::new());
-        for steer in [Steer::Pause, Steer::Resume, Steer::Cancel] {
-            installer.steer(&steam_game("620"), steer, &mut kept).unwrap();
-        }
-        let exe = dir.path().join("steam.exe").display().to_string();
-        assert_eq!(
-            kept.0,
-            [
-                format!("{exe} -silent +standin_pause 620"),
-                format!("{exe} -silent +standin_resume 620"),
-                format!("{exe} -silent +standin_cancel 620")
-            ]
-        );
-        // Another store's game is none of Steam's.
-        let other = Game { source: "gog".into(), ..steam_game("620") };
-        assert_eq!(installer.steer(&other, Steer::Pause, &mut kept), Err(Refusal::Unsupported));
-        let args = fixture::steer_command(Steer::Cancel, 620);
-        assert_eq!(fixture::steer_asked(&args), Some((Steer::Cancel, 620)));
-        assert_eq!(fixture::steer_asked(&command(Ask::Install, 620)), None);
+        let root = dir.path().join("steam");
+        let steam = standin(&root);
+        let quiet = 9_100_040;
+        fixture::write_progress(&root, quiet, fixture::Progress::Downloading { done: 50, total: 100 }).unwrap();
+        let state = |steam: &Steam| steam.installs().unwrap().first().map(|install| (install.state, install.speed));
+        assert_eq!(state(&steam), Some((model::InstallState::Downloading { done: 50, total: 100 }, None)));
+        // The game's own files in, its Workshop items not: installed, two of six items in.
+        fixture::write_workshop(&root, quiet, 2, 6).unwrap();
+        fixture::write_progress(&root, quiet, fixture::Progress::Done).unwrap();
+        let (got, speed) = state(&steam).unwrap();
+        assert!(matches!(got, model::InstallState::Extras { items_done: 2, items: 6, done, total } if done > 0 && total > done));
+        assert_eq!(speed, None);
+        fixture::write_workshop(&root, quiet, 5, 6).unwrap();
+        assert!(matches!(state(&steam), Some((model::InstallState::Extras { items_done: 5, .. }, None))));
+        // All in: done.
+        fixture::write_workshop(&root, quiet, 6, 6).unwrap();
+        assert_eq!(state(&steam), None);
     }
 
     #[test]
