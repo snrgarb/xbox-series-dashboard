@@ -111,7 +111,7 @@ impl Page for InstallWhere {
         "InstallWhere"
     }
 
-    /// The focused folder, by its place and path, then the game: `Folder(1) D:\SteamLibrary of Halo Infinite`, and
+    /// The focused folder, by its place and path, then the game: `Folder(1) D:\SteamLibrary of Halyard Point`, and
     /// `, the default` on the folder installs go to unless the user says otherwise.
     fn focus(&self) -> String {
         let at = self.panel.focus();

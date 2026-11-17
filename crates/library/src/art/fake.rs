@@ -26,7 +26,7 @@ pub type CandidatePainter = Arc<dyn Fn(u64, Kind, usize, bool) -> Vec<u8> + Send
 pub struct FakeGame {
     pub id: u64,
     pub name: String,
-    /// The stores' ids it is known by: `("steam", "620")`, `("egs", "Fortnite")`.
+    /// The stores' ids it is known by: `("steam", "620")`, `("egs", "Fernway")`.
     pub platforms: Vec<(String, String)>,
     /// The kinds it has a picture of.
     pub kinds: Vec<Kind>,

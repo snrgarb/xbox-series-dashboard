@@ -14,7 +14,7 @@ const PROMPT_CLOSE: Effect = Effect::Sound(Sound::PromptClose);
 const CLOSED: Effect = Effect::GuideClosed;
 
 /// The game that runs in these tests, and the Guide's entries over it: Home, My games & apps, the game, then the
-/// games played before it, Halo Infinite (0), Forza Horizon 5 (1) and Starfield (3).
+/// games played before it, Halyard Point (0), Fernway Rally 5 (1) and Starvault (3).
 const RUNNING: usize = 2;
 const ON_RUNNING: (Tab, Focus) = (Tab::Landing, Focus::Entry(2));
 const ON_HALO: (Tab, Focus) = (Tab::Landing, Focus::Entry(3));
@@ -54,7 +54,7 @@ fn on_running_game() -> Dashboard {
     dashboard
 }
 
-/// The same, focus on the first game under it: Halo Infinite, played before.
+/// The same, focus on the first game under it: Halyard Point, played before.
 fn on_a_recent_game() -> Dashboard {
     let mut dashboard = on_running_game();
     press(&mut dashboard, &[Down]);
@@ -66,7 +66,7 @@ fn on_a_recent_game() -> Dashboard {
 fn quitting() -> Dashboard {
     let mut dashboard = on_running_game();
     assert_eq!(press(&mut dashboard, &[Menu]), [PROMPT_OPEN]);
-    assert_eq!(dashboard.guide().dialog_title(), Some("Sea of Thieves"));
+    assert_eq!(dashboard.guide().dialog_title(), Some("Seal of Thorns"));
     assert_eq!(press(&mut dashboard, &[A]), [SELECT, Effect::QuitGame]);
     dashboard
 }
@@ -132,10 +132,10 @@ fn a_game_that_has_not_closed_after_ten_seconds_is_asked_about() {
     assert_eq!(guide.guide().dialog(), None);
     assert_eq!(after(&mut guide, 0.2), [PROMPT_OPEN]);
     assert_eq!(guide.guide().dialog(), prompt(0));
-    assert_eq!(guide.guide().dialog_title(), Some("Force quit Sea of Thieves?"));
+    assert_eq!(guide.guide().dialog_title(), Some("Force quit Seal of Thorns?"));
     assert_eq!(
         guide.guide_line(),
-        "Landing Entry(2), dialog Menu { prompt: true, row: 0 } \"Force quit Sea of Thieves?\", quitting"
+        "Landing Entry(2), dialog Menu { prompt: true, row: 0 } \"Force quit Seal of Thorns?\", quitting"
     );
     // Nothing is counted while the question stands.
     assert_eq!(guide.timer(), None);
@@ -254,7 +254,7 @@ fn a_recent_game_while_another_runs_asks_quit_x_and_start_y() {
     assert_eq!(press(&mut guide, &[A]), [SELECT, PROMPT_OPEN]);
     assert!(guide.guide_open());
     assert_eq!(guide.guide().dialog(), prompt(0));
-    assert_eq!(guide.guide().dialog_title(), Some("Quit Sea of Thieves and start Halo Infinite?"));
+    assert_eq!(guide.guide().dialog_title(), Some("Quit Seal of Thorns and start Halyard Point?"));
     // Cancel, and B, put it away and change nothing.
     assert_eq!(press(&mut guide, &[Down, A]), [MOVE, PROMPT_CLOSE]);
     assert_eq!((guide.guide().dialog(), guide.guide().focus()), (None, ON_HALO));
@@ -269,7 +269,7 @@ fn quit_and_start_quits_the_running_game_and_starts_the_other_when_it_has_stoppe
     press(&mut guide, &[A]);
     assert_eq!(press(&mut guide, &[A]), [PROMPT_CLOSE, Effect::QuitGame]);
     assert!(guide.guide_open() && guide.guide().dialog().is_none());
-    assert_eq!(guide.guide_line(), "Landing Entry(3), quitting, then Halo Infinite");
+    assert_eq!(guide.guide_line(), "Landing Entry(3), quitting, then Halyard Point");
     // The game stops: the Guide closes at once and the other is asked of the shell.
     guide.game_ended();
     assert_eq!(guide.take_effects(), [CLOSED, Effect::Launch(0)]);
@@ -285,7 +285,7 @@ fn the_game_to_start_is_the_same_game_in_a_newer_snapshot_of_the_library() {
     let mut guide = on_a_recent_game();
     press(&mut guide, &[A, A]);
     guide.take_effects();
-    // Halo Infinite is the library's third now.
+    // Halyard Point is the library's third now.
     let mut next = screens::fake_library();
     let halo = next.games.remove(0);
     next.games.insert(2, halo);
@@ -300,7 +300,7 @@ fn a_game_that_will_not_stop_for_quit_and_start_is_asked_about_and_declining_sta
     press(&mut guide, &[A, A]);
     guide.take_effects();
     assert_eq!(after(&mut guide, QUIT_TIMEOUT), [PROMPT_OPEN]);
-    assert_eq!(guide.guide().dialog_title(), Some("Force quit Sea of Thieves?"));
+    assert_eq!(guide.guide().dialog_title(), Some("Force quit Seal of Thorns?"));
     assert_eq!(press(&mut guide, &[Down, A]), [MOVE, PROMPT_CLOSE]);
     assert!(!guide.quitting());
     // It stops later, by itself: nothing starts, and the Guide stays.
@@ -417,12 +417,12 @@ fn a_twice_on_the_running_games_tile_goes_back_to_it_by_way_of_its_hubs_running(
 fn in_front_of_the_game_its_own_tile_goes_back_to_it_and_another_game_is_asked_about() {
     let mut home = in_game();
     press(&mut home, &[Guide, A, Down]);
-    // A on Halo Infinite's tile is its Game hub, and A there its Play: the question, over the Guide, which opens
+    // A on Halyard Point's tile is its Game hub, and A there its Play: the question, over the Guide, which opens
     // for it without the Guide's own sound. The first A sounds the tile's choice; Play's, which brings the question
     // up, the Guide's select, as any choice that opens a dialog over the Guide.
     assert_eq!(press(&mut home, &[A, A]), [Effect::Sound(Sound::Activate), SELECT, PROMPT_OPEN]);
     assert!(home.guide_open() && home.guide().panel_shown());
-    assert_eq!(home.guide().dialog_title(), Some("Quit Sea of Thieves and start Halo Infinite?"));
+    assert_eq!(home.guide().dialog_title(), Some("Quit Seal of Thorns and start Halyard Point?"));
     assert_eq!(press(&mut home, &[A]), [PROMPT_CLOSE, Effect::QuitGame]);
     home.game_ended();
     assert_eq!(home.take_effects(), [CLOSED, Effect::Launch(0)]);

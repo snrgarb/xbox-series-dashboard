@@ -284,7 +284,7 @@ mod tests {
         let cards = pool(&library, true, today);
         let games: Vec<_> = cards.iter().filter(|card| card.kind == Kind::RecentlyPlayed).collect();
         assert_eq!(games.len(), 5);
-        assert_eq!(games[0].title, "Halo Infinite");
+        assert_eq!(games[0].title, "Halyard Point");
         assert_eq!(games[0].header.as_deref(), Some("Played yesterday"));
         assert_eq!(games[0].description.as_deref(), Some("10 h played"));
         assert_eq!(games[1].header.as_deref(), Some("Played 2 days ago"));
@@ -317,7 +317,7 @@ mod tests {
         };
         let progress = |game, unlocked, of| GameProgress { game, unlocked, of, score: 0 };
         library.achievements.totals = Some(Totals { score: 95, unlocked: 6, of: 16, games: 4 });
-        // Halo 2 of 6, Hades II 3 of 4, Starfield 2 of 4 (as many as Halo, nearer finished), Celeste all of 2.
+        // Halyard 2 of 6, Hadrel II 3 of 4, Starvault 2 of 4 (as many as Halyard, nearer finished), Cerulea all of 2.
         library.achievements.games = vec![progress(1, 2, 6), progress(5, 3, 4), progress(4, 2, 4), progress(12, 2, 2)];
         library.achievements.next = vec![
             Unlock { game: 5, achievement: a("Night Bloom", 7.5, None) },
@@ -331,14 +331,14 @@ mod tests {
         let cards = pool(&library, true, today);
         let close: Vec<_> = cards.iter().filter(|card| card.kind == Kind::CloseAchievement).collect();
         let titles: Vec<&str> = close.iter().map(|card| card.title.as_str()).collect();
-        assert_eq!(titles, ["Hades II - Night Bloom", "Starfield", "Halo Infinite - Legend"]);
+        assert_eq!(titles, ["Hadrel II - Night Bloom", "Starvault", "Halyard Point - Legend"]);
         assert_eq!((close[0].score, close[0].rare, close[0].progress), (Some(30), true, Some(0.75)));
         assert_eq!(close[0].label.as_deref(), Some("Close achievement"));
         assert_eq!(close[0].description.as_deref(), Some("Do Night Bloom."));
         assert_eq!((close[1].score, close[1].description.as_deref()), (None, None));
 
         let unlocks: Vec<_> = cards.iter().filter(|card| card.kind == Kind::RecentUnlock).collect();
-        assert_eq!(unlocks[0].title, "Hades II - Blessed");
+        assert_eq!(unlocks[0].title, "Hadrel II - Blessed");
         assert_eq!(unlocks[0].header.as_deref(), Some("Unlocked yesterday"));
         assert_eq!((unlocks[0].score, unlocks[0].rare), (Some(15), false));
         assert_eq!(unlocks[0].label.as_deref(), Some("Achievement unlocked"));

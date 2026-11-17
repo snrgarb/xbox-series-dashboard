@@ -49,7 +49,7 @@ The page scrolls as the other Settings pages do (`controls::scrolled`), so the f
 3. **Focus** starts on the store's default (Settings > Storage's choice), not on the first row.
 4. **A** installs into the focused folder (`Effect::InstallTo { game, folder }`): the question closes and the store is asked as Install asks it, into that folder; the game joins the Queue. Looked at again as it is chosen: a game installed or queued meanwhile asks nothing. **B** installs nothing and closes the question; what asked has gone already.
 5. **Sounds**: Install is a menu row that goes on, `GuideSelect`, and the question is in the menu's place with no sound of its own, as Manage game's hub is; then a prompt's: `GuideMove` on a move, `PromptClose` on A or B.
-6. **The focus log**: `InstallWhere: Folder(0) D:\SteamLibrary, the default of Baldur's Gate 3`, `InstallWhere: Folder(1) C:\Program Files (x86)\Steam of Baldur's Gate 3`.
+6. **The focus log**: `InstallWhere: Folder(0) D:\SteamLibrary, the default of Barlin's Gate 3`, `InstallWhere: Folder(1) C:\Program Files (x86)\Steam of Barlin's Gate 3`.
 7. **The store asked.** `shell::store::ask` gives the installer the folder of its `folders()` that is the one chosen (by path, either slash, any case); one that has gone since is said in the log and the store's default taken. Steam: `steam client: install 9100040 into D:\SteamLibrary: asking Steam's client over its CEF debugger ...`.
 
 Pictures: `install-where.png` (focus on the default), `install-where-other-folder.png`.

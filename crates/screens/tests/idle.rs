@@ -108,8 +108,8 @@ fn draw_icon() -> PathBuf {
     path
 }
 
-/// The library with achievements, as a snapshot of the library database carries them: its games given ids, Halo
-/// Infinite 2 of 6 with Legend nearest to hand, Hades II 3 of 4, and Halo's Spartan (Rare, its icon fetched) the
+/// The library with achievements, as a snapshot of the library database carries them: its games given ids, Halyard
+/// Point 2 of 6 with Legend nearest to hand, Hadrel II 3 of 4, and Halyard Point's Spartan (Rare, its icon fetched) the
 /// last unlock, yesterday.
 fn library_with_achievements() -> Library {
     use model::achievement::{Achievement, GameProgress, Totals, Unlock};
@@ -354,7 +354,7 @@ fn idle_showing_things_a_game() {
     let mut stage = Stage::new();
     press(&mut stage.dashboard, &[Down]);
     wait(&mut stage.dashboard, SHOW + 0.1);
-    until_card(&mut stage.dashboard, |card| card.title == "Halo Infinite");
+    until_card(&mut stage.dashboard, |card| card.title == "Halyard Point");
     stage.check("idle-showing-game");
 }
 
@@ -364,7 +364,7 @@ fn idle_showing_things_a_game_with_a_cover_alone() {
     let mut stage = Stage::new();
     press(&mut stage.dashboard, &[Down]);
     wait(&mut stage.dashboard, SHOW + 0.1);
-    until_card(&mut stage.dashboard, |card| card.title == "Starfield");
+    until_card(&mut stage.dashboard, |card| card.title == "Starvault");
     stage.check("idle-showing-cover");
 }
 
@@ -385,7 +385,7 @@ fn idle_showing_things_a_close_achievement() {
     let mut stage = Stage::with(library_with_achievements());
     press(&mut stage.dashboard, &[Down]);
     wait(&mut stage.dashboard, SHOW + 0.1);
-    until_card(&mut stage.dashboard, |card| card.title == "Halo Infinite - Legend");
+    until_card(&mut stage.dashboard, |card| card.title == "Halyard Point - Legend");
     let card = stage.dashboard.idle_card().unwrap();
     assert_eq!(
         (card.kind, card.score, card.rare, card.label.as_deref()),
@@ -402,7 +402,7 @@ fn idle_showing_things_a_recent_unlock() {
     wait(&mut stage.dashboard, SHOW + 0.1);
     until_card(&mut stage.dashboard, |card| card.kind == Kind::RecentUnlock);
     let card = stage.dashboard.idle_card().unwrap();
-    assert_eq!(card.title, "Halo Infinite - Spartan");
+    assert_eq!(card.title, "Halyard Point - Spartan");
     assert_eq!(card.header.as_deref(), Some("Unlocked yesterday"));
     stage.check("idle-showing-recent-unlock");
     // Y on it sees the game, as on any game's card.

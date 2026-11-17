@@ -7,7 +7,7 @@
 //!
 //! **The focus log.** `Search: <focus>; <text> <keyboard>, <rows>`, where focus is `Box` (the search box),
 //! `Key(Q)` (a key, by the keyboard's names: `Space`, `Shift`, `Quote`), or a tile by its row, its place in the row
-//! and its game's name: `Games(1) Halo Infinite`, `RecentlyAdded(0) Alan Wake 2`. The text is the keyboard's with
+//! and its game's name: `Games(1) Halyard Point`, `RecentlyAdded(0) Aster Wake 2`. The text is the keyboard's with
 //! the caret in it, Shift and its layer while the keyboard is up (`"Ha|" lower letters`), and with the keyboard
 //! away the text alone and `away` (`"Ha" away`). The rows are each row's name and how many it holds
 //! (`RecentlyAdded 12`, `Games 2`), or `no results`. So: `Search: Key(A); "Ha|" lower letters, Games 2`.
@@ -364,7 +364,7 @@ mod tests {
     use super::*;
 
     fn library() -> Library {
-        let names = ["Hades", "Halo Infinite", "Celeste", "Shadow of the Colossus"];
+        let names = ["Hadrel", "Halyard Point", "Cerulea", "Shadow of the Gantry"];
         let games = names.iter().enumerate().map(|(i, name)| Game {
             id: i as i64 + 1,
             source_id: (i + 10).to_string(),
@@ -422,7 +422,7 @@ mod tests {
         let library = library();
         let mut search = Search::open(&library);
         assert_eq!(press(&mut search, &library, &[B]), None);
-        assert_eq!(line(&search), "RecentlyAdded(0) Hades; \"\" away, RecentlyAdded 4");
+        assert_eq!(line(&search), "RecentlyAdded(0) Hadrel; \"\" away, RecentlyAdded 4");
         assert_eq!(press(&mut search, &library, &[B]), Some(PageAction::Close));
     }
 
@@ -431,10 +431,10 @@ mod tests {
         let library = library();
         let mut search = Search::open(&library);
         press(&mut search, &library, &[Right, Menu]);
-        assert_eq!(line(&search), "RecentlyAdded(0) Hades; \"\" away, RecentlyAdded 4");
+        assert_eq!(line(&search), "RecentlyAdded(0) Hadrel; \"\" away, RecentlyAdded 4");
         // With the keyboard away the shortcuts do nothing.
         press(&mut search, &library, &[Y, X, Menu]);
-        assert_eq!(line(&search), "RecentlyAdded(0) Hades; \"\" away, RecentlyAdded 4");
+        assert_eq!(line(&search), "RecentlyAdded(0) Hadrel; \"\" away, RecentlyAdded 4");
         press(&mut search, &library, &[Up, A]);
         assert_eq!(line(&search), "Key(W); \"|\" upper letters, RecentlyAdded 4");
     }
@@ -444,12 +444,12 @@ mod tests {
         let library = library();
         let mut search = Search::open(&library);
         press(&mut search, &library, &[Up, Up]);
-        assert_eq!(search.focus(), "RecentlyAdded(0) Hades");
+        assert_eq!(search.focus(), "RecentlyAdded(0) Hadrel");
         press(&mut search, &library, &[Right, Right, Up]);
         assert_eq!(search.focus(), "Box");
         // Down is the tile the row last had; Down again the keys, on the key they were left on.
         press(&mut search, &library, &[Down]);
-        assert_eq!(search.focus(), "RecentlyAdded(2) Celeste");
+        assert_eq!(search.focus(), "RecentlyAdded(2) Cerulea");
         press(&mut search, &library, &[Right, Right, Down]);
         assert_eq!(search.focus(), "Key(1)");
     }

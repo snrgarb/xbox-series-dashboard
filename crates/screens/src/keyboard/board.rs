@@ -544,10 +544,10 @@ mod tests {
     fn it_opens_empty_on_q_with_shift_on_and_over_a_text_with_the_caret_at_its_end_and_shift_off() {
         let board = Board::new();
         assert_eq!((board.focus().as_str(), board.state(false).as_str()), ("Q", "\"|\" upper letters"));
-        let board = Board::over("Halo");
-        assert_eq!((board.focus().as_str(), board.state(false).as_str()), ("Q", "\"Halo|\" lower letters"));
+        let board = Board::over("Hull");
+        assert_eq!((board.focus().as_str(), board.state(false).as_str()), ("Q", "\"Hull|\" lower letters"));
         assert_eq!(Board::over("").state(false), "\"|\" upper letters");
-        assert_eq!(Board::over("Halo").state(true), "\"****|\" lower letters");
+        assert_eq!(Board::over("Hull").state(true), "\"****|\" lower letters");
     }
 
     #[test]
@@ -665,7 +665,7 @@ mod tests {
     #[test]
     fn a_string_is_typed_by_walking_to_each_key() {
         let mut board = Board::new();
-        for wanted in "Halo 3".chars() {
+        for wanted in "Hull 3".chars() {
             // Shift is on for the first character alone; a space is the space bar.
             if wanted == ' ' {
                 while board.focused().kind != Kind::Space {
@@ -676,16 +676,16 @@ mod tests {
                 type_by_walking(&mut board, wanted);
             }
         }
-        assert_eq!(board.text(), "Halo 3");
-        assert_eq!(board.state(false), "\"Halo 3|\" lower letters");
+        assert_eq!(board.text(), "Hull 3");
+        assert_eq!(board.state(false), "\"Hull 3|\" lower letters");
         // A symbol from the symbols layer, which stays until it is turned back; then a capital.
         press(&mut board, &[LeftTrigger]);
         type_by_walking(&mut board, ',');
         type_by_walking(&mut board, '@');
-        assert_eq!(board.state(false), "\"Halo 3,@|\" lower symbols");
+        assert_eq!(board.state(false), "\"Hull 3,@|\" lower symbols");
         press(&mut board, &[LeftTrigger, LeftStick]);
         type_by_walking(&mut board, 'X');
-        assert_eq!(board.state(false), "\"Halo 3,@X|\" lower letters");
+        assert_eq!(board.state(false), "\"Hull 3,@X|\" lower letters");
     }
 
     #[test]

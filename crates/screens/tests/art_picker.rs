@@ -139,7 +139,7 @@ fn picker(key: bool) -> Dashboard {
         press(&mut dashboard, &[Down]);
     }
     press(&mut dashboard, &[A, Down, Down]);
-    assert_eq!(dashboard.focus_line(), "TileMenu: MoreOptions(Change art) of Hades II");
+    assert_eq!(dashboard.focus_line(), "TileMenu: MoreOptions(Change art) of Hadrel II");
     press(&mut dashboard, &[A]);
     dashboard.take_effects();
     dashboard

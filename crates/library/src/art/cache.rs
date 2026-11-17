@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn any_id_is_a_folder_of_its_own_and_comes_back_as_it_was() {
-        for id in ["440", "Fortnite", "Origin.OFR.50.0001", "a/b\\c:d", "..", "", "café"] {
+        for id in ["440", "Fernway", "Origin.OFR.50.0001", "a/b\\c:d", "..", "", "café"] {
             let name = escape(id);
             assert!(name.chars().all(|c| c.is_ascii_alphanumeric() || "-_%".contains(c)), "{name}");
             assert_eq!(unescape(&name).as_deref(), Some(id));

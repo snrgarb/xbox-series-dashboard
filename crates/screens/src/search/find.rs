@@ -195,47 +195,53 @@ mod tests {
 
     #[test]
     fn a_name_is_found_by_any_part_of_it_whatever_its_case_and_accents() {
-        let library = library_of(&["Pokémon Violet", "Halo Infinite", "Forza Horizon 5", "Ærø Ølstrup"]);
-        assert_eq!(names(&library, "pokemon"), ["Pokémon Violet"]);
-        assert_eq!(names(&library, "POKÉ"), ["Pokémon Violet"]);
-        assert_eq!(names(&library, "HALO"), ["Halo Infinite"]);
-        assert_eq!(names(&library, "izon"), ["Forza Horizon 5"]);
+        let library = library_of(&["Mélodie Violet", "Halyard Point", "Fernway Rally 5", "Ærø Ølstrup"]);
+        assert_eq!(names(&library, "melodie"), ["Mélodie Violet"]);
+        assert_eq!(names(&library, "MÉLO"), ["Mélodie Violet"]);
+        assert_eq!(names(&library, "HALYARD"), ["Halyard Point"]);
+        assert_eq!(names(&library, "nway"), ["Fernway Rally 5"]);
         // Ø is a letter of its own, not an O with something on it.
         assert!(names(&library, "olstrup").is_empty());
         assert_eq!(names(&library, "ølstrup"), ["Ærø Ølstrup"]);
-        assert!(names(&library, "halo wars").is_empty());
+        assert!(names(&library, "halyard wars").is_empty());
     }
 
-    /// The Bundle's own example (CT/SearchTests.cs:237-254).
+    /// The Bundle's own example (CT/SearchTests.cs:237-254), its names made up.
     #[test]
     fn the_name_starting_with_it_comes_first_then_a_word_starting_with_it_then_the_rest() {
-        let library =
-            library_of(&["Unhalo", "Super Halo", "Halo Wars", "Ahalo", "The Halo Collection", "Halo Infinite"]);
+        let library = library_of(&[
+            "Unhalyard",
+            "Super Halyard",
+            "Halyard Wars",
+            "Ahalyard",
+            "The Halyard Collection",
+            "Halyard Point",
+        ]);
         assert_eq!(
-            names(&library, "halo"),
-            ["Halo Infinite", "Halo Wars", "The Halo Collection", "Super Halo", "Ahalo", "Unhalo"]
+            names(&library, "halyard"),
+            ["Halyard Point", "Halyard Wars", "The Halyard Collection", "Super Halyard", "Ahalyard", "Unhalyard"]
         );
         // A word starts after anything that is not a letter or a digit.
-        let library = library_of(&["X-Halo", "Xhalo", "2Halo"]);
-        assert_eq!(names(&library, "halo"), ["X-Halo", "2Halo", "Xhalo"]);
+        let library = library_of(&["X-Halyard", "Xhalyard", "2Halyard"]);
+        assert_eq!(names(&library, "halyard"), ["X-Halyard", "2Halyard", "Xhalyard"]);
     }
 
     #[test]
     fn spaces_round_the_text_are_not_matched_and_only_spaces_is_nothing_typed() {
-        let library = library_of(&["Halo Infinite", "Celeste"]);
-        assert_eq!(names(&library, "  halo "), ["Halo Infinite"]);
+        let library = library_of(&["Halyard Point", "Cerulea"]);
+        assert_eq!(names(&library, "  halyard "), ["Halyard Point"]);
         assert_eq!(rows(&library, "   ")[0].0, Kind::RecentlyAdded);
         // Within the text a space counts.
-        assert_eq!(names(&library, "o i"), ["Halo Infinite"]);
+        assert_eq!(names(&library, "d p"), ["Halyard Point"]);
         assert!(rows(&library, "zz").is_empty(), "nothing found is no row at all");
     }
 
     #[test]
     fn hidden_games_are_never_found_nor_recently_added() {
-        let mut library = library_of(&["Halo Infinite", "Halo Wars"]);
+        let mut library = library_of(&["Halyard Point", "Halyard Wars"]);
         library.games[1].hidden = true;
-        assert_eq!(names(&library, "halo"), ["Halo Infinite"]);
-        assert_eq!(names(&library, ""), ["Halo Infinite"]);
+        assert_eq!(names(&library, "halyard"), ["Halyard Point"]);
+        assert_eq!(names(&library, ""), ["Halyard Point"]);
     }
 
     #[test]
@@ -253,9 +259,9 @@ mod tests {
         // Game 03, with no date, comes after every dated game, then the others with none in the library's order.
         assert_eq!(shown[10..], ["Game 00", "Game 03"]);
         // Added together, they go by sorting name.
-        let mut library = library_of(&["The Witness", "Braid", "Antichamber"]);
+        let mut library = library_of(&["The Wicket", "Brindle", "Anvilchamber"]);
         library.games.iter_mut().for_each(|game| game.added = 5);
-        assert_eq!(names(&library, ""), ["Antichamber", "Braid", "The Witness"]);
+        assert_eq!(names(&library, ""), ["Anvilchamber", "Brindle", "The Wicket"]);
         // An empty library still has the row, with nothing in it.
         assert_eq!(rows(&Library::default(), ""), [(Kind::RecentlyAdded, Vec::new())]);
     }

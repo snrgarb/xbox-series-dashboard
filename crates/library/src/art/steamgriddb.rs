@@ -47,7 +47,7 @@ pub fn platform(source: &str) -> Option<&'static str> {
 }
 
 /// A name as names are matched: lower case, its marks (™ ® ©) gone, `&` as "and", and every run of anything but
-/// letters and digits one space. "DOOM Eternal™" and "Doom: Eternal" are one name; "Doom" and "Doom 3" are not.
+/// letters and digits one space. "VESPER Eternal™" and "Vesper: Eternal" are one name; "Vesper" and "Vesper 3" are not.
 pub fn plain_name(name: &str) -> String {
     let name = name.replace('&', " and ");
     let mut out = String::new();
@@ -317,27 +317,27 @@ mod tests {
 
     #[test]
     fn names_match_only_when_they_are_the_same_name() {
-        assert_eq!(plain_name("DOOM Eternal™"), "doom eternal");
-        assert_eq!(plain_name("Doom: Eternal"), "doom eternal");
-        assert_eq!(plain_name("Ori & the Blind Forest"), "ori and the blind forest");
+        assert_eq!(plain_name("VESPER Eternal™"), "vesper eternal");
+        assert_eq!(plain_name("Vesper: Eternal"), "vesper eternal");
+        assert_eq!(plain_name("Oda & the Blind Orchard"), "oda and the blind orchard");
         let results = [
-            (1, "Hades II".to_string(), true),
-            (2, "Hades' Star".to_string(), true),
-            (3, "HADES".to_string(), false),
-            (4, "Hades".to_string(), true),
+            (1, "Hadrel II".to_string(), true),
+            (2, "Hadrel's Star".to_string(), true),
+            (3, "HADREL".to_string(), false),
+            (4, "Hadrel".to_string(), true),
         ];
         // The verified one of the two that are the name.
-        assert_eq!(best_match("Hades", &results), Some(4));
-        assert_eq!(best_match("Hades: Battle Out of Hell", &results), None);
-        assert_eq!(best_match("Hades 2", &results), None);
-        assert_eq!(best_match("Hades II", &results[..1]), Some(1));
+        assert_eq!(best_match("Hadrel", &results), Some(4));
+        assert_eq!(best_match("Hadrel: Battle Out of Hollow", &results), None);
+        assert_eq!(best_match("Hadrel 2", &results), None);
+        assert_eq!(best_match("Hadrel II", &results[..1]), Some(1));
         assert_eq!(best_match("", &results), None);
         assert_eq!(best_match("™", &results), None);
     }
 
     #[test]
     fn a_name_is_one_part_of_the_path() {
-        assert_eq!(segment("Ori & the Blind Forest"), "Ori%20%26%20the%20Blind%20Forest");
+        assert_eq!(segment("Oda & the Blind Orchard"), "Oda%20%26%20the%20Blind%20Orchard");
         assert_eq!(segment("a/b?c#d"), "a%2Fb%3Fc%23d");
     }
 

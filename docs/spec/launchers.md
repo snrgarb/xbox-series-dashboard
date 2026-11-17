@@ -42,7 +42,7 @@ Pictures: `settings-launchers.png` (at rest, focus on Steam), `settings-launcher
 - **All on by default.** A launcher's switch is the settings store's `launcher.<key>` (`launcher.steam`, `launcher.epic`, `launcher.gog`, `launcher.ea`, `launcher.ubisoft`, `launcher.battlenet`, `launcher.xbox`): no row until it is switched, `false` when off (settings.md, 16.4). Shared by every Profile.
 - **Off hides, never deletes.** Off, the launcher's games leave every list at once: Home's rows and Groups, My games & apps, Search, Play history, the Queue, the Idle cards, the achievement totals and the Achievements page. Its rows stay in the database as they are, and the launcher is not read while it is off (at start-up or by Update now), so nothing of its is marked gone. Switched on, its games are back as they were, with their play time, Play sessions, favourite, hidden and Groups, and it is read again at once (section 4) to catch up.
 - **Who can be switched.** A launcher that is on this PC, or one that is not but has games kept from before (so they can be hidden), or one switched off (so it can be switched on again). A launcher that is not installed, has no games and is on is dimmed, says "Not installed" and has no switch: focus passes over it.
-- **A game playing.** A launcher whose game is running or launching **cannot be switched off**: the page says "Quit <game> before switching <launcher> off." beside Update now, nothing is saved, and the log says `launchers: steam stays on: Halo Infinite is playing`. The executable refuses it too, whatever asks. Reason: the running game would leave the snapshot under the Guide and the Launch screen, which hold it by its place in the list.
+- **A game playing.** A launcher whose game is running or launching **cannot be switched off**: the page says "Quit <game> before switching <launcher> off." beside Update now, nothing is saved, and the log says `launchers: steam stays on: Halyard Point is playing`. The executable refuses it too, whatever asks. Reason: the running game would leave the snapshot under the Guide and the Launch screen, which hold it by its place in the list.
 - **A game installing.** A launcher with an install under way **can** be switched off. The game leaves the Queue at once with the launcher's other games; the install itself is the launcher's and goes on (nothing is cancelled). The Queue's record of it is kept, and is neither followed nor asked about while the launcher is off. Switched on, the launcher is read again and the Queue looks at its installs, so an install still under way is back in the Queue where it is, and one that finished in the meantime is an installed game.
 
 ## 4. Update now
@@ -86,7 +86,7 @@ focus: Settings: Launchers: Steam; on, 5 games, unreadable; ...
 focus: Settings: Launchers: Update now; 14 games from 2 launchers; updating
 focus: Settings: Launchers: Update now; 15 games from 2 launchers; updated: 1 new game, play time for 1
 focus: Settings: Launchers: Update now; ...; update failed
-focus: Settings: Launchers: Steam; ...; refused: Quit Halo Infinite before switching Steam off.
+focus: Settings: Launchers: Steam; ...; refused: Quit Halyard Point before switching Steam off.
 ```
 
 The line changes as the state does, an update finishing included, without a press.
@@ -96,7 +96,7 @@ The line changes as the state does, an update finishing included, without a pres
 ```
 launchers: epic off: 9 games hidden
 launchers: epic on: 9 games back
-launchers: steam stays on: Halo Infinite is playing
+launchers: steam stays on: Halyard Point is playing
 launchers: update: reading every launcher switched on
 launchers: update: reading epic
 launchers: update: steam, gog read in 41 ms: 1 new game, play time for 1

@@ -1372,9 +1372,9 @@ impl Dashboard {
     /// changes: `closed`, or the tab and focus (`ProfileAndSystem Entry(3)`), then `, no panel` when Power came by
     /// a hold, then the dialog up over it and its focus (`, dialog Power(Close)`).
     ///
-    /// A menu or a prompt has its title after it (`, dialog Menu { prompt: true, row: 0 } "Force quit Hades II?"`),
+    /// A menu or a prompt has its title after it (`, dialog Menu { prompt: true, row: 0 } "Force quit Hadrel II?"`),
     /// and whatever the line is, it ends `, quitting` while the running game is being quit, and
-    /// `, quitting, then Celeste` when a game is to start after it.
+    /// `, quitting, then Cerulea` when a game is to start after it.
     pub fn guide_line(&self) -> String {
         let quitting = match self.quit {
             Some(Quit { then: Some(next), .. }) => {
@@ -2386,20 +2386,20 @@ pub fn no_discord() -> &'static model::discord::Discord {
 pub fn fake_library() -> Library {
     // Name, minutes played, installed.
     let games = [
-        ("Halo Infinite", 600, true),
-        ("Forza Horizon 5", 1250, true),
-        ("Sea of Thieves", 90, true),
-        ("Starfield", 2400, true),
-        ("Hades II", 310, true),
-        ("Baldur's Gate 3", 45, false),
-        ("Hollow Knight: Silksong", 780, true),
-        ("Microsoft Flight Simulator", 1500, true),
-        ("Cyberpunk 2077", 20, false),
-        ("Stardew Valley", 3600, true),
-        ("Age of Empires IV", 0, true),
-        ("Celeste", 0, false),
-        ("Ori and the Will of the Wisps", 0, true),
-        ("Psychonauts 2", 0, false),
+        ("Halyard Point", 600, true),
+        ("Fernway Rally 5", 1250, true),
+        ("Seal of Thorns", 90, true),
+        ("Starvault", 2400, true),
+        ("Hadrel II", 310, true),
+        ("Barlin's Gate 3", 45, false),
+        ("Hearthwick: Silverthorn", 780, true),
+        ("Meridian Gliding Simulator", 1500, true),
+        ("Coldspire 2079", 20, false),
+        ("Starbeck Valley", 3600, true),
+        ("Aeon of Embers IV", 0, true),
+        ("Cerulea", 0, false),
+        ("Oda and the Wake of the Moths", 0, true),
+        ("Pinwheelers 2", 0, false),
     ];
     let games = games.iter().enumerate().map(|(i, &(name, playtime_minutes, installed))| model::Game {
         id: 0,

@@ -355,9 +355,9 @@ mod tests {
     fn removing_is_refused_while_a_game_plays_while_another_step_works_and_when_windows_lists_nothing() {
         let data = tempfile::tempdir().unwrap();
         let mut set_up = SetUp::new(clients::builtin(), Some(data.path().into()), no_list());
-        set_up.ask(SetUpAsk::Remove("steam".into()), Some("Halo"), || {});
+        set_up.ask(SetUpAsk::Remove("steam".into()), Some("Halyard"), || {});
         let failed = |why: &str| ClientState::Failed { why: why.into(), installed: false };
-        assert_eq!(set_up.shown()[0].state, failed("Quit Halo before removing Steam."));
+        assert_eq!(set_up.shown()[0].state, failed("Quit Halyard before removing Steam."));
         set_up.ask(SetUpAsk::Remove("steam".into()), None, || {});
         assert_eq!(set_up.shown()[0].state, failed("Windows doesn't list it as installed."));
         set_up.states.insert("epic".into(), ClientState::Installing);
