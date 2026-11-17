@@ -58,6 +58,50 @@ pub fn close_asked() -> bool {
     CLOSE_ASKED.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Lets another program's request to close (`WM_CLOSE`, as `taskkill` without `/f` posts it) reach `window` whatever
+/// that program's rights. Windows drops, without a word to either side, a message posted to a window of a process
+/// that runs with more rights than the sender (UIPI): a Dashboard that runs elevated, as one Winlogon starts as the
+/// shell of an administrator's sign-in may, would never hear an ordinary terminal's `taskkill` (#99). A request to
+/// close is all that is let through; whether the process runs elevated is said by [`elevated`]. True when Windows
+/// took it. Nothing anywhere but Windows.
+// An HWND is a handle Windows looks up, never a pointer this code follows.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn hear_close_from_anyone(window: *mut std::ffi::c_void) -> bool {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_CLOSE};
+        !window.is_null() && ChangeWindowMessageFilterEx(window, WM_CLOSE, MSGFLT_ALLOW, std::ptr::null_mut()) != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        false
+    }
+}
+
+/// Whether this process runs elevated (an administrator's full rights), as Windows says; None where it won't say,
+/// and anywhere but Windows.
+pub fn elevated() -> Option<bool> {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return None;
+        }
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut length = 0;
+        let size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let ok = GetTokenInformation(token, TokenElevation, &mut elevation as *mut _ as *mut _, size, &mut length);
+        CloseHandle(token);
+        (ok != 0).then_some(elevation.TokenIsElevated != 0)
+    }
+    #[cfg(not(windows))]
+    None
+}
+
 /// Says that `window` was asked to close, and has the Dashboard close.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn ask_to_close(window: &str) {

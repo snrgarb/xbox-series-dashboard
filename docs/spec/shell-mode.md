@@ -206,6 +206,10 @@ What Winlogon starts. It never touches the GPU, the library or the stores (`crat
 - **Packaged games** (`shell:AppsFolder\<AUMID>`, the Xbox source's and Store apps) are activated with
   `IApplicationActivationManager::ActivateApplication`, which works with no shell window; `ShellExecuteW` if it fails.
 - Exit to desktop is unchanged: exit 0.
+- A polite request to close (`taskkill` without `/f`: `WM_CLOSE` to each of its windows) closes it as Exit to desktop
+  does, without the sound: exit 0, so the watchdog keeps it down and starts explorer if there is no shell window
+  (#99). Each of its windows lets `WM_CLOSE` through from programs with fewer rights (`ChangeWindowMessageFilterEx`),
+  as a Dashboard Winlogon starts may run elevated; the log says `window: runs elevated: <yes|no>`.
 
 ## 7. Sentinel and safety net
 

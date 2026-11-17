@@ -14,6 +14,7 @@
 #   - `--from-shell --dry-shell`, the window's path as the shell starts it with the shell's events left alone, logs to
 #     <data>\shell\logs\dashboard-<stamp>.log, says it is a dry run, and presents its first frame (`first frame
 #     presented`) with no `window: ERROR` and no panic: checked here, on any machine, before shell-mode restarts one;
+#     then, asked to close as `taskkill` without `/f` asks, it says so (`window: asked to close`) and exits 0 (#99);
 #   - a plain start (Start-Process with nothing redirected: ShellExecute, as Explorer or a shortcut starts it) shows
 #     the Dashboard's window and opens no console window (no new visible ConsoleWindowClass or
 #     CASCADIA_HOSTING_WINDOW_CLASS window) and no console host as its child.
@@ -217,6 +218,16 @@ try {
         Start-Sleep -Milliseconds 250
     }
     $exited = $dashboard.HasExited
+    # Once it has presented, it is asked to close as taskkill without /f asks, WM_CLOSE to each of its windows (#99):
+    # it goes, with 0, which the watchdog takes for Exit to desktop. Whatever it does, its tree is ended after.
+    $closed = $false
+    if (-not $exited -and ($lines -match '^first frame presented')) {
+        $said = & cmd.exe /c "taskkill /pid $($dashboard.Id) 2>&1"
+        Say "taskkill /pid $($dashboard.Id): $(($said | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join ' ')"
+        $closed = $dashboard.WaitForExit([int] ((Get-Limit 10) * 1000))
+        Say "asked to close: $(if ($closed) { "exited with $($dashboard.ExitCode)" } else { 'still running 10 s after' })"
+        $lines = @(Read-Shared $fromShell.FullName)
+    }
     Stop-Tree $dashboard.Id
     $dashboard.WaitForExit(5000) | Out-Null
     Say "from-shell (--from-shell --dry-shell): $(if ($fromShell) { $fromShell.Name } else { 'no log' }), $(if ($exited) { "exited by itself with $($dashboard.ExitCode)" } else { "ended by this test after $([int] $watch.Elapsed.TotalSeconds) s" })"
@@ -225,6 +236,9 @@ try {
     Expect ([bool] $fromShell) 'the --from-shell Dashboard logs to shell\logs'
     Expect ([bool] ($lines -match '^shell: started by the shell; --dry-shell: the events are left alone')) '--from-shell --dry-shell says the events are left alone'
     Expect ([bool] ($lines -match '^first frame presented')) "the --from-shell window presents its first frame (within $([int] $limit) s)"
+    Expect ($closed -and $dashboard.ExitCode -eq 0) 'asked to close as taskkill without /f asks, the --from-shell Dashboard exits with 0'
+    Expect ([bool] ($lines -match '^window: asked to close')) 'it says which of its windows was asked to close'
+    Expect ([bool] ($lines -match '^window: runs elevated: .*; a request to close is heard from any program: true')) 'its window hears a request to close from any program'
     Expect (-not ($lines -match '^window: ERROR')) 'its swap chain was made the first time'
     Expect (-not ($lines -match 'panicked')) 'it did not panic'
 
