@@ -17,7 +17,7 @@ use shell::audio::{self, AudioControl, SystemAudio};
 use shell::idle::LastInput;
 use shell::media::{self, MediaSessions};
 use shell::power::{DryPower, Power, SystemPower};
-use shell::store::{Addresses, Ask, ProgramAddresses, SystemAddresses};
+use shell::store::{Addresses, Ask, Asking, ProgramAddresses, SystemAddresses, Word};
 use shell::wake::{SystemWakes, Wakes};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step, ToastStrip};
 use ui::{Button, Host, Press};
@@ -175,6 +175,11 @@ struct App {
     power: Box<dyn Power>,
     /// What opens a store's address for a game, to install or uninstall it.
     addresses: Box<dyn Addresses>,
+    /// What a store's installer, on its own thread, has for the user (#230): a licence agreement to answer, or an
+    /// install stopped. Each agreement asked waits on its reply here, by the number its prompt was opened with.
+    words: Receiver<Word>,
+    agreements: std::collections::HashMap<u64, Sender<model::Reply>>,
+    agreements_asked: u64,
     /// The system's sound, which the Guide's Audio Flyout shows and changes.
     audio: Box<dyn AudioControl>,
     /// When it was last read while the Audio Flyout is open: it is read as the Flyout opens and every `AUDIO_EVERY`
@@ -420,6 +425,8 @@ pub fn run(
     let set_up = crate::set_up::SetUp::for_args(args, data_dir.clone());
     store.set_clients(set_up.shown());
     dashboard.set_clients(set_up.shown());
+    // What a store's installer's thread has for the user (#230), to the window.
+    let words = mpsc::channel();
     let mut app = App {
         windowed: args.windowed,
         as_shell,
@@ -482,13 +489,22 @@ pub fn run(
         // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
         power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
         // A store's address goes to the program Windows has for it, or with --open-addresses-with to that program.
-        addresses: match &args.open_addresses_with {
-            Some(program) => {
-                eprintln!("store: every address is opened with {}", program.display());
-                Box::new(ProgramAddresses::new(program))
-            }
-            None => Box::new(SystemAddresses),
+        addresses: {
+            let addresses: Box<dyn Addresses> = match &args.open_addresses_with {
+                Some(program) => {
+                    eprintln!("store: every address is opened with {}", program.display());
+                    Box::new(ProgramAddresses::new(program))
+                }
+                None => Box::new(SystemAddresses),
+            };
+            let wake = std::sync::Mutex::new(event_loop.create_proxy());
+            Box::new(Asking::new(addresses, words.0, move || {
+                let _ = wake.lock().map(|proxy| proxy.send_event(()));
+            }))
         },
+        words: words.1,
+        agreements: Default::default(),
+        agreements_asked: 0,
         audio: Box::new(SystemAudio),
         audio_read: None,
         // Windows' media sessions, or with --fake-media one made up; their album art is kept in the data folder.
@@ -1122,9 +1138,28 @@ impl App {
                 Effect::Steer { game, steer } => {
                     let (library, sources) = (self.dashboard.library(), self.store.sources());
                     if crate::games::steer(library, sources, game, steer, &mut *self.addresses) {
+                        if steer == model::Steer::Cancel {
+                            self.store.tell_queue(::library::queue::Ask::Cancel(game));
+                        }
                         self.store.tell_queue(::library::queue::Ask::Look);
                     }
                 }
+                // The user's answer to a licence agreement (#230), for the installer that waits on it.
+                Effect::Agreement { id, reply } => {
+                    eprintln!("store: licence agreement {id} answered: {reply:?}");
+                    if let Some(waiting) = self.agreements.remove(&id) {
+                        let _ = waiting.send(reply);
+                    }
+                }
+            }
+        }
+        // An agreement's prompt gone with no answer (the Guide's page over it, a game ended) is declined.
+        let up = self.dashboard.agreements_up();
+        let gone: Vec<u64> = self.agreements.keys().copied().filter(|id| !up.contains(id)).collect();
+        for id in gone {
+            eprintln!("store: licence agreement {id} gone unanswered: Decline");
+            if let Some(waiting) = self.agreements.remove(&id) {
+                let _ = waiting.send(model::Reply::Decline);
             }
         }
         // A Profile signed in by the core itself (`Dashboard::sign_in`) changed before its effect was carried out.
@@ -1622,6 +1657,33 @@ impl ApplicationHandler for App {
         if self.store.storage_wanted() {
             self.look_at_storage();
         }
+        // What a store's installer has for the user (#230): an agreement's prompt over whatever is up, or the Queue
+        // told why an install stopped (its Toast follows from the Queue, with its row).
+        while let Ok(word) = self.words.try_recv() {
+            match word {
+                Word::Agreement { game, name, agreement, reply } => {
+                    self.agreements_asked += 1;
+                    let id = self.agreements_asked;
+                    eprintln!(
+                        "store: licence agreement {id} for {name} ({} of {}){}",
+                        agreement.at,
+                        agreement.of,
+                        if agreement.text.is_ok() { "" } else { ", its text not had" }
+                    );
+                    let _ = game;
+                    self.agreements.insert(id, reply);
+                    let focus = self.dashboard.focus_line();
+                    self.dashboard.ask_agreement(screens::agreement::Entry { id, game: name, agreement });
+                    // Opened with no press: said as a press's would be.
+                    if self.log_focus && self.dashboard.focus_line() != focus {
+                        eprintln!("focus: {}", self.dashboard.focus_line());
+                    }
+                    self.stale = true;
+                    self.overlay_stale = true;
+                }
+                Word::Stopped { game, stop } => self.store.tell_queue(library::queue::Ask::Stopped { game, stop }),
+            }
+        }
         // The Queue moved on: a new snapshot when a source read again changed the library, else the Queue alone.
         if let Some(update) = self.store.queue_update() {
             self.show(update.library);
@@ -1631,15 +1693,25 @@ impl ApplicationHandler for App {
                 self.overlay_stale = true;
             }
             // A game installed or uninstalled has filled or freed its drive: the ring and Storage read again.
-            if update.tell.iter().any(|tell| !matches!(tell, library::queue::Tell::Queued(_))) {
+            if update
+                .tell
+                .iter()
+                .any(|tell| matches!(tell, library::queue::Tell::Ready(_) | library::queue::Tell::Uninstalled(_)))
+            {
                 self.look_at_storage();
             }
-            // A game queued, ready to play, or uninstalled: a Toast each, with its cover (#132).
+            // A game queued, ready to play, uninstalled, or stopped: a Toast each, with its cover (#132, #230).
             for tell in update.tell {
                 let (kind, game) = match tell {
                     library::queue::Tell::Queued(game) => (screens::toasts::ToastKind::Queued, game),
                     library::queue::Tell::Ready(game) => (screens::toasts::ToastKind::Installed, game),
                     library::queue::Tell::Uninstalled(game) => (screens::toasts::ToastKind::Uninstalled, game),
+                    library::queue::Tell::Stopped(stopped) => {
+                        eprintln!("toast: {}: {}", stopped.headline(), stopped.line());
+                        self.dashboard.tell_stopped(&stopped);
+                        toasts_changed = true;
+                        continue;
+                    }
                 };
                 self.dashboard.tell(kind, game);
                 toasts_changed = true;

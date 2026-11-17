@@ -67,6 +67,8 @@ impl Category {
 pub const DISCORD: (usize, usize) = (1, 0);
 /// Where Groups' box is on Games & apps: its place in its section, and the section.
 pub const GROUPS: (usize, usize) = (2, 0);
+/// Where Storage's box is on Games & apps: first in Installs.
+pub const STORAGE: (usize, usize) = (0, 1);
 
 /// General: Personalisation and Idle, the Bundle's first row; Guide under Personalisation, and Boot video beside it.
 fn general() -> Boxes {

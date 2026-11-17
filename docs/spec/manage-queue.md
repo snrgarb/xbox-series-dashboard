@@ -81,7 +81,10 @@ stays above it when it has games.
 
 On open, focus is on the first cover, else the first row, else nothing. When the lists change under it, focus follows
 its game: to its row, else to its cover (a game that finishes installing goes from Installing to Recently installed,
-and focus with it); a game that has left both gives focus to the first cover, else the first row. Scrolling: a cover
+and focus with it); a game that has left both gives focus to the first cover, else the first row, and a stopped one
+(section 10) gone gives it to the first stopped row before that. The game stays the one wanted until the user moves
+focus: if it comes back (a snapshot of the library read while Settings > Storage was over the page, then the Queue
+again), focus goes back to it. Stopped rows outlive a snapshot of the library, which knows nothing of them. Scrolling: a cover
 puts the list at its top; a row scrolls the least that shows it whole.
 
 Hint bar: "More options" (the Menu glyph) with focus on a cover or row; none with nothing focused.
@@ -186,3 +189,44 @@ Workshop items the account subscribes to (Garry's Mod on the TV PC, #188: 3.9 GB
    downloading Workshop content, 3 of 12 items` (and `, <done> of <total> bytes` where known) at each whole percent,
    and `queue: <game> has all its store was fetching for it` as it leaves.
 6. **The nav's foot** (section 6) shows only a download, not this.
+
+## 10. Why an install stopped, and the licence agreement (decided in #230)
+
+Neither the Bundle nor the console's own pictures cover this; the console's manner, and the user's rule: **the
+Dashboard never just loses an install.** Every refusal, cancel or drop is told.
+
+1. **A licence agreement.** Where a store's install stops for the user to accept one (Steam's `eInstallState` 8),
+   the Dashboard shows its own prompt over whatever is up (`screens::agreement`): a dark panel 1200 by 880 in the
+   middle of the dimmed screen, the game's name (Bahnschrift 33), "Licence agreement" under it ("Licence agreement
+   1 of 2" where there are more), the agreement's own words in a box that **Up and Down** scroll three lines at a
+   time and the **bumpers and triggers** a box at a time, a thin bar at its right showing where, and **Accept** and
+   **Decline** side by side at its foot with "Page n of m" at the right. **Focus starts on Decline**, Left and Right
+   move between them, and **only A on Accept accepts**: B, A on Decline, and the prompt going unanswered (a page
+   over it, the Dashboard closing) all decline. Several are shown one after another; nothing is remembered for the
+   next install. Where the words could not be had, it says so in their place, dimmed, and offers **Open in Steam**
+   (Steam's own window, which shows them) and Decline only. A text that fits the box is one page: "Page 1 of 1",
+   no bar, and Up, Down, the bumpers and the triggers do nothing (focus is always on the buttons). Focus log:
+   `Agreement: Decline of <game>; agreement 1 of 2, page 1 of 7`; as it opens, before it is first drawn and its
+   pages counted, `..., page 1`, so the first press after says the count. A press that scrolls within a page logs
+   no new line. Reference pictures: `crates/screens/tests/reference/agreement.png`, `agreement_scrolled.png`,
+   `agreement_unread.png`, and the row's `manage_queue_stopped.png`.
+2. **The Toast.** Each stop is told in a Toast with the game's cover, in a few words: **Not enough space**,
+   **Licence agreement declined**, **Install it in Steam** (what Steam asked for, the Dashboard can't answer),
+   **Couldn't install**, **Installation cancelled**, **Stopped in Steam** (it left the store's own list while
+   installing), **Steam didn't start it**, **No longer in Steam**. A tap of the Guide button opens this page, as
+   Queued's does.
+3. **The row.** Only for what stopped **without the user asking** (no room, what Steam asked for, a failure,
+   never started, no longer listed): the user's own **Cancel** and **Decline**, and a drop in the store's own
+   client (Stopped in Steam: as a player cancels it there), are told in the Toast and the row simply goes, as before (the lead's decision on #235, 2026-11-17). Under the rows installing, a
+   **Stopped** header and a row a game, the latest first: its cover and
+   name as an install's row, the few words in the state's place, then the rest on up to two dimmed lines in the
+   amount's, no bar: for want of room, "It needs 54.6 GB and 12.0 GB is free. Free up space in Settings > Storage,
+   or install it somewhere else." (the console's units, `model::storage::size`); for what Steam asked, "Steam asked
+   for a product key, which the Dashboard can't give. Install it in Steam."; and so on. **A on a row stopped for want
+   of room opens Settings > Storage**, and **B there comes straight back to the row** (settings.md, 16.3); Menu opens the game's menu, whose Install
+   asks the folder question where another library has room (section 8.6). A on any other is the Game hub. The row
+   goes once the game is asked for again or installed; it is not kept across a restart. Focus log: `Row(1) of
+   <game>; 1 installing, 3 recently installed; Stopped: Not enough space`.
+4. **The log.** `queue: <game> stopped: <few words>: <the rest>`, after the Queue's own `queue: <game> dropped`
+   where it was in the Queue, and the store's line before them naming the state by name and number (docs/sources.md,
+   "Steam's own calls").

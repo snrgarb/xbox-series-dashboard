@@ -783,6 +783,7 @@ The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (
 | Home's **Settings** wide tile (the Bundle's "Playnite settings" tile, whose category is gone; `Entry::Tile`) | General's boxes | its first box, Personalisation | the rail, then the tile |
 | The Tile menu's Customise Home (`Entry::CustomiseHome`) | Games & apps' boxes | **Groups** (#57), the box that customises Home; the Bundle's is Personalisation's first box, Boot video | the rail on Games & apps, then the tile |
 | Home's **Discord** tile with no Discord tab or the Guide off (`Entry::Discord`) | Account > Discord | Type | Account's boxes on Discord, the rail, then the tile |
+| Manage Queue's row of a game stopped for want of space (`Entry::Storage`, #230; not the Bundle's) | Games & apps > Storage | its first folder | **straight back to the row** (the lead's decision on #235). The Bundle's own entries above keep 8.2's rule, every level climbed; a link from a place the Bundle has none goes back to that place |
 
 Left from a pane's first column is B, on the boxes and on the Guide page. From the boxes to the rail and into the category again is the box focus was on (16.1).
 

@@ -25,7 +25,14 @@
 //! apps, a game's uninstaller), after which it is no longer followed, and nothing is said.
 //!
 //! What the screens tell the user of in a Toast ([`Tell`]) goes with each update: a game joining the Queue (but for
-//! those already in it as the Dashboard starts), one finishing installing, and one seen uninstalled.
+//! those already in it as the Dashboard starts), one finishing installing, one seen uninstalled, and one whose
+//! install stopped (#230). A game never just leaves the Queue: one that leaves without installing is told of with
+//! why, and, where the user did not ask for it (not their own Cancel or Decline, nor a drop in the store's own
+//! client), keeps a row in Manage Queue saying so (`model::Stopped`, held here and not in the database), told by its
+//! store's installer
+//! (`Ask::Stopped`: not enough space, a licence agreement declined, what the store asked for) or worked out here
+//! (cancelled here, stopped in the store's own client, never started, no longer listed). The row goes once the game
+//! is asked for again or installed.
 //!
 //! While a game downloads, its speed is worked out from its bytes at successive looks ([`Follower::queue`]): the
 //! bytes gained over the time since they last moved, smoothed, and 0 once they have stood still for
@@ -39,14 +46,14 @@
 //!
 //! [`spawn`] runs all this on a thread of its own, which polls once a second while there is something to follow,
 //! every [`WATCH_EVERY`] seconds otherwise, and wakes whoever started it when the Queue or the library has changed.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use model::{InstallState, Installed, Library, Queue, Queued, Source};
+use model::{InstallState, Installed, Library, Queue, Queued, Source, Stop, Stopped};
 use rusqlite::{params, OptionalExtension};
 
 use crate::Database;
@@ -339,6 +346,13 @@ pub struct Follower {
     installed: HashMap<&'static str, Vec<String>>,
     /// When the sources' installed games were last looked at.
     watched_at: Option<u64>,
+    /// The games whose install the user cancelled here, until they leave the Queue.
+    cancels: HashSet<i64>,
+    /// The games whose install stopped without the user asking, and why, the latest first: their rows in Manage
+    /// Queue (`Stop::keeps_row`).
+    stopped: Vec<Stopped>,
+    /// Each game's latest stop, row or not: what its Toast tells.
+    last_stops: HashMap<i64, Stopped>,
 }
 
 impl Follower {
@@ -351,7 +365,69 @@ impl Follower {
             told: HashMap::new(),
             installed: HashMap::new(),
             watched_at: None,
+            cancels: HashSet::new(),
+            stopped: Vec::new(),
+            last_stops: HashMap::new(),
         }
+    }
+
+    /// The game's install stopped: said in the log and told in a Toast; where the user did not ask for it, its row
+    /// says why, in the place of any it had, first.
+    fn stop(&mut self, db: &Database, game: i64, stop: Stop) -> Result<Stopped> {
+        let found = db.game(game)?;
+        let key = found.as_ref().map(|game| game.source.clone()).unwrap_or_default();
+        let store = self.source(&key).map_or_else(|| key.clone(), |source| source.name().to_string());
+        let stopped = Stopped { game, store, stop };
+        let name = found.map_or_else(|| format!("game {game}"), |game| game.name);
+        eprintln!("queue: {name} stopped: {}: {}", stopped.headline(), stopped.line());
+        self.stopped.retain(|was| was.game != game);
+        if stopped.stop.keeps_row() {
+            self.stopped.insert(0, stopped.clone());
+        }
+        self.last_stops.insert(game, stopped.clone());
+        Ok(stopped)
+    }
+
+    /// Why a game left without installing, where its store's installer has not said: cancelled here, no longer
+    /// listed, never started, or stopped in the store's own client.
+    fn reason(&mut self, row: &Row) -> Stop {
+        if self.cancels.remove(&row.game) {
+            Stop::Cancelled
+        } else if row.gone {
+            Stop::Gone
+        } else if !row.reported {
+            Stop::NeverStarted
+        } else {
+            Stop::InStore
+        }
+    }
+
+    /// The user cancelled the game's install here: told as such when it leaves.
+    pub fn asked_cancel(&mut self, game: i64) {
+        self.cancels.insert(game);
+    }
+
+    /// The game's store's installer said its install stopped, and why (`model::Opener::stopped`): its row leaves the
+    /// Queue now, if it has one, and its stopped row says why. What to tell of it.
+    pub fn stopped_by_store(&mut self, db: &mut Database, game: i64, stop: Stop) -> Result<(Vec<Change>, Stopped)> {
+        let mut changes = Vec::new();
+        if db.rows()?.iter().any(|row| row.game == game) {
+            db.leave(game, None)?;
+            changes.push(Change::Dropped(game));
+        }
+        self.cancels.remove(&game);
+        let stopped = self.stop(db, game, stop)?;
+        Ok((changes, stopped))
+    }
+
+    /// The stopped row of a game, as last said.
+    pub fn stopped(&self, game: i64) -> Option<&Stopped> {
+        self.stopped.iter().find(|stopped| stopped.game == game)
+    }
+
+    /// Why the game's install last stopped, row or not: what its Toast tells.
+    pub fn last_stop(&self, game: i64) -> Option<&Stopped> {
+        self.last_stops.get(&game)
     }
 
     /// The sources whose client's word of what is installed has changed since the last look, every
@@ -392,6 +468,14 @@ impl Follower {
     /// installer can do with it (`Source::installer`).
     pub fn queue(&self, db: &Database) -> Result<Queue> {
         let mut queue = db.queue()?;
+        // A stopped game that is in the Queue again, or installed after all, has no stopped row.
+        let mut stopped = Vec::new();
+        for was in &self.stopped {
+            if queue.get(was.game).is_none() && !db.installed(was.game)? {
+                stopped.push(was.clone());
+            }
+        }
+        queue.stopped = stopped;
         let sources: HashMap<i64, String> = db.rows()?.into_iter().map(|row| (row.game, row.source)).collect();
         for entry in &mut queue.entries {
             entry.speed = self.speed(entry.game);
@@ -453,6 +537,10 @@ impl Follower {
         if installed || gone || queued || !follows {
             return Ok(false);
         }
+        // Asked for again: its stopped row goes.
+        self.stopped.retain(|was| was.game != game);
+        self.last_stops.remove(&game);
+        self.cancels.remove(&game);
         db.join(game, now, true, InstallState::Queued)?;
         Ok(true)
     }
@@ -559,6 +647,8 @@ impl Follower {
             if row.gone || !reports.contains_key(row.source.as_str()) {
                 db.leave(row.game, None)?;
                 polled.changes.push(Change::Dropped(row.game));
+                let stop = self.reason(row);
+                self.stop(db, row.game, stop)?;
             } else if row.reported || row.asked.is_none_or(|asked| now.saturating_sub(asked) >= GIVE_UP_AFTER) {
                 ended.push(row);
             } else {
@@ -598,6 +688,12 @@ impl Follower {
                 (true, true) => Change::ExtrasDone(row.game),
                 (false, _) => Change::Dropped(row.game),
             });
+            if installed {
+                self.cancels.remove(&row.game);
+            } else {
+                let stop = self.reason(row);
+                self.stop(db, row.game, stop)?;
+            }
         }
         for &(game, _) in &playable {
             db.finished(game, now)?;
@@ -675,18 +771,22 @@ fn kind(state: InstallState) -> &'static str {
 }
 
 /// What the thread was asked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ask {
     /// The game's store was asked to install it.
     Install(i64),
     /// The game's store was asked to uninstall it.
     Uninstall(i64),
+    /// The game's store was asked to cancel its install: told as cancelled when it leaves.
+    Cancel(i64),
+    /// The game's store's installer stopped its install before it started, and says why (#230).
+    Stopped { game: i64, stop: Stop },
     /// Look now: the sources have been read, and may have news.
     Look,
 }
 
 /// What the screens tell the user of, in a Toast, as the Bundle does (its glossary's Toast).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tell {
     /// The game joined the Queue: "Queued". Not for those already in it as the Dashboard starts.
     Queued(i64),
@@ -694,11 +794,14 @@ pub enum Tell {
     Ready(i64),
     /// An uninstall the Dashboard asked for is done: "<game> was uninstalled".
     Uninstalled(i64),
+    /// The game's install stopped, or it left the Queue without installing: why (#230).
+    Stopped(Stopped),
 }
 
 impl Tell {
     /// What a change is told as, if anything. `first`: the change was found by the look as the thread started,
-    /// whose games had joined before the Dashboard was there to see.
+    /// whose games had joined before the Dashboard was there to see. A game dropped is told of with its stopped
+    /// row ([`Follower::stopped`]), which the change does not carry ([`tells`]).
     pub fn of(change: &Change, first: bool) -> Option<Tell> {
         match *change {
             Change::Joined { game, .. } if !first => Some(Tell::Queued(game)),
@@ -707,6 +810,17 @@ impl Tell {
             _ => None,
         }
     }
+}
+
+/// What the changes are told as: [`Tell::of`] each, and a game dropped with its stopped row.
+pub fn tells(changes: &[Change], first: bool, follower: &Follower) -> Vec<Tell> {
+    changes
+        .iter()
+        .filter_map(|change| match change {
+            Change::Dropped(game) => follower.last_stop(*game).cloned().map(Tell::Stopped),
+            change => Tell::of(change, first),
+        })
+        .collect()
 }
 
 /// What the thread has for the screens: the Queue, with it the library's snapshot when a source read again
@@ -783,7 +897,7 @@ fn follow(
                 eprintln!("{}", describe(change, &name));
             }
             let library = if library_changed { Some(db.snapshot()?) } else { None };
-            let tell = changes.iter().filter_map(|change| Tell::of(change, first)).collect();
+            let tell = tells(&changes, first, &follower);
             if send.send(Update { queue: follower.queue(&db)?, library, tell }).is_err() {
                 return Ok(());
             }
@@ -807,6 +921,19 @@ fn follow(
                 }
             }
             Ok(Ask::Uninstall(game)) => follower.asked_uninstall(game, crate::now()),
+            Ok(Ask::Cancel(game)) => follower.asked_cancel(game),
+            Ok(Ask::Stopped { game, stop }) => {
+                let (changes, stopped) = follower.stopped_by_store(&mut db, game, stop)?;
+                let name = db.game(game)?.map_or_else(|| format!("game {game}"), |g| g.name);
+                for change in &changes {
+                    eprintln!("{}", describe(change, &|_| name.clone()));
+                }
+                let update = Update { queue: follower.queue(&db)?, library: None, tell: vec![Tell::Stopped(stopped)] };
+                if send.send(update).is_err() {
+                    return Ok(());
+                }
+                wake();
+            }
             Ok(Ask::Look) | Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         }
@@ -1188,6 +1315,77 @@ mod tests {
         world.fake.report(&[]);
         assert_eq!(world.poll(2).changes, [Change::Dropped(moss)]);
         assert!(world.queue().is_empty());
+    }
+
+    /// #230: a game never just leaves the Queue. Each that leaves without installing has a stopped row saying why,
+    /// told in a Toast: as its store's installer said, cancelled here, stopped in the store, never started. The row
+    /// goes once it is asked for again or installed.
+    #[test]
+    fn a_game_that_leaves_without_installing_says_why_until_it_is_asked_for_again() {
+        let mut world = World::new();
+        let (moss, tern) = (world.id("Moss"), world.id("Tern"));
+        let stop_of = |world: &World, game: i64| world.follower.last_stop(game).map(|stopped| stopped.stop.clone());
+        let rows = |world: &World| {
+            let queue = world.follower.queue(&world.db).unwrap();
+            queue.stopped.iter().map(|stopped| stopped.game).collect::<Vec<_>>()
+        };
+
+        // Stopped by its store's installer: told at once, out of the Queue.
+        world.ask("Moss", 0);
+        let no_room = Stop::NoSpace { needed: 20 << 30, free: 1 << 30 };
+        let (changes, stopped) = world.follower.stopped_by_store(&mut world.db, moss, no_room.clone()).unwrap();
+        assert_eq!(changes, [Change::Dropped(moss)]);
+        assert_eq!((stopped.store.as_str(), stopped.headline()), ("Fake", "Not enough space".to_string()));
+        assert!(world.queue().is_empty());
+        let queue = world.follower.queue(&world.db).unwrap();
+        assert_eq!(queue.stopped.iter().map(|stopped| stopped.game).collect::<Vec<_>>(), [moss]);
+
+        // Asked for again: its row goes.
+        world.ask("Moss", 1);
+        assert!(world.follower.queue(&world.db).unwrap().stopped.is_empty());
+        assert_eq!(stop_of(&world, moss), None);
+
+        // Taken on by its store, then cancelled here: "Installation cancelled", told with the drop.
+        world.fake.report(&[("1", QUEUED)]);
+        world.poll(2);
+        world.follower.asked_cancel(moss);
+        world.fake.report(&[]);
+        let polled = world.poll(3);
+        assert_eq!(polled.changes, [Change::Dropped(moss)]);
+        assert_eq!(stop_of(&world, moss), Some(Stop::Cancelled));
+        assert_eq!(
+            tells(&polled.changes, false, &world.follower),
+            [Tell::Stopped(world.follower.last_stop(moss).unwrap().clone())]
+        );
+        // The user's own Cancel leaves no row: the Toast is enough.
+        assert!(rows(&world).is_empty());
+
+        // Taken on, then dropped in the store's own client: "Stopped in <store>".
+        world.ask("Tern", 4);
+        world.fake.report(&[("2", QUEUED)]);
+        world.poll(5);
+        world.fake.report(&[]);
+        world.poll(6);
+        assert_eq!(stop_of(&world, tern), Some(Stop::InStore));
+
+        // Never reported by a store that reports its installs: "<store> didn't start it".
+        world.ask("Tern", 7);
+        world.poll(7 + GIVE_UP_AFTER);
+        assert_eq!(stop_of(&world, tern), Some(Stop::NeverStarted));
+        assert_eq!(rows(&world), [tern]);
+        // The user's own Decline: told, no row; one stopped without asking: a row, the latest first.
+        world.ask("Moss", 8);
+        world.follower.stopped_by_store(&mut world.db, moss, Stop::Declined).unwrap();
+        assert_eq!((stop_of(&world, moss), rows(&world)), (Some(Stop::Declined), vec![tern]));
+        world.ask("Moss", 9);
+        world.follower.stopped_by_store(&mut world.db, moss, Stop::StoreAsks("a product key".into())).unwrap();
+        assert_eq!(rows(&world), [moss, tern]);
+
+        // Installed after all: its row goes.
+        world.fake.set_installed("2", true);
+        let sources: Vec<Arc<dyn Source>> = vec![world.fake.clone(), world.other.clone()];
+        world.db.sync_all(&crate::sources::read(&sources), NOW).unwrap();
+        assert!(world.follower.queue(&world.db).unwrap().stopped.iter().all(|stopped| stopped.game != tern));
     }
 
     #[test]

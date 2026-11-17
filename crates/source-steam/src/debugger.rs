@@ -9,8 +9,17 @@
 //!   does (seen on the TV PC, 2026-11-17, [`takes`]), a call the script makes without the client id `'0'`, or an
 //!   uninstall without its three arguments, returns `undefined` and does nothing: the install's wait on Steam's
 //!   install manager then runs out at `eInstallState` 0, and it is not taken; an uninstall or a download's call
-//!   "goes through" with nothing done, which only the app's manifest tells. Taken, the install manager goes 0, 7 on
-//!   the wizard, 14 on `ContinueInstall`, and Steam's main window comes up, as the real one's does.
+//!   "goes through" with nothing done, which only the app's manifest tells.
+//! - Steam's install wizard (`client::Wizard`, #230), a step a script, its install manager moving as the real one
+//!   was seen to: 0; 5 (`WaitAppInfo`) at the first look after `OpenInstallWizard`, then 7 (`ShowConfig`), or 4
+//!   (`ShowCDKey`) for an app set up to ask for a key; on `ContinueInstall` 8 (`ShowEULAs`) for an app with licence
+//!   agreements, else 14 and the app queued in the library chosen; at 8, `LoadEula(appid)` gives the app's
+//!   agreements as `[{id, url, version}]`, each url a page this debugger serves (`/eula/<appid>/<n>`), and
+//!   `ContinueInstall` leaves 8 only once `MarkEulaAccepted(appid, id, version)` has been called for each of them
+//!   with the id and version given; `CancelInstall` takes it to 16 (`Canceled`) from 7 and back to 0 from anywhere
+//!   else, as the real one's did, the state staying until the next wizard. `GetInstallManagerInfo` says the state,
+//!   the app of the last wizard opened (`currentAppID`), what the app needs (`fixture::needed`) and what is free (`fixture::WizardSetUp`, which `standin
+//!   steam-wizard` writes). `OpenInstallWizard` brings Steam's main window up, as the real one's does.
 //! - Steam's main window (`client::Window`), on a page of its own titled "Steam": how it stands, and hiding or
 //!   minimizing it.
 //! - The download overview (`crate::overview::SCRIPT`): the app downloading, at a made-up speed of [`SPEED`] bytes a
@@ -30,17 +39,42 @@ use std::time::Duration;
 
 use model::Steer;
 
-use crate::client::{self, Answer, Call, Shown, Step, Window};
-use crate::fixture::{self, Progress};
+use crate::client::{self, Answer, Call, Shown, Step, Window, Wizard};
+use crate::fixture::{self, Progress, WizardSetUp};
 use crate::{cef, installs, overview};
 
 /// The speed the stand-in says it downloads at, in bytes a second: 20 Mbps.
 pub const SPEED: u64 = 2_500_000;
 
-/// What the stand-in client keeps between scripts: how its main window stands.
+/// What the stand-in client keeps between scripts: how its main window stands, and its install manager.
 #[derive(Debug)]
 pub struct Client {
     pub main: Shown,
+    pub manager: Manager,
+}
+
+/// The stand-in's install manager (#230).
+#[derive(Debug, Default)]
+pub struct Manager {
+    /// `eInstallState`, as the real one's numbers go.
+    pub state: i64,
+    /// The install its wizard is open on.
+    pub open: Option<Opened>,
+    /// Looks left at 5 before it moves on.
+    pub waiting: u8,
+    /// The app its last wizard was on, which `currentAppID` still says once it is closed, as its state does.
+    pub app: u32,
+}
+
+/// An install whose wizard is open.
+#[derive(Debug, Clone)]
+pub struct Opened {
+    pub appid: u32,
+    /// As the Dashboard asked it, which the stand-in's log line names (`Call::what`).
+    pub folder: Option<String>,
+    pub library: PathBuf,
+    /// The agreements marked accepted, by id.
+    pub accepted: Vec<String>,
 }
 
 /// The stand-in debugger, serving on a thread of its own until it is stopped or dropped.
@@ -61,7 +95,7 @@ impl Debugger {
         listener.set_nonblocking(true)?;
         std::fs::write(root.join(cef::STANDIN_PORT), format!("{port}\n"))?;
         let stop = Arc::new(AtomicBool::new(false));
-        let client = Arc::new(Mutex::new(Client { main: Shown::Hidden }));
+        let client = Arc::new(Mutex::new(Client { main: Shown::Hidden, manager: Manager::default() }));
         let (served, stopped, kept) = (root.to_path_buf(), stop.clone(), client.clone());
         let thread = std::thread::spawn(move || serve(&listener, &served, &kept, port, &stopped, &say));
         Ok(Debugger { port, root: root.to_path_buf(), client, stop, thread: Some(thread) })
@@ -79,6 +113,11 @@ impl Debugger {
     /// Puts the stand-in client's main window as the user might have left it.
     pub fn set_main_window(&self, shown: Shown) {
         self.client.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).main = shown;
+    }
+
+    /// The install manager's `eInstallState`.
+    pub fn install_state(&self) -> i64 {
+        self.client.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).manager.state
     }
 }
 
@@ -130,6 +169,20 @@ fn connection(
     let mut reader = BufReader::new(stream);
     let request = cef::headers(&mut reader)?;
     let line = request.first().map_or("", String::as_str);
+    if let Some(path) = line.strip_prefix("GET /eula/") {
+        let path = path.split([' ', '?']).next().unwrap_or_default();
+        let page = agreement_page(root, path);
+        say(&format!("CEF: served the licence agreement page /eula/{path}"));
+        let (status, page) = match page {
+            Some(page) => ("200 OK", page),
+            None => ("404 Not Found", String::new()),
+        };
+        let answer = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}",
+            page.len()
+        );
+        return writer.write_all(answer.as_bytes()).map_err(|e| e.to_string());
+    }
     if line.starts_with("GET /json") {
         let pages = serde_json::json!([
             { "title": client::MAIN, "type": "page", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/MAIN") },
@@ -155,8 +208,11 @@ fn connection(
     let id = message.get("id").cloned().unwrap_or(serde_json::Value::Null);
     let expression = message["params"]["expression"].as_str().unwrap_or_default();
     let mut client = client.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let evaluated =
-        if main { main_window(&mut client, expression, say) } else { evaluate(root, &mut client, expression, say) };
+    let evaluated = if main {
+        main_window(&mut client, expression, say)
+    } else {
+        evaluate(root, &mut client, port, expression, say)
+    };
     drop(client);
     let result = match evaluated {
         Ok(value) => serde_json::json!({ "result": { "type": "string", "value": value } }),
@@ -198,7 +254,17 @@ fn main_window(client: &mut Client, expression: &str, say: &dyn Fn(&str)) -> Res
 }
 
 /// What a script run in the stand-in's windowless page comes to: its value, or what it threw.
-fn evaluate(root: &Path, client: &mut Client, expression: &str, say: &dyn Fn(&str)) -> Result<String, String> {
+fn evaluate(
+    root: &Path,
+    client: &mut Client,
+    port: u16,
+    expression: &str,
+    say: &dyn Fn(&str),
+) -> Result<String, String> {
+    if let Some(step) = Wizard::of_script(expression) {
+        let answer = wizard(root, client, port, &step, expression, say);
+        return Ok(serde_json::to_string(&answer).unwrap_or_default());
+    }
     if let Some(call) = Call::of_script(expression) {
         let answer = act(root, client, &call, expression, say);
         return Ok(serde_json::to_string(&answer).unwrap_or_default());
@@ -237,7 +303,8 @@ pub fn takes(script: &str, call: &Call) -> Result<(), String> {
     let uninstall = format!("SteamClient.Installs.OpenUninstallWizard([{appid}], '0', true)");
     let pause = format!("SteamClient.Downloads.PauseAppUpdate({appid}, '0')");
     let needs = match call {
-        Call::Install { .. } => vec![wizard, "SteamClient.Installs.ContinueInstall()".to_string()],
+        // An install comes a step at a time (`wizard_takes`).
+        Call::Install { .. } => return Err(wizard),
         Call::Uninstall { .. } => vec![uninstall],
         Call::Steer { steer: Steer::Pause, .. } => vec![pause],
         Call::Steer { steer: Steer::Resume, .. } => {
@@ -258,7 +325,7 @@ pub fn takes(script: &str, call: &Call) -> Result<(), String> {
 /// through, and a last step that says what the stand-in did; or, where it could not, that step failed. A script
 /// that does not make the calls as the real client takes them ([`takes`]) is answered as the real client answers
 /// it, and nothing is done.
-fn act(root: &Path, client: &mut Client, call: &Call, script: &str, say: &dyn Fn(&str)) -> Answer {
+fn act(root: &Path, _client: &mut Client, call: &Call, script: &str, say: &dyn Fn(&str)) -> Answer {
     let appid = call.appid();
     if let Err(missing) = takes(script, call) {
         say(&format!(
@@ -266,37 +333,10 @@ fn act(root: &Path, client: &mut Client, call: &Call, script: &str, say: &dyn Fn
             call.what()
         ));
         let gone = |call: String| Step { call, ok: true, said: "undefined".into() };
-        return match call {
-            // The wizard never opens: the install manager stays at 0, and the script's wait runs out.
-            Call::Install { .. } => {
-                let mut steps: Vec<Step> = call.calls().into_iter().take(2).map(gone).collect();
-                steps.push(Step {
-                    call: client::WIZARD_OPEN.into(),
-                    ok: false,
-                    said: format!(
-                        "eInstallState still 0 after {} ms: Steam did not take it; {{\"eInstallState\":0}}",
-                        client::WIZARD_WAIT.as_millis()
-                    ),
-                });
-                Answer { done: false, steps }
-            }
-            _ => Answer { done: true, steps: call.calls().into_iter().map(gone).collect() },
-        };
+        return Answer { done: true, steps: call.calls().into_iter().map(gone).collect(), value: None };
     }
     let done = match call {
-        Call::Install { folder, .. } => {
-            let libraries: Vec<PathBuf> =
-                crate::libraries(root).iter().filter_map(|dir| dir.parent().map(Path::to_path_buf)).collect();
-            let chosen = match folder {
-                Some(folder) => libraries.iter().find(|library| same(library, Path::new(folder))).cloned(),
-                None => libraries.last().cloned(),
-            };
-            match chosen {
-                Some(library) => fixture::write_progress(root, appid, Progress::Queued)
-                    .map(|()| format!("{appid} queued in {}", library.display())),
-                None => Err(io::Error::other(format!("no library at {}", folder.as_deref().unwrap_or("")))),
-            }
-        }
+        Call::Install { .. } => Err(io::Error::other("an install comes a step at a time, as Steam's wizard goes")),
         Call::Uninstall { .. } => fixture::write_progress(root, appid, Progress::Dropped)
             .and_then(|()| fixture::remove_workshop(root, appid))
             .map(|()| format!("{appid} uninstalled")),
@@ -328,24 +368,199 @@ fn act(root: &Path, client: &mut Client, call: &Call, script: &str, say: &dyn Fn
     ));
     let mut steps: Vec<Step> = Vec::new();
     if done.is_ok() {
-        // The install manager as the real one went: 7 with the wizard open, 14 once the install goes on.
-        let said = |name: &str| match name {
-            client::WIZARD_OPEN => r#"{"eInstallState":7}"#.to_string(),
-            client::INSTALL_GOING => r#"{"eInstallState":14}"#.to_string(),
-            _ => "undefined".to_string(),
-        };
-        steps.extend(call.calls().into_iter().map(|call| Step { said: said(&call), call, ok: true }));
-        // And the wizard brings the main window up.
-        if matches!(call, Call::Install { .. }) {
-            client.main = Shown::Showing;
-        }
+        steps.extend(call.calls().into_iter().map(|call| Step { said: "undefined".into(), call, ok: true }));
     }
     let (ok, said) = match done {
         Ok(did) => (true, did),
         Err(e) => (false, e.to_string()),
     };
     steps.push(Step { call: "the stand-in Steam".into(), ok, said });
-    Answer { done: ok, steps }
+    Answer { done: ok, steps, value: None }
+}
+
+/// The calls the real client takes for a step of its install wizard, written out as `takes` writes them: the
+/// first `script` does not make, if any.
+pub fn wizard_takes(script: &str, step: &Wizard) -> Result<(), String> {
+    let need = match step {
+        Wizard::Open { appid, .. } => format!("SteamClient.Installs.OpenInstallWizard([{appid}], '0')"),
+        Wizard::Look => "SteamClient.Installs.GetInstallManagerInfo()".into(),
+        Wizard::Prepare { .. } => "SteamClient.Installs.SetCreateShortcuts(false, false)".into(),
+        Wizard::Continue => "SteamClient.Installs.ContinueInstall()".into(),
+        Wizard::Agreements { appid } => format!("SteamClient.Apps.LoadEula({appid})"),
+        Wizard::Accept { appid, id, version } => format!("SteamClient.Apps.MarkEulaAccepted({appid}, {id}, {version})"),
+        Wizard::Cancel => "SteamClient.Installs.CancelInstall()".into(),
+    };
+    if script.contains(&format!("=> {need})")) {
+        Ok(())
+    } else {
+        Err(need)
+    }
+}
+
+/// How many looks at 5 (`WaitAppInfo`) the stand-in's manager gives after `OpenInstallWizard` before it moves on.
+const WAIT_APP_INFO: u8 = 1;
+
+/// The id the stand-in gives an app's `n`th agreement (from 0), and its version.
+fn agreement_id(appid: u32, n: u32) -> String {
+    format!("{appid}_eula_{n}")
+}
+const AGREEMENT_VERSION: u64 = 3;
+
+/// Does a step of the install wizard to the stand-in's manager, and answers as the real script would: each call
+/// gone through, what the step gives as its value.
+fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &str, say: &dyn Fn(&str)) -> Answer {
+    let gone = |call: String, said: &str| Step { call, ok: true, said: said.to_string() };
+    if let Err(missing) = wizard_takes(script, step) {
+        say(&format!(
+            "CEF: install wizard: {step:?}: not done: the script does not call {missing}, so Steam's client returns undefined"
+        ));
+        return Answer {
+            done: true,
+            steps: step.calls().into_iter().map(|c| gone(c, "undefined")).collect(),
+            value: None,
+        };
+    }
+    let set_up = WizardSetUp::read(root);
+    let manager = &mut client.manager;
+    let was = manager.state;
+    let mut value = serde_json::Value::Null;
+    match step {
+        Wizard::Open { appid, folder } => {
+            let libraries: Vec<PathBuf> =
+                crate::libraries(root).iter().filter_map(|dir| dir.parent().map(Path::to_path_buf)).collect();
+            let chosen = match folder {
+                Some(folder) => libraries.iter().position(|library| same(library, Path::new(folder))),
+                None => libraries.len().checked_sub(1),
+            };
+            let Some(index) = chosen else {
+                say(&format!("CEF: install wizard: no library at {}", folder.as_deref().unwrap_or("")));
+                let mut steps = vec![gone(step.calls()[0].clone(), "[]")];
+                steps.push(Step {
+                    call: "choose the library".into(),
+                    ok: false,
+                    said: format!("Steam has no library at {}", folder.as_deref().unwrap_or("")),
+                });
+                return Answer { done: false, steps, value: None };
+            };
+            let library = libraries[index].clone();
+            value = serde_json::json!({ "index": index, "path": library.display().to_string() });
+            *manager = Manager {
+                state: 5,
+                open: Some(Opened { appid: *appid, folder: folder.clone(), library, accepted: Vec::new() }),
+                waiting: WAIT_APP_INFO,
+                app: *appid,
+            };
+            // The wizard brings the main window up.
+            client.main = Shown::Showing;
+        }
+        Wizard::Look => {
+            if manager.state == 5 {
+                if manager.waiting > 0 {
+                    manager.waiting -= 1;
+                } else {
+                    let key = manager.open.as_ref().is_some_and(|open| set_up.keys.contains(&open.appid));
+                    manager.state = if key { 4 } else { 7 };
+                }
+            }
+            let needed = manager.open.as_ref().map_or(0, |open| fixture::needed(open.appid));
+            let free = if manager.open.is_some() { set_up.free() } else { 0 };
+            value = serde_json::json!({ "eInstallState": manager.state, "currentAppID": manager.app,
+                "nDiskSpaceRequired": needed, "nDiskSpaceAvailable": free });
+        }
+        Wizard::Prepare { .. } => {}
+        Wizard::Continue => {
+            let open = manager.open.clone();
+            let count = |appid: u32| set_up.agreements.get(&appid).copied().unwrap_or(0);
+            let all_accepted =
+                |open: &Opened| (0..count(open.appid)).all(|n| open.accepted.contains(&agreement_id(open.appid, n)));
+            match (manager.state, open) {
+                (7, Some(open)) if count(open.appid) > 0 && !all_accepted(&open) => manager.state = 8,
+                (7 | 8, Some(open)) if all_accepted(&open) => {
+                    manager.state = 14;
+                    let what = Call::Install { appid: open.appid, folder: open.folder.clone() }.what();
+                    match fixture::write_progress(root, open.appid, Progress::Queued) {
+                        Ok(()) => {
+                            say(&format!("CEF: asked to {what}: {} queued in {}", open.appid, open.library.display()))
+                        }
+                        Err(e) => say(&format!("CEF: asked to {what}: not done: {e}")),
+                    }
+                }
+                _ => {}
+            }
+        }
+        Wizard::Agreements { appid } => {
+            let count = set_up.agreements.get(appid).copied().unwrap_or(0);
+            let shown = manager.state == 8 && manager.open.as_ref().is_some_and(|open| open.appid == *appid);
+            let list: Vec<serde_json::Value> = (0..if shown { count } else { 0 })
+                .map(|n| {
+                    serde_json::json!({ "id": agreement_id(*appid, n),
+                        "url": format!("http://127.0.0.1:{port}/eula/{appid}/{n}?l=english&cc=GB&client=1"),
+                        "version": AGREEMENT_VERSION })
+                })
+                .collect();
+            value = serde_json::Value::Array(list);
+        }
+        Wizard::Accept { appid, id, version } => {
+            let known = (0..set_up.agreements.get(appid).copied().unwrap_or(0))
+                .any(|n| id.as_str() == Some(agreement_id(*appid, n).as_str()))
+                && version.as_u64() == Some(AGREEMENT_VERSION);
+            match manager.open.as_mut().filter(|open| open.appid == *appid && known) {
+                Some(open) => {
+                    open.accepted.push(id.as_str().unwrap_or_default().to_string());
+                    say(&format!("CEF: licence agreement {id} version {version} of {appid} marked accepted"));
+                }
+                None => say(&format!("CEF: licence agreement {id} version {version} of {appid}: not one it gave")),
+            }
+        }
+        Wizard::Cancel => {
+            // From ShowConfig the real one went to 16 (Canceled) and stayed there; from anywhere else, to 0.
+            let state = if was == 7 { 16 } else { 0 };
+            *manager = Manager { state, app: manager.app, ..Manager::default() };
+            say(&format!("CEF: install wizard cancelled: eInstallState {was} -> {state}"));
+        }
+    }
+    if manager.state != was && !matches!(step, Wizard::Cancel) {
+        say(&format!("CEF: install wizard: eInstallState {was} -> {}", manager.state));
+    }
+    let said = |value: &serde_json::Value| if value.is_null() { "undefined".to_string() } else { value.to_string() };
+    let mut steps: Vec<Step> = step.calls().into_iter().map(|call| gone(call, "undefined")).collect();
+    if let Some(last) = steps.last_mut() {
+        last.said = said(&value);
+    }
+    Answer { done: true, steps, value: (!value.is_null()).then_some(value) }
+}
+
+/// The stand-in's page for an agreement, `<appid>/<n>`: a whole page as a store's is, its frame, scripts, styles and
+/// a language picker above it, and enough paragraphs to scroll through. None for one no app of the fake's set-up has.
+fn agreement_page(root: &Path, path: &str) -> Option<String> {
+    let (appid, n) = path.split_once('/')?;
+    let (appid, n): (u32, u32) = (appid.parse().ok()?, n.parse().ok()?);
+    let count = WizardSetUp::read(root).agreements.get(&appid).copied().unwrap_or(0);
+    if n >= count {
+        return None;
+    }
+    let mut body = format!(
+        "<h1>Stand-in Licence Agreement {} of {count}</h1>\n<p>For app {appid}, version {AGREEMENT_VERSION}. \
+         This is the stand-in Steam&#39;s own made-up text: it binds nobody to anything.</p>\n",
+        n + 1
+    );
+    // Long enough to be several pages of the prompt at any screen size: some 20 of its boxes at 1080p.
+    for clause in 1..=60 {
+        body.push_str(&format!(
+            "<h2>{clause}. Clause {clause}</h2>\n<p>The stand-in's clause {clause} goes on for a while, so that \
+             the agreement is long enough to scroll with the pad. It says nothing &amp; means nothing, \
+             and is here only to be read through. It runs on over a second line and a third, as a real \
+             agreement's clauses do, and then it ends.</p>\n<ul><li>Its first point.</li><li>Its second \
+             point.</li></ul>\n"
+        ));
+    }
+    body.push_str("<p>End of the stand-in licence agreement.</p>\n");
+    Some(format!(
+        "<!DOCTYPE html>\n<html><head><title>Licence agreement</title><style>body {{ color: #ccc }}</style>\
+         <script>window.stand_in = '<p>never shown</p>';</script></head>\n<body><header>Stand-in store</header>\
+         <nav>Store | Library</nav>\n<div class=\"lang\">Language: <select><option>English</option>\
+         </select></div>\n<div class=\"eula\">{body}</div><footer>Stand-in footer</footer></body></html>"
+    ))
 }
 
 /// Whether two paths name the same folder, as Windows compares them.
@@ -400,7 +615,7 @@ mod tests {
         // As before the fix (#171, 2026-11-17): the wizard without the client id does nothing, and the install's
         // wait on Steam's install manager runs out at 0; the two-argument uninstall returns with nothing done.
         let install = Call::Install { appid: quiet, folder: Some(root.display().to_string()) };
-        let old = install
+        let old = Wizard::Open { appid: quiet, folder: Some(root.display().to_string()) }
             .script()
             .replace(&format!("OpenInstallWizard([{quiet}], '0')"), &format!("OpenInstallWizard([{quiet}])"));
         let answer = |script: &str| match cef::evaluate(&ports, cef::SHARED, script) {
@@ -408,7 +623,8 @@ mod tests {
             other => panic!("{other:?}"),
         };
         let wizard = answer(&old);
-        assert!(!wizard.done && wizard.steps.last().is_some_and(|step| step.call == client::WIZARD_OPEN && !step.ok));
+        assert!(wizard.done && wizard.value.is_none(), "returned undefined, as Steam's does");
+        assert_eq!(debugger.install_state(), 0, "no wizard opened");
         assert_eq!(state(), None, "nothing queued");
         assert_eq!(debugger.main_window(), Shown::Hidden, "no wizard, no main window");
 
@@ -491,5 +707,123 @@ mod tests {
                     == &format!("CEF: asked to pause {quiet}: {quiet} is Paused {{ done: 30, total: 100 }}")),
             "{said:#?}"
         );
+    }
+
+    /// #230: the wizard's states as the real client's went, walked through Steam's own calls: a licence agreement
+    /// declined, then accepted (two of them, one after another), a product key asked for, and a game too big for
+    /// the drive. Every stop cancels the wizard (to 16 from the config, else to 0, as Steam's went), and nothing but
+    /// the user's own Accept marks one accepted.
+    #[test]
+    fn the_stand_ins_install_wizard_goes_as_steams_and_the_install_stops_where_it_must() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        fixture::write(&root, &fixture::Fixture::standard()).unwrap();
+        std::fs::write(root.join(fixture::STANDIN_CLIENT), "").unwrap();
+        let said = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let kept = said.clone();
+        let debugger = Debugger::start(&root, move |line| kept.lock().unwrap().push(line.to_string())).unwrap();
+        let ports = cef::ports(&root);
+        let (agreed, keyed, plain) = (9_100_060, 9_100_100, 9_100_040);
+        let set_up = |free: Option<u64>| {
+            let set_up = WizardSetUp { agreements: [(agreed, 2)].into(), keys: vec![keyed], free };
+            set_up.write(&root).unwrap();
+        };
+        set_up(None);
+        let queued =
+            |appid: u32| installs::under_way(&crate::libraries(&root), &|_| false).iter().any(|found| found.0 == appid);
+        let install = |appid: u32| Call::Install { appid, folder: None };
+        // What the install came to, and each agreement the user was shown.
+        let ask = |appid: u32, replies: &[model::Reply]| {
+            let mut seen: Vec<model::Agreement> = Vec::new();
+            let mut replies = replies.iter().copied();
+            let mut user = |agreement: &model::Agreement| {
+                seen.push(agreement.clone());
+                replies.next().unwrap_or(model::Reply::Decline)
+            };
+            let outcome = client::ask_user(&ports, Some(&root), &install(appid), &mut user);
+            (outcome, seen)
+        };
+        use model::Reply::{Accept, Decline, OpenInStore};
+
+        // Declined: the wizard cancelled, nothing queued, nothing marked accepted.
+        let (outcome, seen) = ask(agreed, &[Decline]);
+        assert_eq!(outcome, Outcome::Stopped(model::Stop::Declined));
+        assert_eq!((debugger.install_state(), queued(agreed)), (0, false));
+        assert_eq!(seen.len(), 1);
+        let text = seen[0].text.as_ref().unwrap();
+        assert!(text.starts_with("Stand-in Licence Agreement 1 of 2"), "{text}");
+        assert!(!text.contains("never shown") && !text.contains("Stand-in footer") && !text.contains("<p>"));
+        assert!(!text.contains("Language:") && !text.contains("English"), "the language picker: {text}");
+        assert_eq!((seen[0].at, seen[0].of), (1, 2));
+
+        // The first accepted and the second declined: still nothing.
+        let (outcome, seen) = ask(agreed, &[Accept, Decline]);
+        assert_eq!(outcome, Outcome::Stopped(model::Stop::Declined));
+        assert_eq!((debugger.install_state(), queued(agreed), seen.len()), (0, false, 2));
+
+        // Both accepted, one after another: the install goes on to 14 and is queued.
+        let (outcome, seen) = ask(agreed, &[Accept, Accept]);
+        assert_eq!(outcome, Outcome::Took);
+        assert_eq!((debugger.install_state(), queued(agreed)), (14, true));
+        assert_eq!(seen.iter().map(|agreement| agreement.at).collect::<Vec<_>>(), [1, 2]);
+        assert!(seen[1].text.as_ref().unwrap().starts_with("Stand-in Licence Agreement 2 of 2"));
+        fixture::write_progress(&root, agreed, Progress::Dropped).unwrap();
+
+        // Left to Steam's own dialog: the wizard cancelled.
+        assert_eq!(ask(agreed, &[OpenInStore]).0, Outcome::LeftToSteam);
+        assert_eq!((debugger.install_state(), queued(agreed)), (0, false));
+
+        // A product key: the wizard never gets to its config.
+        assert_eq!(ask(keyed, &[]).0, Outcome::Stopped(model::Stop::StoreAsks("a product key".into())));
+        assert_eq!((debugger.install_state(), queued(keyed)), (0, false));
+
+        // Too big for what is free: refused with the manager's own figures, before ContinueInstall.
+        let needed = fixture::needed(plain);
+        set_up(Some(needed - 1));
+        // Cancelled from the config, the manager at 16 is a clean cancel: not waited out.
+        let start = std::time::Instant::now();
+        assert_eq!(ask(plain, &[]).0, Outcome::Stopped(model::Stop::NoSpace { needed, free: needed - 1 }));
+        assert!(start.elapsed() < client::WIZARD_WAIT, "{:?}", start.elapsed());
+        assert_eq!((debugger.install_state(), queued(plain)), (16, false));
+        set_up(Some(needed));
+        assert_eq!(ask(plain, &[]).0, Outcome::Stopped(model::Stop::NoSpace { needed, free: needed }), "as Steam: >=");
+        // With room, a game with no agreement is taken without the user being asked.
+        set_up(None);
+        let (outcome, seen) = ask(plain, &[]);
+        assert_eq!(outcome, Outcome::Took);
+        assert!(seen.is_empty() && queued(plain));
+
+        let said = said.lock().unwrap();
+        let has = |line: &str| said.iter().any(|said| said == line);
+        assert!(has("CEF: install wizard: eInstallState 0 -> 5"), "{said:#?}");
+        assert!(has("CEF: install wizard: eInstallState 5 -> 7"), "{said:#?}");
+        assert!(has("CEF: install wizard: eInstallState 7 -> 8"), "{said:#?}");
+        assert!(has(&format!("CEF: licence agreement \"{agreed}_eula_1\" version 3 of {agreed} marked accepted")));
+        assert!(has("CEF: install wizard cancelled: eInstallState 8 -> 0"), "{said:#?}");
+        assert!(has("CEF: install wizard cancelled: eInstallState 4 -> 0"), "{said:#?}");
+        assert!(has("CEF: install wizard cancelled: eInstallState 7 -> 16"), "{said:#?}");
+        assert!(said.iter().any(|line| line.starts_with(&format!(
+            "CEF: asked to install {agreed} into Steam's default library: {agreed} queued in "
+        ))));
+    }
+
+    /// A script that makes Steam's calls otherwise than the real client takes them does nothing, as Steam's does.
+    #[test]
+    fn a_wizard_step_made_otherwise_than_steam_takes_it_is_not_taken() {
+        let step = Wizard::Accept { appid: 7, id: serde_json::json!("7_eula_0"), version: serde_json::json!(3) };
+        assert_eq!(wizard_takes(&step.script(), &step), Ok(()));
+        let without = step.script().replace("MarkEulaAccepted(7, ", "MarkEulaAccepted(");
+        assert!(wizard_takes(&without, &step).is_err());
+        for step in [
+            Wizard::Look,
+            Wizard::Continue,
+            Wizard::Cancel,
+            Wizard::Agreements { appid: 7 },
+            Wizard::Prepare { index: Some(1) },
+        ] {
+            assert_eq!(wizard_takes(&step.script(), &step), Ok(()), "{step:?}");
+        }
+        let open = Wizard::Open { appid: 7, folder: None };
+        assert_eq!(wizard_takes(&open.script(), &open), Ok(()));
     }
 }

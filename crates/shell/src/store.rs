@@ -53,6 +53,15 @@ impl Opener for Saying<'_> {
     fn front(&mut self) {
         self.addresses.front();
     }
+
+    fn agreement(&mut self, game: &Game, agreement: &model::Agreement) -> model::Reply {
+        self.addresses.agreement(game, agreement)
+    }
+
+    fn stopped(&mut self, game: &Game, stop: &model::Stop) {
+        eprintln!("store: {} stopped installing {}: {stop:?}", self.store, game.name);
+        self.addresses.stopped(game, stop);
+    }
 }
 
 /// [`Saying`], for a thread to keep: an installer's fallback that is taken later (Steam's client not answering).
@@ -72,6 +81,15 @@ impl Opener for Detached {
 
     fn front(&mut self) {
         self.addresses.front();
+    }
+
+    fn agreement(&mut self, game: &Game, agreement: &model::Agreement) -> model::Reply {
+        self.addresses.agreement(game, agreement)
+    }
+
+    fn stopped(&mut self, game: &Game, stop: &model::Stop) {
+        eprintln!("store: {} stopped installing {}: {stop:?}", self.store, self.name);
+        self.addresses.stopped(game, stop);
     }
 }
 
@@ -256,6 +274,82 @@ fn bring_front(home: isize) {
     #[cfg(not(windows))]
     {
         let _ = home;
+    }
+}
+
+/// What a store's installer, on a thread of its own, has for the user (#230): a licence agreement to answer, its
+/// answer sent back on `reply`; or an install stopped, and why.
+#[derive(Debug)]
+pub enum Word {
+    Agreement { game: i64, name: String, agreement: model::Agreement, reply: std::sync::mpsc::Sender<model::Reply> },
+    Stopped { game: i64, stop: model::Stop },
+}
+
+/// Whatever opens addresses, with a way to the window: what an installer's thread has for the user goes as a
+/// [`Word`] down `words`, and `wake` has the window look. The executable's [`Addresses`].
+pub struct Asking {
+    addresses: Box<dyn Addresses>,
+    words: std::sync::mpsc::Sender<Word>,
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+
+impl Asking {
+    pub fn new(
+        addresses: Box<dyn Addresses>,
+        words: std::sync::mpsc::Sender<Word>,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        Self { addresses, words, wake: std::sync::Arc::new(wake) }
+    }
+}
+
+impl Opener for Asking {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
+        self.addresses.open(start)
+    }
+
+    fn detached(&self) -> Option<Box<dyn Opener + Send>> {
+        let addresses = self.addresses.detached()?;
+        Some(Box::new(Telling { addresses, words: self.words.clone(), wake: self.wake.clone() }))
+    }
+
+    fn front(&mut self) {
+        self.addresses.front();
+    }
+}
+
+/// [`Asking`], for a thread to keep: it tells the window, and waits for the user's answer to an agreement.
+struct Telling {
+    addresses: Box<dyn Opener + Send>,
+    words: std::sync::mpsc::Sender<Word>,
+    wake: std::sync::Arc<dyn Fn() + Send + Sync>,
+}
+
+impl Opener for Telling {
+    fn open(&mut self, start: &Start) -> Result<(), String> {
+        self.addresses.open(start)
+    }
+
+    fn front(&mut self) {
+        self.addresses.front();
+    }
+
+    /// Waits for the user's answer for as long as they take. The window gone, or the question with it, is a
+    /// Decline.
+    fn agreement(&mut self, game: &Game, agreement: &model::Agreement) -> model::Reply {
+        let (reply, answer) = std::sync::mpsc::channel();
+        let word = Word::Agreement { game: game.id, name: game.name.clone(), agreement: agreement.clone(), reply };
+        if self.words.send(word).is_err() {
+            return model::Reply::Decline;
+        }
+        (self.wake)();
+        answer.recv().unwrap_or(model::Reply::Decline)
+    }
+
+    fn stopped(&mut self, game: &Game, stop: &model::Stop) {
+        if self.words.send(Word::Stopped { game: game.id, stop: stop.clone() }).is_ok() {
+            (self.wake)();
+        }
     }
 }
 

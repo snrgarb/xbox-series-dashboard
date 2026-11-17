@@ -8,6 +8,7 @@
 //! Toasts are a third (`draw_toasts`), for the strip above both.
 pub mod achievement;
 pub mod achievements;
+pub mod agreement;
 mod app_tile;
 pub mod art_picker;
 pub mod drawn;
@@ -109,6 +110,9 @@ pub enum Effect {
     /// Ask its store to pause, resume or cancel the install under way of the game with this id: a queued game's
     /// menu in the Queue (docs/spec/manage-queue.md, section 8). The Queue follows what the store then does.
     Steer { game: i64, steer: model::Steer },
+    /// The user's answer to the licence agreement's prompt asked with this number (`Dashboard::ask_agreement`,
+    /// #230): for whoever waits on it. Only the user's own A on Accept is `Reply::Accept`.
+    Agreement { id: u64, reply: model::Reply },
     /// Settings' Groups page changed a saved filter: shown or not, moved, made, changed, deleted
     /// (docs/spec/filters.md, section 6). A new snapshot follows, as for a favourite, and the pages over Home are
     /// told of it.
@@ -370,6 +374,15 @@ impl Dashboard {
         // Nor what each store can be asked of its games: each keeps what it had.
         for entry in library.queue.entries.iter_mut().filter(|entry| entry.can == model::Can::NOTHING) {
             entry.can = self.library.queue.get(entry.game).map_or(model::Can::NOTHING, |was| was.can);
+        }
+        // Nor which games stopped and why (the follower keeps them, not the database): they stay, but for a game
+        // installing again or installed now.
+        if library.queue.stopped.is_empty() {
+            let gone = |game: i64| {
+                library.queue.get(game).is_some() || library.games.iter().any(|g| g.id == game && g.installed)
+            };
+            let stopped = self.library.queue.stopped.iter().filter(|stopped| !gone(stopped.game)).cloned().collect();
+            library.queue.stopped = stopped;
         }
         let place = |at: usize| {
             let game = self.library.games.get(at)?;
@@ -1316,6 +1329,37 @@ impl Dashboard {
         }
     }
 
+    /// A store's install asks the user to accept a licence agreement (#230): its prompt over whatever is up, which
+    /// answers with `Effect::Agreement` and this `entry`'s number.
+    pub fn ask_agreement(&mut self, entry: agreement::Entry) {
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+            discord: &self.discord,
+        };
+        if self.pages.open_over(agreement::open(entry), around) {
+            self.effects.push(Effect::Sound(Sound::PromptOpen));
+        }
+    }
+
+    /// The licence agreements' prompts that are up, by their numbers: one asked and no longer up went with no
+    /// answer (a page from the Guide took the screen, a game ended), which is a Decline.
+    pub fn agreements_up(&self) -> Vec<u64> {
+        self.pages.agreements()
+    }
+
+    /// An install stopped, or a game left the Queue without installing (#230): a Toast with the game's cover and
+    /// why, in a few words. A tap opens Manage Queue, where its row says the rest.
+    pub fn tell_stopped(&mut self, stopped: &model::Stopped) {
+        let Some(found) = self.library.games.iter().find(|found| found.id == stopped.game) else { return };
+        let art = Some(Box::new(found.clone()));
+        let toast = Toast::new(ToastKind::Stopped, stopped.headline(), self.options.use_guide);
+        self.toast(Toast { game: Some(stopped.game), art, ..toast });
+    }
+
     /// The name of the page that has the pad, if one is up over Home.
     pub fn page(&self) -> Option<&'static str> {
         self.pages.top().map(|page| page.name())
@@ -1572,8 +1616,8 @@ impl Dashboard {
     /// game. Either way the Toast goes, and the tap sounds as A does. None for any other Toast: the Guide opens.
     fn do_what_toast_says(&mut self, toast: &Toast) -> Option<bool> {
         match toast.kind {
-            ToastKind::Queued => {
-                self.toasts.drop_waiting(ToastKind::Queued);
+            ToastKind::Queued | ToastKind::Stopped => {
+                self.toasts.drop_waiting(toast.kind);
                 self.toasts.send_away();
                 self.open_page(Open::ManageQueue);
                 self.show_dashboard();
@@ -1594,7 +1638,7 @@ impl Dashboard {
     /// (docs/spec/guide.md, 9.5). An Uninstalled Toast's is the Guide as it opens.
     fn show_what_toast_told(&mut self, toast: ToastKind) {
         match toast {
-            ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled => {}
+            ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled | ToastKind::Stopped => {}
             ToastKind::Notification => self.open_notifications(),
             // An achievement's opens it where the Profile's totals and last unlocks are, Rare or not.
             ToastKind::Greeting | ToastKind::Achievement | ToastKind::RareAchievement => {
@@ -1705,9 +1749,11 @@ impl Dashboard {
             ToastKind::Queued => "Queued".to_string(),
             ToastKind::Installed => "Ready to play".to_string(),
             ToastKind::Uninstalled => format!("{} was uninstalled", found.name),
-            ToastKind::Notification | ToastKind::Greeting | ToastKind::Achievement | ToastKind::RareAchievement => {
-                return
-            }
+            ToastKind::Notification
+            | ToastKind::Greeting
+            | ToastKind::Achievement
+            | ToastKind::RareAchievement
+            | ToastKind::Stopped => return,
         };
         let art = Some(Box::new(found.clone()));
         self.toast(Toast { game: Some(game), art, ..Toast::new(kind, text, self.options.use_guide) });

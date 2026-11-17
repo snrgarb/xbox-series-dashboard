@@ -196,14 +196,14 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
                 }
                 // A game's cover, the tile's whole square cut from its middle and bare on the card; its kind's
                 // icon until it is decoded, or with none.
-                ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled => {
+                ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled | ToastKind::Stopped => {
                     let key = toast.art.as_deref().and_then(|game| square_art(game, ui.px()));
                     let drawn = key.is_some_and(|key| face(ui, at(tile), &key, 1.0, 4.0 * scale));
                     if !drawn {
                         icon(
                             ui,
                             match toast.kind {
-                                ToastKind::Queued => glyph::DOWNLOAD,
+                                ToastKind::Queued | ToastKind::Stopped => glyph::DOWNLOAD,
                                 ToastKind::Installed => glyph::PLAY,
                                 _ => glyph::DELETE,
                             },

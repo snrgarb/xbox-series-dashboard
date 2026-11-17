@@ -29,6 +29,11 @@
 //!   standin steam-library <dir> <folder>
 //!       Adds a library at <folder> to the fake Steam at <dir> (`fixture::add_library`, #179), as Steam's Storage
 //!       Manager adds one on another drive: a second folder installs may go to, which the Dashboard asks about.
+//!   standin steam-wizard <dir> [--agreements <appid>:<n>]... [--key <appid>]... [--free <bytes>]
+//!       Sets up the stand-in client's install wizard at <dir> (#230, `fixture::WizardSetUp`): the apps whose install
+//!       shows <n> licence agreements (eInstallState 8, each served by the stand-in at its own address and marked
+//!       accepted only by `MarkEulaAccepted`), those that ask for a product key (4), and the bytes free that its
+//!       install manager says every library has (a TiB by default). Each call writes the whole set-up anew.
 //!   standin steam-change <dir> add-game | played <appid> <minutes>
 //!       Changes the fake Steam at <dir>, written by make-steam without --full-shelf, as Steam's own files change
 //!       while the Dashboard runs (`fixture::change`): add-game makes Paper Lighthouse (9100800) the user's,
@@ -230,6 +235,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
        standin steam-workshop <dir> <appid> <done>/<items>
        standin steam-library <dir> <folder>
+       standin steam-wizard <dir> [--agreements <appid>:<n>]... [--key <appid>]... [--free <bytes>]
        standin unlock-achievement <dir> <key>
        standin steam-change <dir> add-game | played <appid> <minutes>
        steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>
@@ -731,6 +737,26 @@ fn dir_and_json(args: &[String]) -> Option<(&Path, Option<&Path>)> {
 }
 
 /// A make- command's exit code: its failure said in the log, and in `standin-error.txt` beside `dir`.
+/// `steam-wizard`'s options: `--agreements <appid>:<n>`, `--key <appid>`, each as often as wanted, and `--free
+/// <bytes>`. None for anything else.
+fn wizard_set_up(args: &[String]) -> Option<fixture::WizardSetUp> {
+    let mut set_up = fixture::WizardSetUp::default();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let value = args.next()?;
+        match arg.as_str() {
+            "--agreements" => {
+                let (appid, n) = value.split_once(':')?;
+                set_up.agreements.insert(appid.parse().ok()?, n.parse().ok()?);
+            }
+            "--key" => set_up.keys.push(value.parse().ok()?),
+            "--free" => set_up.free = Some(value.parse().ok()?),
+            _ => return None,
+        }
+    }
+    Some(set_up)
+}
+
 fn made(what: &str, dir: &Path, result: Result<(), String>) -> i32 {
     let Err(e) = result else { return 0 };
     note(&format!("{what}: {e}"));
@@ -1012,6 +1038,22 @@ fn run(args: &[String]) -> i32 {
                 2
             }
         },
+        Some("steam-wizard") => {
+            let Some((dir, rest)) = args[1..].split_first() else {
+                note(USAGE);
+                return 2;
+            };
+            let Some(set_up) = wizard_set_up(rest) else {
+                note(USAGE);
+                return 2;
+            };
+            let dir = Path::new(dir);
+            let written = set_up.write(dir).map_err(|e| format!("{}: {e}", dir.display()));
+            if written.is_ok() {
+                note(&format!("steam-wizard: {set_up:?} at {}", dir.display()));
+            }
+            made("steam-wizard", dir, written)
+        }
         Some("steam-install") => {
             let parsed = match &args[1..] {
                 [root, appid, rest @ ..] => appid.parse::<u32>().ok().zip(progress_of(rest)).map(|got| (root, got)),
