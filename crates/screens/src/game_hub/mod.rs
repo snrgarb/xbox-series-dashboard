@@ -113,6 +113,16 @@ fn facts(game: &Game) -> String {
     facts.into_iter().flatten().collect::<Vec<_>>().join(" \u{2022} ")
 }
 
+/// The pictures a hub of `game` shows as it opens, at `px` pixels a design unit, each with what it is in a log:
+/// the art behind the band (`hero`, or `cover, blurred` for want of one) and the cover card's. A hub's opening line
+/// says how each came to be ready (#214).
+pub fn art_keys(game: &Game, px: f32) -> Vec<(&'static str, ui::ArtKey)> {
+    let backdrop =
+        backdrop::art(game).map(|(key, _)| (if game.hero.is_some() { "hero" } else { "cover, blurred" }, key));
+    let cover = cards::cover_key(game, px).map(|key| ("cover", key));
+    backdrop.into_iter().chain(cover).collect()
+}
+
 /// How far the game has got with its achievements, if it has any: a game in no library database has none.
 fn progress<'a>(game: &Game, library: &'a Library) -> Option<&'a model::achievement::GameProgress> {
     library.achievements.of(game.id).filter(|_| game.id != 0)
@@ -304,6 +314,10 @@ impl Page for GameHub {
 
     fn behind(&self) -> Option<u64> {
         Some(self.serial)
+    }
+
+    fn game_hub<'a>(&self, library: &'a Library) -> Option<(u64, &'a Game)> {
+        self.entry.find(library).map(|(game, _)| (self.serial, game))
     }
 }
 

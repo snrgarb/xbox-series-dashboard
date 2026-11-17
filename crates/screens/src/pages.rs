@@ -264,6 +264,12 @@ pub trait Page {
     fn is_art_picker(&self) -> bool {
         false
     }
+
+    /// For the Game hub: its number ([`Page::behind`]), new each time a hub opens, and its game as `library` has
+    /// it. What the shell's line on how long a hub took to open goes by (#214).
+    fn game_hub<'a>(&self, _library: &'a Library) -> Option<(u64, &'a model::Game)> {
+        None
+    }
 }
 
 fn behind_key(page: u64) -> (&'static str, u64) {

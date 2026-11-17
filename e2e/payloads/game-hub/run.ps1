@@ -59,6 +59,30 @@ function Expect-Logged([string] $Pattern, [int] $After, [string] $What) {
     if ($line) { Say "${What}: $line" } else { Say "${What}: no line like '$Pattern'"; $script:failures += "${What}: the Dashboard logged no '$Pattern'" }
 }
 
+# How long the hub took to open (#214), by the line the Dashboard logs for every hub once it has come to rest:
+# `hub: opened <game> in N ms: first frame N ms, last moving frame N ms after A (at rest, drawn on the GPU); A
+# answered by a frame at N ms; double tap wait N ms ...`. The double tap's 300 ms is the spec's; what is judged is the
+# time from the hub being put up to its first frame being done, which nothing the hub waits on (a picture, its
+# achievements) may hold: at most $HubFrameGpuMs on a GPU, and $HubFrameCpuMs on the processor (WARP on a VM, where a
+# frame takes most of a second).
+$HubFrameGpuMs = 100
+$HubFrameCpuMs = 3000
+function Expect-HubOpenedQuickly([int] $After, [string] $What) {
+    $line = Wait-DashboardLog '^hub: opened ' 15 $After
+    if (-not $line) { Say "${What}: no 'hub: opened' line"; $script:failures += "${What}: the Dashboard logged no 'hub: opened' line"; return }
+    Say "${What}: $line"
+    if ($line -notmatch 'first frame (\d+) ms, last moving frame (\d+) ms after A') { $script:failures += "${What}: the hub's line does not count from A: $line"; return }
+    $first = [double] $Matches[1]
+    $wait = if ($line -match 'double tap wait (\d+) ms') { [double] $Matches[1] } else { 0 }
+    $bound = if ($line -match 'drawn on the processor') { $HubFrameCpuMs } else { $HubFrameGpuMs }
+    $frame = $first - $wait
+    if ($frame -gt $bound) {
+        $script:failures += "${What}: the hub's first frame was done $frame ms after it was put up, over the bound of $bound ms: $line"
+    } else {
+        Say "${What}: first frame $frame ms after the hub was put up (bound $bound ms)"
+    }
+}
+
 # A line the stand-in Steam must have written: what it was started with.
 function Expect-Steam([string] $Pattern, [string] $What) {
     $log = Join-Path $env:E2E_OUT 'standin.log'
@@ -83,7 +107,9 @@ try {
 
     # The Recent row's first game, which is installed and has been played. One A: its hub, focus on Play.
     Press Down 'Recent\(0\)'
+    $mark = Get-DashboardLogLength
     Press A 'GameHub: \d+ Hub Play' '01-hub-play-focused'
+    Expect-HubOpenedQuickly $mark 'the first hub since start-up'
     $game = if ((Focus-Now) -match 'GameHub: (\d+) ') { $Matches[1] } else { throw "No hub opened: $(Focus-Now)" }
     $hub = "GameHub: $game"
 
@@ -138,7 +164,9 @@ try {
     $install = $false
     foreach ($tile in 1..6) {
         Press Right "Recent\($tile\)"
+        $mark = Get-DashboardLogLength
         Press A 'GameHub: \d+ Hub (Play|Install)'
+        Expect-HubOpenedQuickly $mark "the hub of Recent($tile)"
         if ((Focus-Now) -match 'Hub Install$') {
             $install = $true
             Start-Sleep -Milliseconds 4500

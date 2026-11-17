@@ -278,6 +278,9 @@ pub struct Renderer {
     atlas: TextAtlas,
     /// One per layer that has text.
     text_renderers: Vec<TextRenderer>,
+    /// The time spent laying out glyphs for the GPU (rasterising those not drawn before) since
+    /// [`Renderer::take_glyph_time`] was last asked.
+    glyph_time: std::time::Duration,
 }
 
 impl Renderer {
@@ -476,6 +479,7 @@ impl Renderer {
             viewport,
             atlas,
             text_renderers: Vec::new(),
+            glyph_time: Default::default(),
         };
         renderer.add_texture(device, queue, &[RgbaImage::from_pixel(1, 1, image::Rgba([255; 4]))]);
         renderer
@@ -784,6 +788,12 @@ impl Renderer {
         queue.write_buffer(&made.params[1], 0, bytemuck::cast_slice(&down));
     }
 
+    /// The time spent preparing text for the GPU since the last call: shaping what is new (also counted by
+    /// [`TextSys::take_shaped`]) and rasterising glyphs not drawn before.
+    pub fn take_glyph_time(&mut self) -> std::time::Duration {
+        std::mem::take(&mut self.glyph_time)
+    }
+
     /// Draws `frame` to `target`, which is `size` pixels and is first cleared to `clear`, and submits it.
     pub fn render(
         &mut self,
@@ -847,6 +857,7 @@ impl Renderer {
         while self.text_renderers.len() < with_text {
             self.text_renderers.push(TextRenderer::new(&mut self.atlas, device, Default::default(), None));
         }
+        let glyphs_began = std::time::Instant::now();
         for (next, at) in (0..frame.layers.len()).filter(|&at| has_text(at)).enumerate() {
             let layer = &frame.layers[at];
             for text in &layer.texts {
@@ -873,6 +884,7 @@ impl Renderer {
                 .prepare(device, queue, &mut self.text.fonts, &mut self.atlas, viewport, areas, &mut self.swash)
                 .expect("prepare text");
         }
+        self.glyph_time += glyphs_began.elapsed();
 
         // Where each layer's quads start among the instances, and which text renderer is the layer's.
         let (mut first, mut text) = (0, 0);

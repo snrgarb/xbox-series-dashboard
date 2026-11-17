@@ -17,7 +17,7 @@ const SMALL: (u32, u32) = (128, 72);
 /// The game's art for behind the band, and how far past the screen it is drawn: its background art, blurred by 2
 /// at a fifteenth of the screen; else its cover, blurred by 4 and drawn 1.15 times the screen's size so that the
 /// blur's soft edges fall off it.
-fn art(game: &Game) -> Option<(ArtKey, f32)> {
+pub(crate) fn art(game: &Game) -> Option<(ArtKey, f32)> {
     let soft = |path: &PathBuf, radius| ArtKey { path: path.clone(), kind: Kind::Soft(radius) };
     match (&game.hero, game.cover.as_ref().or(game.header.as_ref())) {
         (Some(hero), _) => Some((soft(hero, 2), 1.0)),
