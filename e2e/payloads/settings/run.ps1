@@ -1,7 +1,7 @@
 # Settings, walked with the virtual pad on a fake Steam library: the rail's four categories (General, Account, Games &
 # apps, System), General's boxes, the Idle and Guide pages, Games & apps' two sections (Library and Installs), each
-# category keeping where focus was, and Personalisation; Background delay and Reduce motion turned over; then the
-# Dashboard killed and started again, to see that both are as they were left.
+# category keeping where focus was, and Personalisation; Background delay, Reduce motion and Show launcher on recent
+# games turned over; then the Dashboard killed and started again, to see that all three are as they were left.
 #
 # Judged by the Dashboard's log, a press at a time. --log-focus says where focus is after every press that moved it
 # (`focus: Settings: Personalisation: Reduce motion`); a checkbox turned over is `settings: <key> = <value>` as it is
@@ -167,6 +167,10 @@ try {
     Turn-Over 'home.background_delay' 'false' '31-background-delay-off'
     Press Down 'Settings: Personalisation: Reduce motion'
     Turn-Over 'motion.reduce' 'true' '31-reduce-motion-on'
+    # Show launcher icons (#248), beside Show Play history: off, the Recent row's tiles lose their marks.
+    Press Down 'Settings: Personalisation: Show Play history'
+    Press Down 'Settings: Personalisation: Show launcher icons'
+    Turn-Over 'home.recent_launcher' 'false' '31-recent-launcher-off'
     Walk-ToEdge Down 'Settings: Personalisation: Show battery percentages'
     Start-Sleep -Milliseconds 2000
     Save-Screen '31-personalisation-last-box'
@@ -181,7 +185,7 @@ try {
     Stop-Dashboard
     Say 'stopped the Dashboard; starting it again on the same data folder'
     Start-OnData
-    foreach ($held in @('home.background_delay is false', 'motion.reduce is true')) {
+    foreach ($held in @('home.background_delay is false', 'motion.reduce is true', 'home.recent_launcher is false')) {
         if (Get-DashboardLog | Where-Object { $_ -eq "settings: $held" }) {
             Say "held: $held"
         } else {
@@ -197,6 +201,9 @@ try {
     Turn-Over 'home.background_delay' 'true'
     Press Down 'Settings: Personalisation: Reduce motion'
     Turn-Over 'motion.reduce' 'false' '31-put-back'
+    Press Down 'Settings: Personalisation: Show Play history'
+    Press Down 'Settings: Personalisation: Show launcher icons'
+    Turn-Over 'home.recent_launcher' 'true'
 
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }

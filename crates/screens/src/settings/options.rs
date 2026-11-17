@@ -15,6 +15,8 @@ pub enum Setting {
     ReduceMotion,
     /// The Recent row ends with the Play history tile; off, with one game more.
     ShowPlayHistory,
+    /// The Recent row's tiles carry their launcher's mark at their foot; off, none of them does.
+    ShowRecentLauncher,
     /// The figure beside the pad's battery and the PC's.
     ShowBatteryPercent,
     /// The Guide opens with the Guide button and from Home; off, the button is left to Steam or another program.
@@ -31,10 +33,11 @@ pub enum Setting {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 8] = [
+    pub const ALL: [Setting; 9] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
+        Setting::ShowRecentLauncher,
         Setting::ShowBatteryPercent,
         Setting::UseGuide,
         Setting::DownloadArtOnline,
@@ -48,6 +51,7 @@ impl Setting {
             Setting::BackgroundDelay => "home.background_delay",
             Setting::ReduceMotion => "motion.reduce",
             Setting::ShowPlayHistory => "home.play_history",
+            Setting::ShowRecentLauncher => "home.recent_launcher",
             Setting::ShowBatteryPercent => "status.battery_percent",
             Setting::UseGuide => "guide.enabled",
             // `library::art::ONLINE_SETTING`.
@@ -104,6 +108,8 @@ pub struct Options {
     pub background_delay: bool,
     pub reduce_motion: bool,
     pub show_play_history: bool,
+    /// The launcher's mark on the Recent row's tiles: on by default (#248).
+    pub show_recent_launcher: bool,
     pub show_battery_percent: bool,
     pub use_guide: bool,
     /// Art is downloaded for the games that have none on the PC (Settings > Art): on by default.
@@ -137,6 +143,7 @@ impl Default for Options {
             background_delay: of(Setting::BackgroundDelay),
             reduce_motion: of(Setting::ReduceMotion),
             show_play_history: of(Setting::ShowPlayHistory),
+            show_recent_launcher: of(Setting::ShowRecentLauncher),
             show_battery_percent: of(Setting::ShowBatteryPercent),
             use_guide: of(Setting::UseGuide),
             art_online: of(Setting::DownloadArtOnline),
@@ -176,6 +183,7 @@ impl Options {
             Setting::BackgroundDelay => self.background_delay,
             Setting::ReduceMotion => self.reduce_motion,
             Setting::ShowPlayHistory => self.show_play_history,
+            Setting::ShowRecentLauncher => self.show_recent_launcher,
             Setting::ShowBatteryPercent => self.show_battery_percent,
             Setting::UseGuide => self.use_guide,
             Setting::DownloadArtOnline => self.art_online,
@@ -189,6 +197,7 @@ impl Options {
             Setting::BackgroundDelay => &mut self.background_delay,
             Setting::ReduceMotion => &mut self.reduce_motion,
             Setting::ShowPlayHistory => &mut self.show_play_history,
+            Setting::ShowRecentLauncher => &mut self.show_recent_launcher,
             Setting::ShowBatteryPercent => &mut self.show_battery_percent,
             Setting::UseGuide => &mut self.use_guide,
             Setting::DownloadArtOnline => &mut self.art_online,
@@ -215,6 +224,8 @@ mod tests {
     fn the_defaults_are_the_bundles() {
         let options = Options::default();
         assert!(options.background_delay && options.show_play_history && options.show_battery_percent);
+        // The port's own (#248): the Recent row's launcher marks show until they are turned off.
+        assert!(options.show_recent_launcher);
         assert!(options.use_guide && !options.reduce_motion && options.ask_whos_playing);
         // The port's own: art online is on until it is turned off.
         assert!(options.art_online && !options.art_key);
@@ -228,10 +239,12 @@ mod tests {
             "home.background_delay" => Some("false".to_string()),
             "motion.reduce" => Some(" On ".to_string()),
             "home.play_history" => Some("perhaps".to_string()),
+            "home.recent_launcher" => Some("false".to_string()),
             _ => None,
         };
         let options = Options::read(stored);
-        let expected = Options { background_delay: false, reduce_motion: true, ..Options::default() };
+        let expected =
+            Options { background_delay: false, reduce_motion: true, show_recent_launcher: false, ..Options::default() };
         assert_eq!(options, expected);
         assert_eq!(options.boot_video, BootVideo::XboxSeriesX, "the Bundle's, until one is chosen");
     }

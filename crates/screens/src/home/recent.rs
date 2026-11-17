@@ -80,8 +80,9 @@ pub fn rects_at_rest(count: usize, focused: Option<usize>) -> Vec<Rect> {
     rects(count, &|i| if focused == Some(i) { 1.0 } else { 0.0 })
 }
 
-/// The row, with focus on this tile if on any; `queue` says which games are being installed.
-pub fn draw(ui: &mut Ui, row: &Row, queue: &model::Queue, focused: Option<usize>) {
+/// The row, with focus on this tile if on any; `queue` says which games are being installed; `launcher`, Settings'
+/// Show launcher icons, whether the tiles carry their launcher's mark.
+pub fn draw(ui: &mut Ui, row: &Row, queue: &model::Queue, focused: Option<usize>, launcher: bool) {
     // Each tile's share of the growth closes on 1 with focus and 0 without.
     let shares: Vec<f32> = (0..row.tiles())
         .map(|i| ui.approach(("recent tile", i), if focused == Some(i) { 1.0 } else { 0.0 }, GROWTH_TAU))
@@ -90,7 +91,8 @@ pub fn draw(ui: &mut Ui, row: &Row, queue: &model::Queue, focused: Option<usize>
     for (i, &rect) in rects.iter().enumerate() {
         let (title, status) = match row.games.get(i) {
             Some(game) => {
-                tile::game(ui, rect, game, TILE * S, focused == Some(i));
+                // A focused tile hides its mark for its title, as every tile does with the setting off.
+                tile::game(ui, rect, game, TILE * S, focused == Some(i) || !launcher);
                 (game.name.as_str(), queue.status(game.id))
             }
             None => {

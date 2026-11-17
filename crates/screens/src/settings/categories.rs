@@ -122,7 +122,7 @@ fn system() -> Boxes {
     Boxes::new(Category::System.name(), vec![vec![system, about]])
 }
 
-/// Personalisation's boxes: the four checkbox boxes, a row each, the second column's place kept for the focused
+/// Personalisation's boxes: the five checkbox boxes, a row each, the second column's place kept for the focused
 /// one's info. Its boxes that opened pages are in General (Boot video), Account (Profiles, Who's playing today?) and
 /// Games & apps (Groups) now.
 pub fn personalisation() -> Boxes {
@@ -147,6 +147,12 @@ pub fn personalisation() -> Boxes {
                 "Show Play history",
                 "Ends Home's recent games with the Play history tile. Turn it off to show another recent game in \
                  its place; Play history stays in My games & apps.",
+            ),
+            check(
+                Setting::ShowRecentLauncher,
+                "Show launcher icons",
+                "Marks each of Home's recent games with the launcher it comes from, at the tile's foot. Turn it \
+                 off to show the covers alone.",
             ),
             check(
                 Setting::ShowBatteryPercent,
