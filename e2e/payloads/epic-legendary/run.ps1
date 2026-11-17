@@ -140,9 +140,13 @@ try {
     Expect-Logged '^helpers: legendary 0\.21\.1 added, gogdl 1\.4\.0 not added$' 0 'Helpers read' | Out-Null
     Expect-Logged '^helpers: legendary: not signed in$' 0 'Not signed in' | Out-Null
     Walk Right 'TopBar\(Settings\)' 6
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Walk Down 'Settings: Theme settings: Helpers' 8
+    # Games & apps > Installs > Helpers, beside Storage (#221).
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Down 'Settings: Rail: Games & apps' | Out-Null
+    Press Right 'Settings: Games & apps: Launchers' | Out-Null
+    Press Right 'Settings: Games & apps: Storage' | Out-Null
+    Press Down 'Settings: Games & apps: Helpers' | Out-Null
     Press A 'Settings: Helpers: legendary; Remove; added 0\.21\.1' '01-not-signed-in' | Out-Null
     if (Get-DashboardLog | Where-Object { $_ -match '^epic: legendary: ' }) { throw "legendary was run, not signed in: $(Get-DashboardLog | Where-Object { $_ -match '^epic: legendary: ' } | Select-Object -First 1)" }
     Stop-Dashboard
@@ -179,8 +183,9 @@ try {
     Save-Screen '03-row'
 
     # --- Pause: legendary stopped, its resume file kept.
-    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
-    Press Down "TileMenu: Menu\(Pause installation\) of $name" | Out-Null
+    # The menu starts with Install, or (#219) with Pause installation itself.
+    Press Back "TileMenu: Menu\((Install|Pause installation)\) of $name" | Out-Null
+    Walk Down "TileMenu: Menu\(Pause installation\) of $name" 2
     $mark = Get-DashboardLogLength
     Press A "$row; .+" | Out-Null
     Expect-Logged "^epic: legendary: ${app}: paused at \d+ of $whole bytes$" $mark 'Paused' | Out-Null
@@ -191,8 +196,8 @@ try {
     Save-Screen '04-paused'
 
     # --- Resume: legendary run again, from where it was.
-    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
-    Press Down "TileMenu: Menu\(Resume installation\) of $name" | Out-Null
+    Press Back "TileMenu: Menu\((Install|Resume installation)\) of $name" | Out-Null
+    Walk Down "TileMenu: Menu\(Resume installation\) of $name" 2
     $mark = Get-DashboardLogLength
     Press A "$row; .+" | Out-Null
     Expect-Logged "^epic: legendary: ${app}: started \(pid \d+\): -y install $app .+$" $mark 'Resumed' | Out-Null
@@ -200,7 +205,7 @@ try {
     Expect-Logged "^focus: $row; Installing\.\.\. [\d.]+%$" $mark 'Resumed, the row' | Out-Null
 
     # --- Cancel, after its question: legendary stopped, what it fetched deleted.
-    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
+    Press Back "TileMenu: Menu\((Install|Pause installation)\) of $name" | Out-Null
     Walk Down "TileMenu: Menu\(Cancel installation\) of $name" 3
     Press A "TileMenu: Prompt\(Cancel installation\) of $name" '05-cancel-question' | Out-Null
     $mark = Get-DashboardLogLength
@@ -225,7 +230,8 @@ try {
     Say "the old launcher's record: $($item[0].FullName)"
 
     # --- Play, through legendary launch.
-    Press B "Search: \w+\(\d+\) $name;.*" | Out-Null
+    # A on the hub's Install closed the hub (`tile_menu::install`): focus is on Search's result already.
+    if ((Focus-Now) -notmatch "^focus: Search: \w+\(\d+\) $name;") { throw "after Install, focus is not on $name's result: '$(Focus-Now)'" }
     Press A "GameHub: $app Hub Play" '06-hub-play' | Out-Null
     $mark = Get-DashboardLogLength
     $standinMark = Standin-LogLength
