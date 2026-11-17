@@ -513,7 +513,7 @@ mod tests {
         for title in [
             "Sign in to Steam",
             "Steam Guard - Computer Authorization Required",
-            "Install - Portal 2",
+            "Install - Lantern Gate 2",
             "Friends List",
             "",
         ] {

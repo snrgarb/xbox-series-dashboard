@@ -262,7 +262,7 @@ mod tests {
     fn binary_inline_keys() {
         let mut b = Vec::new();
         b.extend(b"\x00common\0");
-        b.extend(b"\x01name\0Half-Life\0");
+        b.extend(b"\x01name\0Hearthwick\0");
         b.extend(b"\x02n\0");
         b.extend((-5i32).to_le_bytes());
         b.extend(b"\x07big\0");
@@ -271,7 +271,7 @@ mod tests {
         let mut r = Reader::new(&b);
         let v = parse_binary(&mut r, None).unwrap();
         assert_eq!(r.pos, b.len());
-        assert_eq!(v.str_at(&["common", "name"]), Some("Half-Life"));
+        assert_eq!(v.str_at(&["common", "name"]), Some("Hearthwick"));
         assert_eq!(v.str_at(&["common", "n"]), Some("-5"));
         assert_eq!(v.u64_at(&["common", "big"]), Some(7_000_000_000));
     }
@@ -282,13 +282,13 @@ mod tests {
         let mut b = Vec::new();
         b.push(1);
         b.extend(1u32.to_le_bytes());
-        b.extend(b"Portal\0");
+        b.extend(b"Lantern\0");
         b.push(1);
         b.extend(0u32.to_le_bytes());
         b.extend(b"Game\0");
         b.push(8);
         let v = parse_binary(&mut Reader::new(&b), Some(&table)).unwrap();
-        assert_eq!(v.str_at(&["name"]), Some("Portal"));
+        assert_eq!(v.str_at(&["name"]), Some("Lantern"));
         assert_eq!(v.str_at(&["type"]), Some("Game"));
         assert!(parse_binary(&mut Reader::new(&b[..b.len() - 1]), Some(&table)).is_err());
         assert!(parse_binary(&mut Reader::new(&[1, 9, 0, 0, 0, b'x', 0, 8]), Some(&table)).is_err());

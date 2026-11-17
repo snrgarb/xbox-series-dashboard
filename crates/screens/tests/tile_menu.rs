@@ -26,7 +26,7 @@ fn library_seeded(library: Library, seed: impl FnOnce(&mut library::Database, &[
     database.snapshot().unwrap()
 }
 
-/// The fake library: the Recent row's first game is installed (Halo Infinite), its sixth is not (Baldur's Gate 3).
+/// The fake library: the Recent row's first game is installed (Halyard Point), its sixth is not (Barlin's Gate 3).
 fn library() -> Library {
     library_seeded(screens::fake_library(), |_, _| {})
 }
@@ -86,7 +86,7 @@ const FLYOUT: f32 = 99.6 + 3.0 * 72.0;
 fn menu_on_a_recent_tile_opens_its_menu_over_home_with_focus_on_the_first_row() {
     let mut home = on_tile(library(), 0);
     assert_eq!(pressed(&mut home, &[Menu]), [OPEN], "PromptOpen.wav, and nothing else");
-    assert_eq!(home.focus_line(), "TileMenu: Menu(Play game) of Halo Infinite");
+    assert_eq!(home.focus_line(), "TileMenu: Menu(Play game) of Halyard Point");
     assert_eq!((home.page(), home.pages_up()), (Some("TileMenu"), 1));
     // Focus stays on what opened it, and the hint bar is gone while the menu is up.
     assert_eq!(home.home_focus(), Focus::Recent(0));
@@ -167,7 +167,7 @@ fn up_and_down_move_along_the_rows_and_stop_at_the_ends_in_silence() {
     for row in rows {
         // The gap before Customise Home is not a stop.
         assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
-        assert_eq!(menu.focus_line(), format!("TileMenu: Menu({row}) of Halo Infinite"));
+        assert_eq!(menu.focus_line(), format!("TileMenu: Menu({row}) of Halyard Point"));
     }
     assert_eq!(pressed(&mut menu, &[Down]), [], "the last row");
     // A held direction moves as a press does, and stops dead at the end.
@@ -198,7 +198,7 @@ fn every_other_button_does_nothing_while_the_menu_is_up() {
 #[test]
 fn play_game_closes_the_menu_and_launches_the_game() {
     let mut menu = menu_on(2);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(Play game) of Sea of Thieves");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(Play game) of Seal of Thorns");
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Launch(2)]);
     assert_eq!((menu.page(), menu.home_focus()), (None, Focus::Recent(2)));
 }
@@ -208,10 +208,10 @@ fn install_closes_the_menu_and_asks_the_games_store() {
     let mut menu = menu_on(5);
     let game = menu.library().games[5].clone();
     assert!(!game.installed);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(Install) of Baldur's Gate 3");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(Install) of Barlin's Gate 3");
     // A game that is not installed has no Uninstall row: five rows.
     press(&mut menu, &[Down; 4]);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(More options) of Baldur's Gate 3");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(More options) of Barlin's Gate 3");
     press(&mut menu, &[Up; 4]);
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Install(game.id)]);
@@ -223,7 +223,7 @@ fn the_favourites_row_marks_the_game_and_reads_the_other_way_for_a_favourite() {
     let mut menu = menu_on(1);
     let game = menu.library().games[1].clone();
     press(&mut menu, &[Down]);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(Add to Favourites) of Forza Horizon 5");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(Add to Favourites) of Fernway Rally 5");
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Favourite { game: game.id, on: true }]);
     assert_eq!(menu.page(), None);
@@ -238,7 +238,7 @@ fn the_favourites_row_marks_the_game_and_reads_the_other_way_for_a_favourite() {
     assert_eq!((favourites.name.as_str(), favourites.games.as_slice()), ("Favourites", [game.id].as_slice()));
     assert_eq!(menu.home_focus(), Focus::Recent(1));
     press(&mut menu, &[Menu, Down]);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(Remove from Favourites) of Forza Horizon 5");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(Remove from Favourites) of Fernway Rally 5");
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Favourite { game: game.id, on: false }]);
 }
@@ -286,18 +286,18 @@ fn uninstall_asks_first_and_only_yes_asks_the_store() {
     menu.take_effects();
     // The question takes the menu's place, focus on the confirming row. Nothing is uninstalled yet.
     assert_eq!(pressed(&mut menu, &[A]), [ENTER], "Enter.wav, and no PromptOpen.wav of its own");
-    assert_eq!(menu.focus_line(), "TileMenu: Prompt(Uninstall) of Halo Infinite");
+    assert_eq!(menu.focus_line(), "TileMenu: Prompt(Uninstall) of Halyard Point");
     assert_eq!(pressed(&mut menu, &[Up]), []);
     assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
-    assert_eq!(menu.focus_line(), "TileMenu: Prompt(Cancel) of Halo Infinite");
+    assert_eq!(menu.focus_line(), "TileMenu: Prompt(Cancel) of Halyard Point");
     assert_eq!(pressed(&mut menu, &[Down, Left, Right, Menu, Y]), []);
 
     // Cancel: back to the menu, focus on its Uninstall row. A prompt's answer sounds as its closing.
     assert_eq!(pressed(&mut menu, &[A]), [CLOSE]);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(Uninstall) of Halo Infinite");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(Uninstall) of Halyard Point");
     // Down from there steps over the gap to Customise.
     press(&mut menu, &[Down]);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(Customise Home) of Halo Infinite");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(Customise Home) of Halyard Point");
     press(&mut menu, &[Up]);
     menu.take_effects();
 
@@ -305,7 +305,7 @@ fn uninstall_asks_first_and_only_yes_asks_the_store() {
     press(&mut menu, &[A]);
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[B]), [CLOSE]);
-    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("TileMenu: Menu(Uninstall) of Halo Infinite", 1));
+    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("TileMenu: Menu(Uninstall) of Halyard Point", 1));
 
     // Yes: the whole menu closes, then the store is asked.
     press(&mut menu, &[A]);
@@ -321,14 +321,14 @@ fn more_options_opens_the_flyout_and_hide_this_game_hides_it() {
     down_to(&mut menu, "More options");
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER]);
-    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Hide this game) of Hades II");
+    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Hide this game) of Hadrel II");
     // Three rows: Up from the first goes nowhere, Down to Refresh art and Change art and back. Left does not close
     // it.
     assert_eq!(pressed(&mut menu, &[Up, Left, Right]), []);
     assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
-    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Refresh art) of Hades II");
+    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Refresh art) of Hadrel II");
     assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
-    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Change art) of Hades II");
+    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Change art) of Hadrel II");
     assert_eq!(pressed(&mut menu, &[Down]), []);
     assert_eq!(pressed(&mut menu, &[Up, Up]), [MOVE, MOVE]);
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Hidden { game: game.id, on: true }]);
@@ -388,10 +388,10 @@ fn b_is_one_level_at_a_time_and_each_level_keeps_its_focus() {
     menu.take_effects();
     // The flyout closes, the menu's focus still on More options.
     assert_eq!(pressed(&mut menu, &[B]), [CLOSE]);
-    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("TileMenu: Menu(More options) of Halo Infinite", 1));
+    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("TileMenu: Menu(More options) of Halyard Point", 1));
     // Opened again it starts on its first row, as every opening does.
     press(&mut menu, &[A]);
-    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Hide this game) of Halo Infinite");
+    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Hide this game) of Halyard Point");
     press(&mut menu, &[B]);
     menu.take_effects();
     // The menu closes: Home has the pad, focus where it always was, and nothing was asked of the shell.
@@ -399,7 +399,7 @@ fn b_is_one_level_at_a_time_and_each_level_keeps_its_focus() {
     assert_eq!((menu.page(), menu.home_focus()), (None, Focus::Recent(0)));
     // And opened again the menu starts on its first row.
     press(&mut menu, &[Menu]);
-    assert_eq!(menu.focus_line(), "TileMenu: Menu(Play game) of Halo Infinite");
+    assert_eq!(menu.focus_line(), "TileMenu: Menu(Play game) of Halyard Point");
 }
 
 #[test]
@@ -685,7 +685,7 @@ fn more_options_is_a_flyout_over_the_dimmed_menu() {
 fn the_uninstall_question_takes_the_menus_place() {
     let mut stage = Stage::on_tile(0);
     stage.press(&[Menu, Down, Down, Down, A]);
-    assert_eq!(stage.dashboard.focus_line(), "TileMenu: Prompt(Uninstall) of Halo Infinite");
+    assert_eq!(stage.dashboard.focus_line(), "TileMenu: Prompt(Uninstall) of Halyard Point");
     let image = stage.check("tile-menu-uninstall-prompt");
     assert_panel(&image, 735, 418.2, 243.6);
     assert_eq!(colour(&image, 1100, 518 + 36), FILL);
@@ -693,7 +693,7 @@ fn the_uninstall_question_takes_the_menus_place() {
     drop(stage);
     let mut stage = Stage::on_tile(6);
     stage.press(&[Menu, Down, Down, Down, A]);
-    assert_eq!(stage.dashboard.focus_line(), "TileMenu: Prompt(Uninstall) of Hollow Knight: Silksong");
+    assert_eq!(stage.dashboard.focus_line(), "TileMenu: Prompt(Uninstall) of Hearthwick: Silverthorn");
     let image = stage.check("tile-menu-uninstall-prompt-two-lines");
     assert_panel(&image, 735, 398.4, 283.2);
 }

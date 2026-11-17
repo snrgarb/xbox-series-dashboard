@@ -182,7 +182,7 @@ fn steam_app(id: &str) -> bool {
     !id.is_empty() && id.len() <= 10 && id.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// A Microsoft Store product id: twelve letters and digits (`9NKX70BBCDRN`).
+/// A Microsoft Store product id: twelve letters and digits (`9ZZZMADEUP12`).
 fn product_id(id: &str) -> bool {
     id.len() == 12 && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }
@@ -254,14 +254,14 @@ mod tests {
         // An Xbox game only with its product id.
         assert!(stores.offers(&want("xbox", "Family_abc")).is_empty());
         let mut xbox = want("xbox", "Family_abc");
-        xbox.online.product = Some("9NKX70BBCDRN".into());
+        xbox.online.product = Some("9ZZZMADEUP12".into());
         assert_eq!(stores.offers(&xbox), Kind::ALL);
         assert_eq!(stores.offers(&want("gog", "1207664663")), [Kind::Cover, Kind::Hero, Kind::Header]);
         for store in ["ea", "ubisoft", "battlenet", "epic", "manual"] {
             assert!(stores.offers(&want(store, "1")).is_empty(), "{store}");
         }
         // What the client named, with no request at all.
-        let mut epic = want("epic", "Fortnite");
+        let mut epic = want("epic", "Fernway");
         epic.online.cover = Some("https://cdn1.epicgames.com/tall.jpg".into());
         assert_eq!(stores.offers(&epic), [Kind::Cover]);
         assert!(stores.ask(&epic, &[Kind::Cover]).is_none());
@@ -278,11 +278,11 @@ mod tests {
         assert!(steam.url.starts_with("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json="));
         assert!(steam.url.contains("%22appid%22%3A620%7D"), "{}", steam.url);
         let mut xbox = want("xbox", "Family_abc");
-        xbox.online.product = Some("9NKX70BBCDRN".into());
+        xbox.online.product = Some("9ZZZMADEUP12".into());
         let microsoft = stores.ask(&xbox, &[Kind::Square]).unwrap().url;
         assert_eq!(
             microsoft,
-            "https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=9NKX70BBCDRN&market=US&languages=en-us"
+            "https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=9ZZZMADEUP12&market=US&languages=en-us"
         );
         assert_eq!(
             stores.ask(&want("gog", "42"), &[Kind::Cover]).unwrap().url,

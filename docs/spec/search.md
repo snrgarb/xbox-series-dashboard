@@ -84,7 +84,7 @@ The keyboard does not slide over the results: the results viewport is simply sho
 - **text and keyboard**: with the keyboard up, the keyboard's text with a bar at the caret, Shift and the layer, as text entry's line has them: `"Ha|" lower letters`. With it away, the text alone and `away`: `"Ha" away`.
 - **rows**: each row showing, top to bottom, by its name and how many games it holds: `RecentlyAdded 12`, `Games 2` (and `Apps <n>` in M4); `no results` when no row shows.
 
-So Search as it opens is `focus: Search: Key(Q); "|" upper letters, RecentlyAdded 12`, "Ha" typed on the keys is `focus: Search: Key(A); "Ha|" lower letters, Games 2`, and B after it `focus: Search: Games(0) Hades; "Ha" away, Games 2`. A change of text or rows alone is a line of the log but not a move, and makes no sound. A test walks the keys by the key's name, a row by the game's name, and reads how much was found from the row's count, never by counting presses.
+So Search as it opens is `focus: Search: Key(Q); "|" upper letters, RecentlyAdded 12`, "Ha" typed on the keys is `focus: Search: Key(A); "Ha|" lower letters, Games 2`, and B after it `focus: Search: Games(0) Hadal Lantern; "Ha" away, Games 2`. A change of text or rows alone is a line of the log but not a move, and makes no sound. A test walks the keys by the key's name, a row by the game's name, and reads how much was found from the row's count, never by counting presses.
 
 ---
 

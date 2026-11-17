@@ -13,7 +13,7 @@ use screens::{Dashboard, Effect, Sound};
 use ui::host::Offscreen;
 use ui::{Button, Host, Press};
 
-/// The game whose achievements are unlocked: Halo Infinite, row 1, which has achievements; Sea of Thieves, row 3,
+/// The game whose achievements are unlocked: Halyard Point, row 1, which has achievements; Seal of Thorns, row 3,
 /// which has none.
 const GAME: i64 = 1;
 const NO_ACHIEVEMENTS: i64 = 3;
@@ -37,7 +37,7 @@ fn icon() -> PathBuf {
     .clone()
 }
 
-/// The fake library with each game in a row of its own, 1 up, and Halo Infinite's achievements counted.
+/// The fake library with each game in a row of its own, 1 up, and Halyard Point's achievements counted.
 fn library() -> model::Library {
     let mut library = screens::fake_library();
     for (i, game) in library.games.iter_mut().enumerate() {
@@ -100,7 +100,7 @@ fn an_unlock_is_told_of_a_second_after_it_is_found_in_a_toast_and_a_notification
     assert!(toast.prompt);
     // Listed, with its game, for A to open its page.
     let listed = dashboard.notifications().last().unwrap();
-    assert_eq!(listed.text, "Achievement unlocked in Halo Infinite: Night Route");
+    assert_eq!(listed.text, "Achievement unlocked in Halyard Point: Night Route");
     assert_eq!(listed.game, Some(GAME));
 
     // It shows for 8.5 s, as the console's pill, and goes over 1.12 s.
@@ -124,7 +124,7 @@ fn a_rare_one_alone_is_the_rare_form_with_its_own_sound() {
     assert_eq!(dashboard.toasts().showing().unwrap().told_line(), " \"No Detours\", score 30, 7.4%");
     assert_eq!(
         dashboard.notifications().last().unwrap().text,
-        "Rare Achievement unlocked in Halo Infinite: No Detours"
+        "Rare Achievement unlocked in Halyard Point: No Detours"
     );
     // It goes at 8.45 s, as its sound's flourish starts.
     pass(&mut dashboard, 8.4);
@@ -143,7 +143,7 @@ fn several_found_within_a_second_are_one_ordinary_toast_a_rare_one_among_them() 
     assert_eq!(showing(&dashboard), Some((ToastKind::Achievement, "2 achievements unlocked".into())));
     assert_eq!(dashboard.take_effects(), [Effect::Sound(Sound::Notification)]);
     assert_eq!(dashboard.notifications().len(), 1);
-    assert_eq!(dashboard.notifications()[0].text, "2 achievements unlocked in Halo Infinite");
+    assert_eq!(dashboard.notifications()[0].text, "2 achievements unlocked in Halyard Point");
     // One found after the second is up is a Toast of its own, after this one's pill has gone and the gap.
     pass(&mut dashboard, 0.5);
     dashboard.unlocked(vec![unlock(GAME, "The Last Parcel", Some(45.0), None)]);

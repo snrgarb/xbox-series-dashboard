@@ -1241,7 +1241,7 @@ fn the_groups_are_the_shown_filters_that_have_a_game_in_the_users_order() {
     assert_eq!(cards_games(&mut home, 0), [13, 12, 11, 10], "the user's own Group, first, names downward");
     press(&mut home, &[Down]);
     assert_eq!(after(&mut home, &[Left; 6]), card(1, 0));
-    assert_eq!(cards_games(&mut home, 1), [4, 12], "Favourites: Hades II, Ori and the Will of the Wisps");
+    assert_eq!(cards_games(&mut home, 1), [4, 12], "Favourites: Hadrel II, Oda and the Wake of the Moths");
     press(&mut home, &[Down]);
     assert_eq!(after(&mut home, &[Left; 6]), card(2, 0));
     assert_eq!(cards_games(&mut home, 2), [10, 1, 4, 0, 6, 7], "Installed, by name");
@@ -1267,9 +1267,9 @@ fn the_hidden_group_shows_the_hidden_games_when_the_user_shows_it() {
     assert_eq!(library.games.len(), 12);
     let mut home = Dashboard::new(library);
     press(&mut home, &[Down, Down, Down]);
-    // Stardew Valley is hidden, so Starfield is the most played of what is left: third in the library now.
+    // Starbeck Valley is hidden, so Starvault is the most played of what is left: third in the library now.
     assert_eq!(home.focused_game(), Some(2));
-    // The last Group: two cards, Sea of Thieves and Stardew Valley, and See all.
+    // The last Group: two cards, Seal of Thorns and Starbeck Valley, and See all.
     assert_eq!(after(&mut home, &[Down, Right, Right, Right]), card(1, 2));
     // A hidden game has no place among the library's games: its card launches nothing until the Game hub opens on it.
     assert_eq!(after(&mut home, &[Left, A]), card(1, 1));
@@ -1291,7 +1291,7 @@ fn b_on_a_group_goes_back_to_the_recent_rows_game_last_focused() {
 #[test]
 fn a_twice_on_a_groups_card_launches_its_game_from_its_hub_and_a_on_see_all_or_play_history_none() {
     let mut home = core();
-    // Most played's first card is the game played longest, Stardew Valley, tenth in the library.
+    // Most played's first card is the game played longest, Starbeck Valley, tenth in the library.
     press(&mut home, &[Down, Down, Down]);
     assert_eq!(home.focused_game(), Some(9));
     a_twice(&mut home);
@@ -1379,7 +1379,7 @@ fn a_hidden_games_card_opens_its_hub_where_play_plays_nothing() {
 #[test]
 fn a_game_ending_brings_focus_back_to_its_recent_tile_from_the_groups() {
     let mut home = core();
-    // Installed's second card is Forza Horizon 5, second in the Recent row.
+    // Installed's second card is Fernway Rally 5, second in the Recent row.
     press(&mut home, &[Down, Down, Right]);
     a_twice(&mut home);
     assert_eq!(asked(&mut home), [Effect::Launch(1)]);
@@ -1563,7 +1563,7 @@ fn guide_long_names() {
     let mut library = library_with_art();
     library.user = Some("A Gamertag That Is Far Too Long For The Panel".into());
     library.games[0].name = "The Legend of the Seven Lanterns: Definitive Anniversary Edition of the Year".into();
-    library.games[1].name = "Microsoft Flight Simulator 40th Anniversary Deluxe Edition".into();
+    library.games[1].name = "Meridian Gliding Simulator 40th Anniversary Deluxe Edition".into();
     library.games[2].name = "Supercalifragilisticexpialidocious".into();
     let mut stage = guide_over_game(library, 0);
     let image = stage.still_over(GAME);
@@ -1993,7 +1993,7 @@ fn tile_menu() -> MenuPanel<u8> {
         Row::new(icon::CUSTOMISE, "Customise Home", 3).after_a_gap(),
         Row::new(icon::MORE_OPTIONS, "More options", 4),
     ];
-    MenuPanel::menu("Halo Infinite", rows)
+    MenuPanel::menu("Halyard Point", rows)
 }
 
 /// A menu of five rows as the Bundle's picture of the Tile menu has it (23-tile-menu-installed.jpg): the panel at
@@ -2032,7 +2032,7 @@ fn menu_panel_prompt_over_its_menu() {
     let mut menu = tile_menu();
     menu.set_focus(4);
     let rows = vec![Row::new(icon::REMOVE_GAME, "Remove", true), Row::new(icon::CANCEL, "Cancel", false)];
-    let prompt = MenuPanel::prompt("Remove Halo Infinite?", None, rows);
+    let prompt = MenuPanel::prompt("Remove Halyard Point?", None, rows);
     let image = stage.still_with(|ui| {
         ui.layer();
         ui.fill(ui.screen(), TILE_MENU_DIM, 0.0);
@@ -2051,7 +2051,7 @@ fn menu_panel_prompt_with_a_message() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     let rows = vec![Row::new(icon::QUIT, "Force quit", true), Row::new(icon::CANCEL, "Cancel", false)];
     let message = Some("It hasn't closed. Anything unsaved will be lost.");
-    let mut prompt = MenuPanel::prompt("Force quit Microsoft Flight Simulator?", message, rows);
+    let mut prompt = MenuPanel::prompt("Force quit Meridian Gliding Simulator?", message, rows);
     prompt.set_focus(1);
     let image = stage.still_with(|ui| {
         ui.layer();
@@ -2662,7 +2662,7 @@ fn draw_achievement_icon(n: u32) -> PathBuf {
     path
 }
 
-/// Halo Infinite's twelve made-up achievements, in its store's order, with how rare each is: four unlocked, seven
+/// Halyard Point's twelve made-up achievements, in its store's order, with how rare each is: four unlocked, seven
 /// locked, one of them a secret, and a secret unlocked.
 fn halo_achievements() -> Vec<(model::achievement::Achievement, f64)> {
     let day = 86_400;
@@ -2702,7 +2702,7 @@ fn halo_achievements() -> Vec<(model::achievement::Achievement, f64)> {
     ]
 }
 
-/// The hub's library with Halo Infinite's achievements and how rare each is, kept in the library database as the
+/// The hub's library with Halyard Point's achievements and how rare each is, kept in the library database as the
 /// thread that follows achievements keeps them; its last unlocks' icons fetched.
 fn library_with_achievements() -> Library {
     let mut library = from_database(library_for_the_hub(), |database| {
@@ -2718,7 +2718,7 @@ fn library_with_achievements() -> Library {
     library
 }
 
-/// Halo Infinite's whole list as the shell gives it to its Achievements page: its icons fetched but for two.
+/// Halyard Point's whole list as the shell gives it to its Achievements page: its icons fetched but for two.
 fn halo_list(dashboard: &Dashboard) -> (i64, Vec<model::achievement::Achievement>) {
     let game = &dashboard.library().games[0];
     let mut list: Vec<_> = halo_achievements()

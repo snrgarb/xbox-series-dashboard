@@ -1029,7 +1029,7 @@ mod tests {
         let groups: Vec<&str> = library.groups().map(|f| f.name.as_str()).collect();
         assert_eq!(groups, ["Most played", "Recently added"]);
         let most_played = library.groups().next().unwrap();
-        assert_eq!(library.game(most_played.games[0]).unwrap().name, "Stardew Valley");
+        assert_eq!(library.game(most_played.games[0]).unwrap().name, "Starbeck Valley");
         // One that has its filters keeps them, and its games their ids.
         let (again, database) = with_filters(library.clone());
         assert!(again == library && database.is_none());

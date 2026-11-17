@@ -80,11 +80,11 @@ fn storage_page(library: Library) -> Dashboard {
     dashboard
 }
 
-/// The Tile menu of the Recent row's sixth game, Baldur's Gate 3, which is not installed.
+/// The Tile menu of the Recent row's sixth game, Barlin's Gate 3, which is not installed.
 fn install_menu(library: Library) -> Dashboard {
     let mut dashboard = Dashboard::new(library);
     press(&mut dashboard, &[Down, Right, Right, Right, Right, Right, Menu]);
-    assert_eq!(dashboard.focus_line(), "TileMenu: Menu(Install) of Baldur's Gate 3");
+    assert_eq!(dashboard.focus_line(), "TileMenu: Menu(Install) of Barlin's Gate 3");
     dashboard.take_effects();
     dashboard
 }
@@ -149,20 +149,20 @@ fn install_asks_which_folder_focus_on_the_default_and_a_installs_there() {
     press(&mut dashboard, &[A]);
     assert_eq!(
         dashboard.focus_line(),
-        r"InstallWhere: Folder(1) C:\Program Files (x86)\Steam, the default of Baldur's Gate 3"
+        r"InstallWhere: Folder(1) C:\Program Files (x86)\Steam, the default of Barlin's Gate 3"
     );
     // Install was a menu's row that goes on: the menu's choice sound, then the question in its place.
     assert_eq!(dashboard.take_effects(), [Effect::Sound(Sound::GuideSelect)]);
     press(&mut dashboard, &[Down]);
     assert_eq!(
         dashboard.focus_line(),
-        r"InstallWhere: Folder(1) C:\Program Files (x86)\Steam, the default of Baldur's Gate 3",
+        r"InstallWhere: Folder(1) C:\Program Files (x86)\Steam, the default of Barlin's Gate 3",
         "the foot stops"
     );
     assert_eq!(dashboard.take_effects(), [], "a move that goes nowhere is silent");
     press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.take_effects(), [Effect::Sound(Sound::GuideMove)]);
-    assert_eq!(dashboard.focus_line(), r"InstallWhere: Folder(0) D:\SteamLibrary of Baldur's Gate 3");
+    assert_eq!(dashboard.focus_line(), r"InstallWhere: Folder(0) D:\SteamLibrary of Barlin's Gate 3");
     press(&mut dashboard, &[A]);
     let install = Effect::InstallTo { game, folder: PathBuf::from(r"D:\SteamLibrary") };
     assert_eq!(dashboard.take_effects(), [Effect::Sound(Sound::PromptClose), install]);

@@ -34,7 +34,7 @@ fn cover() -> PathBuf {
         .clone()
 }
 
-/// The fake library with each game in a database's row, 1 up, and the first two and Baldur's Gate 3 with a cover: what the Queue's
+/// The fake library with each game in a database's row, 1 up, and the first two and Barlin's Gate 3 with a cover: what the Queue's
 /// Toasts name games by.
 fn library_with_ids() -> model::Library {
     let mut library = screens::fake_library();
@@ -45,7 +45,7 @@ fn library_with_ids() -> model::Library {
     library
 }
 
-/// Places and rows of two of its games: Halo Infinite, installed, and Baldur's Gate 3, not.
+/// Places and rows of two of its games: Halyard Point, installed, and Barlin's Gate 3, not.
 const HALO: (usize, i64) = (0, 1);
 const BALDURS_GATE: (usize, i64) = (5, 6);
 
@@ -206,7 +206,7 @@ fn queue_toasts_are_worded_as_the_bundles_and_a_tap_on_queued_opens_manage_queue
     let toast = dashboard.toasts().showing().unwrap().clone();
     assert_eq!((toast.text.as_str(), toast.kind, toast.prompt), ("Queued", ToastKind::Queued, true));
     assert_eq!(toast.game, Some(BALDURS_GATE.1));
-    assert_eq!(toast.art.as_deref().map(|game| game.name.as_str()), Some("Baldur's Gate 3"));
+    assert_eq!(toast.art.as_deref().map(|game| game.name.as_str()), Some("Barlin's Gate 3"));
     // None for a game the library does not have, nor as a notification.
     dashboard.tell(ToastKind::Installed, 999);
     dashboard.tell(ToastKind::Notification, HALO.1);
@@ -222,7 +222,7 @@ fn queue_toasts_are_worded_as_the_bundles_and_a_tap_on_queued_opens_manage_queue
     // The Uninstalled one shows after, worded with the game's name, and a tap on it opens the Guide.
     pass(&mut dashboard, 0.5);
     pass(&mut dashboard, 0.5);
-    assert_eq!(showing(&dashboard).as_deref(), Some("Halo Infinite was uninstalled"));
+    assert_eq!(showing(&dashboard).as_deref(), Some("Halyard Point was uninstalled"));
     assert_eq!(dashboard.toasts().showing().unwrap().kind, ToastKind::Uninstalled);
     dashboard.take_effects();
     press(&mut dashboard, Button::Guide);
@@ -406,7 +406,7 @@ fn the_banner() {
     let mut stage = Stage::with(HD, library_with_ids());
     stage.dashboard.tell(ToastKind::Installed, HALO.1);
     compare("toast-ready-to-play-prompt", &stage.frame_after(3.0));
-    // A game with no cover (Sea of Thieves): its kind's icon on the lighter square, as a notification's bell is.
+    // A game with no cover (Seal of Thorns): its kind's icon on the lighter square, as a notification's bell is.
     drop(stage);
     let mut stage = Stage::with(HD, library_with_ids());
     stage.dashboard.tell(ToastKind::Uninstalled, 3);

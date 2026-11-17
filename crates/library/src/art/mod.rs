@@ -92,12 +92,13 @@ mod tests {
 
     #[test]
     fn the_stores_art_wins_and_ours_fills_only_what_it_lacks() {
-        let mut steam = game("steam", "620", "Portal 2");
+        let mut steam = game("steam", "620", "Lantern Gate 2");
         steam.cover = Some("C:/Steam/librarycache/620/cover.jpg".into());
         let library = Library { games: vec![steam], ..Library::default() };
         assert_eq!(wanted(&library)[0].kinds, [Kind::Hero, Kind::Header, Kind::Square]);
 
-        let fake = FakeService::start(0, script(vec![known(5, "Portal 2", &[("steam", "620")], &Kind::ALL)])).unwrap();
+        let fake =
+            FakeService::start(0, script(vec![known(5, "Lantern Gate 2", &[("steam", "620")], &Kind::ALL)])).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let art = ArtDir::under(dir.path());
         let ran = run(&art, &fake, KEY, &library);
@@ -153,10 +154,10 @@ mod tests {
     fn only_a_game_of_the_same_name_is_taken() {
         let fake = FakeService::start(
             0,
-            script(vec![known(1, "Hades II", &[], &Kind::ALL), known(2, "Hades' Star", &[], &Kind::ALL)]),
+            script(vec![known(1, "Hadrel II", &[], &Kind::ALL), known(2, "Hadrel's Star", &[], &Kind::ALL)]),
         )
         .unwrap();
-        let library = Library { games: vec![game("ubisoft", "4", "Hades")], ..Library::default() };
+        let library = Library { games: vec![game("ubisoft", "4", "Hadrel")], ..Library::default() };
         let dir = tempfile::tempdir().unwrap();
         let art = ArtDir::under(dir.path());
         let ran = run(&art, &fake, KEY, &library);
@@ -407,20 +408,20 @@ mod tests {
 
     #[test]
     fn the_stores_own_art_online_comes_before_steamgriddb_and_steamgriddb_is_the_last() {
-        let mut halo = xbox("Family.Halo_8wekyb3d8bbwe", "Halo", "9PP5G1F0C2B6");
+        let mut halyard = xbox("Family.Halyard_1a2b3c4d5e6f7", "Halyard", "9ZZZMADEUP11");
         // Its own square logo, from its package: the store's files win.
-        halo.square = Some("C:/XboxGames/Halo/Content/Logo480.png".into());
-        let portal = game("steam", "620", "Portal 2");
-        let witcher = game("gog", "1207664663", "The Witcher 3");
-        let library = Library { games: vec![halo, portal, witcher], ..Library::default() };
+        halyard.square = Some("C:/XboxGames/Halyard/Content/Logo480.png".into());
+        let lantern = game("steam", "620", "Lantern Gate 2");
+        let wayfarer = game("gog", "1207664663", "The Wayfarer 3");
+        let library = Library { games: vec![halyard, lantern, wayfarer], ..Library::default() };
         let fake = with_stores(
             vec![
-                known(1, "Halo", &[], &Kind::ALL),
-                known(2, "Portal 2", &[("steam", "620")], &Kind::ALL),
-                known(3, "The Witcher 3", &[("gog", "1207664663")], &Kind::ALL),
+                known(1, "Halyard", &[], &Kind::ALL),
+                known(2, "Lantern Gate 2", &[("steam", "620")], &Kind::ALL),
+                known(3, "The Wayfarer 3", &[("gog", "1207664663")], &Kind::ALL),
             ],
             vec![
-                ("xbox", "9PP5G1F0C2B6", &Kind::ALL),
+                ("xbox", "9ZZZMADEUP11", &Kind::ALL),
                 // Steam has no square online; its hero is missing here, so SteamGridDB's is taken.
                 ("steam", "620", &[Kind::Cover, Kind::Header]),
                 ("gog", "1207664663", &[Kind::Cover, Kind::Hero, Kind::Header]),
@@ -433,13 +434,13 @@ mod tests {
         let ran = run_with(&art, &fake, None, &library);
         assert!(fake.requests().iter().all(|r| r.path.starts_with("/stores/")), "{:?}", fake.requests());
         assert!(fake.requests().iter().all(|r| r.authorization.is_none()));
-        let xbox_id = "Family.Halo_8wekyb3d8bbwe";
-        assert_eq!(whose(&art, "xbox", xbox_id, Kind::Cover), "store xbox 9PP5G1F0C2B6 cover");
+        let xbox_id = "Family.Halyard_1a2b3c4d5e6f7";
+        assert_eq!(whose(&art, "xbox", xbox_id, Kind::Cover), "store xbox 9ZZZMADEUP11 cover");
         assert_eq!(whose(&art, "xbox", xbox_id, Kind::Square), "none", "the package's own square wins");
         assert_eq!(whose(&art, "steam", "620", Kind::Cover), "store steam 620 cover");
         assert_eq!(whose(&art, "steam", "620", Kind::Hero), "none");
         assert_eq!(whose(&art, "gog", "1207664663", Kind::Header), "store gog 1207664663 header");
-        // Halo: cover, hero, header; Portal 2: cover, header; The Witcher 3: cover, hero, header.
+        // Halyard: cover, hero, header; Lantern Gate 2: cover, header; The Wayfarer 3: cover, hero, header.
         assert_eq!(ran.summary.pictures, Pictures { store_files: 1, cache: 0, store_online: 8, steamgriddb: 0 });
         assert_eq!((ran.summary.looked_up, ran.summary.found), (3, 3));
         let line = ran.log.last().unwrap();
@@ -459,27 +460,28 @@ mod tests {
         assert_eq!(whose(&art, "gog", "1207664663", Kind::Square), "steamgriddb");
         assert_eq!(whose(&art, "xbox", xbox_id, Kind::Square), "none", "never asked: the package has one");
         assert!(api(&asked).iter().any(|path| path.contains("dimensions=1024x1024,512x512")), "{asked:?}");
-        // Steam's hero and square and GOG's square; Halo is not asked about: the store gave it everything else.
+        // Steam's hero and square and GOG's square; Halyard is not asked about: the store gave it everything else.
         assert_eq!(ran.summary.pictures.steamgriddb, 3);
         assert_eq!(ran.summary.pictures.store_online, 0);
         let line = ran.log.last().unwrap();
         assert!(line.ends_with("; pictures: 1 store files, 0 cache, 0 store online, 3 SteamGridDB"), "{line}");
         for line in &ran.log {
-            assert!(!line.contains(KEY) && !line.contains("Portal") && !line.contains("Witcher"), "{line}");
+            assert!(!line.contains(KEY) && !line.contains("Lantern") && !line.contains("Wayfarer"), "{line}");
         }
     }
 
     #[test]
     fn an_xbox_game_gets_the_stores_box_art_as_its_square() {
-        let library = Library { games: vec![xbox("Family.Forza_1", "Forza", "9NKX70BBCDRN")], ..Library::default() };
-        let fake = with_stores(Vec::new(), vec![("xbox", "9NKX70BBCDRN", &Kind::ALL)]);
+        let library =
+            Library { games: vec![xbox("Family.Fernway_1", "Fernway", "9ZZZMADEUP12")], ..Library::default() };
+        let fake = with_stores(Vec::new(), vec![("xbox", "9ZZZMADEUP12", &Kind::ALL)]);
         let dir = tempfile::tempdir().unwrap();
         let art = ArtDir::under(dir.path());
         let ran = run_with(&art, &fake, None, &library);
         assert_eq!(ran.summary.pictures.store_online, 4);
-        assert_eq!(whose(&art, "xbox", "Family.Forza_1", Kind::Square), "store xbox 9NKX70BBCDRN square");
+        assert_eq!(whose(&art, "xbox", "Family.Fernway_1", Kind::Square), "store xbox 9ZZZMADEUP12 square");
         let catalogue: Vec<String> = api(&fake.requests()).into_iter().filter(|p| p.contains("/microsoft/")).collect();
-        assert_eq!(catalogue, ["/stores/microsoft/v7.0/products?bigIds=9NKX70BBCDRN&market=US&languages=en-us"]);
+        assert_eq!(catalogue, ["/stores/microsoft/v7.0/products?bigIds=9ZZZMADEUP12&market=US&languages=en-us"]);
         // Its pictures at a width a screen needs.
         assert!(fake.requests().iter().any(|r| r.path.ends_with("/BoxArt.png?w=600")), "{:?}", fake.requests());
         // And the snapshot shows it.
@@ -487,8 +489,8 @@ mod tests {
         db.set_art_dir(Some(art.clone()));
         db.sync("xbox", &library, NOW).unwrap();
         let shown = db.snapshot().unwrap().games.remove(0);
-        assert_eq!(shown.square, art.find("xbox", "Family.Forza_1", Kind::Square));
-        assert_eq!(shown.online.product.as_deref(), Some("9NKX70BBCDRN"), "kept in the database");
+        assert_eq!(shown.square, art.find("xbox", "Family.Fernway_1", Kind::Square));
+        assert_eq!(shown.online.product.as_deref(), Some("9ZZZMADEUP12"), "kept in the database");
     }
 
     #[test]
@@ -526,9 +528,9 @@ mod tests {
     #[test]
     fn with_art_online_off_nothing_is_asked_and_the_log_still_counts() {
         let fake = with_stores(Vec::new(), vec![("steam", "620", &Kind::ALL)]);
-        let mut portal = game("steam", "620", "Portal 2");
-        portal.cover = Some("C:/Steam/librarycache/620/library_600x900.jpg".into());
-        let library = Library { games: vec![portal], ..Library::default() };
+        let mut lantern = game("steam", "620", "Lantern Gate 2");
+        lantern.cover = Some("C:/Steam/librarycache/620/library_600x900.jpg".into());
+        let library = Library { games: vec![lantern], ..Library::default() };
         let dir = tempfile::tempdir().unwrap();
         let art = ArtDir::under(dir.path());
         let lines = Arc::new(Mutex::new(Vec::new()));

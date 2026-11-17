@@ -323,7 +323,7 @@ mod tests {
     fn menu() -> MenuPanel<u8> {
         let rows = vec![Row::new(icon::PLAY, "Play game", 1), Row::new(icon::FAVOURITE, "Add to Favourites", 2)];
         MenuPanel::menu(
-            "Halo Infinite",
+            "Halyard Point",
             [rows, vec![Row::new(icon::CUSTOMISE, "Customise Home", 3).after_a_gap()]].concat(),
         )
     }
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn a_menus_choice_sounds_as_a_selection_and_a_prompts_answer_as_its_closing() {
         assert_eq!(menu().choose_sound(), Sound::GuideSelect);
-        let prompt = MenuPanel::prompt("Remove Halo Infinite?", None, vec![Row::new(icon::REMOVE_GAME, "Remove", 1)]);
+        let prompt = MenuPanel::prompt("Remove Halyard Point?", None, vec![Row::new(icon::REMOVE_GAME, "Remove", 1)]);
         assert_eq!(prompt.choose_sound(), Sound::PromptClose);
         assert!(prompt.is_prompt() && !menu().is_prompt());
     }

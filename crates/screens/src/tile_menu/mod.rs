@@ -340,7 +340,7 @@ impl Page for TileMenu {
         "TileMenu"
     }
 
-    /// The panel that has the pad and its focused row, then the game: `Menu(Play game) of Halo Infinite`,
+    /// The panel that has the pad and its focused row, then the game: `Menu(Play game) of Halyard Point`,
     /// `MoreOptions(Hide this game) of ...`, `Prompt(Uninstall) of ...`.
     fn focus(&self) -> String {
         fn row<T: Copy>(panel: &MenuPanel<T>) -> &str {
@@ -454,7 +454,7 @@ mod tests {
             id: 7,
             source: "steam".into(),
             source_id: "440".into(),
-            name: "Halo Infinite".into(),
+            name: "Halyard Point".into(),
             installed: true,
             ..Game::default()
         }

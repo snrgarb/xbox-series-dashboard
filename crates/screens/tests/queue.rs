@@ -6,7 +6,7 @@ use screens::{Dashboard, Effect};
 use ui::Button::{self, Down, Left, Menu, Right, A, B};
 use ui::Press;
 
-/// The fake library as the library database gives it: the Recent row's sixth game (Baldur's Gate 3) is not
+/// The fake library as the library database gives it: the Recent row's sixth game (Barlin's Gate 3) is not
 /// installed.
 fn library() -> Library {
     let mut database = library::Database::in_memory().unwrap();

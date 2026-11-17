@@ -200,7 +200,7 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[Right]);
     settings_and_back(&mut home, "Settings: General: Personalisation", 2, Focus::Wide(1));
     press(&mut home, &[Right, Right]);
-    let queue = "ManageQueue: Cover(0) of Age of Empires IV; 0 installing, 8 recently installed";
+    let queue = "ManageQueue: Cover(0) of Aeon of Embers IV; 0 installing, 8 recently installed";
     there_and_back(&mut home, A, queue, Focus::Wide(3));
     assert_eq!(rests(&home), at_rest);
 

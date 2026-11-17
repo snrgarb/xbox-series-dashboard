@@ -66,7 +66,7 @@ fn the_guide_opens_on_the_landing_tab_with_focus_on_home() {
     // The first game stands under a divider, and nothing else does.
     let dividers: Vec<bool> = dashboard.guide().entries().iter().map(|entry| entry.divider).collect();
     assert_eq!(dividers, [false, false, true, false, false, false]);
-    assert_eq!(dashboard.guide().entries()[2].title, "Halo Infinite");
+    assert_eq!(dashboard.guide().entries()[2].title, "Halyard Point");
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn a_new_snapshot_of_the_library_leaves_focus_at_its_place_in_the_list() {
     next.games.swap(0, 1);
     guide.set_library(next);
     assert_eq!(guide.guide().focus(), (LANDING, entry(5)));
-    assert_eq!(guide.guide().entries()[2].title, "Forza Horizon 5");
+    assert_eq!(guide.guide().entries()[2].title, "Fernway Rally 5");
     // A shorter list: focus on its last entry.
     let mut next = screens::fake_library();
     next.games.truncate(2);
