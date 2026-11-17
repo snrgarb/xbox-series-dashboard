@@ -12,6 +12,7 @@ pub mod queue;
 pub mod shell_mode;
 pub mod sound;
 pub mod source;
+pub mod update;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

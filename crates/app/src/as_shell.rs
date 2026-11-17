@@ -16,19 +16,36 @@ pub struct AsShell {
     crash: Option<u32>,
     _guard: Option<dashboard::Guard>,
     asked: Option<mpsc::Receiver<ShellMode>>,
+    /// An update's new Dashboard: the pid of the one it takes over from, told of the first frame.
+    handover: Option<u32>,
 }
 
 impl AsShell {
     /// As the Dashboard starts, before anything else: a second Dashboard brings the first forward and ends here.
     /// `own_log`: under --from-shell without --log-file, the log goes to `<data>\shell\logs\`.
-    pub fn start(from_shell: bool, own_log: bool, dry: bool, data_dir: Option<PathBuf>, data: Option<PathBuf>) -> Self {
+    /// `handover`: an update's new Dashboard (`--handover <pid>`), which takes the guard alongside the old one's.
+    pub fn start(
+        from_shell: bool,
+        own_log: bool,
+        dry: bool,
+        data_dir: Option<PathBuf>,
+        data: Option<PathBuf>,
+        handover: Option<u32>,
+    ) -> Self {
         let shell_folder = data.as_ref().map(|data| data.join("shell"));
         if own_log {
             if let Some(folder) = &shell_folder {
                 dashboard::log_to_file(&folder.join("logs"));
             }
         }
-        let guard = match dashboard::single_instance(data_dir.as_deref()) {
+        let guard = match handover {
+            Some(old) => {
+                eprintln!("update: taking over from pid {old}, an update's earlier version");
+                Instance::First(dashboard::taking_over(data_dir.as_deref()))
+            }
+            None => dashboard::single_instance(data_dir.as_deref()),
+        };
+        let guard = match guard {
             Instance::First(guard) => guard,
             Instance::Second => {
                 let brought = dashboard::bring_first_forward();
@@ -59,11 +76,16 @@ impl AsShell {
         if dry {
             eprintln!("shell: --dry-shell: Settings > System says what it would write and writes nothing");
         }
-        Self { from_shell, dry, data, signals, crash, _guard: Some(guard), asked: None }
+        Self { from_shell, dry, data, signals, crash, _guard: Some(guard), asked: None, handover }
     }
 
     /// The first frame is on the screen: the --shell process may take its black down.
     pub fn first_frame(&mut self) {
+        // An update's new Dashboard: the old one exits now.
+        if let Some(old) = self.handover.take() {
+            let told = dashboard::handed_over(old);
+            eprintln!("update: first frame at {:.0} ms; told pid {old}: {told}", crate::since_start());
+        }
         if let Some(signals) = &mut self.signals {
             if signals.first_frame() {
                 eprintln!("shell: FirstFrame set at {:.0} ms", crate::since_start());

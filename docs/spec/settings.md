@@ -784,6 +784,7 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Idle > Dim after (6.7) | `idle.dim_after` | `120` (seconds, or `never`) |
 | Idle > Show things after (6.7) | `idle.show_things_after` | `300` |
 | Who's playing today? (start-up.md 9) | `startup.ask_whos_playing` | on: Ask every time; off is Sign in the last profile |
+| About's Check for updates every day (updates.md 3) | `updates.daily_check` | off |
 | Launchers > a launcher ([launchers.md](launchers.md) 3) | `launcher.<key>` (`launcher.steam`, `launcher.epic`, ...) | on; saved by `Effect::Launcher`, read by the library itself, never by `Options` |
 
 The library keeps `launcher.<key>.found` (`installed`, `not installed`, `failed`) and `launcher.<key>.read` (Unix seconds) beside them, what the launcher's last read found and when: launchers.md, 2.
@@ -855,23 +856,25 @@ up `Settings: System: Prompt(Turn on) of Start with Windows as the shell`; the e
 
 Theme settings' fifth row, beside System: **About** (icon U+E946) at (1, 4) (x 975..1412, y 806..937). The Bundle has
 no such page (Playnite's own About said Playnite's version). Right from System is About, Up from it is Art (the row
-above has one box). Its page is laid out as System's (shell-mode.md, 2), three groups of a label and its text, 40
-apart, from y 190:
+above has one box). Its page is laid out as System's (shell-mode.md, 2), groups of a label and its text, 40
+apart, from y 190; the second, **Updates**, is updates.md's (section 2), between the version and the licences:
 
 | Label | Text |
 |---|---|
 | "Xbox Series Dashboard" | "Version 0.1.0 (0123abc)": the workspace's one version (`Cargo.toml`, `[workspace.package]`) and the commit the executable was built from, seven characters; "Version 0.1.0" alone where the build had no commit (a source archive) |
+| "Updates" | where updates stand, Check for updates and Install, and the checkbox row Check for updates every day (updates.md, 2) |
 | "Third-party licences" | "The Dashboard is built from open-source parts. Their licences are in THIRD-PARTY-LICENSES.txt, beside dashboard.exe." |
 | "Sounds and boot videos" | "The console's sounds and boot videos don't come with the Dashboard. It plays them from the Xbox Series Theme for Playnite, where that is installed, or from the media folder in %LOCALAPPDATA%\XboxSeriesDashboard. The README beside dashboard.exe says how to fill it." |
 
-- **Nothing on it takes focus**: the page is the control. B or Left goes back to Theme settings' boxes on About; every
-  other button does nothing.
+- **Focus** is on Updates' three controls, from Check for updates (updates.md, 2). B, or Left from the first column,
+  goes back to Theme settings' boxes on About.
 - **Where the version comes from**: the executable's `BUILD` (`crates/app`: `CARGO_PKG_VERSION`, and the commit its
   build script reads, `DASHBOARD_COMMIT` from the environment where CI gives one, else `git rev-parse --short=7
   HEAD`), handed over in `Options::build`. The core's own default is the version with no commit; the screenshot test
   gives a made-up `1.2.3 (0123abc)`, so its picture never changes with a release.
 - **The same anywhere else**: `dashboard --version` prints `dashboard 0.1.0 (0123abc)` and ends 0, and every start of
   the Dashboard says `dashboard 0.1.0 (0123abc)` in its log before it reads the library.
-- **The focus log**: `Settings: About: Version 0.1.0 (0123abc)`, the line a test reads the version by (with
+- **The focus log**: `Settings: About: Version 0.1.0 (0123abc); Check for updates; unchecked`, the line a test reads
+  the version by (with
   `--screenshot --page settings --press right,down,down,down,down,right,a --log-focus`, the offscreen frame logs where
   its presses left focus).

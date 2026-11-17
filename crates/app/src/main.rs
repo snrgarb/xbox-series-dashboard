@@ -15,6 +15,7 @@ mod sources;
 mod startup;
 mod store;
 mod store_apps;
+mod updates;
 mod window;
 
 use std::path::PathBuf;
@@ -25,6 +26,17 @@ pub use shell::since_start;
 /// and `--version`.
 pub const BUILD: screens::settings::about::Build =
     screens::settings::about::Build { version: env!("CARGO_PKG_VERSION"), commit: env!("DASHBOARD_COMMIT") };
+
+/// `--pretend-version`'s version, which a test's Dashboard takes for its own, so that the update it serves is newer.
+static PRETEND: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// Which build this Dashboard takes itself for: [`BUILD`], or with `--pretend-version` that version and its commit.
+pub fn build() -> screens::settings::about::Build {
+    match PRETEND.get() {
+        Some(version) => screens::settings::about::Build { version, ..BUILD },
+        None => BUILD,
+    }
+}
 
 #[derive(Default)]
 pub struct Args {
@@ -112,6 +124,14 @@ pub struct Args {
     /// Explorer, a shortcut or another program: a GUI program has no console) logs to
     /// `<data>\logs\dashboard-<stamp>.log`.
     log_file: Option<PathBuf>,
+    /// The update address, in place of `update::SOURCE`: a test's stand-in (`standin serve-updates`). Never the
+    /// real one in a test.
+    update_source: Option<String>,
+    /// The version this Dashboard takes itself for, in place of its own: a test's, older than the one it serves.
+    pretend_version: Option<model::update::Version>,
+    /// An update's new Dashboard, started by the one with this pid (docs/spec/updates.md): it takes the
+    /// single-instance guard alongside it, has no Start-up, and tells it of its first frame.
+    handover: Option<u32>,
 }
 
 impl Args {
@@ -142,6 +162,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
                  [--from-shell] [--dry-shell] [--log-file <file>]
+                 [--update-source <url>] [--pretend-version <x.y.z>]
        dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
        dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
        dashboard --version: prints `dashboard <version> (<commit>)`
@@ -236,6 +257,17 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--from-shell" => args.from_shell = true,
             "--dry-shell" => args.dry_shell = true,
             "--log-file" => args.log_file = Some(value()?.into()),
+            "--update-source" => args.update_source = Some(value()?),
+            "--pretend-version" => {
+                let value = value()?;
+                args.pretend_version =
+                    Some(model::update::Version::parse(&value).ok_or(format!("bad --pretend-version {value}"))?);
+            }
+            shell_mode::contract::HANDOVER => {
+                args.handover = Some(value()?.parse().map_err(|e| format!("bad {arg}: {e}"))?);
+                // The new version comes up in place of the old one, which has had its Start-up.
+                args.no_startup = true;
+            }
             _ => return Err(format!("unknown argument {arg}")),
         }
     }
@@ -265,7 +297,10 @@ fn main() {
     if let Some(code) = shell_mode::run_job(&given, library::data_dir()) {
         std::process::exit(code);
     }
-    let args = parse_args(given).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    let args = parse_args(given.clone()).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
+    if let Some(version) = args.pretend_version {
+        let _ = PRETEND.set(Box::leak(version.to_string().into_boxed_str()));
+    }
     // A log for every start: --log-file's; under shell mode its own place (as_shell); otherwise, where its lines
     // would go nowhere, the data folder's logs\.
     let data = args.data_dir.clone().or_else(library::data_dir);
@@ -281,9 +316,23 @@ fn main() {
     // One Dashboard at a time, and under shell mode its log in the data folder from its first line.
     let as_shell = args.screenshot.is_none().then(|| {
         let own_log = args.from_shell && args.log_file.is_none();
-        as_shell::AsShell::start(args.from_shell, own_log, args.dry_shell, args.data_dir.clone(), data.clone())
+        as_shell::AsShell::start(
+            args.from_shell,
+            own_log,
+            args.dry_shell,
+            args.data_dir.clone(),
+            data.clone(),
+            args.handover,
+        )
     });
     eprintln!("dashboard {}", BUILD.says_short());
+    if let Some(version) = PRETEND.get() {
+        eprintln!("dashboard: taking itself for {version} (--pretend-version)");
+    }
+    // The versions an update kept beside this program, once it has started on its own: not while it takes over.
+    if args.screenshot.is_none() && args.handover.is_none() {
+        updates::remove_old();
+    }
     let (library, mut store) = store::open(&args);
     if args.screenshot.is_some() {
         // Art for the games a store's files gave none for, before the picture is taken, where there is a data
@@ -304,7 +353,7 @@ fn main() {
         if args.log_queue_sources {
             log_queue_sources(&args);
         }
-        window::run(&args, library, store, as_shell.expect("made without --screenshot"));
+        window::run(&args, &given, library, store, as_shell.expect("made without --screenshot"));
     }
 }
 

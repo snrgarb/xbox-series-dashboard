@@ -21,7 +21,7 @@
 #   - the installed `dashboard.exe --version` prints `dashboard <version> (<commit>)` and ends 0, the version the
 #     installer's own;
 #   - the installed Dashboard, offscreen (--screenshot) on Settings > About, logs `dashboard <version> ...` and
-#     `focus: Settings: About: Version <version> (<commit>)`, the same commit, writes its picture and ends 0;
+#     `focus: Settings: About: Version <version> (<commit>); ...`, the same commit, writes its picture and ends 0;
 #   - `uninstall.exe /S /DRYSHELL /DATADIR=<test data>` runs `dashboard.exe --shell-off --dry-shell` first (its lines
 #     kept in <test data>\uninstall-shell-off.log: a dry run, exit 0), then removes the folder, the shortcut and the
 #     uninstall entry, leaves no RunOnce entry, and keeps the data folder;
@@ -166,7 +166,8 @@ try {
     $shot = Invoke-Bounded $exe 'about' $arguments 90
     Expect ($shot.Code -eq 0) "the offscreen Dashboard ends 0 (got $($shot.Code))"
     Expect ([bool] ($shot.Lines -match "^dashboard $([regex]::Escape($version))")) 'it says its version as it starts'
-    Expect ($shot.Lines -contains "focus: Settings: About: $about") "Settings > About says $about"
+    $aboutLine = '^focus: Settings: About: ' + [regex]::Escape($about) + ';'
+    Expect ([bool] ($shot.Lines -match $aboutLine)) "Settings > About says $about"
     Expect (Test-Path (Join-Path $Out 'about.png')) 'it wrote its picture'
 
     # --- Uninstall, keeping the data folder.

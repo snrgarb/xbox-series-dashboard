@@ -223,8 +223,7 @@ As research section 6. In short: Exit to desktop or View+Menu 5 s; with a keyboa
 
 ## 9. Not here yet
 
-- The update handover (`--handover`, `.old` removal at sign-in) is #156's; the uninstaller's `--shell-off` first is
-  #155's. Shell mode's paths are ready for both.
+- The update handover (`--handover`, `.old` removal) is updates.md's (#156), section 5.1 there for shell mode.
 - No hang detection beyond View+Menu, as in the Bundle.
 
 ## 10. Tests

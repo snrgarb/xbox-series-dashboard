@@ -1,0 +1,20 @@
+[package]
+name = "update"
+version.workspace = true
+publish.workspace = true
+edition = "2021"
+description = "Updates (docs/spec/updates.md): the newest release asked of one address, its portable zip downloaded and checked against SHA256SUMS.txt, and dashboard.exe put in place by renaming, the old one kept."
+
+[dependencies]
+model = { path = "../model" }
+serde_json = "1"
+# The release's API and its files: a small blocking HTTP client, TLS by rustls, no async runtime (as art's).
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
+# The download checked against the release's manifest.
+sha2 = "0.10"
+# dashboard.exe out of the portable zip (deflate), and the stand-in's zip's CRCs: no zip crate for one file.
+miniz_oxide = "0.8"
+crc32fast = "1"
+
+[dev-dependencies]
+tempfile = "3"

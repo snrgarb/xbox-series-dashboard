@@ -199,6 +199,8 @@ struct App {
     idle_after: Option<screens::idle::Times>,
     /// The Discord connection (docs/discord.md): Discord's own pipe, or with --discord-pipe a test's.
     discord: discord::Connection,
+    /// Settings > About's updates and the daily check (docs/spec/updates.md).
+    updater: crate::updates::Updater,
 }
 
 /// What a Toast says when SteamGridDB refuses the key (a 401): once, and no lookups until another key is entered.
@@ -329,7 +331,7 @@ fn describe(window: &Window) -> String {
     }
 }
 
-pub fn run(args: &Args, library: Library, store: Store, as_shell: crate::as_shell::AsShell) {
+pub fn run(args: &Args, started_with: &[String], library: Library, store: Store, as_shell: crate::as_shell::AsShell) {
     shell::log_wgpu();
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
@@ -379,6 +381,9 @@ pub fn run(args: &Args, library: Library, store: Store, as_shell: crate::as_shel
     if !args.no_startup {
         dashboard.start_up(boot_video.is_some());
     }
+    let current = model::update::Version::parse(crate::build().version).unwrap_or_default();
+    let last_check = store.setting(screens::settings::LAST_UPDATE_CHECK);
+    let updater = crate::updates::Updater::new(args.update_source.clone(), current, started_with, last_check);
     let mut app = App {
         windowed: args.windowed,
         as_shell,
@@ -469,6 +474,7 @@ pub fn run(args: &Args, library: Library, store: Store, as_shell: crate::as_shel
         input_clock: shell::idle::system(),
         idle_after: args.idle_after,
         discord,
+        updater,
     };
     // Where shell mode stands, for Settings > System: asked off the frame's thread, as schtasks is slow.
     let proxy = event_loop.create_proxy();
@@ -931,6 +937,19 @@ impl App {
                         let _ = proxy.send_event(());
                     });
                 }
+                // Settings > About: asked and downloaded off the frame's thread; the page follows how it goes.
+                Effect::CheckForUpdates => self.check_for_updates("Check for updates"),
+                Effect::InstallUpdate => {
+                    if self.dashboard.playing().is_some() {
+                        eprintln!("update: Install refused while a game runs");
+                    } else {
+                        let proxy = self.proxy.clone();
+                        self.updater.install(move || {
+                            let _ = proxy.send_event(());
+                        });
+                        self.show_updates();
+                    }
+                }
                 Effect::ClearArt => {
                     self.art = None;
                     let cleared = self.store.clear_art();
@@ -993,6 +1012,28 @@ impl App {
         }
         // A Profile signed in by the core itself (`Dashboard::sign_in`) changed before its effect was carried out.
         self.log_profile();
+    }
+
+    /// Asks for updates off the frame's thread (`why`, for the log), and keeps when.
+    fn check_for_updates(&mut self, why: &str) {
+        let proxy = self.proxy.clone();
+        let checked = self.updater.check(why, move || {
+            let _ = proxy.send_event(());
+        });
+        if let Some(at) = checked {
+            self.store.set_text(screens::settings::LAST_UPDATE_CHECK, &at.to_string());
+        }
+        self.show_updates();
+    }
+
+    /// Settings > About follows where updates stand.
+    fn show_updates(&mut self) {
+        let updates = self.updater.state();
+        if updates != self.dashboard.options().updates {
+            self.dashboard.set_options(screens::Options { updates, ..self.dashboard.options() });
+            self.stale = true;
+            self.overlay_stale = true;
+        }
     }
 
     /// The Boot video while it plays: drawn every refresh, and let go as it ends, fails, runs too long or a press
@@ -1262,6 +1303,29 @@ impl ApplicationHandler for App {
             eprintln!("shell: Settings > System shows {}", screens::settings::system::state(shell));
             self.dashboard.set_options(screens::Options { shell, ..self.dashboard.options() });
             self.stale = true;
+        }
+        // Updates: how a check or an install goes, as a thread says; the daily check when it is due; and a Toast
+        // for a version ready, never while a game runs.
+        for event in self.updater.poll() {
+            match event {
+                crate::updates::Event::Changed(_) => self.show_updates(),
+                crate::updates::Event::HandedOver => {
+                    eprintln!("update: handed over at {:.0} ms; exiting 0", since_start());
+                    event_loop.exit();
+                    return;
+                }
+            }
+        }
+        if self.updater.due(self.dashboard.options().daily_update_check) {
+            self.check_for_updates("the daily check");
+        }
+        if self.updater.owes_toast() && self.home_presented.is_some() && self.dashboard.playing().is_none() {
+            if let Some(version) = self.updater.untold() {
+                eprintln!("update: {version} is ready: a Toast tells of it");
+                self.dashboard
+                    .notify(&format!("Version {version} of the Dashboard is ready. Install it in Settings > About."));
+                self.overlay_stale = true;
+            }
         }
         // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time.
         let focus = self.dashboard.focus_line();
