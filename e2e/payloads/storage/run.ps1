@@ -28,7 +28,8 @@ function Focus-Lines { @(Get-DashboardLog | Where-Object { $_ -match '^focus: ' 
 function Focus-Now { Focus-Lines | Select-Object -Last 1 }
 
 # One press that must be followed by a new focus line matching $Expect, a regular expression for what comes after
-# "focus: ". Then a rest for the picture, if one is asked for. Returns the line, or nothing.
+# "focus: ". Then a rest for the picture, if one is asked for. Returns the line. A press that went elsewhere ends the
+# walk: every step after it would start from the wrong place.
 function Press([string] $Button, [string] $Expect, [string] $Name = '') {
     Start-Sleep -Milliseconds 130
     $before = @(Focus-Lines).Count
@@ -43,12 +44,12 @@ function Press([string] $Button, [string] $Expect, [string] $Name = '') {
         Say "$Button -> $got"
     } else {
         Say "$Button -> NOT '$Expect': $(Focus-Now)"
-        $script:failures += "$Button should have given 'focus: $Expect', and the log's last is '$(Focus-Now)'"
+        throw "$Button should have given 'focus: $Expect', and the log's last is '$(Focus-Now)'"
     }
     $got
 }
 
-# Presses a direction until focus is where $Expect says, $Most times at most.
+# Presses a direction along a row until focus is where $Expect says, $Most times at most; ends the walk if it never is.
 function Walk([string] $Button, [string] $Expect, [int] $Most = 10) {
     $pattern = "^focus: $Expect`$"
     foreach ($press in 1..$Most) {
@@ -60,7 +61,7 @@ function Walk([string] $Button, [string] $Expect, [int] $Most = 10) {
         Say "$Button until $(Focus-Now)"
     } else {
         Say "$Button never reached '$Expect': $(Focus-Now)"
-        $script:failures += "$Button never reached 'focus: $Expect': '$(Focus-Now)'"
+        throw "$Button never reached 'focus: $Expect': '$(Focus-Now)'"
     }
 }
 
@@ -85,19 +86,17 @@ function Steam-LogLength {
 
 function Menu-Game([string] $Line) { if ($Line -match ' of (.+)$') { $Matches[1] } }
 
-# From the Recent row's first tile rightwards, opens each game's Tile menu until one is the menu of $Name; leaves it
-# open and returns its line.
+# From the Recent row's first tile, where focus must be, rightwards: opens each game's Tile menu until one is the menu
+# of $Name; leaves it open and returns its line. B on a menu goes back to its tile.
 function Open-MenuOf([string] $Name) {
-    Walk Left 'Recent\(0\)'
-    foreach ($tile in 1..8) {
-        $line = Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
-        if (-not $line) { return $null }
+    if ((Focus-Now) -notmatch '^focus: Recent\(0\)$') { throw "the Recent row's walk starts on Recent(0), not '$(Focus-Now)'" }
+    foreach ($tile in 0..7) {
+        $line = Press Start "TileMenu: Menu\((Play game|Install)\) of .+"
         if ((Menu-Game $line) -eq $Name) { return $line }
-        Press B 'Recent\(\d+\)' | Out-Null
-        Press Right 'Recent\(\d+\)' | Out-Null
+        Press B "Recent\($tile\)" | Out-Null
+        Press Right "Recent\($($tile + 1)\)" | Out-Null
     }
-    $script:failures += "no tile of the Recent row is $Name's"
-    $null
+    throw "none of the Recent row's first eight tiles is $Name's"
 }
 
 function In-Front { if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" } }
@@ -136,7 +135,9 @@ try {
     $script:root = Get-FakeRoot 'steam'
     $library = Initialize-FakeSteam $script:root
     if (-not (Test-Path (Join-Path $script:root 'standin-client.txt'))) { throw "make-steam did not mark $script:root as the stand-in Steam" }
-    $played = @(@($library.games) | Where-Object { -not $_.installed -and $_.last_played -gt 0 })
+    # The most recently played of the games not installed: the furthest left of them on the Recent row, which is every
+    # played game, newest first.
+    $played = @(@($library.games) | Where-Object { -not $_.installed -and $_.last_played -gt 0 } | Sort-Object { [long]$_.last_played } -Descending)
     if ($played.Count -lt 1) { throw 'the fake has no played game that is not installed' }
     $game = $played[0]
     $name = [regex]::Escape($game.name)
@@ -181,14 +182,17 @@ try {
     Start-Sleep -Milliseconds 3000
     Save-Screen '02-storage-chosen'
 
-    # --- My games & apps: the storage ring at the nav's foot.
-    Walk B 'TopBar\(.+\)' 4
+    # --- My games & apps: the storage ring at the nav's foot. B climbs Settings a level a press: the page to its box,
+    # the boxes to the rail, the rail out to the top bar's Settings, which opened it.
+    Press B 'Settings: Theme settings: Storage' | Out-Null
+    Press B 'Settings: Rail: Theme settings' | Out-Null
+    Press B 'TopBar\(Settings\)' | Out-Null
     Walk Left 'TopBar\(MyGames\)' 4
-    Press A 'MyGames: .+' '03-my-games-storage-ring' | Out-Null
-    Walk B 'TopBar\(.+\)' 3
+    Press A 'MyGames: Games: Tile\(0\)' '03-my-games-storage-ring' | Out-Null
+    # B from My games & apps is Home, focus on the Recent row's first tile.
+    Press B 'Recent\(0\)' | Out-Null
 
     # --- Install: which folder, focus on the default chosen; the second library.
-    Press Down 'Recent\(\d+\)' | Out-Null
     Open-MenuOf $game.name | Out-Null
     Press A "InstallWhere: Folder\(0\) $secondRx, the default of $name" '04-which-folder' | Out-Null
     Press Down "InstallWhere: Folder\(1\) $rootRx of $name" | Out-Null
