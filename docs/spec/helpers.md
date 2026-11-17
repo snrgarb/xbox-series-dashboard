@@ -81,8 +81,8 @@ release.
 `shell::helper::Job::start(program, args, wake)` starts a helper in its own folder, with no window on Windows
 (`CREATE_NO_WINDOW`), its standard output and error piped. A thread for each reads it a line at a time, a carriage
 return ending a line too (a progress line rewrites itself with one), and hands each over through a channel
-(`Said::Out`, `Said::Err`), calling `wake` so a sleeping UI thread looks; once both are read to their ends,
-`Said::Ended(code)`. Nothing is read on the UI thread. `Job::stop()` kills the process (both helpers resume from what
+(`Said::Out`, `Said::Err`), calling `wake` so a sleeping UI thread looks; once the process has ended and both are read to their ends (or a
+second more, where a process it started still holds them open), `Said::Ended(code)`. Nothing is read on the UI thread. `Job::stop()` kills the process (both helpers resume from what
 they kept, so pause is a stop); its end is said as any end is, with no code. A job dropped is stopped.
 
 ## 5. Tests

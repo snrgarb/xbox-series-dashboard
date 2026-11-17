@@ -8,6 +8,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+/// How long, once a job has ended, what it wrote is waited for before its end is said.
+const DRAIN: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// What a job says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Said {
@@ -15,7 +18,8 @@ pub enum Said {
     Out(String),
     /// A line of its standard error: legendary and gogdl write their progress there.
     Err(String),
-    /// It ended, with its exit code where it has one (none when it was stopped, or killed by a signal).
+    /// It ended, with its exit code where it has one (none when it was stopped, or killed by a signal). Everything
+    /// it wrote comes before; a line from a process it started that outlives it may come after.
     Ended(Option<i32>),
 }
 
@@ -48,11 +52,10 @@ impl Job {
         let err = child.stderr.take().map(|err| read_lines(err, tell.clone(), wake.clone(), Said::Err));
         let child = Arc::new(Mutex::new(child));
         let waited = child.clone();
-        // The end is said once both its outputs are read to their ends, so no line comes after it.
+        // The end is said once the process has ended and what it wrote is read: its outputs to their ends, or for a
+        // moment more where a process it started holds them open after it, which would otherwise keep its end
+        // unsaid for as long as that one runs.
         std::thread::spawn(move || {
-            for reader in [out, err].into_iter().flatten() {
-                let _ = reader.join();
-            }
             let code = loop {
                 match waited.lock().unwrap().try_wait() {
                     Ok(Some(status)) => break status.code(),
@@ -61,6 +64,11 @@ impl Job {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(20));
             };
+            let until = std::time::Instant::now() + DRAIN;
+            let readers: Vec<_> = [out, err].into_iter().flatten().collect();
+            while readers.iter().any(|reader| !reader.is_finished()) && std::time::Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
             let _ = tell.send(Said::Ended(code));
             wake();
         });
