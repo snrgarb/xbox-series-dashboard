@@ -146,12 +146,12 @@ try {
     # Manage, and Menu wherever focus is, open the game's Tile menu over the hub, which has no Manage game row; B
     # closes it, and focus is where it was.
     Press Left "$hub Hub Manage"
-    Press A 'TileMenu: Menu\((Play game|Install)\) of .+' '04b-hub-tile-menu'
+    Press A 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+' '04b-hub-tile-menu'
     Press Down 'TileMenu: Menu\((Add to|Remove from) Favourites\) of .+'
     Press Down 'TileMenu: Menu\((Uninstall|Customise Home)\) of .+'
     Press B "$hub Hub Manage"
     Press Up "$hub Hub Stats"
-    Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
+    Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+'
     Press B "$hub Hub Stats"
     Press Down "$hub Hub Toggle"
 

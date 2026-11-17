@@ -91,7 +91,7 @@ function Menu-Game([string] $Line) { if ($Line -match ' of (.+)$') { $Matches[1]
 function Open-MenuOf([string] $Name) {
     if ((Focus-Now) -notmatch '^focus: Recent\(0\)$') { throw "the Recent row's walk starts on Recent(0), not '$(Focus-Now)'" }
     foreach ($tile in 0..7) {
-        $line = Press Start "TileMenu: Menu\((Play game|Install)\) of .+"
+        $line = Press Start "TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+"
         if ((Menu-Game $line) -eq $Name) { return $line }
         Press B "Recent\($tile\)" | Out-Null
         Press Right "Recent\($($tile + 1)\)" | Out-Null
