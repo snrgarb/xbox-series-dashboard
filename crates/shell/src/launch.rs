@@ -83,6 +83,30 @@ impl Launch {
 #[cfg(windows)]
 pub use win::Launch;
 
+/// Whether a window cloaked so (its `DWMWA_CLOAKED`) may be the game's. Not cloaked (0), or cloaked by the shell (2,
+/// `DWM_CLOAKED_SHELL`): Windows' Xbox mode cloaks the app that is not in front, the game's windows while Home is,
+/// and a virtual desktop not shown cloaks its windows so too; the game still has them. Not a window its own app
+/// cloaked (1, `DWM_CLOAKED_APP`: a UWP frame kept for later, a window hidden by design), nor one cloaked with its
+/// owner (4, `DWM_CLOAKED_INHERITED`). Other programs' windows are kept out by their path, not by this.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn may_be_the_games(cloaked: u32) -> bool {
+    matches!(cloaked, 0 | 2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::may_be_the_games;
+
+    #[test]
+    fn a_window_the_shell_cloaked_is_still_the_games_and_one_its_app_cloaked_is_not() {
+        assert!(may_be_the_games(0), "shown");
+        assert!(may_be_the_games(2), "cloaked by the shell: Xbox mode with Home in front");
+        assert!(!may_be_the_games(1), "cloaked by its own app");
+        assert!(!may_be_the_games(4), "cloaked with its owner");
+        assert!(!may_be_the_games(1 | 2), "its app's cloak as well as the shell's");
+    }
+}
+
 #[cfg(windows)]
 mod win {
     use super::{c_void, Addresses, Arc, Duration, Freezer, Game, Overlay, Path, Source, Step};
@@ -176,6 +200,8 @@ mod win {
         left: Vec<String>,
         /// With no window or process of the game's left: since when its store has still said it runs.
         store_since: Option<Instant>,
+        /// The game's largest window when last said, and how it was cloaked.
+        found: (HWND, u32),
     }
 
     fn log(message: &str) {
@@ -242,6 +268,7 @@ mod win {
                 marked: Vec::new(),
                 left: Vec::new(),
                 store_since: None,
+                found: (std::ptr::null_mut(), 0),
             })
         }
 
@@ -263,6 +290,17 @@ mod win {
             let running = self.source.running(&self.playing);
             self.seen |= running || look.any;
             self.game = look.largest;
+            // Which window of the game's is its largest, and how it is cloaked: said as either changes.
+            let found = (look.largest.unwrap_or(std::ptr::null_mut()), look.cloaked);
+            if found != self.found && look.largest.is_some() {
+                let how = match look.cloaked {
+                    0 => "not cloaked",
+                    2 => "cloaked by the shell",
+                    _ => "cloaked",
+                };
+                log(&format!("the game's window {}, {how} ({})", unsafe { crate::describe(found.0) }, found.1));
+            }
+            self.found = found;
             let starting = self.state == State::Starting;
             if look.any != self.window_up {
                 self.window_up = look.any;
@@ -319,20 +357,29 @@ mod win {
                 self.store_since = None;
                 return Step::Same;
             }
-            if running {
+            // The store still saying it runs is waited for only while something else has the foreground: a launcher
+            // outside the game's folder may be starting it again. With Home's window in front the user is back at
+            // the Dashboard, and a store slow to see the game go (Steam took 2.2 s on the TV PC) holds nothing up.
+            let home_front = unsafe { GetForegroundWindow() } == self.home;
+            if running && !home_front {
                 if self.store_since.is_none() {
                     log(&format!("the game's processes have gone, {} still says it runs", self.source.name()));
                     self.store_since = Some(now);
                 }
                 return Step::Same;
             }
-            let why = match self.store_since {
-                Some(since) => format!(
+            let why = match (running, self.store_since) {
+                (true, _) => format!(
+                    "the game's windows and processes have gone, Home's window has the foreground: ended without \
+                     waiting for {} to say so",
+                    self.source.name()
+                ),
+                (false, Some(since)) => format!(
                     "the game's windows and processes have gone, and {} said so {:.0} ms later",
                     self.source.name(),
                     (now - since).as_secs_f64() * 1000.0
                 ),
-                None => "the game's windows and processes have gone".to_string(),
+                (false, None) => "the game's windows and processes have gone".to_string(),
             };
             self.ended(overlay, &why)
         }
@@ -610,7 +657,12 @@ mod win {
                     if IsIconic(game) != 0 {
                         ShowWindow(game, SW_RESTORE);
                     }
-                    SetForegroundWindow(game);
+                    // In Xbox mode the game's window is cloaked by the shell while Home is in front. No documented
+                    // call switches Xbox mode's app: activating the window is how an app is brought forward there,
+                    // as it is for a window on another virtual desktop. Said, with the window's state after, so a
+                    // run shows whether the shell uncloaked it (the next look says so again as it changes).
+                    let given = SetForegroundWindow(game) != 0;
+                    log(&format!("the game's window given the foreground: {given}; it is {}", window_state(game)));
                 }
             }
             self.put_behind(game);
@@ -663,8 +715,8 @@ mod win {
         }
     }
 
-    /// What Windows has Home's window as, for the log: shown, minimised, cloaked (hidden by Windows or the shell
-    /// while still shown: in Xbox mode, a home app behind another), and where.
+    /// What Windows has a window as, for the log: shown, minimised, cloaked (hidden by Windows or the shell while
+    /// still shown: in Xbox mode, the app not in front), and where.
     unsafe fn window_state(window: HWND) -> String {
         let mut cloaked = 0u32;
         DwmGetWindowAttribute(window, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut c_void, 4);
@@ -716,6 +768,9 @@ mod win {
         any: bool,
         /// The largest of them.
         largest: Option<HWND>,
+        /// How the largest is cloaked (`DWMWA_CLOAKED`): 0, or 2 where the shell has set the game aside (Xbox
+        /// mode, with Home in front).
+        cloaked: u32,
     }
 
     struct Search<'a> {
@@ -745,7 +800,7 @@ mod win {
         DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut c_void, 4);
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
-        if cloaked != 0 || pid == 0 || pid == std::process::id() {
+        if !super::may_be_the_games(cloaked) || pid == 0 || pid == std::process::id() {
             return 1;
         }
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
@@ -767,6 +822,7 @@ mod win {
         if area > search.largest {
             search.largest = area;
             search.look.largest = Some(hwnd);
+            search.look.cloaked = cloaked;
         }
         if area >= search.screen * GAME_COVERS && area > search.best {
             search.best = area;
