@@ -81,7 +81,10 @@ stays above it when it has games.
 
 On open, focus is on the first cover, else the first row, else nothing. When the lists change under it, focus follows
 its game: to its row, else to its cover (a game that finishes installing goes from Installing to Recently installed,
-and focus with it); a game that has left both gives focus to the first cover, else the first row. Scrolling: a cover
+and focus with it); a game that has left both gives focus to the first cover, else the first row, and a stopped one
+(section 10) gone gives it to the first stopped row before that. The game stays the one wanted until the user moves
+focus: if it comes back (a snapshot of the library read while Settings > Storage was over the page, then the Queue
+again), focus goes back to it. Stopped rows outlive a snapshot of the library, which knows nothing of them. Scrolling: a cover
 puts the list at its top; a row scrolls the least that shows it whole.
 
 Hint bar: "More options" (the Menu glyph) with focus on a cover or row; none with nothing focused.

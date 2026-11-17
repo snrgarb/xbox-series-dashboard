@@ -163,6 +163,14 @@ impl Layout {
 /// The header over the stopped rows.
 pub const STOPPED: &str = "Stopped";
 
+/// Where on the page a game was: a stopped one gone gives focus to the first stopped row.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Section {
+    Covers,
+    Installing,
+    Stopped,
+}
+
 /// The game of the row focus calls `Row(i)`: an install's, else a stopped one's.
 fn row_game(library: &Library, i: usize) -> Option<i64> {
     let entries = &library.queue.entries;
@@ -174,8 +182,11 @@ fn row_game(library: &Library, i: usize) -> Option<i64> {
 
 pub struct ManageQueue {
     focus: Focus,
-    /// The game focus is on, or last was: where it goes back to as the lists change.
+    /// The game the user last put focus on, and where on the page it was: where focus goes back to as the lists
+    /// change, even after it has had to fall back elsewhere while the game was gone (a snapshot of the library
+    /// without it, read while another page was over this one). Only the user's own moves change it.
     game: Option<i64>,
+    section: Option<Section>,
     /// The cover last focused: where Up from the first row goes.
     last_cover: usize,
     scroll: f32,
@@ -191,6 +202,7 @@ impl ManageQueue {
         let mut page = Self {
             focus: Focus::Nothing,
             game: None,
+            section: None,
             last_cover: 0,
             scroll: 0.0,
             name: String::new(),
@@ -201,8 +213,8 @@ impl ManageQueue {
         page
     }
 
-    /// The library may have changed: focus stays on its game, as a cover or a row, whichever it now is; else the
-    /// first cover, else the first row, else nothing.
+    /// The library may have changed: focus stays on its game, as a cover or a row, whichever it now is; else, for
+    /// a stopped one, the first stopped row; else the first cover, else the first row, else nothing.
     fn keep(&mut self, library: &Library) {
         let covers = recently_installed(library);
         let rows = &library.queue.entries;
@@ -221,6 +233,11 @@ impl ManageQueue {
         self.focus = still
             .or_else(|| self.game.and_then(row_of).map(Focus::Row))
             .or_else(|| self.game.and_then(cover_of).map(Focus::Cover))
+            // A stopped one gone: the first stopped row (the Bundle has no such rows); else, as the Bundle's
+            // focus does, the first cover.
+            .or_else(|| {
+                (self.section == Some(Section::Stopped) && !stopped.is_empty()).then_some(Focus::Row(rows.len()))
+            })
             .or_else(|| (!covers.is_empty()).then_some(Focus::Cover(0)))
             .or_else(|| (total > 0).then_some(Focus::Row(0)))
             .unwrap_or(Focus::Nothing);
@@ -232,7 +249,11 @@ impl ManageQueue {
         if let Focus::Cover(i) = self.focus {
             self.last_cover = i;
         }
-        self.game = game.or(self.game);
+        // Focus that fell back elsewhere leaves the game it was on wanted, until the user moves.
+        if self.game.is_none() {
+            self.game = game;
+            self.section = self.section_of(library);
+        }
         self.name = game.and_then(|game| library.game(game)).map(|game| game.name.clone()).unwrap_or_default();
         self.counts = (rows.len(), covers.len());
         self.row = match self.focus {
@@ -257,12 +278,28 @@ impl ManageQueue {
         stopped.is_some_and(|stopped| matches!(stopped.stop, model::Stop::NoSpace { .. }))
     }
 
+    /// The game focus is on now.
+    fn focused(&self, library: &Library) -> Option<i64> {
+        match self.focus {
+            Focus::Cover(i) => recently_installed(library).get(i).map(|game| game.id),
+            Focus::Row(i) => row_game(library, i),
+            Focus::Nothing => None,
+        }
+    }
+
+    /// The section focus is in now.
+    fn section_of(&self, library: &Library) -> Option<Section> {
+        match self.focus {
+            Focus::Cover(_) => Some(Section::Covers),
+            Focus::Row(i) if i < library.queue.entries.len() => Some(Section::Installing),
+            Focus::Row(_) => Some(Section::Stopped),
+            Focus::Nothing => None,
+        }
+    }
+
     /// The game focus is on, by its place in the library.
     fn place(&self, library: &Library) -> Option<usize> {
-        if self.focus == Focus::Nothing {
-            return None;
-        }
-        let game = self.game?;
+        let game = self.focused(library)?;
         library.games.iter().position(|g| g.id == game)
     }
 
@@ -348,13 +385,11 @@ impl Page for ManageQueue {
             }
             _ => {}
         }
-        // Where focus went names its game.
-        let game = match self.focus {
-            Focus::Cover(i) => recently_installed(library).get(i).map(|game| game.id),
-            Focus::Row(i) => row_game(library, i),
-            Focus::Nothing => None,
-        };
-        self.game = game.or(self.game);
+        // Where the user put focus is the game and section wanted from now on.
+        if let Some(game) = self.focused(library) {
+            self.game = Some(game);
+            self.section = self.section_of(library);
+        }
         self.keep(library);
         None
     }

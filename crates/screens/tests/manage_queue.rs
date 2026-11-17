@@ -558,6 +558,55 @@ fn a_stopped_row_says_why_and_one_with_no_room_opens_storage() {
     assert_eq!(after(&mut page, &[]), "Row(1) of Fathom Nine");
 }
 
+/// Back from Settings > Storage after the library was read again while it was up (a snapshot from the database,
+/// which knows nothing of stopped games, then the Queue as the follower has it): focus is on the same game's row,
+/// as on the TV after a look at the drives.
+#[test]
+fn back_from_storage_focus_is_on_the_same_game_after_the_library_is_read_again() {
+    let library = with_queue(library(), stopped);
+    let mut page = on_page(library.clone());
+    assert_eq!(after(&mut page, &[Down, Down]), "Row(1) of Fathom Nine");
+    press(&mut page, &[A]);
+    assert!(page.focus_line().starts_with("Settings: Storage: "), "{}", page.focus_line());
+    let mut snapshot = library.clone();
+    snapshot.queue.stopped.clear();
+    page.set_library(snapshot);
+    press(&mut page, &[B]);
+    assert_eq!(after(&mut page, &[]), "Row(1) of Fathom Nine");
+    assert!(page.focus_line().ends_with("; Stopped: Not enough space"), "{}", page.focus_line());
+
+    // The follower's Queue without the stopped rows for a moment, then with them: focus waits at the page's start
+    // and comes back to the game.
+    let start = after(&mut on_page(library.clone()), &[]);
+    let mut without = library.queue.clone();
+    without.stopped.clear();
+    page.set_queue(without);
+    assert_eq!(after(&mut page, &[]), start);
+    page.set_queue(library.queue.clone());
+    assert_eq!(after(&mut page, &[]), "Row(1) of Fathom Nine");
+}
+
+/// A focused stopped game that is gone leaves focus on the first stopped row, else the page's start; one the user
+/// moves to is the game wanted from then on.
+#[test]
+fn a_focused_game_gone_leaves_focus_on_the_first_of_its_section() {
+    let library = with_queue(library(), stopped);
+    let mut page = on_page(library.clone());
+    assert_eq!(after(&mut page, &[Down, Down, Down]), "Row(2) of Ember Choir");
+    let ember = id(&library, "Ember Choir");
+    let mut queue = library.queue.clone();
+    queue.stopped.retain(|stopped| stopped.game != ember);
+    page.set_queue(queue.clone());
+    assert_eq!(after(&mut page, &[]), "Row(1) of Fathom Nine");
+    let start = after(&mut on_page(library.clone()), &[]);
+    queue.stopped.clear();
+    page.set_queue(queue.clone());
+    assert_eq!(after(&mut page, &[]), start);
+    assert_eq!(after(&mut page, &[Down]), "Row(0) of Dune Cartographer");
+    page.set_queue(library.queue.clone());
+    assert_eq!(after(&mut page, &[]), "Row(0) of Dune Cartographer");
+}
+
 /// A stopped game asked for again leaves Stopped for Installing, and focus goes with it.
 #[test]
 fn a_stopped_game_asked_for_again_is_a_row_of_installing() {

@@ -375,6 +375,15 @@ impl Dashboard {
         for entry in library.queue.entries.iter_mut().filter(|entry| entry.can == model::Can::NOTHING) {
             entry.can = self.library.queue.get(entry.game).map_or(model::Can::NOTHING, |was| was.can);
         }
+        // Nor which games stopped and why (the follower keeps them, not the database): they stay, but for a game
+        // installing again or installed now.
+        if library.queue.stopped.is_empty() {
+            let gone = |game: i64| {
+                library.queue.get(game).is_some() || library.games.iter().any(|g| g.id == game && g.installed)
+            };
+            let stopped = self.library.queue.stopped.iter().filter(|stopped| !gone(stopped.game)).cloned().collect();
+            library.queue.stopped = stopped;
+        }
         let place = |at: usize| {
             let game = self.library.games.get(at)?;
             library.games.iter().position(|g| g.is(&game.key()))
