@@ -1,5 +1,10 @@
 //! The executable: the Dashboard in a window, or one frame of it drawn offscreen to a PNG; or one of shell mode's
 //! jobs (`shell_mode::run_job`: --shell, --sentinel, --shell-on, --shell-off, --shell-probe).
+//!
+//! On Windows a GUI program: no console window opens for it. Run from a terminal it prints there
+//! (`shell_mode::dashboard::attach_parent_console`), but cmd and PowerShell don't wait for a GUI program: `start
+//! /wait dashboard.exe ...`, or `Start-Process -Wait -NoNewWindow`, to wait for it and have its exit code.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 mod as_shell;
 mod games;
 mod media_folder;
@@ -230,8 +235,14 @@ fn fail(message: &str) -> ! {
 
 fn main() {
     since_start();
-    // Shell mode's jobs come before anything of the Dashboard's: the --shell process never touches the GPU.
     let given: Vec<String> = std::env::args().skip(1).collect();
+    // A GUI program, so no console window opens for it however it is started; run from a terminal it prints there.
+    // The --shell process and the sentinel never take a terminal's console, which would tie them to it.
+    if !matches!(given.first().map(String::as_str), Some(shell_mode::contract::SHELL | shell_mode::contract::SENTINEL))
+    {
+        shell_mode::dashboard::attach_parent_console();
+    }
+    // Shell mode's jobs come before anything of the Dashboard's: the --shell process never touches the GPU.
     if let Some(code) = shell_mode::run_job(&given, library::data_dir()) {
         std::process::exit(code);
     }

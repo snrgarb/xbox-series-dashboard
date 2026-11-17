@@ -849,4 +849,4 @@ such page; the words, the layout and what each state shows are in shell-mode.md,
 row **Start with Windows as the shell**: A asks before turning it on (Turn on, Cancel), turns it off at once, and does
 nothing while it is refused. The focus log: `Settings: System: Start with Windows as the shell`, and with the question
 up `Settings: System: Prompt(Turn on) of Start with Windows as the shell`; the executable's answer is
-`settings: shell mode is on` (`off`, `refused <why>`, `failed`, `unknown`).
+`shell: Settings > System shows on` (`off`, `refused <why>`, `failed`, `unknown`).

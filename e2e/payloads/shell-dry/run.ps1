@@ -13,7 +13,10 @@
 #   - no line of either says it wrote anything (`shell: set `, `shell: register`, `shell: saved`, `shell: renamed`);
 #   - `--from-shell --dry-shell`, the window's path as the shell starts it with the shell's events left alone, logs to
 #     <data>\shell\logs\dashboard-<stamp>.log, says it is a dry run, and presents its first frame (`first frame
-#     presented`) with no `window: ERROR` and no panic: checked here, on any machine, before shell-mode restarts one.
+#     presented`) with no `window: ERROR` and no panic: checked here, on any machine, before shell-mode restarts one;
+#   - a plain start (Start-Process with nothing redirected: ShellExecute, as Explorer or a shortcut starts it) shows
+#     the Dashboard's window and opens no console window (no new visible ConsoleWindowClass or
+#     CASCADIA_HOSTING_WINDOW_CLASS window) and no console host as its child.
 #
 # Bounded: the whole payload ends within $Budget seconds whatever happens. Every process it starts has its stdout and
 # stderr in files of its own (none holds this script's output, which the harness reads to its end), is waited on with
@@ -26,6 +29,35 @@ $Budget = 170
 $clock = [Diagnostics.Stopwatch]::StartNew()
 $Since = (Get-Date).AddSeconds(-2)
 $started = @()
+
+# The visible top-level windows: "handle|class|pid|title".
+Add-Type @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class E2EWindows {
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    public static string[] Visible() {
+        var found = new List<string>();
+        EnumWindows((h, l) => {
+            if (IsWindowVisible(h)) {
+                var c = new StringBuilder(256); GetClassName(h, c, 256);
+                var t = new StringBuilder(256); GetWindowText(h, t, 256);
+                uint pid; GetWindowThreadProcessId(h, out pid);
+                found.Add(h.ToInt64() + "|" + c + "|" + pid + "|" + t);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found.ToArray();
+    }
+}
+'@
 
 # Seconds left of $Want, within what is left of the budget (a few kept for the end).
 function Get-Limit([double] $Want) { [Math]::Max(1, [Math]::Min($Want, $Budget - 10 - $clock.Elapsed.TotalSeconds)) }
@@ -195,6 +227,36 @@ try {
     Expect ([bool] ($lines -match '^first frame presented')) "the --from-shell window presents its first frame (within $([int] $limit) s)"
     Expect (-not ($lines -match '^window: ERROR')) 'its swap chain was made the first time'
     Expect (-not ($lines -match 'panicked')) 'it did not panic'
+
+    # A plain start, as Explorer, a shortcut or another program starts it (ShellExecute, no handles given): a GUI
+    # program, it must open no console window, conhost's or Windows Terminal's. Judged by the console windows on the
+    # screen before and once its own window is up, and by its children.
+    $consoles = { @([E2EWindows]::Visible() | Where-Object { $_.Split('|')[1] -in 'ConsoleWindowClass', 'CASCADIA_HOSTING_WINDOW_CLASS' }) }
+    $hadConsoles = & $consoles
+    $plainArguments = @('--dry-shell', '--no-startup', '--data-dir', "`"$data`"", '--store-art-service', 'http://127.0.0.1:9')
+    if (Test-SafeMode) { $plainArguments += @(Get-SafeArguments $plainArguments) }
+    $plain = Start-Process -FilePath $exe -ArgumentList $plainArguments -WorkingDirectory $Payload -PassThru
+    $plain.Handle | Out-Null
+    $script:started += $plain.Id
+    Say "started the Dashboard plainly, pid $($plain.Id)"
+    $limit = Get-Limit 30
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $windowed = $false
+    while (-not $windowed -and -not $plain.HasExited -and $watch.Elapsed.TotalSeconds -lt $limit) {
+        $windowed = [bool] ([E2EWindows]::Visible() | Where-Object { $_.Split('|', 4)[2] -eq "$($plain.Id)" -and $_.Split('|', 4)[3] -eq 'Xbox Series Dashboard' })
+        if (-not $windowed) { Start-Sleep -Milliseconds 250 }
+    }
+    Start-Sleep -Seconds 2
+    $hadHandles = @($hadConsoles | ForEach-Object { $_.Split('|')[0] })
+    $newConsoles = @(& $consoles | Where-Object { $hadHandles -notcontains $_.Split('|')[0] })
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($plain.Id)" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in 'conhost.exe', 'OpenConsole.exe', 'WindowsTerminal.exe' } | ForEach-Object { "$($_.Name) $($_.ProcessId)" })
+    Save-Screen 'plain-start'
+    $plainExited = $plain.HasExited
+    Stop-Tree $plain.Id
+    Expect $windowed "a plain start shows the Dashboard's window (within $([int] $limit) s$(if ($plainExited) { "; it exited with $($plain.ExitCode)" }))"
+    Expect ($newConsoles.Count -eq 0) "a plain start opens no console window$(if ($newConsoles.Count) { ": $($newConsoles -join '; ')" })"
+    Expect ($children.Count -eq 0) "a plain start has no console host$(if ($children.Count) { ": $($children -join '; ')" })"
 
     $after = Get-ShellPlaces $data 'after'
     $after | Set-Content (Join-Path $Out 'places-after.txt') -Encoding UTF8

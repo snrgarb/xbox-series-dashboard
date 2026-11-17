@@ -234,7 +234,8 @@ Two payloads (docs/spec/shell-mode.md):
   `Shell` line exactly, no line says it wrote, and `reg query` and `schtasks /Query` read every place the same before
   and after. Then it starts `dashboard.exe --from-shell --dry-shell` (the window as the shell starts it, topmost for
   Start-up, the shell's events left alone) and needs `first frame presented` in `<data>\shell\logs\dashboard-*.log`
-  with no `window: ERROR`: run it before `shell-mode`. It ends within 170 s whatever happens: every process it starts
+  with no `window: ERROR`: run it before `shell-mode`. Last, a plain start (ShellExecute, as Explorer starts it) must
+  show the Dashboard's window and no console window (conhost's or Windows Terminal's). It ends within 170 s whatever happens: every process it starts
   has its output in files of its own, is waited on with a limit, and is ended with its whole tree, by pid. `e2e/run.sh shell-dry`, or `e2e/htpc/run.sh shell-dry`.
 - **`shell-mode`**, the VM only: it turns shell mode on for real and restarts the VM five times. In safe mode it
   throws at once (`Assert-VmOnly`). It needs longer than the default wait:

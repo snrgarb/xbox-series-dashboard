@@ -1243,9 +1243,10 @@ impl ApplicationHandler for App {
         if self.state.is_none() {
             return;
         }
-        // Settings > System: where shell mode stands, as a thread found it.
+        // Settings > System: where shell mode stands, as a thread found it. Under `shell:`, not `settings:`, which is
+        // only ever an option set or saved.
         if let Some(shell) = self.as_shell.answer() {
-            eprintln!("settings: shell mode is {}", screens::settings::system::state(shell));
+            eprintln!("shell: Settings > System shows {}", screens::settings::system::state(shell));
             self.dashboard.set_options(screens::Options { shell, ..self.dashboard.options() });
             self.stale = true;
         }

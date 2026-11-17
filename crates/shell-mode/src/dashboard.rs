@@ -76,7 +76,9 @@ mod elsewhere {
 
     pub fn log_to_file(_: &Path) {}
 
-    pub fn detach_console() {}
+    pub fn attach_parent_console() -> bool {
+        false
+    }
 
     pub fn describe_window(_: isize) -> String {
         String::new()
@@ -107,10 +109,10 @@ mod win {
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, OPEN_ALWAYS,
     };
-    use windows_sys::Win32::System::Console::{FreeConsole, SetStdHandle, STD_ERROR_HANDLE};
+    use windows_sys::Win32::System::Console::{SetStdHandle, STD_ERROR_HANDLE};
     use windows_sys::Win32::System::Threading::{
-        CreateMutexW, CreateProcessW, OpenEventW, OpenMutexW, SetEvent, CREATE_NO_WINDOW, EVENT_MODIFY_STATE,
-        PROCESS_INFORMATION, STARTUPINFOW, SYNCHRONIZATION_SYNCHRONIZE,
+        CreateMutexW, CreateProcessW, OpenEventW, OpenMutexW, SetEvent, EVENT_MODIFY_STATE, PROCESS_INFORMATION,
+        STARTUPINFOW, SYNCHRONIZATION_SYNCHRONIZE,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         FindWindowW, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
@@ -136,7 +138,8 @@ mod win {
     }
 
     /// Starts `exe` with `args`, in its own folder, passing no handles and in no job, so it outlives whoever
-    /// started it, with no console window of its own (CREATE_NO_WINDOW: the Dashboard is a console exe); its pid. The process handle is closed: whoever watches finds it by its exe.
+    /// started it (a GUI program: no console window); its pid. The process handle is closed: whoever watches finds
+    /// it by its exe.
     pub fn start(exe: &Path, args: &[&str]) -> Result<u32, String> {
         let (pid, handle) = start_held(exe, args)?;
         unsafe { CloseHandle(handle) };
@@ -162,7 +165,7 @@ mod win {
                 std::ptr::null(),
                 std::ptr::null(),
                 0,
-                CREATE_NO_WINDOW,
+                0,
                 std::ptr::null(),
                 folder.as_ref().map_or(std::ptr::null(), |f| f.as_ptr()),
                 &startup,
@@ -278,10 +281,48 @@ mod win {
         }
     }
 
-    /// Lets go of the console Windows made for this console-subsystem exe, started by Winlogon or explorer with
-    /// none to share: its window goes at once.
-    pub fn detach_console() {
-        unsafe { FreeConsole() };
+    /// `dashboard.exe` is a GUI program, so Windows gives it no console: started from Explorer, a shortcut, the Run
+    /// key or another program, no console window shows. Run from a terminal, its output and errors, where they
+    /// aren't already going somewhere (a file or a pipe, as the tests' are, which stay as they are), go to that
+    /// terminal's console, which it attaches to. Whether it attached.
+    pub fn attach_parent_console() -> bool {
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileType, FILE_GENERIC_READ, FILE_SHARE_WRITE, FILE_TYPE_UNKNOWN, OPEN_EXISTING,
+        };
+        use windows_sys::Win32::System::Console::{
+            AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_HANDLE, STD_OUTPUT_HANDLE,
+        };
+        unsafe {
+            let missing = |which: STD_HANDLE| {
+                let handle = GetStdHandle(which);
+                handle.is_null() || handle == INVALID_HANDLE_VALUE || GetFileType(handle) == FILE_TYPE_UNKNOWN
+            };
+            let (output, errors) = (missing(STD_OUTPUT_HANDLE), missing(STD_ERROR_HANDLE));
+            if !(output || errors) || AttachConsole(ATTACH_PARENT_PROCESS) == 0 {
+                return false;
+            }
+            let name = wide("CONOUT$");
+            let console = CreateFileW(
+                name.as_ptr(),
+                FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                0,
+                std::ptr::null_mut(),
+            );
+            if console.is_null() || console == INVALID_HANDLE_VALUE {
+                return false;
+            }
+            if output {
+                SetStdHandle(STD_OUTPUT_HANDLE, console);
+            }
+            if errors {
+                SetStdHandle(STD_ERROR_HANDLE, console);
+            }
+            true
+        }
     }
 
     /// The two events, opened to be set. None with no --shell process to tell.

@@ -16,8 +16,12 @@ before anything of the Dashboard's is set up (`shell_mode::run_job`):
 | `--shell-on`, `--shell-off` | Settings > System, or a terminal | Turns shell mode on or off from the next sign-in (section 3). |
 | `--shell-probe` | `--shell-on` | Prints `dashboard: --shell-probe ok` and exits `0x58440002`: the exe starts. |
 
-`--shell` and `--sentinel` let go of the console Windows makes for this console-subsystem exe at once
-(`FreeConsole`), and start the Dashboard with `CREATE_NO_WINDOW`.
+`dashboard.exe` is a GUI-subsystem program: however it is started (Winlogon, the Run key, Explorer, a shortcut, another
+program with a plain `CreateProcess`) no console window opens for it. Run from a terminal, it attaches to that
+terminal's console for whichever of its output and errors aren't already going to a file or a pipe, so `--shell-on`'s
+lines and the logs print there; `--shell` and `--sentinel` never attach. cmd and PowerShell don't wait for a GUI
+program: `start /wait dashboard.exe --shell-on`, or `Start-Process -Wait -NoNewWindow`, to wait and read its exit code
+(`echo %errorlevel%`, `$p.ExitCode`).
 
 Exit codes: `--shell-on` and `--shell-off` end 0 (done, or so already), 3 (refused), 4 (failed) or 2 (bad arguments).
 `--sentinel`, a second `--shell` and a second Dashboard end `0x58440001`, which the watchdog never takes for a
@@ -51,7 +55,7 @@ desktop or hold View and Menu for 5 seconds." with **Turn on** and **Cancel**. A
 off is the way back, and is never asked. A while it is refused or unknown does nothing; the line says why.
 
 The page asks with `Effect::ShellMode(on)`; the executable does it on a thread of its own (`setup::turn_on` is slow:
-schtasks and the probe) and answers in `Options::shell`, logging `settings: shell mode is on`. Where it stands is
+schtasks and the probe) and answers in `Options::shell`, logging `shell: Settings > System shows on`. Where it stands is
 looked up the same way as the Dashboard starts. The focus line is `System: Start with Windows as the shell`, or with
 the question up `System: Prompt(Turn on) of Start with Windows as the shell`.
 

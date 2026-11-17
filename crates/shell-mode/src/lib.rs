@@ -64,14 +64,8 @@ pub fn paths(data: &Path, as_installed: bool) -> Paths {
 pub fn run_job(args: &[String], data: Option<PathBuf>) -> Option<i32> {
     let first = args.first()?.as_str();
     match first {
-        contract::SHELL => {
-            dashboard::detach_console();
-            Some(shell(data))
-        }
-        contract::SENTINEL => {
-            dashboard::detach_console();
-            Some(sentinel(data))
-        }
+        contract::SHELL => Some(shell(data)),
+        contract::SENTINEL => Some(sentinel(data)),
         contract::PROBE => {
             println!("dashboard: {} ok", contract::PROBE);
             Some(contract::PROBE_OK as i32)

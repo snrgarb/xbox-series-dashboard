@@ -45,8 +45,8 @@ pub fn status(shell: ShellMode) -> &'static str {
     }
 }
 
-/// Shell mode as the log says it (`settings: shell mode is refused not-installed`): `on`, `off`, `refused <why>`,
-/// `failed`, `unknown`.
+/// Shell mode as the log says it (`shell: Settings > System shows refused not-installed`): `on`, `off`,
+/// `refused <why>`, `failed`, `unknown`.
 pub fn state(shell: ShellMode) -> String {
     match shell {
         ShellMode::Unknown => "unknown".into(),
