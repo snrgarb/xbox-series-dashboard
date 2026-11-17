@@ -70,14 +70,16 @@ impl LaunchScreen {
 }
 
 /// The Launch screen's picture over the whole screen: the game's art as Home's hero chooses it, the scrim, the shade
-/// and the game's name, with the Spinner when `turning`.
-fn picture(ui: &mut Ui, game: &Game, turning: bool) {
+/// and the game's name, with the Spinner when `turning`. Whether it is whole: its art was in, or it has none.
+fn picture(ui: &mut Ui, game: &Game, turning: bool) -> bool {
     let screen = ui.screen();
     // The art as Home's hero chooses it: background art as it is, else the cover blurred and darkened, else black.
     ui.fill(screen, Color::BLACK, 0.0);
+    let mut whole = true;
     if let Some((key, blurred)) = hero_art(game, ui.px()) {
         let rect = if blurred { screen.grow(120.0) } else { screen };
-        if ui.art(rect, &key, Crop::Top, 1.0, 0.0) && blurred {
+        whole = ui.art(rect, &key, Crop::Top, 1.0, 0.0);
+        if whole && blurred {
             ui.fill(screen, Color::argb(0x99000000), 0.0);
         }
     }
@@ -91,6 +93,7 @@ fn picture(ui: &mut Ui, game: &Game, turning: bool) {
         spinner(ui, 960.0, SPINNER_Y, SPINNER);
     }
     ui.paragraph(NAME, &game.name, &theme::HEADING, HAlign::Center, VAlign::Top, 2);
+    whole
 }
 
 /// Home's window while a game is up: the game's Launch screen without its Spinner, opaque over the whole of it, so
@@ -104,6 +107,8 @@ pub struct Backdrop {
     game: Option<Game>,
     /// Fading to Home: the game has ended.
     fading: bool,
+    /// Whether it was whole when last drawn: its art in, or none to wait for.
+    whole: bool,
 }
 
 impl Backdrop {
@@ -121,6 +126,12 @@ impl Backdrop {
     /// Whether it is fading to Home.
     pub fn fading(&self) -> bool {
         self.fading
+    }
+
+    /// Whether it was whole when last drawn: its art was in, or it has none. One that was not is drawn again when its
+    /// art comes. True when there is none to draw.
+    pub fn whole(&self) -> bool {
+        self.whole || self.game.is_none()
     }
 
     /// Draws it over whatever is drawn already. `covering`: the game it covers Home's window for now, which it does at
@@ -148,6 +159,6 @@ impl Backdrop {
             return;
         }
         ui.layer();
-        ui.with_alpha(shown, |ui| picture(ui, game, false));
+        self.whole = ui.with_alpha(shown, |ui| picture(ui, game, false));
     }
 }
