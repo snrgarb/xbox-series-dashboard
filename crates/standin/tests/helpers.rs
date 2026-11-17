@@ -17,6 +17,12 @@ impl Opener for Nothing {
     }
 }
 
+/// The test's own folder, under Cargo's `target/tmp` rather than the system's temp folder: each test copies this
+/// crate's program (tens of MB) into it, which filled a small `/tmp` and failed the tests now and then (#158).
+fn scratch() -> tempfile::TempDir {
+    tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap()
+}
+
 /// This crate's program, copied into `dir` under `name`, as the Dashboard keeps a helper.
 fn helper(dir: &Path, name: &str) -> PathBuf {
     let program = dir.join("helpers").join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
@@ -41,7 +47,7 @@ fn state(installs: Option<Vec<Install>>) -> Option<InstallState> {
 
 #[test]
 fn epic_through_the_stand_in_legendary_installs_pauses_resumes_cancels_uninstalls_and_starts() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = scratch();
     let dir = dir.path();
     let program = helper(dir, "legendary");
     let home = dir.join("legendary");
@@ -111,7 +117,7 @@ fn epic_through_the_stand_in_legendary_installs_pauses_resumes_cancels_uninstall
 
 #[test]
 fn gog_through_the_stand_in_gogdl_downloads_pauses_resumes_cancels_sets_up_and_uninstalls() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = scratch();
     let dir = dir.path();
     let program = helper(dir, "gogdl");
     let home = dir.join("gogdl");
