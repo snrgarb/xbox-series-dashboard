@@ -52,6 +52,9 @@ struct Opening {
     frames: u32,
 }
 
+/// A hub on top: its number, its game's name, and the pictures it shows as it opens.
+pub type Hub = (u64, String, Vec<(&'static str, ArtKey)>);
+
 /// Follows hubs as they open, and says how each went once it is at rest.
 #[derive(Default)]
 pub struct HubOpen {
@@ -93,7 +96,7 @@ impl HubOpen {
     /// The hub on top after this turn's work, if one is (`Dashboard::game_hub_up`), with its pictures
     /// (`screens::game_hub::art_keys`) and whether each is ready: a new one starts being timed. A hub that goes
     /// before it came to rest is said as it was.
-    pub fn look(&mut self, hub: Option<(u64, String, Vec<(&'static str, ArtKey)>)>, art: &ArtCache, now: Instant) {
+    pub fn look(&mut self, hub: Option<Hub>, art: &ArtCache, now: Instant) {
         let serial = hub.as_ref().map(|(serial, ..)| *serial);
         if serial == self.seen {
             return;
