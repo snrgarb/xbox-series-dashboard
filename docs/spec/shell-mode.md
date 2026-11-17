@@ -156,7 +156,8 @@ What Winlogon starts. It never touches the GPU, the library or the stores (`crat
 3. Makes the events `Local\XboxSeriesDashboard.v1.FirstFrame` and `…v1.BootVideoEnded`, unset.
 4. Waits for Windows' default audio device to settle: started once the same device has been there 1.5 s, or at 6 s.
 5. Starts `dashboard.exe --from-shell` from its own folder (the file beside it, so an update's renamed-aside build
-   still starts the new one), then opens its log `<data>\shell\logs\shell-<stamp>.log` (newest 30 kept) and logs
+   still starts the new one), with any of the Dashboard's logging switches `--shell` was given (`--log-focus`,
+   `--log-sounds`, `--log-frames`, `--log-queue-sources`: `contract::PASSED_ON`) passed on after it, then opens its log `<data>\shell\logs\shell-<stamp>.log` (newest 30 kept) and logs
    Windows' build, HKLM `Shell`, `OverrideShellProgram` and HKCU `Shell`.
 6. Then every 100 ms until Windows ends the session:
    - **The events.** FirstFrame: the black comes down. BootVideoEnded: explorer starts. Explorer also starts 20 s

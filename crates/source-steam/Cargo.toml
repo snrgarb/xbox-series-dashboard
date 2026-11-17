@@ -14,7 +14,8 @@ serde = { version = "1", features = ["derive"] }
 # For the fixture's generated art only.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
-# How far a download has got, live (`live`), and what `probe` reads for `--log-queue-sources`.
+# How far a download has got, live (`live`), and what `probe` reads for `--log-queue-sources`; Steam's main window
+# (`client`).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
@@ -26,6 +27,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_IO",
     "Win32_System_Ioctl",
     "Win32_System_Threading",
+    # Steam's main window, how it stood before an install brought it up (`client`).
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]

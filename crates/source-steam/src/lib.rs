@@ -92,19 +92,28 @@ impl Steam {
     }
 
     /// Asks Steam's client `call` on a thread of its own (the Dashboard's window never waits on its debugger), and
-    /// where it is not taken, opens `fallback` with `open`: Steam's own program, as before #171.
+    /// where it is not taken, opens `fallback` with `open`: Steam's own program, as before #171. After an install,
+    /// whose wizard brings Steam's main window up, the Dashboard is put in front again (`Opener::front`).
     fn ask_client(&self, ports: Vec<u16>, call: client::Call, fallback: Option<(Start, Box<dyn Opener + Send>)>) {
-        std::thread::spawn(move || match (client::ask(&ports, &call), fallback) {
-            (client::Outcome::NotTaken(_), Some((start, mut open))) => {
-                client::log(&format!("{}: asking through steam.exe instead", call.what()));
-                if let Err(why) = open.open(&start) {
-                    client::log(&format!("{}: steam.exe could not be asked either: {why}", call.what()));
+        let root = self.installed_root();
+        std::thread::spawn(move || {
+            let outcome = client::ask(&ports, root.as_deref(), &call);
+            match (outcome, fallback) {
+                (client::Outcome::NotTaken(_), Some((start, mut open))) => {
+                    if matches!(call, client::Call::Install { .. }) {
+                        open.front();
+                    }
+                    client::log(&format!("{}: asking through steam.exe instead", call.what()));
+                    if let Err(why) = open.open(&start) {
+                        client::log(&format!("{}: steam.exe could not be asked either: {why}", call.what()));
+                    }
                 }
+                (client::Outcome::NotTaken(_), None) => {
+                    client::log(&format!("{}: nothing else can do it: the Queue stays as it is", call.what()));
+                }
+                (_, Some((_, mut open))) if matches!(call, client::Call::Install { .. }) => open.front(),
+                _ => {}
             }
-            (client::Outcome::NotTaken(_), None) => {
-                client::log(&format!("{}: nothing else can do it: the Queue stays as it is", call.what()));
-            }
-            _ => {}
         });
     }
 
@@ -207,6 +216,18 @@ impl Source for Steam {
             }
         }
         Some(found)
+    }
+
+    /// The apps whose manifest, in any library, says installed (`installs::installed`), as [`load`] reads them.
+    fn installed_now(&self) -> Option<Vec<String>> {
+        let root = self.installed_root()?;
+        let mut ids: Vec<String> = installed_apps(&root)
+            .into_iter()
+            .filter(|(_, manifest)| manifest.installed)
+            .map(|(appid, _)| appid.to_string())
+            .collect();
+        ids.sort();
+        Some(ids)
     }
 
     /// Asking is all it takes: `+app_uninstall` asks the user nothing.

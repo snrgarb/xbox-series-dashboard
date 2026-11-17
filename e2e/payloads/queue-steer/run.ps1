@@ -12,8 +12,11 @@
 # What it walks:
 # - Install from a game's Tile menu: `steam client: install <appid> into Steam's default library: asking ...`, a line
 #   a call, `... Steam's client took it`, never `asking through steam.exe instead`; the stand-in's `steam: CEF: asked
-#   to install <appid> ...`; the Queue's `joined, asked for` and `queued`. Its download moved to 25% by `standin
-#   steam-install`.
+#   to install <appid> ...`; the Queue's `joined, asked for` and `queued`. The stand-in holds the scripts to the real
+#   client's signatures (#171, seen on the TV PC 2026-11-17: every call with the client id "0", the uninstall with
+#   three arguments) and, as the real one, brings its main window up on the install wizard: the Dashboard puts it
+#   back hidden (`steam: CEF: the main window, asked to Hide`) and keeps the foreground. Its download moved to 25% by
+#   `standin steam-install`.
 # - Manage Queue from Home's Downloads tile, Down to the row (`Installing... 25.0%`), View on it (`Back` on the virtual
 #   Xbox 360 pad, as Menu is `Start`): Install first, then Pause installation and Cancel installation.
 # - Pause, Resume (then the bytes on to 60%), and Cancel after its question (Keep installing first): each `steam
@@ -26,8 +29,8 @@
 #   reads `Downloading Workshop content 0 of 4 items 0.0%`, then 2 of 4 (30.0%: the stand-in's items are 4, 8, 12 and
 #   16 MB), and once all four are in it leaves (`queue: <name> has all its store was fetching for it`).
 # - Uninstall from the Tile menu, after the Dashboard's own question: `steam client: uninstall <appid>: Steam's client
-#   took it` (`Installs.OpenUninstallWizard([appid], true)`, which passes over Steam's own question), and `queue:
-#   <name> uninstalled`; no window of Steam's comes forward (the Dashboard keeps the foreground).
+#   took it` (`Installs.OpenUninstallWizard([appid], "0", true)`, which passes over Steam's own question, taken only
+#   once the manifest says so), and `queue: <name> uninstalled`; no window of Steam's comes forward (the Dashboard keeps the foreground).
 #
 # Judged by --log-focus a press at a time, the Dashboard's `steam client:`, `store:` and `queue:` lines, and the stand-in
 # client's `steam: CEF: ...` lines. Runs on the VM and in safe mode on the TV PC. The screenshots are to look at.
@@ -188,6 +191,9 @@ try {
     $steamMark = Steam-LogLength
     Press A 'Recent\(\d+\)' | Out-Null
     Expect-Took "install $appid into Steam's default library" $mark $steamMark "$appid queued in" 'Install'
+    Expect-Steam 'steam: CEF: the main window, asked to Hide: it was Showing, it is Hidden' $steamMark 'Install, Steam''s main window put back'
+    $front = Get-Foreground
+    if ($front.Title -ne 'Xbox Series Dashboard') { $failures += "after the install, '$($front.Title)' ($($front.Process)) has the foreground" }
     Expect-Logged "^queue: $name joined, asked for$" $mark 'Install, the Queue' | Out-Null
     Expect-Logged "^queue: $name queued$" $mark 'Install, Steam took it on' | Out-Null
     $mark = Get-DashboardLogLength

@@ -126,6 +126,14 @@ pub trait Source: Send + Sync {
         None
     }
 
+    /// The `source_id`s of the games its client's files say are installed now, read cheaply from the same small
+    /// files as [`installs`](Source::installs) (Steam's app manifests), sorted: how a change made in the store's own
+    /// client, while the Dashboard runs, is noticed (the Queue's thread looks every few seconds and reads the source
+    /// again when it changes). None, the default: no cheap word, and only a read finds such a change.
+    fn installed_now(&self) -> Option<Vec<String>> {
+        None
+    }
+
     /// Whether asking the store to uninstall a game (`ask`) is all it takes: nothing of the store's, or of the
     /// game's, asks the user anything, so the game should be gone within a minute or two, and a log line says so
     /// when it is not (Steam's `+app_uninstall`). Any other store's uninstall is the user's to finish in a window

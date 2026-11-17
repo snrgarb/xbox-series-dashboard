@@ -26,6 +26,11 @@ pub trait Opener {
     fn detached(&self) -> Option<Box<dyn Opener + Send>> {
         None
     }
+
+    /// Puts the Dashboard's window in front again, where a store's own window has come up over it (Steam's main
+    /// window, as its install wizard brings it up): the window that was in front as this opener was made. Nothing
+    /// where it is in front already, and nothing by default.
+    fn front(&mut self) {}
 }
 
 /// What a store's installer can do on this machine, as it is now: each false where the route it would take is not
