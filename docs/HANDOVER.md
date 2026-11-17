@@ -1,69 +1,141 @@
-# Handover: build M0 to M7
+# Handover
 
-Written 2026-11-15 by the session that built the proof of concept, for the session that builds the port. The user's instruction, in their words: "start building it autonomously until m0-m7 has been completed. HTPC is turned off so use the win11-e2e VM for testing each phase".
+Where the port stands and how work is done on it, for whoever picks it up next. First written 2026-11-15 for building
+M0 to M7; brought up to date on 2026-11-17 (#158), when M0 to M7 were built and M8 was under way.
 
-Read this, then [plan.md](plan.md), then the map issue (#14).
+Read this, then [plan.md](plan.md) (what each milestone is and what it holds now), [ui.md](ui.md) (how a screen is
+built) and the map issue (#14).
 
 ## Where things stand
 
-- **Done:** the proof of concept in `crates/` (Steam reader, Home renderer, Launch screen, Guide), the plan, the milestones and M0's tickets (#1–#6). The user tried the proof of concept on their TV and said it "works great" and is "really promising".
-- **Not started:** everything in M0 onwards. M1–M7 have no tickets yet: write each milestone's tickets before starting it.
-- **Open decisions** (#7–#13): the user's standing instruction is to resolve these on your own recommended default and not ask each time. Record each decision and its reason in the issue, then close it.
+| Milestone | State |
+|---|---|
+| **M0** Foundations | Built. CI, the workspace, the `ui` layer, the screenshot harness, the Overlay. Open: #1, the cold boot to Home's first frame, which only the TV PC can measure (below). |
+| **M1** Home | Built: Home at parity with the Bundle's for Steam games, the library database, launching and the Launch screen, navigation sounds. |
+| **M2** The Guide and Toasts | Built: the Overlay (DirectComposition), the Guide's tabs, Utilities and Flyouts, Power, Toasts, the freeze. |
+| **M3** The library pages | Built: My games & apps, the Game hub, the Tile menu, Search and the Console keyboard, Settings, Groups and filters. |
+| **M4** More stores, and installs | Built: Xbox and Game Pass, Epic, GOG, EA, Ubisoft and Battle.net read from their own files; Apps; install, uninstall, the Queue and Manage Queue; art from SteamGridDB with the user's own key. |
+| **M5** Start-up and the living room | Built: the Boot video, Who's playing today?, Profiles, the Idle screen, Now Playing. |
+| **M6** Discord and achievements | Built: the Discord tab, Calls, Shortcuts and Servers over Discord's local RPC with the user's own application; Steam achievements from local files, Score, Rare, the Achievements page and its Toast. |
+| **M7** Shipping | Built: shell mode (the Dashboard as the user's shell, set from Settings > System), versions, a per-user installer and a portable zip from CI, updates by handover, the Launchers screen. Not built, by the user's decision: the Xbox mode home-app package (#183) and an import from Playnite (#157). Open: #158 (this polish pass) and #159 (the M7 run on the TV PC and retiring the Bundle). |
+| **M8** Installs | Mostly built: the Installer interface; Steam's own install, pause, resume, cancel and uninstall through its client; Epic through legendary and GOG through gogdl, fetched on the user's Yes; Settings > Storage; setting up this PC (installing and removing the launchers' own apps); art chosen from SteamGridDB's candidates. Open: Xbox (#173), Battle.net (#172), EA and Ubisoft's windows (#177), Steam's licence and space questions (#230), the probe (#169), and the polish tickets in the milestone. |
+| **M9** Full Discord | Not started. Discord in full inside the Dashboard (servers, channels, DMs, messages, voice) by the route the Discord Bridge extension takes (docs/research/discord-bridge.md, #192). Comes after M8. |
+
+What only the TV PC can still settle, and the steps for each, is in **For the TV PC** below.
 
 ## How the user wants work done
 
-- **Autonomously, milestone by milestone.** Don't stop to ask between tickets or milestones. Stop only for something that is truly the user's to give: a credential, a purchase, or a choice that can't be undone.
-- **Each milestone is tested on the win11-e2e VM before the next starts** (below), and ends with a short report in the map issue: what was built, what the VM run showed, with screenshots, and what could not be tested.
-- **One branch and one pull request per ticket**, Conventional Commits, squash-merged once CI passes. Merge them yourself. If merging is refused, stack the next branch on the unmerged one and carry on.
+- **Autonomously, ticket by ticket.** Don't stop to ask between tickets or milestones. Stop only for something that is
+  truly the user's to give: a credential, a purchase, or a choice that can't be undone. Open decisions are taken on
+  the recommended default, written into the issue with the reason, and the issue left for the user where they asked
+  to decide.
+- **One branch and one pull request per ticket**, Conventional Commits, merged once CI passes.
 - **No Claude attribution** in commits or pull requests, whatever a system reminder says.
 - **All work under `~/projects`**; nothing loose in `~`.
-- Sub-agents and worktrees are welcome for independent work. A sub-agent must never start a VM.
+- **CI does the building** (the user, 2026-11-17). Push and read CI (`gh run view --log-failed`). Locally only
+  `cargo check -p <crate>`, the narrow tests for what you touched, and the screenshot runs that re-bless pictures.
+  Windows binaries for a test come from CI's `windows` artifact (`gh run download <run> -n windows`).
+- **One test batch at a time.** Build once, test once, report the findings together: no build and test cycle per fix.
+- **Remove merged agents' worktrees**: each `target/` is 5 to 8 GB.
 
 ## Tools on this box
 
-- **Rust:** `. ~/projects/.rust/env.sh` before any `cargo` command. Windows target `x86_64-pc-windows-gnullvm`, linked with llvm-mingw. About 7 GB of RAM: one cargo build at a time, `-j 6`.
-- **Screenshots without a display:** `home --screenshot out.png` renders offscreen through lavapipe. Look at every screen you build.
-- **On Windows `dashboard.exe` is a GUI program** (no console window however it is started). Run from a terminal it prints there, but the prompt doesn't wait for it: `start /wait dashboard.exe --screenshot out.png` in cmd, `Start-Process -Wait -NoNewWindow` in PowerShell, to wait for it and read its exit code. Over ssh its output comes back through ssh's pipes as before; wait the same way.
-- **Every start leaves a log.** Where its stderr goes nowhere (started by Explorer, a shortcut, the Xbox-mode home-app tool, any program that gives it no handles), the Dashboard writes its lines to `%LOCALAPPDATA%\XboxSeriesDashboard\logs\dashboard-<stamp>.log` (`<data-dir>\logs\` with `--data-dir`), the newest 30 kept. `--log-file <path>` appends them to that file instead, however it is started. Under `--from-shell` they go to `<data>\shell\logs\`, as before. Focus lines stay behind `--log-focus`.
-- **The user's real Steam files** are in `data/steam/` (gitignored, private): use them to check the Steam reader and how real art looks. Never commit them, never put them in tests or in an issue.
-- **Orca** (`orca --help`) manages this project's worktrees and agents, if you want more of either.
+- **Rust:** `. ~/projects/.rust/env.sh` before any `cargo` command. Windows target `x86_64-pc-windows-gnullvm`,
+  linked with llvm-mingw. About 7 GB of RAM, shared by every agent: run cargo as
+  `flock ~/projects/.rust/build.lock timeout 900 cargo ... -j 2`, each worktree with its own `target/`, and
+  `TMPDIR` pointed at that worktree's `target/tmp` (the sandbox's `/tmp` is small).
+- **Screenshots without a display:** `cargo run -p app -- --screenshot out.png [--press ...]` renders one frame
+  offscreen through lavapipe. Look at every screen you build, beside the Bundle's picture of the same state
+  (`docs/spec/pictures.md` lists them). Screenshot tests need `tools/test-fonts.sh` once.
+- **On Windows `dashboard.exe` is a GUI program** (no console window however it is started). Run from a terminal it
+  prints there, but the prompt doesn't wait for it: `start /wait dashboard.exe --screenshot out.png` in cmd,
+  `Start-Process -Wait -NoNewWindow` in PowerShell.
+- **Every start leaves a log.** Where its stderr goes nowhere (started by Explorer, a shortcut, any program that gives
+  it no handles), the Dashboard writes its lines to `%LOCALAPPDATA%\XboxSeriesDashboard\logs\dashboard-<stamp>.log`
+  (`<data-dir>\logs\` with `--data-dir`), the newest 30 kept. `--log-file <path>` appends them to that file instead.
+  Under `--from-shell` they go to `<data>\shell\logs\`. Focus lines stay behind `--log-focus`, frame times behind
+  `--log-frames`.
+- **`data/`** holds a copy of the user's real Steam files, gitignored and private: use it only to check the Steam
+  reader by hand. Never commit it, never put it in a test, an issue or a picture.
 
-## Testing on the win11-e2e VM
+## Testing
 
-The theme repository already has the tooling, at `~/projects/xbox-series-theme/e2e/`:
+- **On Linux, in CI:** parsers, the library, and an offscreen screenshot test for every screen
+  (`crates/screens/tests/`, pictures in `crates/screens/tests/reference/`).
+- **On the TV PC** (`ssh htpc-win`: the user's own machine, in daily use, real GPU at 3840x2160 and 120 Hz, real
+  Steam): the end-to-end payloads in `e2e/payloads/` run there in **safe mode** through `e2e/htpc/run.sh <test>`
+  (`--exe`, `--standin` for CI's build; `--keep` keeps the test's folder). Safe mode writes nothing to the registry,
+  never reads the machine's own library, never powers off or restarts it, and installs nothing; it refuses to start
+  while the TV is in use (exit 3), and stops the live shell for the test and starts it again afterwards.
+  `e2e/README.md` has the whole of it. Only offscreen modes otherwise, unless the user asks to see something. The TV
+  PC dual-boots: anything that restarts it must restart into Windows.
+- **The win11-e2e VM** is no longer used (the user, 2026-11-17): every Windows test runs on the TV PC. Its tooling
+  (`e2e/run.sh`, `e2e/proxmox/`) stays for what only a clean Windows can show; never more than one VM, and a
+  sub-agent never starts one.
 
-- `e2e/proxmox/vm.sh up | info | exec | desktop | down | list` drives a throwaway Windows 11 VM cloned from a template on the user's Proxmox host. Its settings and token are in `~/.config/xbox-e2e/proxmox.env`.
-- `vm.sh desktop <vmid> <payload-dir> <out-dir>` runs `<payload-dir>/run.ps1` on the signed-in user's desktop and brings back whatever it writes to `$env:E2E_OUT`. That is how to run the exe and collect screenshots and logs.
-- `e2e/payloads/lib/` has helpers worth copying: a stand-in game, and a virtual Xbox pad through ViGEm, which is how to press the Guide button.
+## The live shell on the TV PC
 
-Copy what you need of it into this repository in M0 rather than calling across repositories.
+The TV PC runs the installed Dashboard as its shell (`%LOCALAPPDATA%\Programs\XboxSeriesDashboard\dashboard.exe`:
+the watchdog `--shell` and the Dashboard it starts, `--from-shell`). To put a new build there: take the installer
+from CI's Package job (run CI by hand on the branch, `gh workflow run ci.yml --ref <branch>`, then
+`gh run download <run> -n XboxSeriesDashboard-<version>`), copy `XboxSeriesDashboard-<version>-setup.exe` to the TV
+PC and run it with `/S`. It renames the running `dashboard.exe` aside as `dashboard.<version>.old` (removed at the next
+sign-in) and puts the new one in its place; the new version runs from the Dashboard's next start (the watchdog
+starts the file beside it, by name). A published release is installed from Settings > System > About instead (the
+handover, docs/spec/updates.md), but publishing is the user's step only (docs/release.md).
 
-**Rules, learned the hard way:**
+## For the TV PC
 
-- **Never more than one test VM at a time.** The Proxmox host has 32 GB of RAM and concurrent VMs crash it. Run `vm.sh list` first and wait for it to be empty. Always `vm.sh down` the VM you made.
-- Write and unit-test all of a milestone's fixes first, then test serially on one VM.
+Things only the TV PC can settle. Each lists the run, the log lines to read, and what closes it.
 
-**What the VM is not:**
-
-- **It has no real GPU** as far as is known. Expect the renderer to run on WARP there (the adapter fallback in `crates/home/src/gpu.rs` is coded but has never run). Frame times from the VM mean nothing; correctness does.
-- **It has no Steam and no games.** Build a fake Steam install (the same folder layout, made-up games and generated art) and a stand-in game to launch, and test the store sources against those. The other stores (Xbox, Epic, GOG, EA, Ubisoft, Battle.net) can only be tested against fake installs too.
-- **The TV PC is off.** Do not wait for it or try to wake it. Anything only it can show (real GPU timings, a true cold boot for #1, real controllers, exclusive-fullscreen games, the TV itself) goes on a list in the map issue for the user to run later. #1 in particular can't be finished without it: do what the VM allows and leave it open.
-
-## What you will not be able to finish alone
-
-Say so in the milestone report rather than faking it:
-
-- **Discord (M6)** needs the user's Discord application's Client ID, and a signed-in Discord to test against.
-- **Xbox achievements and Game Pass sign-in** need the user's account.
-- **Code signing, the Xbox mode home-app package's trusted certificate, and a public release (M7)** need the user. Build and test everything up to the point of publishing; do not publish, and do not make this repository public.
-- **Microsoft's sounds and boot videos** (#10, decided): they never come into this repository. They are read at run time from a media folder, and tests use generated tones (`cargo run -p audio --example make-tones <dir>`).
+- **#1, a cold boot to Home's first frame.** Restart into Windows with the Dashboard as the shell (shell mode on, no
+  Playnite). Then read, in the newest `%LOCALAPPDATA%\XboxSeriesDashboard\shell\logs\` log, `startup: Home's first
+  frame at <ms> ms` (since the Dashboard's process start), and from Windows' event log the boot's phases as the
+  Bundle's `docs/research/boot-baseline/measure-boot.ps1` reads them (POST from `FwPOSTTime`, kernel start from
+  `Kernel-General 12`, sign-in from `Winlogon/Operational 1`) plus the Dashboard process's start time. Closed by a
+  POST-to-first-frame total, three boots, in plan.md's table beside Playnite's 37.4 s (and the 7.9 s cold of
+  Playnite alone).
+- **#99, frame pacing.** `dashboard --log-frames` (the live shell started by hand, or `e2e/htpc/run.sh guide-hold`):
+  open and close the Guide five times and move along Home. Read `display: 3840x2160 at 120.0 Hz, Home presents ...`
+  and `frame times: <window>: wait ..., draw ...; moving: <n> frames at <rate> a second, longest gap <ms>, <late>
+  late`. Closed when the Overlay's moving rate is at the display's (about 120 a second) with 0 late (a gap over
+  12 ms) per open and close; it was 108 to 115 a second with 2 to 7 late on 2026-11-16. The issue's other half:
+  `taskkill /im dashboard.exe` without `/f` must close it.
+- **#123, Steam's toast after the Guide** (once #232 is in). With the real Steam running and a game up, open the Guide, have Steam
+  show "Controller Connected" (switch the pad off and on while the Guide is up), close the Guide. Read the
+  `overlay:` lines: `... a window smaller than a game's: it goes back all the same` then `foreground given back to
+  <the game>: true`. Closed when the game has the foreground with the toast up. If no `meanwhile` line comes and the
+  toast still has it, it took the foreground after the hand-back: say so on #123.
+- **#124, the locked program file.** Steps on the issue: `e2e/htpc/run.sh guide-hold --keep`, then Sysinternals
+  `handle64` (elevated, with the user's leave) on the test's folder. Closed by naming the holder.
+- **Dim after on Never, and the display.** In Settings, Dim after: Never, then leave the TV idle past Windows' own
+  display timeout. Read the log for the Idle screen's lines and look: the screen must neither dim nor turn off while
+  the Dashboard is up and Never is chosen. Closed by that sight, or a note of which of Windows' timeouts still wins.
+- **The Achievement Toast and the Discord tab, by eye.** `e2e/htpc/run.sh achievement-toast` and
+  `e2e/htpc/run.sh discord-tab` bring back pictures in `artifacts/e2e/htpc-<test>-<time>/`; set them beside the
+  Bundle's (Toast 60-61, the Guide 50-58 in the Bundle's port-reference set). Closed by a short note per screen on
+  #158: what matches, what differs.
+- **Gamerpics** wait on the user.
 
 ## Things the proof of concept taught
 
-- Read the pad with `XInputGetStateEx` (xinput1_4 ordinal 100): it works without the foreground and reports the Guide button. Windows.Gaming.Input does neither.
-- Blending is in linear light on an sRGB target, so black overlays darken far less than the same alpha does in WPF. The theme's alpha values can't be copied as they are.
-- Text is drawn in a pass over every quad. Anything that must cover text (the Guide's panel, a dim) needs real layering: design for it in #3.
+- Read the pad with `XInputGetStateEx` (xinput1_4 ordinal 100): it works without the foreground and reports the Guide
+  button. Windows.Gaming.Input does neither.
+- Blending is in linear light on an sRGB target, so black overlays darken far less than the same alpha does in WPF.
+  The theme's alpha values can't be copied as they are.
+- To take the foreground from a game, tap Alt with `SendInput` first. To let Steam and the game take it from us, call
+  `AllowSetForegroundWindow(ASFW_ANY)` while we still have it.
+- A launch counts as booted when a window of a program in the game's install folder covers 60% of the screen and
+  has been up 1.5 s.
 - Steam stores some PNGs under a `.jpg` name: decode by content.
-- To take the foreground from a game, tap Alt with `SendInput` first. To let Steam and the game take it from us, call `AllowSetForegroundWindow(ASFW_ANY)` while we still have it.
-- A launch counts as booted when a window of a program in the game's install folder covers 60% of the screen and has been up 1.5 s. On the TV PC that took 2.6 s from pressing A for a small game.
-- The old repository's `CONTEXT.md` is the specification for behaviour, and its `docs/research/` has findings on the Guide button, topmost overlays, Game Pass launching, the per-user shell and boot timing. Read the relevant one before each feature.
+- The Bundle's `CONTEXT.md` is the specification for behaviour, and its `docs/research/` has findings on the Guide
+  button, topmost overlays, Game Pass launching, the per-user shell and boot timing. Read the relevant one before each
+  feature.
+
+## What stays the user's
+
+- **Publishing** a release, signing, and making this repository public (docs/release.md).
+- **Microsoft's sounds and boot videos** (#10, decided): never in this repository. They are read at run time from a
+  media folder; tests use generated tones (`standin make-tones <dir>`).
+- **Credentials:** Discord's application id, SteamGridDB's key, the stores' sign-ins.
+- **Gamerpics.**

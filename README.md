@@ -2,19 +2,23 @@
 
 A standalone Windows dashboard for a TV PC, modelled on the Xbox Series X|S dashboard and written in Rust. It is the port of the [Xbox Series Theme](https://github.com/snrgarb/xbox-series-theme), which is a Playnite theme and extension, to its own executable with no Playnite underneath.
 
-**Status: M0, foundations.** Home, a Launch screen and a first Guide run on the real ui layer ([docs/ui.md](docs/ui.md)) from the real Steam library. See [docs/plan.md](docs/plan.md) for the port.
+**Status: M0 to M7 built, M8 (installs) under way.** Home, the Guide over games, Toasts, My games & apps, the Game hub, Search, Settings, Start-up, Profiles, the Idle screen, Now Playing, the Discord tab and achievements run from the libraries of Steam, Xbox, Epic, GOG, EA, Ubisoft and Battle.net, read from their own files. The Dashboard can be the PC's shell (Settings > System). Steam's, Epic's and GOG's games install, pause and uninstall from the Queue. See [docs/plan.md](docs/plan.md) for each milestone's state and [docs/HANDOVER.md](docs/HANDOVER.md) for how work is done.
 
-An unofficial fan project, not affiliated with Microsoft or Valve.
+An unofficial fan project, not affiliated with Microsoft, Valve or Discord.
 
-## Build
+## Build and test
 
-Rust with the `x86_64-pc-windows-gnullvm` target and llvm-mingw as its linker. On the development box: `. ~/projects/.rust/env.sh`.
+Rust with the `x86_64-pc-windows-gnullvm` target and llvm-mingw as its linker. On the development box: `. ~/projects/.rust/env.sh`. CI (`.github/workflows/ci.yml`) runs the tests on Linux, builds for Windows, and on a version tag packs an installer and a portable zip ([docs/release.md](docs/release.md)).
 
 ```sh
-tools/test-fonts.sh                                          # once: the screenshot tests' fonts
-cargo test                                                   # parsers and screenshot tests, on Linux
-cargo build --release --target x86_64-pc-windows-gnullvm     # dashboard.exe for Windows
-cargo run -p app -- --screenshot out.png --steam data/steam  # one frame, no window (lavapipe on Linux)
+tools/test-fonts.sh                                        # once: the screenshot tests' fonts
+cargo test -p screens --test shots                         # one crate's or one screen's tests, on Linux
+cargo run -p app -- --screenshot out.png [--press ...]     # one frame, no window (lavapipe on Linux)
+cargo build --release --target x86_64-pc-windows-gnullvm   # dashboard.exe for Windows (CI does this)
 ```
 
-`dashboard.exe` with no arguments finds Steam from the registry and opens fullscreen. Guide button or Ctrl+Alt+G opens the Guide; Esc quits.
+## Run
+
+`dashboard.exe` with no arguments finds each store from the registry and opens fullscreen. The Guide button, or Ctrl+Alt+G, opens the Guide; Esc is B, and quits from Home with nothing open. Its data and logs are in `%LOCALAPPDATA%\XboxSeriesDashboard`. Fonts, and the console's sounds and boot videos, are never shipped: they are read from Windows and from a media folder at run time (`packaging/README.txt`).
+
+End-to-end tests run on a Windows PC through `e2e/htpc/run.sh <test>` in a safe mode that changes nothing of the machine ([e2e/README.md](e2e/README.md)).
