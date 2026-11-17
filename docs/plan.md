@@ -15,12 +15,13 @@ Measured on the TV PC (RX 9070 XT, DX12), 2026-11-15:
 | Measure | Rust proof of concept | Playnite + Bundle today |
 |---|---|---|
 | Process start to first frame on screen | 0.37–0.43 s (warm) | 7.9 s cold, 3.8 s warm |
+| Power-on to first frame on screen, cold boot | 18.4–22.1 s (three boots, shell mode, 2026-11-18) | 37.4 s |
 | Reading the whole Steam library (286 games) | 0.12–0.14 s | n/a (Playnite's database) |
 | Frame time at 1080p, focus animating | 0.26 ms | not measured |
 | Memory | about 150 MB | not measured |
 | Size | one 15 MB exe | Playnite + 16 extensions |
 
-A cold-boot figure for the Rust side is still to be measured on the TV PC (#1; the steps are in HANDOVER.md, "For the TV PC"). On the test VM, through software rendering, the first frame came 425 to 655 ms after the process started.
+The cold boots were measured on the TV PC on 2026-11-18 with the Dashboard as the shell (#1): firmware 8.5–8.8 s, kernel start to sign-in 7.0–10.4 s, sign-in to the Dashboard's process 2.1 s, process start to the Boot video's first frame 0.70–0.75 s (cold), so 22.1, 21.5 and 18.4 s from power-on to the first frame. Who's playing today? follows the Boot video at 10.7–10.8 s after the process started. On the test VM, through software rendering, the first frame came 425 to 655 ms after the process started.
 
 **What worked:**
 

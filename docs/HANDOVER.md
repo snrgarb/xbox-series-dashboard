@@ -88,13 +88,6 @@ handover, docs/spec/updates.md), but publishing is the user's step only (docs/re
 
 Things only the TV PC can settle. Each lists the run, the log lines to read, and what closes it.
 
-- **#1, a cold boot to Home's first frame.** Restart into Windows with the Dashboard as the shell (shell mode on, no
-  Playnite). Then read, in the newest `%LOCALAPPDATA%\XboxSeriesDashboard\shell\logs\` log, `startup: Home's first
-  frame at <ms> ms` (since the Dashboard's process start), and from Windows' event log the boot's phases as the
-  Bundle's `docs/research/boot-baseline/measure-boot.ps1` reads them (POST from `FwPOSTTime`, kernel start from
-  `Kernel-General 12`, sign-in from `Winlogon/Operational 1`) plus the Dashboard process's start time. Closed by a
-  POST-to-first-frame total, three boots, in plan.md's table beside Playnite's 37.4 s (and the 7.9 s cold of
-  Playnite alone).
 - **#99, frame pacing.** `dashboard --log-frames` (the live shell started by hand, or `e2e/htpc/run.sh guide-hold`):
   open and close the Guide five times and move along Home. Read `display: 3840x2160 at 120.0 Hz, Home presents ...`
   and `frame times: <window>: wait ..., draw ...; moving: <n> frames at <rate> a second, longest gap <ms>, <late>
