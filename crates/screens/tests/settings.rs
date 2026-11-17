@@ -951,7 +951,7 @@ fn settings_system() {
         stage.dashboard.set_options(Options { shell, ..options });
     };
     shell(&mut stage, ShellMode::Off);
-    stage.press(&[Right, Down, Down, Down]);
+    stage.press(&[Right, Down, Down, Down, Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
     stage.press(&[A]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
