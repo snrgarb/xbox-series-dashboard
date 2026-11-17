@@ -1425,6 +1425,8 @@ impl Dashboard {
             GuideAction::MyGames => self.guide_opens(Open::MyGames(my_games::Entry::Games)),
             GuideAction::Settings => self.guide_opens(Open::Settings(settings::Entry::Rail)),
             GuideAction::Search => self.guide_opens(Open::Search),
+            // As Search: the Guide closes onto the page, in front of a running game too.
+            GuideAction::ManageQueue => self.guide_opens(manage_queue::open()),
             GuideAction::Achievements(game) => self.open_achievements(game),
             // The Guide stays open over a game being quit, and closes a moment after the game has stopped.
             GuideAction::QuitGame => self.quit_game(),

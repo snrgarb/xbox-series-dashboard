@@ -200,7 +200,8 @@ from the hub and the Tile menu, the fake install moved along by `standin steam-i
 tiles, the hub's Queue action, Downloads' count, Manage Queue from all three ways in (the hub, Downloads, Manage's
 box) and B back to each with focus restored, its row following the bytes, View on it, an install started in the
 client, one dropped, one done with Manage Queue up and focus going with it to Recently installed, and Uninstall seen
-through), `queue-steer` (#170, #171, #188: through the stand-in Steam's CEF debugger and Steam's own calls, an install paused,
+through), `guide-downloads` (#193: the Guide's Downloads Utility reached with the pad and A on it opening Manage
+Queue, at Home and over the stand-in game with the Dashboard coming in front of it), `queue-steer` (#170, #171, #188: through the stand-in Steam's CEF debugger and Steam's own calls, an install paused,
 resumed and cancelled from a queued game's menu in Manage Queue, its question declined once; a second install to the
 end with its Workshop items coming in, Play offered and the Ready to play Toast meanwhile, the row reading Downloading
 Workshop content until all are in; and an uninstall with no prompt of Steam's; the fake named with `--steam` on the

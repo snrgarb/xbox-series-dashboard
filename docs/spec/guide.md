@@ -208,7 +208,7 @@ Entries (C/ExtensionCore.cs:2554-2573, 15):
 2. My games & apps
 3. Up to 4 games: the running game first (as Running game), then games played and not hidden, most recently played first (as Recent game). The first game has a divider above it.
 
-Utilities: Notifications, Audio, Search. Focus starts on Home.
+Utilities: Notifications, Audio, Search, and the port's Downloads (section 16). Focus starts on Home.
 
 With the layout above: Home y 183..288, My games & apps y 291..396, divider y 413, first game y 440..536, then every 108. With 4 games the last ends at y 860, clear of the Utilities' ring (y 934): the landing tab never scrolls at 1080.
 
@@ -237,14 +237,14 @@ Measured (old type): the first divider at y 403, x 108..583. With nothing betwee
 
 ### 2.8 Utilities
 
-A row at the panel's foot, left-aligned from x 93: each a square 87 x 87, 18 apart: x 93..180, 198..285, 303..390; y 942..1029 (1088-1096). Measured the same.
+A row at the panel's foot, left-aligned from x 93: each a square 87 x 87, 18 apart: x 93..180, 198..285, 303..390; y 942..1029 (1088-1096). Measured the same. The port's fourth, Downloads (section 16), follows at x 408..495: the row stays left-aligned, as the Bundle's `StackPanel` lays it, and is not centred.
 
 | Part | Value | Source |
 |---|---|---|
 | Fill | radius 4; `#73000000` at rest, `#26FFFFFF` focused | 1097-1100, 1135-1140 |
-| Icon | icon font 33, centred: Notifications U+E91C, Audio U+E767, Search U+E721 (M3) | 1101-1112 |
+| Icon | icon font 33, centred: Notifications U+E91C, Audio U+E767, Search U+E721 (M3); the port's Downloads U+E896, Home's Downloads tile's | 1101-1112 |
 | Focus ring | as an entry's: 4 thick, 4 clear, radius 12, with glow; the focused square draws over its neighbours | 1118-1124, 1141-1145 |
-| Badge (Notifications) | the count of notifications: a pill at least 24 wide, 24 high, radius 12, `#FF2CA243`, padding 6 each side, at the square's top right 6 in from both edges; text Segoe UI 26 white. Not drawn at 0 | 1125-1133 |
+| Badge (Notifications; the port's Downloads) | the count of notifications (of games in the Queue on Downloads): a pill at least 24 wide, 24 high, radius 12, `#FF2CA243`, padding 6 each side, at the square's top right 6 in from both edges; text Segoe UI 26 white. Not drawn at 0 | 1125-1133 |
 
 A 26-px figure in a 24-high pill overflows it; that is what the source says since #229 (**UNVERIFIED** how WPF clips it; in the pictures, with 16-px type, it fits). Flag for the look review rather than guess.
 
@@ -299,6 +299,7 @@ C/ExtensionCore.cs:2040-2154.
 | Power | Opens Power (section 6.2) |
 | Notifications, Audio | Opens the Flyout |
 | Search | Closes the Guide, opens Search (M3) |
+| Downloads (the port's) | Closes the Guide, opens Manage Queue, as Search opens Search (section 16) |
 
 ### 3.4 What closes the Guide
 
@@ -845,4 +846,20 @@ Matched against the Bundle's pictures `52-guide-utility-focused.jpg`, `53-guide-
 - **Reduce motion**: the Flyout's slide is dropped and its fade kept, as `ui.slide` does everywhere.
 - **The log** (`--log-focus`): the `guide:` line has `, flyout Notifications Item(0)` or `, flyout Audio Item(2), volume 67` (and `, muted`), `Device(Output, 1)` while a list is open and `Nothing` in an empty Flyout; `audio: volume 67, muted false, output "Speakers" of 2, input None of 0` says what was read from Windows as the Flyout opens, after each change, and whenever a reading differs. Now Playing's lines (`Control(PlayPause)` in the `guide:` line, `now playing: ...`) are in now-playing.md.
 - **The VM test** is `e2e/payloads/flyouts/run.ps1`: both Flyouts over a stand-in game; where the VM has an output device the real volume moves by 2 and back and mute goes on and off, each read back from Windows; where it has none, that nothing can be changed.
+
+---
+
+## 16. The Downloads Utility: what was built, and what was decided (#193)
+
+Asked for by the user (2026-11-17): "add a download/queue icon in the bottom bar of the guide". **The Bundle has no such Utility**: its row is Notifications, Audio and Search. Everything here is the port's own, made of the parts the row already has.
+
+- **Where.** The fourth square, after Search: x 408..495, y 942..1029. The row stays left-aligned from x 93 (2.8), as the Bundle's is, rather than centred: the three squares it has were never centred, and a fourth ends well inside the panel (x 605). Last, so the three that were there keep their places and the Toast that opens the Guide on Notifications still lands on the first.
+- **What it looks like.** As the others: the 87 square, `#73000000` at rest and `#26FFFFFF` with focus, the ring, and the download arrow U+E896 at 33 (`theme::glyph::DOWNLOAD`, Home's Downloads tile's).
+- **The badge.** While the Queue has anything in it, the count of games in it on the Notifications badge's pill: green, at the square's top right, the figure in the body type (2.8). Nothing at 0. It counts what Home's Downloads tile counts (`{n} in queue`), the Queue's entries, paused ones included. The issue also asked for the active download's progress "where the row's manner allows": the row has no such manner (no Utility shows anything but its glyph and a count), so there is none; Manage Queue, one press away, has the bar.
+- **Focus.** Right from Search reaches it; Right on it does nothing (the row stops at its ends); Up from it is the tab's last entry, as from any Utility; Down from the last entry is still the first Utility, Notifications (3.2).
+- **A** closes the Guide and opens Manage Queue (`manage_queue::open()`, the hook Home's Downloads tile and the Game hub's Queue action call) **as Search opens Search** (3.3, 14): the Guide closes, the page takes the place of any page that was up, and over a running game the Dashboard comes in front of the game with the page on it (`Effect::ShowHome`), the game running on behind. B on Manage Queue is Home, still in front of the game; the Guide's Running entry goes back to it. Not a page drawn on the Overlay over the game: the Guide has no pages of its own, and Manage Queue, which plays games and opens the Tile menu, is Home's window's.
+- **Sounds.** As Search's: a move onto it is the Guide's move, A the Guide's select.
+- **Hints.** None of its own: the Guide's hints are the Guide button's and, on an entry with a menu, Menu's (3.6).
+- **The log.** `--log-focus`'s `guide:` line says `Landing Utility(3)` with focus on it; after A, the focus line is Manage Queue's (`ManageQueue: Nothing`, `ManageQueue: Row(0) of ...`).
+- **Tests.** `tests/guide.rs` (the row's ends), `tests/pages.rs` (A at Home, B back to Home's rows), `tests/guide_games.rs` (A over a game), and the pictures `guide-downloads` (empty) and `guide-downloads-queued` (two queued, one downloading) in `tests/shots.rs`. The VM test is `e2e/payloads/guide-downloads/run.ps1`: from the Guide with the pad, at Home and over the stand-in game.
 
