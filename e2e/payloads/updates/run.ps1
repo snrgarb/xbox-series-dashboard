@@ -82,6 +82,7 @@ function Start-Releases([string] $Version, [string[]] $Extra = @()) {
     $arguments = @('serve-updates', '--exe', "`"$(Join-Path $Payload 'dashboard.exe')`"", '--version', $Version, '--port', "$port") + $Extra
     $server = Start-Process (Join-Path $Payload 'standin.exe') -ArgumentList $arguments -PassThru -WindowStyle Hidden
     $script:started += $server.Id
+    $script:releases = $server.Id
     $line = Wait-Line $standinLog "serve-updates: listening on (http://127\.0\.0\.1:$port/releases/latest)" 20
     if (-not $line) { throw "the stand-in update address on port $port never said it was listening" }
     $line -match '(http://\S+)' | Out-Null
@@ -143,7 +144,13 @@ try {
     Expect-Line $log "^update: $([regex]::Escape($version))'s zip matches its manifest" 60 'its zip matches its manifest' $mark | Out-Null
     Expect-Line $log "^update: ready $([regex]::Escape($version))$" 10 'it is ready' $mark | Out-Null
     Expect (Test-Path (Join-Path $folder 'dashboard.exe.new')) 'the new build is staged as dashboard.exe.new'
-    $asked = @(Read-Log $standinLog | Where-Object { $_ -match 'serve-updates: /' })
+    # The stand-in says each request a moment after serving it (it looks every 200 ms), so the zip's line can come
+    # after the Dashboard is already ready: wait for all three of this server's lines rather than reading once.
+    $server = $script:releases
+    $asked = @(Wait-Until {
+            $lines = @(Read-Log $standinLog | Where-Object { $_ -match "^\[pid $server\] serve-updates: /" })
+            if ($lines.Count -ge 3) { $lines }
+        } (Get-Limit 10))
     $asked | ForEach-Object { Say "  stand-in: $_" }
     Expect ($asked.Count -ge 3 -and -not ($asked | Where-Object { $_ -notmatch '\(User-Agent dashboard-updates, no Authorization\)$' })) 'every request carried the plain User-Agent and no Authorization'
 
