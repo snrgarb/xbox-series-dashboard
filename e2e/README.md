@@ -215,7 +215,10 @@ folder with the choice kept), `epic-legendary` (#175: standin.exe kept as legend
 `--helper-home`; not signed in said and shown on Settings > Helpers; signed in with the stand-in's `legendary auth`
 and the library listed; Zinnia Gate installed from its Game hub with legendary's own progress in the Queue, paused,
 resumed and cancelled from Manage Queue, installed to the end with egl-sync's record, played through `legendary
-launch`, and uninstalled from its Tile menu), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
+launch`, and uninstalled from its Tile menu), `gog-gogdl` (#176: the same for GOG with the stand-in gogdl and the fake
+GOG's Pewter Isles: signed in with the stand-in's `auth --code`; downloaded, paused, resumed and cancelled; to the
+end with its set-up step, the stand-in script interpreter; played as its own program; uninstalled with its
+`unins000.exe /VERYSILENT`), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
 Home, in Games a screenful at a time and in Full library, a Game hub of each store's, Search finding two stores' games
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
 each), `launchers` (Settings > Launchers on the fake Steam and Epic, docs/spec/launchers.md: Steam switched off with

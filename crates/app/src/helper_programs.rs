@@ -72,10 +72,14 @@ impl Helpers {
         if let Some(home) = crate::sources::legendary_home(args) {
             helpers.sign_ins.insert("legendary".into(), Box::new(move || legendary_account(&home)));
         }
+        if let Some(home) = crate::sources::gogdl_home(args) {
+            helpers.sign_ins.insert("gogdl".into(), Box::new(move || gogdl_account(&home)));
+        }
         // How each added helper's sign-in stands at start: `helpers: legendary: signed in as Stand-in Player`.
         for shown in helpers.shown() {
             match shown.account {
                 Account::Unknown => {}
+                Account::SignedIn(name) if name.is_empty() => eprintln!("helpers: {}: signed in", shown.key),
                 Account::SignedIn(name) => eprintln!("helpers: {}: signed in as {name}", shown.key),
                 Account::SignedOut(_) => eprintln!("helpers: {}: not signed in", shown.key),
             }
@@ -205,6 +209,20 @@ fn legendary_account(home: &std::path::Path) -> Account {
     match source_epic::legendary::signed_in(home) {
         source_epic::legendary::SignIn::As(name) => Account::SignedIn(name),
         source_epic::legendary::SignIn::No => Account::SignedOut(LEGENDARY_SIGN_IN.into()),
+    }
+}
+
+/// What signing gogdl in takes, said where it is not: GOG's sign-in page in a browser, and the code from the address
+/// it ends on given to gogdl's own `auth --code`. The Dashboard shows no sign-in page of its own yet.
+const GOGDL_SIGN_IN: &str = "that takes GOG's sign-in page, which the Dashboard doesn't show yet. Sign in at \
+                             login.gog.com in a browser, then give gogdl the code from the address it ends on \
+                             (\"gogdl auth --code\"). Until then GOG Galaxy installs.";
+
+fn gogdl_account(home: &std::path::Path) -> Account {
+    match source_gog::gogdl::signed_in(&home.join("auth.json")) {
+        // gogdl keeps a user id, not a name.
+        true => Account::SignedIn(String::new()),
+        false => Account::SignedOut(GOGDL_SIGN_IN.into()),
     }
 }
 

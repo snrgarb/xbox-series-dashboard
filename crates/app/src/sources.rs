@@ -19,8 +19,11 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
             Some(route) => source_epic::Epic::at(args.epic.clone()).with_legendary(route),
             None => source_epic::Epic::at(args.epic.clone()),
         }),
-        // `--gog` names a folder standing for GOG's; else the registry and `%ProgramData%\GOG.com`.
-        Arc::new(source_gog::Gog::at(args.gog.clone())),
+        // `--gog` names a folder standing for GOG's; else the registry and `%ProgramData%\GOG.com`. gogdl too (#176).
+        Arc::new(match gogdl_route(args) {
+            Some(route) => source_gog::Gog::at(args.gog.clone()).with_gogdl(route),
+            None => source_gog::Gog::at(args.gog.clone()),
+        }),
         // `--ea`, `--ubisoft` and `--battlenet` name a fake store; else this machine's are read.
         Arc::new(source_ea::Ea::at(args.ea.clone())),
         Arc::new(source_ubisoft::Ubisoft::at(args.ubisoft.clone())),
@@ -46,24 +49,46 @@ pub fn legendary_home(args: &Args) -> Option<PathBuf> {
     }
 }
 
-/// Where legendary is run from (the data folder's `helpers\legendary`, while it is added at the table's version),
-/// where its records are, and where it installs: `--helper-home`'s `games`, else the user's `Games`.
-fn legendary_route(args: &Args) -> Option<HelperRoute> {
+/// The Dashboard's own folder for gogdl (its sign-in, manifests and records): `--helper-home`'s `gogdl` (a test's),
+/// else the data folder's `gogdl`. gogdl keeps nothing a user would have made with it by hand.
+pub fn gogdl_home(args: &Args) -> Option<PathBuf> {
+    match &args.helper_home {
+        Some(dir) => Some(dir.join("gogdl")),
+        None => data(args).map(|data| data.join("gogdl")),
+    }
+}
+
+/// Where a helper installs: `--helper-home`'s `games`, else the user's `Games`.
+fn games(args: &Args) -> Option<PathBuf> {
+    match &args.helper_home {
+        Some(dir) => Some(dir.join("games")),
+        None => source_epic::legendary::default_games(),
+    }
+}
+
+/// The helper `key`'s program in the data folder's `helpers\<key>`, while it is added at the table's version.
+fn kept_program(args: &Args, key: &str) -> Option<Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>> {
     let data = data(args)?;
-    let helper = crate::helper_programs::table(args).into_iter().find(|helper| helper.key == "legendary")?;
-    let home = legendary_home(args)?;
-    let games = match &args.helper_home {
-        Some(dir) => dir.join("games"),
-        None => source_epic::legendary::default_games()?,
-    };
-    let program = move || {
+    let helper = crate::helper_programs::table(args).into_iter().find(|helper| helper.key == key)?;
+    Some(Arc::new(move || {
         let kept = helpers::kept(&data, &helper).filter(|kept| kept.version == helper.version);
         kept.map(|_| helpers::program(&data, &helper))
-    };
+    }))
+}
+
+/// Where legendary is run from, where its records are, and where it installs.
+fn legendary_route(args: &Args) -> Option<HelperRoute> {
+    let (program, home, games) = (kept_program(args, "legendary")?, legendary_home(args)?, games(args)?);
     // A test's folder is legendary's for every run of it, `launch` too (`main`): legendary reads it from there.
     let env = vec![("LEGENDARY_CONFIG_PATH".to_string(), home.clone().into_os_string())];
     let env = if args.helper_home.is_some() { env } else { Vec::new() };
-    Some(HelperRoute { program: Arc::new(program), home, env, games })
+    Some(HelperRoute { program, home, env, games })
+}
+
+/// Where gogdl is run from, the Dashboard's folder for it, and where it installs.
+fn gogdl_route(args: &Args) -> Option<HelperRoute> {
+    let (program, home, games) = (kept_program(args, "gogdl")?, gogdl_home(args)?, games(args)?);
+    Some(HelperRoute { program, home, env: Vec::new(), games })
 }
 
 /// Every store's achievements (docs/achievements.md): Steam's alone, from its own files.

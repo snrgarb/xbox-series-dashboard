@@ -150,8 +150,13 @@
 //!       standard error, and exits 0. As legendary, the commands the Epic source runs (`auth --code`, `status`,
 //!       `install`, `uninstall`, `launch`, `egl-sync`), answered in legendary's own lines and records in the folder
 //!       `LEGENDARY_CONFIG_PATH` names, and only there (`source_epic::legendary::standin`: one game, Zinnia Gate,
-//!       its bytes counted out `STANDIN_HELPER_STEP_MS` apart). With anything else says each argument a line, then
-//!       `done`.
+//!       its bytes counted out `STANDIN_HELPER_STEP_MS` apart). As gogdl, the commands the GOG source runs (`auth
+//!       --code`, `download`, `info`, `redist --ids ISI`) in gogdl's own lines and files, with `GOGDL_CONFIG_PATH`
+//!       naming the test's folder (`source_gog::gogdl::standin`: any product id, named as the GOG fixture names it).
+//!       With anything else says each argument a line, then `done`.
+//!   scriptinterpreter.exe | unins000.exe <args>...
+//!       A GOG build's script interpreter, which writes its arguments in `/DIR=`'s `standin-set-up.txt`; a GOG game's
+//!       uninstaller, which empties `/dir=` but for itself. Both say their arguments in standin.log.
 //!   standin discord --pipe <name> [--port <n>]
 //!       A fake Discord (`discord::fake`), for `dashboard --discord-pipe <name> --discord-token-url
 //!       http://127.0.0.1:<n>/api/oauth2/token --discord-cdn-url http://127.0.0.1:<n>`: listens on the named pipe
@@ -1068,6 +1073,15 @@ fn run(args: &[String]) -> i32 {
         // As a fake Battle.net's client.
         _ if named("Battle.net") => battlenet(args),
         _ if named("legendary") || named("gogdl") => helper(args),
+        // As a GOG build's script interpreter and a GOG game's uninstaller, as the stand-in gogdl writes them (#176).
+        _ if named("scriptinterpreter") => {
+            note(&format!("scriptinterpreter: {}", args.join(" ")));
+            source_gog::gogdl::standin::script_interpreter(args)
+        }
+        _ if named("unins000") => {
+            note(&format!("unins000: {}", args.join(" ")));
+            source_gog::gogdl::standin::uninstaller(args)
+        }
         // As a fake Steam's client.
         _ if named("steam") => steam_client(args),
         // As a game's own program, in its install folder.
@@ -1315,6 +1329,10 @@ fn helper(args: &[String]) -> i32 {
     // What the Epic source runs legendary for (#175): its own lines and records.
     if name == "legendary" {
         return source_epic::legendary::standin::run(args);
+    }
+    // What the GOG source runs gogdl for (#176): its own lines and files.
+    if name == "gogdl" {
+        return source_gog::gogdl::standin::run(args);
     }
     for arg in args {
         println!("{arg}");

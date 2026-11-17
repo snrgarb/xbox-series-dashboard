@@ -25,6 +25,9 @@ pub enum Line {
     Total(u64),
     /// The bytes this run has downloaded so far.
     Done(u64),
+    /// Both on one line, as gogdl says them every second (`= Progress: <pct> <done>/<total>`): the whole is taken
+    /// as `Total` the first time it is said, and only then.
+    Progress { done: u64, total: u64 },
     /// How fast it downloads now, in bytes a second.
     Speed(u64),
     /// An error the helper says; kept, to say why if it then ends badly.
@@ -177,6 +180,7 @@ impl Downloads {
         finish: Box<dyn FnOnce() -> Result<(), String> + Send>,
     ) {
         let log = self.log;
+        let mut said_total = None;
         let code = loop {
             let line = match job.next(Duration::from_secs(60)) {
                 Some(Said::Out(line) | Said::Err(line)) => line,
@@ -186,12 +190,20 @@ impl Downloads {
             let read = parse(&line);
             let mut map = self.map();
             let Some(download) = map.get_mut(id) else { continue };
+            let total = match read {
+                Line::Total(bytes) => Some(bytes),
+                Line::Progress { total, .. } if said_total.is_none() => Some(total),
+                _ => None,
+            };
+            if let Some(bytes) = total {
+                let whole = *download.whole.get_or_insert(download.before + bytes);
+                download.base = whole.saturating_sub(bytes);
+                said_total = Some(bytes);
+                eprintln!("{log}: {id}: {bytes} bytes to download, {whole} in all");
+            }
             match read {
-                Line::Total(bytes) => {
-                    let whole = *download.whole.get_or_insert(download.before + bytes);
-                    download.base = whole.saturating_sub(bytes);
-                    eprintln!("{log}: {id}: {bytes} bytes to download, {whole} in all");
-                }
+                Line::Total(_) => {}
+                Line::Progress { done, .. } => download.run_done = done,
                 Line::Done(bytes) => download.run_done = bytes,
                 Line::Speed(bytes) => download.speed = Some(bytes),
                 Line::Error(why) => {
