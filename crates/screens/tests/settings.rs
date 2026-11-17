@@ -116,20 +116,22 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
     press(&mut dashboard, &[Down, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
-    // Down from Launchers is Art, the fourth row's one box, and System is under it, where the foot stops, with About
-    // beside it, where the row ends.
+    // Down from Launchers is Storage, beside Art, and About is under it, where the foot stops, with System beside
+    // it, where the row starts.
     press(&mut dashboard, &[Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
+    press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Down, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
     press(&mut dashboard, &[Right, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: About");
-    // Up from About is Art, the row above having one box; Up from Art is Games & apps above it.
+    // Up from About is Storage; Up from Art is Games & apps above it.
     press(&mut dashboard, &[Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
     press(&mut dashboard, &[Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
-    press(&mut dashboard, &[Up]);
+    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: About");
+    press(&mut dashboard, &[Up, Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
     press(&mut dashboard, &[Up]);
     assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");

@@ -63,6 +63,12 @@ pub struct Store {
     update_again: Vec<String>,
     /// Settings > Art's refresh of all art: how it goes, as every snapshot carries it (`Library::art_refresh`).
     art_refresh: model::ArtRefresh,
+    /// The drives and each store's install folders, as last read: every snapshot carries them (`Library::storage`).
+    storage: model::Storage,
+    /// Hears from the thread that reads them, while it does.
+    looking: Option<Receiver<model::Storage>>,
+    /// Asked to read them again while a read was under way: once more when it is done.
+    look_again: bool,
 }
 
 /// What an update of the launchers came to: what it changed, in a few words; none when it could not be done.
@@ -429,9 +435,55 @@ impl Store {
         });
     }
 
-    /// The new snapshot, once, if the background sync changed the database, or the Store apps have been listed.
+    /// Reads the drives and each store's install folders (Settings > Storage, the storage ring) on a thread of its
+    /// own, from the library as it is now; `wake` is called once they are. One read at a time: asked while one is
+    /// under way, it reads again after.
+    pub fn look_at_storage(&mut self, library: &Library, wake: impl FnOnce() + Send + 'static) {
+        if self.looking.is_some() {
+            self.look_again = true;
+            return;
+        }
+        let (looked, hear) = mpsc::channel();
+        self.looking = Some(hear);
+        let sources = self.sources.clone();
+        let chosen = crate::storage::chosen(&sources, |key| self.setting(key));
+        let installed: Vec<Game> = library.games.iter().filter(|game| game.installed).cloned().collect();
+        std::thread::spawn(move || {
+            let storage = crate::storage::read(&sources, &shell::drives::SystemDrives, &chosen, &installed);
+            let _ = looked.send(storage);
+            wake();
+        });
+    }
+
+    /// Whether Storage is to be read again, a read having been asked for while the last was under way.
+    pub fn storage_wanted(&mut self) -> bool {
+        self.looking.is_none() && std::mem::take(&mut self.look_again)
+    }
+
+    /// Settings > Storage chose the folder a store's installs go to: kept in the settings, and the store's default
+    /// in every snapshot from now. The snapshot after.
+    pub fn set_default_folder(&mut self, store: &str, folder: &std::path::Path) -> Option<Library> {
+        self.set_text(&model::storage::setting_key(store), &folder.display().to_string());
+        if let Some(folders) = self.storage.stores.iter_mut().find(|folders| folders.store == store) {
+            let at = folders.folders.iter().position(|place| model::storage::same_folder(&place.path, folder));
+            match at {
+                Some(at) => folders.default = at,
+                None => eprintln!("storage: {} is not one of {}'s folders", folder.display(), folders.name),
+            }
+        }
+        self.snapshot()
+    }
+
+    /// The new snapshot, once, if the background sync changed the database, the Store apps have been listed, or the
+    /// drives and folders read.
     pub fn changed(&mut self) -> Option<Library> {
         let mut changed = false;
+        if let Some(storage) = self.looking.as_ref().and_then(|looking| looking.try_recv().ok()) {
+            self.looking = None;
+            if storage != self.storage {
+                (self.storage, changed) = (storage, true);
+            }
+        }
         if let Some(apps) = self.listed.as_ref().and_then(|listed| listed.try_recv().ok()) {
             (self.store_apps, self.listed, changed) = (apps, None, true);
         }
@@ -753,6 +805,7 @@ impl Store {
         library.profiles.pictures = self.pictures();
         library.launchers.update = self.update.clone();
         library.art_refresh = self.art_refresh;
+        library.storage = self.storage.clone();
     }
 
     /// Switches a launcher on or off (Settings > Launchers): its games leave every list at once, or come back as

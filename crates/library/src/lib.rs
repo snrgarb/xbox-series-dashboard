@@ -474,6 +474,7 @@ impl Database {
             achievements: self.achievement_summary()?,
             launchers: self.launchers()?,
             art_refresh: Default::default(),
+            storage: Default::default(),
         })
     }
 

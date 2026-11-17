@@ -11,6 +11,7 @@ use super::guide::Guide;
 use super::idle::Idle;
 use super::launchers::{self, Launchers};
 use super::profiles::Profiles;
+use super::storage::{self, Storage};
 use super::system;
 use super::whos_playing::WhosPlayingPage;
 use super::Setting;
@@ -31,13 +32,23 @@ pub fn theme_settings() -> Boxes {
     let launchers =
         Item::Opens { icon: '\u{E8F1}', name: launchers::TITLE, pane: |around| Box::new(Launchers::open(around)) };
     let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |around| Box::new(Art::open(around)) };
+    // Storage beside Art, under Launchers: where installs go (docs/spec/storage.md), until Settings is regrouped
+    // (#194).
+    let storage =
+        Item::Opens { icon: '\u{EDA2}', name: storage::TITLE, pane: |around| Box::new(Storage::open(around)) };
     // Shell mode's page, the port's own, on a row of its own under Art (docs/spec/shell-mode.md, 2), and About beside
     // it: which build this is (16.10).
     let system = Item::Opens { icon: '\u{E770}', name: system::TITLE, pane: |_| Box::new(system::System::default()) };
     let about = Item::Opens { icon: '\u{E946}', name: about::TITLE, pane: |around| Box::new(About::open(around)) };
     Boxes::new(
         "Theme settings",
-        vec![vec![personalisation, idle], vec![guide, discord], vec![added, launchers], vec![art], vec![system, about]],
+        vec![
+            vec![personalisation, idle],
+            vec![guide, discord],
+            vec![added, launchers],
+            vec![art, storage],
+            vec![system, about],
+        ],
     )
 }
 

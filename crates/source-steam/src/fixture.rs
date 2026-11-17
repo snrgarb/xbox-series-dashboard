@@ -555,6 +555,27 @@ fn libraryfolders(root: &Path, spec: &Fixture) -> Vec<u8> {
     map([("libraryfolders", map([("0", library)]))]).to_text().into_bytes()
 }
 
+/// Adds a library at `library` to the fake Steam at `root`, as Steam's Storage Manager adds one on another drive
+/// (#179): the folder and its `steamapps` made, and `libraryfolders.vdf` written again with it before the Steam
+/// folder's own, in Steam's order. A library already there is left as it is. The libraries' app lists are written
+/// empty: the Dashboard reads installs from the manifests, not from them.
+pub fn add_library(root: &Path, library: &Path) -> io::Result<()> {
+    let (root, library) = (std::path::absolute(root)?, std::path::absolute(library)?);
+    fs::create_dir_all(library.join("steamapps"))?;
+    let mut roots: Vec<PathBuf> =
+        crate::libraries(&root).iter().filter_map(|dir| dir.parent().map(Path::to_path_buf)).collect();
+    if roots.iter().any(|known| model::storage::same_folder(known, &library)) {
+        return Ok(());
+    }
+    roots.insert(roots.len().saturating_sub(1), library);
+    // The Steam folder's own first, as Steam writes it ("0"), then the others.
+    roots.rotate_right(1);
+    let entry = |path: &Path| map([("path", s(path.display())), ("label", s("")), ("apps", Kv::Map(Vec::new()))]);
+    let entries = roots.iter().enumerate().map(|(at, path)| (at.to_string(), entry(path))).collect();
+    let text = map([("libraryfolders", Kv::Map(entries))]).to_text();
+    fs::write(root.join("steamapps").join("libraryfolders.vdf"), text)
+}
+
 /// `userdata/<id>/config/cloudstorage/cloud-storage-namespace-1.json`: a list of `[key, entry]` pairs. A collection's
 /// entry carries its value as JSON in a string. Steam's own two collections are always there, and so is a key of
 /// another kind, which is no collection.
@@ -1082,6 +1103,22 @@ mod tests {
         let reader = image::ImageReader::open(path).unwrap().with_guessed_format().unwrap();
         let format = reader.format().unwrap();
         (format, reader.into_dimensions().unwrap())
+    }
+
+    #[test]
+    fn a_library_added_is_a_folder_installs_may_go_to_and_the_games_are_read_as_before() {
+        use model::Installer;
+        let dir = tempfile::tempdir().unwrap();
+        let (root, other) = (dir.path().join("steam"), dir.path().join("second"));
+        write(&root, &Fixture::standard()).unwrap();
+        let before = load(&root).unwrap().games.len();
+        add_library(&root, &other).unwrap();
+        add_library(&root, &other).unwrap();
+        let steam = crate::Steam::at(Some(root.clone()));
+        let folders: Vec<(PathBuf, bool)> = steam.folders().into_iter().map(|f| (f.path, f.default)).collect();
+        let root = std::path::absolute(&root).unwrap();
+        assert_eq!(folders, [(std::path::absolute(&other).unwrap(), false), (root.clone(), true)]);
+        assert_eq!(load(&root).unwrap().games.len(), before);
     }
 
     #[test]

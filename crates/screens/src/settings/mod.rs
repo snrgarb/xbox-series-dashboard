@@ -23,6 +23,7 @@ pub mod idle;
 pub mod launchers;
 pub mod options;
 mod profiles;
+pub mod storage;
 pub mod system;
 mod theme_settings;
 mod whos_playing;

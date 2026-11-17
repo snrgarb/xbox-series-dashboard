@@ -114,8 +114,8 @@ pub trait Installer: Send + Sync {
     fn can(&self) -> Can;
 
     /// Where it may install: each folder with its free space where known, one of them the default. Empty where the
-    /// store chooses for itself. With more than one the Dashboard may ask the user which (Settings > Storage, #179);
-    /// until then every install goes to the default.
+    /// store chooses for itself. With more than one, and `Can::choose_folder`, Install asks the user which, starting
+    /// on the default Settings > Storage keeps (docs/spec/storage.md).
     fn folders(&self) -> Vec<Folder> {
         Vec::new()
     }
@@ -136,7 +136,8 @@ pub trait Installer: Send + Sync {
 }
 
 /// The folder an install goes to while the Dashboard asks nothing: the default among `folders`, none when the
-/// store chooses for itself. Settings > Storage (#179) is where another is chosen.
+/// store chooses for itself: where an install goes that was given no folder. Settings > Storage keeps the user's own
+/// choice (`model::storage`), which the executable passes as the folder.
 pub fn default_folder(folders: &[Folder]) -> Option<&Folder> {
     folders.iter().find(|folder| folder.default)
 }

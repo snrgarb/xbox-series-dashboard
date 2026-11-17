@@ -68,10 +68,17 @@ impl Opener for Detached {
 }
 
 /// Asks the game's store, by way of its source (none for a game of no source the Dashboard has) and `addresses`:
-/// through its installer where it has one that can, into its default folder (the folder question is Settings >
-/// Storage's, #179), else as its source says. A game whose store can't be asked is said so and left alone. Whether
+/// through its installer where it has one that can, else as its source says. An install goes into `folder`, the
+/// one chosen in the Dashboard's question or Settings > Storage (#179), where it is still one of the installer's
+/// folders, else into the store's default. A game whose store can't be asked is said so and left alone. Whether
 /// the store was asked.
-pub fn ask(game: &Game, source: Option<&dyn Source>, ask: Ask, addresses: &mut dyn Addresses) -> bool {
+pub fn ask(
+    game: &Game,
+    source: Option<&dyn Source>,
+    ask: Ask,
+    folder: Option<&Path>,
+    addresses: &mut dyn Addresses,
+) -> bool {
     let what = ask.verb();
     let Some(source) = source else {
         eprintln!("store: {} is from no store that can {what} it", game.name);
@@ -82,7 +89,18 @@ pub fn ask(game: &Game, source: Option<&dyn Source>, ask: Ask, addresses: &mut d
         let done = match ask {
             Ask::Install => {
                 let folders = installer.folders();
-                installer.install(game, installer::default_folder(&folders), &mut saying)
+                let chosen = folder.and_then(|path| {
+                    let found = folders.iter().find(|folder| model::storage::same_folder(&folder.path, path));
+                    if found.is_none() {
+                        eprintln!(
+                            "store: {} is not one of {}'s folders now: its default it is",
+                            path.display(),
+                            source.name()
+                        );
+                    }
+                    found
+                });
+                installer.install(game, chosen.or_else(|| installer::default_folder(&folders)), &mut saying)
             }
             Ask::Uninstall => installer.uninstall(game, &mut saying),
         };
@@ -281,10 +299,10 @@ mod tests {
     #[test]
     fn asking_opens_the_address_the_games_source_gives_and_nothing_where_it_has_none() {
         let mut addresses = Recorded::default();
-        ask(&game("9100040"), Some(&Fake), Ask::Install, &mut addresses);
-        ask(&game("9100010"), Some(&Fake), Ask::Uninstall, &mut addresses);
-        ask(&game(""), Some(&Fake), Ask::Uninstall, &mut addresses);
-        ask(&game("5"), None, Ask::Uninstall, &mut addresses);
+        ask(&game("9100040"), Some(&Fake), Ask::Install, None, &mut addresses);
+        ask(&game("9100010"), Some(&Fake), Ask::Uninstall, None, &mut addresses);
+        ask(&game(""), Some(&Fake), Ask::Uninstall, None, &mut addresses);
+        ask(&game("5"), None, Ask::Uninstall, None, &mut addresses);
         assert_eq!(addresses.opened, ["fake://install/9100040", "fake://uninstall/9100010"]);
     }
 
@@ -345,10 +363,19 @@ mod tests {
     #[test]
     fn a_store_with_an_installer_is_asked_through_it_into_its_default_folder_and_else_as_before() {
         let mut addresses = Recorded::default();
-        ask(&game("7"), Some(&WithInstaller), Ask::Install, &mut addresses);
+        ask(&game("7"), Some(&WithInstaller), Ask::Install, None, &mut addresses);
         // Its installer does not uninstall: the source's own address, as before installers.
-        ask(&game("7"), Some(&WithInstaller), Ask::Uninstall, &mut addresses);
+        ask(&game("7"), Some(&WithInstaller), Ask::Uninstall, None, &mut addresses);
         assert_eq!(addresses.opened, ["inst://install/7?into=D", "fake://uninstall/7"]);
+    }
+
+    #[test]
+    fn an_install_goes_into_the_folder_chosen_while_it_is_one_of_the_stores() {
+        let mut addresses = Recorded::default();
+        ask(&game("7"), Some(&WithInstaller), Ask::Install, Some(Path::new("e")), &mut addresses);
+        // One that is gone since it was chosen: the store's default.
+        ask(&game("7"), Some(&WithInstaller), Ask::Install, Some(Path::new("Z")), &mut addresses);
+        assert_eq!(addresses.opened, ["inst://install/7?into=E", "inst://install/7?into=D"]);
     }
 
     #[test]

@@ -148,6 +148,11 @@ impl<T: Copy> MenuPanel<T> {
         &self.title
     }
 
+    /// A prompt's message, changed: one that says something of the focused answer (the free space of a folder).
+    pub fn set_message(&mut self, message: Option<&str>) {
+        self.message = message.map(str::to_string);
+    }
+
     pub fn is_prompt(&self) -> bool {
         self.prompt
     }

@@ -26,6 +26,9 @@
 //!       Writes the fake Steam's Workshop record of <appid> (#188, `fixture::write_workshop`): <items> subscribed
 //!       items, <done> of them in their folders under `steamapps/workshop/content/<appid>`, and Steam still fetching
 //!       until all are in. A test calls it again and again to fill the folder over time.
+//!   standin steam-library <dir> <folder>
+//!       Adds a library at <folder> to the fake Steam at <dir> (`fixture::add_library`, #179), as Steam's Storage
+//!       Manager adds one on another drive: a second folder installs may go to, which the Dashboard asks about.
 //!   standin steam-change <dir> add-game | played <appid> <minutes>
 //!       Changes the fake Steam at <dir>, written by make-steam without --full-shelf, as Steam's own files change
 //!       while the Dashboard runs (`fixture::change`): add-game makes Paper Lighthouse (9100800) the user's,
@@ -192,6 +195,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
                      [--no-previous] [--seconds <n>]
        standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
        standin steam-workshop <dir> <appid> <done>/<items>
+       standin steam-library <dir> <folder>
        standin unlock-achievement <dir> <key>
        standin steam-change <dir> add-game | played <appid> <minutes>
        steam.exe -silent +app_install <appid> | -silent -console +app_uninstall <appid>
@@ -959,6 +963,20 @@ fn run(args: &[String]) -> i32 {
             };
             made("steam-workshop", dir, steam_workshop(dir, appid, done, items))
         }
+        Some("steam-library") => match &args[1..] {
+            [dir, folder] => {
+                let dir = Path::new(dir);
+                let added = fixture::add_library(dir, Path::new(folder)).map_err(|e| format!("{}: {e}", dir.display()));
+                if added.is_ok() {
+                    note(&format!("steam-library: {folder} added to {}", dir.display()));
+                }
+                made("steam-library", dir, added)
+            }
+            _ => {
+                note(USAGE);
+                2
+            }
+        },
         Some("steam-install") => {
             let parsed = match &args[1..] {
                 [root, appid, rest @ ..] => appid.parse::<u32>().ok().zip(progress_of(rest)).map(|got| (root, got)),
