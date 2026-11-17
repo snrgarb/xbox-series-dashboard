@@ -46,7 +46,7 @@ impl Probe {
         let found = installs::under_way(&libraries, &|appid| registry && crate::registry::updating(appid));
         self.baselines.retain(|appid, _| found.iter().any(|(id, ..)| id == appid));
         // Steam's overview, whole: what it says of an app whose manifest says it is done is wanted too (#132).
-        let read = cef::enabled(&self.root).then(overview::read);
+        let read = cef::enabled(&self.root).then(|| overview::read(&cef::ports(&self.root)));
         let cef = read.as_ref().map(|read| match read {
             Ok(overview) => overview.raw.clone(),
             Err(why) => why.clone(),

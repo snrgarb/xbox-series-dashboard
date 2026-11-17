@@ -111,10 +111,66 @@ pub fn under_way(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<(
 /// folders, says it still has items to fetch (`NeedsDownload`): the subscribed items Steam downloads once the game
 /// itself is installed (#188).
 pub fn workshop_pending(steamapps: &[PathBuf], appid: u32) -> bool {
-    steamapps.iter().any(|dir| {
-        let file = dir.join("workshop").join(format!("appworkshop_{appid}.acf"));
-        let record = fs::read(file).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
-        record.and_then(|record| record.u64_at(&["AppWorkshop", "NeedsDownload"])).is_some_and(|needs| needs != 0)
+    workshop(steamapps, appid).is_some_and(|workshop| workshop.needs_download)
+}
+
+/// What Steam's Workshop record for an app, and the folders of its items, say of the Workshop items it fetches for
+/// the app once the app itself is installed (#188).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Workshop {
+    /// `NeedsDownload`: Steam still has items to fetch. Seen on the TV PC (#188).
+    pub needs_download: bool,
+    /// The items the account subscribes to (`WorkshopItemDetails`, and those in `WorkshopItemsInstalled`), and
+    /// how many of them have their folder in `workshop/content/<appid>`.
+    pub items: u32,
+    pub items_done: u32,
+    /// The bytes of the items whose folder is there, of the bytes of them all: only where the record gives a `size`
+    /// for every item subscribed to.
+    pub bytes: Option<(u64, u64)>,
+}
+
+impl Workshop {
+    /// What the Queue shows of it: the items done of those subscribed to, and the bytes where known.
+    pub fn state(self) -> InstallState {
+        let (done, total) = self.bytes.unwrap_or((0, 0));
+        InstallState::Extras { items_done: self.items_done, items: self.items, done, total }
+    }
+}
+
+/// The app's Workshop record, `workshop/appworkshop_<appid>.acf` in the first of these `steamapps` folders that has
+/// one, read with the item folders beside it in `workshop/content/<appid>/<item>`. Of the record, `NeedsDownload`
+/// was seen on the TV PC (#188, 160 items subscribed); the item lists, `WorkshopItemsInstalled` with each item's
+/// `size` and `WorkshopItemDetails` with each one subscribed to, are as Steam's files are commonly read, and to be
+/// confirmed on the TV PC. None with no record.
+pub fn workshop(steamapps: &[PathBuf], appid: u32) -> Option<Workshop> {
+    steamapps.iter().find_map(|dir| {
+        let workshop = dir.join("workshop");
+        let file = workshop.join(format!("appworkshop_{appid}.acf"));
+        let record = fs::read(file).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok())?;
+        let record = record.get("AppWorkshop")?;
+        let content = workshop.join("content").join(appid.to_string());
+        let entries = |key: &str| record.get(key).map_or(&[][..], vdf::Value::entries);
+        let (installed, details) = (entries("WorkshopItemsInstalled"), entries("WorkshopItemDetails"));
+        let mut items: Vec<(&str, Option<u64>)> = Vec::new();
+        for (id, item) in details.iter().chain(installed) {
+            let size = item.u64_at(&["size"]);
+            match items.iter_mut().find(|(known, _)| *known == id.as_str()) {
+                Some((_, known)) => *known = known.or(size),
+                None => items.push((id.as_str(), size)),
+            }
+        }
+        let there: Vec<bool> = items.iter().map(|(id, _)| content.join(id).is_dir()).collect();
+        let sizes: Option<Vec<u64>> = items.iter().map(|&(_, size)| size).collect();
+        let bytes = sizes.filter(|sizes| !sizes.is_empty()).map(|sizes| {
+            let done = sizes.iter().zip(&there).filter(|(_, &there)| there).map(|(size, _)| size).sum();
+            (done, sizes.iter().sum())
+        });
+        Some(Workshop {
+            needs_download: record.u64_at(&["NeedsDownload"]).is_some_and(|needs| needs != 0),
+            items: items.len() as u32,
+            items_done: there.iter().filter(|&&there| there).count() as u32,
+            bytes,
+        })
     })
 }
 
@@ -198,6 +254,51 @@ mod tests {
         assert!(workshop_pending(&dirs, 4000) && !workshop_pending(&dirs, 4001));
         std::fs::write(&file, record(0)).unwrap();
         assert!(!workshop_pending(&dirs, 4000));
+    }
+
+    #[test]
+    fn the_workshop_items_done_are_those_with_their_folder_and_the_bytes_are_known_only_for_them_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let steamapps = dir.path().join("steamapps");
+        let content = steamapps.join("workshop").join("content").join("4000");
+        std::fs::create_dir_all(&content).unwrap();
+        // Three subscribed to; one in with its size; one sized in its details, its folder not there yet.
+        let record = r#""AppWorkshop"
+        {
+            "appid" "4000"
+            "NeedsDownload" "1"
+            "WorkshopItemsInstalled" { "111" { "size" "300" "timeupdated" "1" } }
+            "WorkshopItemDetails"
+            {
+                "111" { "subscribedby" "5" }
+                "222" { "subscribedby" "5" }
+                "333" { "subscribedby" "5" "size" "700" }
+            }
+        }"#;
+        std::fs::write(steamapps.join("workshop").join("appworkshop_4000.acf"), record).unwrap();
+        std::fs::create_dir(content.join("111")).unwrap();
+        let dirs = [steamapps.clone()];
+        let read = workshop(&dirs, 4000).unwrap();
+        assert_eq!(read, Workshop { needs_download: true, items: 3, items_done: 1, bytes: None });
+        assert_eq!(read.state(), InstallState::Extras { items_done: 1, items: 3, done: 0, total: 0 });
+        assert_eq!(workshop(&dirs, 4001), None);
+
+        // The stand-in's record: every item sized, the folders filled one by one.
+        let root = dir.path().join("steam");
+        fixture::write(&root, &fixture::Fixture::standard()).unwrap();
+        let dirs = [root.join("steamapps")];
+        fixture::write_workshop(&root, 9_100_040, 0, 4).unwrap();
+        let first = workshop(&dirs, 9_100_040).unwrap();
+        assert_eq!((first.needs_download, first.items, first.items_done), (true, 4, 0));
+        let total = first.bytes.unwrap().1;
+        assert_eq!(first.bytes, Some((0, total)));
+        fixture::write_workshop(&root, 9_100_040, 3, 4).unwrap();
+        let most = workshop(&dirs, 9_100_040).unwrap();
+        assert_eq!((most.needs_download, most.items_done), (true, 3));
+        assert!(most.bytes.unwrap().0 > 0 && most.bytes.unwrap().0 < total);
+        fixture::write_workshop(&root, 9_100_040, 4, 4).unwrap();
+        let all = workshop(&dirs, 9_100_040).unwrap();
+        assert_eq!((all.needs_download, all.items_done, all.bytes), (false, 4, Some((total, total))));
     }
 
     /// The stand-in Steam's Pause, Resume and Cancel (#170): from the bytes its manifest has.

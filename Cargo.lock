@@ -2432,6 +2432,7 @@ dependencies = [
  "image",
  "log-line",
  "model",
+ "serde",
  "serde_json",
  "tempfile",
  "windows-sys 0.61.2",

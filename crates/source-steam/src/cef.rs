@@ -28,10 +28,26 @@ pub const PROBE: Duration = Duration::from_secs(2);
 /// How long the script's answer is waited for, once it is sent.
 pub const ANSWER: Duration = Duration::from_secs(30);
 
+/// The file beside the stand-in Steam's `steam.exe` in which its debugger (`crate::debugger`) writes the port it
+/// listens on, a port of its own: the stand-in never takes 8080 or 8081, where a real Steam's may be.
+pub const STANDIN_PORT: &str = "standin-cef-port.txt";
+
 /// Whether the Steam at `root` opens its debugger as it starts, as its folder now says. A Steam started before the
 /// file was put there has it closed until it starts again; asking then finds no debugger and says so.
 pub fn enabled(root: &Path) -> bool {
     root.join(FILE).is_file()
+}
+
+/// The ports the debugger of the Steam at `root` answers on: [`PORTS`] for a real Steam; for the stand-in Steam of
+/// the end-to-end tests (`crate::fixture::STANDIN_CLIENT` in its folder) only the port its debugger wrote down
+/// ([`STANDIN_PORT`]), none while it has written none. So a test's fake is never asked through a real Steam's
+/// debugger, nor the real one through the fake's.
+pub fn ports(root: &Path) -> Vec<u16> {
+    if !root.join(crate::fixture::STANDIN_CLIENT).is_file() {
+        return PORTS.to_vec();
+    }
+    let written = std::fs::read_to_string(root.join(STANDIN_PORT)).unwrap_or_default();
+    written.trim().parse::<u16>().ok().filter(|&port| port != 0).into_iter().collect()
 }
 
 /// The client's console's command for what `steam.exe` is given (`crate::command`): `+app_install 620` is
@@ -81,8 +97,13 @@ impl std::fmt::Display for Failed {
 }
 
 /// Runs `expression` in the page titled `target` of the first debugger on 127.0.0.1's `ports` that has it, and
-/// gives what it came to.
+/// gives what it came to, waiting [`ANSWER`] at most for it.
 pub fn evaluate(ports: &[u16], target: &str, expression: &str) -> Result<Evaluated, Failed> {
+    evaluate_within(ports, target, expression, ANSWER)
+}
+
+/// [`evaluate`], waiting `answer` at most for the script's answer once it is sent.
+pub fn evaluate_within(ports: &[u16], target: &str, expression: &str, answer: Duration) -> Result<Evaluated, Failed> {
     let mut tried = Vec::new();
     let found = ports.iter().find_map(|&port| match page(port, target) {
         Ok(url) => Some(url),
@@ -91,8 +112,11 @@ pub fn evaluate(ports: &[u16], target: &str, expression: &str) -> Result<Evaluat
             None
         }
     });
+    if ports.is_empty() {
+        tried.push("no port to ask: the stand-in Steam's debugger has written none".into());
+    }
     let Some(url) = found else { return Err(Failed::NotSent(tried.join("; "))) };
-    run(&url, expression)
+    run(&url, expression, answer)
 }
 
 /// The WebSocket address of the page titled `target` in the list a debugger at `port` gives.
@@ -143,7 +167,7 @@ fn page(port: u16, target: &str) -> Result<String, String> {
 }
 
 /// An HTTP answer's status line and headers, up to the empty line.
-fn headers(reader: &mut impl BufRead) -> Result<Vec<String>, String> {
+pub(crate) fn headers(reader: &mut impl BufRead) -> Result<Vec<String>, String> {
     let mut lines = Vec::new();
     loop {
         let mut line = String::new();
@@ -159,7 +183,7 @@ fn headers(reader: &mut impl BufRead) -> Result<Vec<String>, String> {
 }
 
 /// Runs the expression in the page at the WebSocket address `url` (`ws://127.0.0.1:8080/devtools/page/<id>`).
-fn run(url: &str, expression: &str) -> Result<Evaluated, Failed> {
+fn run(url: &str, expression: &str, answer_within: Duration) -> Result<Evaluated, Failed> {
     let not_sent = |why: String| Failed::NotSent(why);
     let rest = url.strip_prefix("ws://").ok_or_else(|| not_sent(format!("not a ws:// address: {url}")))?;
     let (host, path) = rest.split_once('/').map_or((rest, "/".to_string()), |(host, path)| (host, format!("/{path}")));
@@ -197,11 +221,11 @@ fn run(url: &str, expression: &str) -> Result<Evaluated, Failed> {
         "params": { "expression": expression, "awaitPromise": true, "returnByValue": true },
     });
     stream.write_all(&frame(message.to_string().as_bytes())).map_err(|e| lost(e.to_string()))?;
-    let until = Instant::now() + ANSWER;
+    let until = Instant::now() + answer_within;
     loop {
         let left = until.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Err(lost(format!("no answer in {} s", ANSWER.as_secs())));
+            return Err(lost(format!("no answer in {} s", answer_within.as_secs())));
         }
         reader.get_ref().set_read_timeout(Some(left)).map_err(|e| lost(e.to_string()))?;
         let text = message_text(&mut reader).map_err(lost)?;
@@ -247,8 +271,27 @@ fn frame(payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The next whole text message from the server, its fragments joined; pings and pongs passed over.
-fn message_text(reader: &mut impl Read) -> Result<String, String> {
+/// A text frame from the server, unmasked as a server's is: what the stand-in debugger answers with.
+pub(crate) fn server_frame(payload: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x81];
+    match payload.len() {
+        len if len < 126 => out.push(len as u8),
+        len if len <= u16::MAX as usize => {
+            out.push(126);
+            out.extend_from_slice(&(len as u16).to_be_bytes());
+        }
+        len => {
+            out.push(127);
+            out.extend_from_slice(&(len as u64).to_be_bytes());
+        }
+    }
+    out.extend_from_slice(payload);
+    out
+}
+
+/// The next whole text message from the other end, masked or not, its fragments joined; pings and pongs passed
+/// over.
+pub(crate) fn message_text(reader: &mut impl Read) -> Result<String, String> {
     let mut message = Vec::new();
     loop {
         let mut head = [0u8; 2];

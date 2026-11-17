@@ -676,27 +676,71 @@ pub fn write_progress(root: &Path, appid: u32, progress: Progress) -> io::Result
 }
 
 /// The file beside the stand-in Steam's `steam.exe` that says it is the stand-in (written by `standin make-steam`):
-/// the client that takes the stand-in's own commands to pause, resume and cancel an install ([`steer_command`]),
-/// which the real Steam's console has no word for. Looked for only in an install named on the command line
-/// (`--steam`), never in the one the registry names.
+/// its debugger (`crate::debugger`) is asked on the port it writes down, never on a real Steam's (`cef::ports`).
+/// Looked for only in an install named on the command line (`--steam`), never in the one the registry names.
 pub const STANDIN_CLIENT: &str = "standin-client.txt";
 
-/// What the stand-in Steam's client is given to pause, resume or cancel the install of `appid`: `-silent
-/// +standin_pause <appid>`, `+standin_resume`, `+standin_cancel`.
-pub fn steer_command(steer: model::Steer, appid: u32) -> Vec<String> {
-    let command = format!("+standin_{}", steer.verb());
-    vec!["-silent".to_string(), command, appid.to_string()]
+/// How big each of the stand-in's Workshop items is, in bytes: item `n` (from 0) is `(n + 1)` times this.
+pub const WORKSHOP_ITEM: u64 = 4 << 20;
+
+/// The id of the stand-in's Workshop item `n` (from 0) of an app: made up, never a real item's.
+fn workshop_item(appid: u32, n: u32) -> u64 {
+    appid as u64 * 1000 + n as u64 + 1
 }
 
-/// The pause, resume or cancel a stand-in client's command asks for, and of which app, from its arguments.
-pub fn steer_asked(args: &[String]) -> Option<(model::Steer, u32)> {
-    use model::Steer;
-    let at = args.iter().position(|arg| arg.starts_with("+standin_"))?;
-    let steer = [Steer::Pause, Steer::Resume, Steer::Cancel]
-        .into_iter()
-        .find(|steer| args[at].eq_ignore_ascii_case(&format!("+standin_{}", steer.verb())))?;
-    let appid = args.get(at + 1)?.parse().ok().filter(|&appid| appid != 0)?;
-    Some((steer, appid))
+/// Writes the fake Steam's Workshop record of `appid` (`steamapps/workshop/appworkshop_<appid>.acf`) as Steam's
+/// would be with `done` of `items` subscribed items fetched (#188): every item in `WorkshopItemDetails` with its
+/// size, the fetched ones in `WorkshopItemsInstalled` with their folders in `workshop/content/<appid>` (a small file
+/// each), and `NeedsDownload` 1 until all are in. What the stand-in Steam does over time as a test calls it (`standin
+/// steam-workshop`). The real record's item lists are as Steam's files are commonly read (`installs::workshop`).
+pub fn write_workshop(root: &Path, appid: u32, done: u32, items: u32) -> io::Result<()> {
+    let done = done.min(items);
+    let workshop = root.join("steamapps").join("workshop");
+    let content = workshop.join("content").join(appid.to_string());
+    fs::create_dir_all(&content)?;
+    let size = |n: u32| WORKSHOP_ITEM * (n as u64 + 1);
+    let mut installed = Vec::new();
+    let mut details = Vec::new();
+    for n in 0..items {
+        let id = workshop_item(appid, n).to_string();
+        let folder = content.join(&id);
+        if n < done {
+            fs::create_dir_all(&folder)?;
+            fs::write(folder.join("item.txt"), format!("stand-in Workshop item {id}\n"))?;
+            installed.push((id.clone(), map([("size", s(size(n))), ("timeupdated", s(0)), ("manifest", s(n))])));
+        } else if folder.exists() {
+            fs::remove_dir_all(&folder)?;
+        }
+        let subscribed = [("manifest", s(n)), ("timeupdated", s(0)), ("subscribedby", s(1)), ("size", s(size(n)))];
+        details.push((id, map(subscribed)));
+    }
+    let on_disk: u64 = (0..done).map(size).sum();
+    let record = map([
+        ("appid", s(appid)),
+        ("SizeOnDisk", s(on_disk)),
+        ("NeedsUpdate", s(0)),
+        ("NeedsDownload", s(u8::from(done < items))),
+        ("TimeLastUpdated", s(0)),
+        ("TimeLastAppRan", s(0)),
+        ("WorkshopItemsInstalled", Kv::Map(installed)),
+        ("WorkshopItemDetails", Kv::Map(details)),
+    ]);
+    let part = workshop.join(format!("appworkshop_{appid}.acf.part"));
+    fs::write(&part, map([("AppWorkshop", record)]).to_text())?;
+    fs::rename(part, workshop.join(format!("appworkshop_{appid}.acf")))
+}
+
+/// Removes the fake Steam's Workshop record and items of `appid`, as uninstalling the app does.
+pub fn remove_workshop(root: &Path, appid: u32) -> io::Result<()> {
+    let workshop = root.join("steamapps").join("workshop");
+    for gone in [workshop.join(format!("appworkshop_{appid}.acf")), workshop.join("content").join(appid.to_string())] {
+        let removed = if gone.is_dir() { fs::remove_dir_all(&gone) } else { fs::remove_file(&gone) };
+        match removed {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Where the fake Steam's install of `appid` at `root` goes as its client is asked to pause, resume or cancel it,

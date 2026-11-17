@@ -13,6 +13,8 @@
 //! - Steam's overview names it (known: it is Steam's own word).
 //! - The registry's `Apps\<appid>\Updating` says so, for the install the registry names (Steam's own word too,
 //!   though on the real machine it was not seen set for the shared content).
+//! - Its Workshop record says Steam still has items to fetch for it (`NeedsDownload`, #188): the game is playable
+//!   then, which `Steam::installs` says (`InstallState::Extras`).
 //! - Without the overview: another app turned up under way within [`SHARED_WITHIN`] seconds of this one and is still
 //!   under way. That is taken as content this one needs, which Steam fetches as soon as it has the app's own:
 //!   reasoned from one install, and wrong for a game the user happened to queue in Steam in those seconds, whose
@@ -68,6 +70,20 @@ impl Follow {
         updating: &dyn Fn(u32) -> bool,
         at: f64,
     ) -> Vec<Install> {
+        self.look_with_workshop(found, overview, writes, updating, &|_| false, at)
+    }
+
+    /// [`look`](Follow::look), with Steam's Workshop record as one more word that an app is not done: `workshop`
+    /// says whether the app's record has items still to fetch (#188), which holds it with no overview at all.
+    pub fn look_with_workshop(
+        &mut self,
+        found: Vec<(u32, InstallState, Counts)>,
+        overview: Option<&Overview>,
+        writes: Option<Writes>,
+        updating: &dyn Fn(u32) -> bool,
+        workshop: &dyn Fn(u32) -> bool,
+        at: f64,
+    ) -> Vec<Install> {
         for (appid, ..) in &found {
             self.first_seen.entry(*appid).or_insert(at);
         }
@@ -87,6 +103,8 @@ impl Follow {
                 Some(format!("Steam's download overview still names it, {}", overview.map_or("", |o| &o.state)))
             } else if updating(appid) {
                 Some("the registry says it is still updating".to_string())
+            } else if workshop(appid) {
+                Some("its Workshop record says Steam still has items to fetch".to_string())
             } else if let (None, Some(other)) = (overview, shared) {
                 Some(format!("{other} turned up under way just after it, taken as content it needs"))
             } else {
@@ -229,6 +247,18 @@ mod tests {
         assert_eq!(states(&got), [("70", InstallState::Queued, None), ("60", UNKNOWN, None)]);
         assert_eq!(follow.look(shared, None, None, NOT_UPDATING, 10.0).len(), 2);
         assert_eq!(follow.look(Vec::new(), None, None, NOT_UPDATING, 15.0), []);
+    }
+
+    #[test]
+    fn an_app_whose_workshop_items_are_still_coming_is_held_with_no_overview_until_they_are_in() {
+        let mut follow = Follow::default();
+        let found = vec![(4000, InstallState::Downloading { done: 0, total: 5000 }, counts(0, 5000))];
+        follow.look(found, None, None, NOT_UPDATING, 0.0);
+        let got = follow.look_with_workshop(Vec::new(), None, None, NOT_UPDATING, &|appid| appid == 4000, 100.0);
+        assert_eq!(states(&got), [("4000", UNKNOWN, None)]);
+        assert!(follow.held(4000));
+        assert_eq!(follow.look_with_workshop(Vec::new(), None, None, NOT_UPDATING, &|_| false, 101.0), []);
+        assert!(!follow.held(4000));
     }
 
     #[test]

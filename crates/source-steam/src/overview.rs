@@ -114,9 +114,10 @@ impl Overview {
     }
 }
 
-/// The overview from the Steam whose debugger answers on this PC, or why there is none.
-pub fn read() -> Result<Overview, String> {
-    match cef::evaluate(&cef::PORTS, cef::SHARED, SCRIPT) {
+/// The overview from the Steam whose debugger answers on one of `ports` on this PC (`cef::ports`), or why there is
+/// none.
+pub fn read(ports: &[u16]) -> Result<Overview, String> {
+    match cef::evaluate(ports, cef::SHARED, SCRIPT) {
         Ok(cef::Evaluated::Value(text)) => Overview::parse(&text).ok_or_else(|| format!("no overview: {text}")),
         Ok(other) => Err(format!("{other:?}")),
         Err(why) => Err(format!("unreachable ({why})")),

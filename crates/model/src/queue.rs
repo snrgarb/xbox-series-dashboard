@@ -13,6 +13,9 @@ pub const INSTALLING: &str = "Installing...";
 /// What Manage Queue's row reads of an install paused, by the user here or in the store's client (#170): the
 /// console's word. Tiles read it Queued, as the Bundle's do.
 pub const PAUSED: &str = "Paused";
+/// What Manage Queue's row reads of a game installed whose store is still fetching its extras: Steam's Workshop
+/// items, the only extras any store has (#188, the user's words for it).
+pub const WORKSHOP: &str = "Downloading Workshop content";
 
 /// Where an install a store's client has under way is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,10 +30,11 @@ pub enum InstallState {
     /// The user has paused it, here or in the client.
     Paused { done: u64, total: u64 },
     /// The game itself is installed and playable, and its store is still fetching more for it: Steam's Workshop
-    /// items the account subscribes to (#188), `done` of `total` bytes of that where the store says (0 of 0 while
-    /// it does not). Play is offered and the game's Ready to play Toast has been told; the Queue keeps its row
-    /// until the store is done, and it then leaves with nothing more said.
-    Extras { done: u64, total: u64 },
+    /// items the account subscribes to (#188), `items_done` of `items` (0 of 0 where the store does not say), and
+    /// `done` of `total` bytes of them where the store says (0 of 0 while it does not). Play is offered and the
+    /// game's Ready to play Toast has been told; the Queue keeps its row until the store is done, and it then
+    /// leaves with nothing more said.
+    Extras { items_done: u32, items: u32, done: u64, total: u64 },
 }
 
 impl InstallState {
@@ -64,14 +68,27 @@ impl InstallState {
             InstallState::Queued => None,
             InstallState::Downloading { done, total }
             | InstallState::Paused { done, total }
-            | InstallState::Extras { done, total } => Some((done, total)),
+            | InstallState::Extras { done, total, .. } => Some((done, total)),
         }
     }
 
-    /// The whole percent done, for the log: none without a total.
+    /// The whole percent done, for the log: none without a total. Extras with no bytes known go by their items.
     pub fn percent(self) -> Option<u64> {
-        let (done, total) = self.bytes().filter(|&(_, total)| total > 0)?;
-        Some(done.min(total) * 100 / total)
+        let whole = |(done, total): (u64, u64)| (total > 0).then(|| done.min(total) * 100 / total);
+        match self {
+            InstallState::Extras { items_done, items, total: 0, .. } => whole((items_done as u64, items as u64)),
+            state => whole(state.bytes()?),
+        }
+    }
+
+    /// The share done, 0 to 1, where there is a whole to share: the bytes, or extras' items where their bytes are
+    /// not known.
+    pub fn fraction(self) -> Option<f64> {
+        let share = |(done, total): (u64, u64)| (total > 0).then(|| (done as f64 / total as f64).clamp(0.0, 1.0));
+        match self {
+            InstallState::Extras { items_done, items, total: 0, .. } => share((items_done as u64, items as u64)),
+            state => share(state.bytes()?),
+        }
     }
 }
 
@@ -200,12 +217,18 @@ mod tests {
 
     #[test]
     fn a_game_whose_extras_alone_are_coming_in_reads_installed_on_its_tiles_and_stays_in_the_queue() {
-        let extras = InstallState::Extras { done: 0, total: 0 };
+        let extras = InstallState::Extras { items_done: 3, items: 12, done: 0, total: 0 };
         let queue = Queue::new(vec![entry(1, InstallState::Queued, 100), entry(2, extras, 300)], Vec::new());
         // Under way, so first; but its tiles read it as any installed game.
         assert_eq!(queue.entries.iter().map(|e| e.game).collect::<Vec<_>>(), [2, 1]);
         assert_eq!((queue.status(2), queue.installing(2), queue.get(2).map(|e| e.state)), (None, None, Some(extras)));
         assert_eq!(queue.status(1), Some(QUEUED));
         assert!(extras.extras() && !extras.downloading() && !extras.paused());
+        // No bytes known: its share is its items'; with bytes, theirs.
+        assert_eq!((extras.percent(), extras.fraction()), (Some(25), Some(0.25)));
+        let sized = InstallState::Extras { items_done: 3, items: 12, done: 600, total: 1000 };
+        assert_eq!((sized.percent(), sized.bytes()), (Some(60), Some((600, 1000))));
+        let unknown = InstallState::Extras { items_done: 0, items: 0, done: 0, total: 0 };
+        assert_eq!((unknown.percent(), unknown.fraction()), (None, None));
     }
 }
