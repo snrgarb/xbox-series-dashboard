@@ -236,8 +236,14 @@ const KEY_REFUSED: &str =
     "SteamGridDB didn't accept your key, so no art is being downloaded. Check it in Settings, Games & apps, Art.";
 
 /// How long a window's frames took, for --log-frames: the wait for the swap chain to give a frame to draw on, the
-/// drawing and the present, and the time from one frame's start to the next while something moved: a frame that
-/// follows one that left nothing moving comes after a rest, and is not late.
+/// drawing and the present, and the time from one frame to the next while something moved.
+///
+/// A frame's time is when it got its buffer (`acquired`): its picture is fixed then, by the clock the animations
+/// read (`overlay_last_frame`, `last_frame`), and presented a draw later. The gap to the frame before is counted
+/// from that frame's own buffer, not from the start of its turn: the wait before the first frame of a stretch (the
+/// Overlay just shown, Home starting to move from rest) is how late the stretch starts, not a gap in its movement,
+/// and is said apart, under `from rest`. A frame that follows one that left nothing moving comes after a rest, and
+/// is not late.
 #[derive(Default)]
 struct FrameTimes {
     frames: u32,
@@ -249,12 +255,21 @@ struct FrameTimes {
     moving: u32,
     moving_time: Duration,
     gap_most: Duration,
-    /// Of those, the frames that began more than 12 ms after the one before: short of 90 a second.
+    /// How much of the longest gap was that frame's own wait for its buffer.
+    gap_most_wait: Duration,
+    /// Of those, the frames that got their buffer more than 12 ms after the one before: short of 90 a second.
     late: u32,
+    /// The frames that came after a rest (the first of a stretch, or one alone), and the longest of their waits.
+    from_rest: u32,
+    from_rest_wait_most: Duration,
+    /// When the last frame got its buffer.
     last: Option<Instant>,
 }
 
 impl FrameTimes {
+    /// Ignoring 12 ms or less, at 120 Hz a refresh and a half: a gap over it is a refresh missed.
+    const LATE: Duration = Duration::from_millis(12);
+
     fn frame(&mut self, began: Instant, acquired: Instant, done: Instant, was_moving: bool) {
         self.frames += 1;
         let (acquire, draw) = (acquired - began, done - acquired);
@@ -262,13 +277,22 @@ impl FrameTimes {
         self.acquire_most = self.acquire_most.max(acquire);
         self.draw += draw;
         self.draw_most = self.draw_most.max(draw);
-        if let Some(gap) = self.last.map(|last| began - last).filter(|_| was_moving) {
-            self.moving += 1;
-            self.moving_time += gap;
-            self.gap_most = self.gap_most.max(gap);
-            self.late += u32::from(gap > Duration::from_millis(12));
+        match self.last.filter(|_| was_moving) {
+            Some(last) => {
+                let gap = acquired - last;
+                self.moving += 1;
+                self.moving_time += gap;
+                if gap > self.gap_most {
+                    (self.gap_most, self.gap_most_wait) = (gap, acquire);
+                }
+                self.late += u32::from(gap > Self::LATE);
+            }
+            None => {
+                self.from_rest += 1;
+                self.from_rest_wait_most = self.from_rest_wait_most.max(acquire);
+            }
         }
-        self.last = Some(began);
+        self.last = Some(acquired);
     }
 
     /// What they were, and forgets them.
@@ -277,7 +301,7 @@ impl FrameTimes {
         let each = self.frames.max(1);
         let said = format!(
             "wait {:.1} ms (most {:.1}), draw {:.1} ms (most {:.1}); moving: {} frames at {:.0} a second, longest gap \
-             {:.1} ms, {} late",
+             {:.1} ms ({:.1} of it its wait), {} late; from rest: {} frames, their wait most {:.1} ms",
             ms(self.acquire / each),
             ms(self.acquire_most),
             ms(self.draw / each),
@@ -285,7 +309,10 @@ impl FrameTimes {
             self.moving,
             self.moving as f32 / self.moving_time.as_secs_f32().max(f32::EPSILON),
             ms(self.gap_most),
-            self.late
+            ms(self.gap_most_wait),
+            self.late,
+            self.from_rest,
+            ms(self.from_rest_wait_most)
         );
         *self = FrameTimes { last: self.last, ..FrameTimes::default() };
         said
@@ -1524,6 +1551,13 @@ impl ApplicationHandler for App {
                 }
             }
         };
+        // A request to close (taskkill without /f) is heard from any program, one with fewer rights included: a
+        // Dashboard Winlogon started as the shell may run elevated, and Windows would drop it unsaid (#99).
+        if cfg!(windows) {
+            let heard = shell::hear_close_from_anyone(window_handle(&window));
+            let elevated = shell::elevated().map_or("unknown", |elevated| if elevated { "yes" } else { "no" });
+            eprintln!("window: runs elevated: {elevated}; a request to close is heard from any program: {heard}");
+        }
         if topmost {
             window.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
             eprintln!("window: topmost while Start-up shows; {}", describe(&window));
@@ -2075,14 +2109,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested if self.backdrop.skip(self.dashboard.home_covered()) => {}
             WindowEvent::RedrawRequested => {
                 let began = since_start();
-                let now = Instant::now();
-                // From rest an animation starts with a tenth of a second at most, however long Home sat still. One
-                // that was moving has moved on by as long as this frame is after the last, as the Overlay's does: a
-                // fade takes its time by the clock however few frames a slow renderer gives it.
-                let passed = (now - self.last_frame).as_secs_f32();
-                let dt = passed.min(if self.moving { 1.0 } else { 0.1 });
-                state.host.store.slept(passed - dt);
-                self.last_frame = now;
+                let turn = Instant::now();
                 self.stale = false;
                 self.minute = minute();
                 if let Some((frames, _)) = &mut self.frames {
@@ -2094,6 +2121,8 @@ impl ApplicationHandler for App {
                         frame
                     }
                     wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                        // A turn all the same: what asked for it (a wake) is answered, and not asked again at once.
+                        self.last_frame = Instant::now();
                         // Nothing of the window shows: a Toast drawn in it passes unseen, in its time.
                         if self.toast_strip.is_none() {
                             self.dashboard.toasts_presented(told(&mut self.told_time));
@@ -2101,13 +2130,25 @@ impl ApplicationHandler for App {
                         return;
                     }
                     wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                        self.last_frame = Instant::now();
                         state.surface.configure(&state.gpu.device, &state.config);
                         self.stale = true;
                         return;
                     }
                     wgpu::CurrentSurfaceTexture::Validation => panic!("surface validation error"),
                 };
-                let acquired = Instant::now();
+                // The picture is of the moment the frame had its buffer, as the Overlay's is (#99): read before the
+                // wait, the clock would put a long wait (the first frame of a stretch) into the next frame's step,
+                // and the movement would jump by it between two frames a refresh apart.
+                let now = Instant::now();
+                let acquired = now;
+                // From rest an animation starts with a tenth of a second at most, however long Home sat still. One
+                // that was moving has moved on by as long as this frame is after the last, as the Overlay's does: a
+                // fade takes its time by the clock however few frames a slow renderer gives it.
+                let passed = (now - self.last_frame).as_secs_f32();
+                let dt = passed.min(if self.moving { 1.0 } else { 0.1 });
+                state.host.store.slept(passed - dt);
+                self.last_frame = now;
                 let view = frame.texture.create_view(&Default::default());
                 let size = (state.config.width, state.config.height);
                 if let Some(playing) = &mut self.boot_video {
@@ -2131,16 +2172,16 @@ impl ApplicationHandler for App {
                     }
                 }
                 if self.frames.is_some() {
-                    self.frame_times[0].frame(now, acquired, Instant::now(), self.moving);
+                    self.frame_times[0].frame(turn, acquired, Instant::now(), self.moving);
                 }
-                (self.home_took, self.home_done) = (now.elapsed(), Instant::now());
+                (self.home_took, self.home_done) = (turn.elapsed(), Instant::now());
                 // Without a strip the Toast was in that frame.
                 if self.toast_strip.is_none() {
                     self.dashboard.toasts_presented(told(&mut self.told_time));
                 }
                 self.moving = state.host.animating();
                 let art = &state.host.art;
-                self.hub_open.frame(now, acquired, Instant::now(), state.host.cost, self.moving, art);
+                self.hub_open.frame(turn, acquired, Instant::now(), state.host.cost, self.moving, art);
                 let (covered, showing) = (self.dashboard.home_covered(), self.dashboard.backdrop_showing());
                 self.backdrop.presented(covered, showing, self.moving, self.dashboard.backdrop_whole(), size);
                 if self.presented.is_none() {
@@ -2248,5 +2289,66 @@ mod tests {
         assert_eq!(overlay_due(began, quick), began + quick);
         let slow = Duration::from_millis(600);
         assert_eq!(overlay_due(began, slow), began + slow * 4);
+    }
+
+    /// A window's frames, through `FrameTimes`: each `(wait, draw, between)` in ms, the first after a rest, every
+    /// other after one that left something moving. `between` is the loop's time from a frame's present to the next
+    /// frame's turn.
+    fn timed(frames: &[(u64, u64, u64)]) -> FrameTimes {
+        let ms = Duration::from_millis;
+        let mut times = FrameTimes::default();
+        let mut at = Instant::now();
+        for (n, &(wait, draw, between)) in frames.iter().enumerate() {
+            at += ms(between);
+            let (began, acquired) = (at, at + ms(wait));
+            at = acquired + ms(draw);
+            times.frame(began, acquired, at, n > 0);
+        }
+        times
+    }
+
+    #[test]
+    fn the_wait_before_a_stretchs_first_frame_is_said_apart_and_is_no_late_frame() {
+        // The Guide as it was measured on the TV PC (#99): its first frame waits two refreshes for its buffer, then
+        // every frame one. Counted from each turn's start, as it was, the second frame's gap took the first one's
+        // wait in and was late, though the two pictures were a refresh apart.
+        let mut frames = vec![(16, 0, 0)];
+        frames.extend([(8, 0, 0); 30]);
+        let mut times = timed(&frames);
+        assert_eq!((times.moving, times.late, times.from_rest), (30, 0, 1));
+        assert_eq!((times.gap_most, times.from_rest_wait_most), (Duration::from_millis(8), Duration::from_millis(16)));
+        let said = times.said();
+        assert!(said.contains("moving: 30 frames at 125 a second, longest gap 8.0 ms (8.0 of it its wait), 0 late"));
+        assert!(said.ends_with("; from rest: 1 frames, their wait most 16.0 ms"), "{said}");
+        // Said and forgotten, all but when the last frame was.
+        assert_eq!((times.frames, times.moving, times.from_rest), (0, 0, 0));
+        assert!(times.last.is_some());
+    }
+
+    #[test]
+    fn a_refresh_missed_in_a_stretch_is_late_and_says_where_its_time_went() {
+        // The loop slow to come back once (another window's frame, a sleep too long): late, its wait a refresh.
+        let mut times = timed(&[(0, 1, 0), (7, 1, 0), (7, 1, 15), (7, 1, 0), (21, 1, 0), (7, 1, 0)]);
+        assert_eq!((times.moving, times.late), (5, 2));
+        assert!(times.said().contains("longest gap 23.0 ms (7.0 of it its wait), 2 late"));
+        // A wait of over two refreshes in the middle of a stretch: late, nearly all of it the wait.
+        let mut times = timed(&[(0, 1, 0), (7, 1, 0), (21, 1, 0), (7, 1, 0)]);
+        assert_eq!((times.moving, times.late), (3, 1));
+        assert!(times.said().contains("longest gap 22.0 ms (21.0 of it its wait), 1 late"));
+    }
+
+    #[test]
+    fn a_frame_after_a_rest_starts_a_stretch_however_long_the_rest() {
+        let ms = Duration::from_millis;
+        let mut times = FrameTimes::default();
+        let at = Instant::now();
+        // A stretch, a second's rest, another stretch: the rest is neither a gap nor late.
+        times.frame(at, at, at + ms(1), false);
+        times.frame(at + ms(1), at + ms(8), at + ms(9), true);
+        let later = at + Duration::from_secs(1);
+        times.frame(later, later + ms(3), later + ms(4), false);
+        times.frame(later + ms(4), later + ms(11), later + ms(12), true);
+        assert_eq!((times.moving, times.late, times.from_rest), (2, 0, 2));
+        assert_eq!((times.gap_most, times.from_rest_wait_most), (ms(8), ms(3)));
     }
 }

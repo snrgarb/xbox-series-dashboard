@@ -215,6 +215,8 @@ mod win {
         }
         // A layered window shows nothing until it is given its attributes: fully opaque, as far as layering goes.
         SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+        // taskkill's request to close reaches it from any program, as Home's window's does.
+        crate::hear_close_from_anyone(hwnd);
         log(&format!("window {hwnd:?} made hidden, {width}x{height} at y {top}, ex style {ex:#010x}"));
         let size = (width as u32, height as u32);
         Some((hwnd, Place { size, screen: (width as u32, screen_height as u32), top: top as u32 }))

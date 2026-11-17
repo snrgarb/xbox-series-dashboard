@@ -234,6 +234,8 @@ pub(crate) mod win {
             // A layered window shows nothing until it is given its attributes: fully opaque, as far as layering goes.
             SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
         }
+        // taskkill's request to close reaches it from any program, as Home's window's does.
+        crate::hear_close_from_anyone(hwnd);
         log(&format!("window {hwnd:?} made hidden, {width}x{height}, WS_POPUP, ex style {ex:#010x}"));
         Some((hwnd, (width as u32, height as u32)))
     }
