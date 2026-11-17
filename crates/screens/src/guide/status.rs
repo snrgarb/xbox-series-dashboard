@@ -1,7 +1,7 @@
 //! The Status area as the Guide has it, stacked at the screen's top right: the batteries on a line of their own
 //! over the clock, large (docs/spec/guide.md, section 2.3). Home's top bar has the same parts in a row.
 use model::discord::CallMark;
-use ui::{Color, Font, Rect, TextStyle, Ui};
+use ui::{Battery, Color, Font, Rect, TextStyle, Ui};
 
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 
@@ -9,9 +9,9 @@ use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 /// Dashboard is told (`Dashboard::set_status`); where each value comes from is the shell's business.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Status {
-    /// The first pad's charge, 0 to 100, in place of what the pad itself says (`Dashboard::set_pad`). With none
-    /// known either way a connected pad shows as one on a cable does: its glyph.
-    pub pad_battery: Option<u8>,
+    /// The first pad's battery, in place of what the pad itself says (`Dashboard::set_pad`). With none known either
+    /// way a connected pad shows as one on a cable does: its glyph.
+    pub pad_battery: Option<Battery>,
     /// The PC's own battery; none on a PC without one.
     pub pc_battery: Option<PcBattery>,
     /// Settings' "show battery percentages": the figure beside each battery.
@@ -113,10 +113,11 @@ pub(crate) fn call_mark(ui: &mut Ui, right: f32, middle: f32, mark: CallMark) ->
     area.x
 }
 
-/// The pad's battery ending at `right`: its charge as a cell on its side, or the pad's glyph for one whose charge
-/// is not known. Returns where it starts.
+/// The pad's battery ending at `right`: its charge as a cell on its side, with the figure beside it where the pad
+/// says a percentage (and Settings wants figures); at its level and with no figure where it says only a level; and
+/// the pad's glyph for one on a cable or one that says nothing (docs/spec/home.md 2.4). Returns where it starts.
 pub(crate) fn pad_battery(ui: &mut Ui, right: f32, middle: f32, status: &Status) -> f32 {
-    let Some(percent) = status.pad_battery else {
+    let Some((battery, fill)) = status.pad_battery.and_then(|battery| Some((battery, battery.fill()?))) else {
         ui.icon(right - 12.0, middle, glyph::GAMEPAD, 24.0, Color::WHITE);
         return right - 24.0;
     };
@@ -125,7 +126,8 @@ pub(crate) fn pad_battery(ui: &mut Ui, right: f32, middle: f32, status: &Status)
     let cell = Rect::new(right - 33.0, middle - 8.0, 30.0, 16.0);
     ui.ring(cell, Color::WHITE, 3.0, 2.0);
     let inside = cell.grow(-4.0);
-    ui.fill(Rect::new(inside.x, inside.y, inside.w * percent.min(100) as f32 / 100.0, inside.h), Color::WHITE, 1.0);
+    ui.fill(Rect::new(inside.x, inside.y, inside.w * fill, inside.h), Color::WHITE, 1.0);
+    let Battery::Percent(percent) = battery else { return cell.x };
     if !status.show_percent {
         return cell.x;
     }

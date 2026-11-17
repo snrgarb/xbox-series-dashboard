@@ -75,13 +75,28 @@ impl Default for Repeat {
     }
 }
 
-/// What powers a pad.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// What powers a pad, as far as Windows says (docs/research/pad-battery.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Battery {
     /// A cable.
     Wired,
-    /// A battery this full, 0 to 1.
-    Charge(f32),
+    /// A battery at one of XInput's four levels, 0 to 3: empty (under 10%), low (to 40%), medium (to 70%), full.
+    /// All most pads say of their charge.
+    Level(u8),
+    /// A battery with this much charge left, 0 to 100: a pad on Bluetooth LE, as Windows' Settings shows it.
+    Percent(u8),
+}
+
+impl Battery {
+    /// How full the battery's cell is drawn, 0 to 1: a level at the top of its band, as Windows.Gaming.Input gives
+    /// the same four (10, 40, 70 and 100 percent). None for a cable.
+    pub fn fill(self) -> Option<f32> {
+        match self {
+            Battery::Wired => None,
+            Battery::Level(level) => Some([0.1, 0.4, 0.7, 1.0][level.min(3) as usize]),
+            Battery::Percent(percent) => Some(percent.min(100) as f32 / 100.0),
+        }
+    }
 }
 
 /// The pad the Status area shows: the first one connected.

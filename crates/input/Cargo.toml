@@ -3,11 +3,18 @@ name = "input"
 version.workspace = true
 publish.workspace = true
 edition = "2021"
-description = "The gamepad, through XInput, and the Guide button."
+description = "The gamepad, through XInput, and the Guide button; the first pad's battery."
 
 [dependencies]
 log-line = { path = "../log-line" }
 ui = { path = "../ui" }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Properties",
+] }
+windows = { version = "0.62", features = ["Foundation", "Gaming_Input", "Devices_Power", "System_Power"] }

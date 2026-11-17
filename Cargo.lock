@@ -973,6 +973,7 @@ version = "0.1.0"
 dependencies = [
  "log-line",
  "ui",
+ "windows",
  "windows-sys 0.61.2",
 ]
 
