@@ -11,7 +11,9 @@
 //!
 //! [`Gog`] is the source the library reads (`model::Source`). A GOG game has no launcher check, so it is started
 //! as its own program, with the `.info` file's primary play task: no client is needed. Galaxy is asked to install
-//! a game where it is installed; a game's own uninstaller uninstalls it.
+//! a game where it is installed; a game's own uninstaller uninstalls it. Where the user has added gogdl and signed it
+//! in (#176, [`gogdl`]), it downloads, pauses, resumes, cancels, sets up and uninstalls through gogdl instead, its
+//! progress in the Queue; the games it installed are read from the Dashboard's own record of them.
 // Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
 // (crates/log-line). Defined before the modules, so they all take it rather than std's.
 #[allow(unused_macros)]
@@ -23,13 +25,14 @@ macro_rules! eprintln {
 
 pub mod fixture;
 pub mod galaxy;
+pub mod gogdl;
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use model::{Ask, Found, Game, Library, Source, Start};
+use model::{Ask, Can, Folder, Found, Game, Install, Installer, Library, Opener, Refusal, Source, Start, Steer};
 use serde_json::Value;
 
 /// GOG, as a game's `source` names it.
@@ -40,12 +43,25 @@ pub const SOURCE: &str = "gog";
 pub struct Gog {
     /// A folder standing for GOG's on this machine (`--gog`, `Places::under`); with none, the machine's own.
     root: Option<PathBuf>,
+    /// gogdl, where the executable gives its route (#176).
+    gogdl: Option<gogdl::Gogdl>,
 }
 
 impl Gog {
     /// GOG's files under `root` (`--gog` on the command line, `Places::under`), or with none the machine's own.
     pub fn at(root: Option<PathBuf>) -> Self {
-        Self { root }
+        Self { root, gogdl: None }
+    }
+
+    /// With gogdl at `route`: its installs read, and asked to install and steer installs while it is added and
+    /// signed in.
+    pub fn with_gogdl(mut self, route: source_kit::HelperRoute) -> Self {
+        self.gogdl = Some(gogdl::Gogdl::new(route));
+        self
+    }
+
+    fn usable_gogdl(&self) -> Option<&gogdl::Gogdl> {
+        self.gogdl.as_ref().filter(|gogdl| gogdl.usable())
     }
 
     fn places(&self) -> Option<Places> {
@@ -142,10 +158,13 @@ impl Source for Gog {
             bail!("{}: no such folder", places.data.display());
         }
         let records = places.records();
-        if records.is_none() && !places.database().is_file() {
+        let ours = self.gogdl.as_ref().map(|gogdl| gogdl::installed(gogdl.home())).unwrap_or_default();
+        if records.is_none() && ours.is_empty() && !places.database().is_file() {
             return Ok(None);
         }
-        let library = load(&places, records.unwrap_or_default()).with_context(|| places.data.display().to_string())?;
+        // What gogdl installed first: its folder is the one the Dashboard knows.
+        let records = ours.into_iter().chain(records.unwrap_or_default()).collect();
+        let library = load(&places, records).with_context(|| places.data.display().to_string())?;
         Ok(Some(Found { library, from: places.data.display().to_string() }))
     }
 
@@ -180,6 +199,49 @@ impl Source for Gog {
                 })
             }
         }
+    }
+
+    /// gogdl's downloads, while it is added and signed in (or has one paused).
+    fn installs(&self) -> Option<Vec<Install>> {
+        let gogdl = self.gogdl.as_ref()?;
+        let installs = gogdl.installs();
+        (gogdl.usable() || !installs.is_empty()).then_some(installs)
+    }
+
+    /// Through gogdl, a game it installed is uninstalled with no question but the Dashboard's.
+    fn uninstalls_by_itself(&self) -> bool {
+        self.usable_gogdl().is_some()
+    }
+
+    fn installer(&self) -> Option<&dyn Installer> {
+        self.gogdl.as_ref().map(|_| self as &dyn Installer)
+    }
+}
+
+/// GOG's installer: gogdl, where it is added and signed in. Where it is not, every call is `Unsupported`, and GOG's
+/// own way is asked as before: Galaxy to install, the game's uninstaller to uninstall.
+impl Installer for Gog {
+    fn can(&self) -> Can {
+        self.gogdl.as_ref().map_or(Can::NOTHING, gogdl::Gogdl::can)
+    }
+
+    fn folders(&self) -> Vec<Folder> {
+        self.usable_gogdl().map(gogdl::Gogdl::folders).unwrap_or_default()
+    }
+
+    fn install(&self, game: &Game, folder: Option<&Folder>, _open: &mut dyn Opener) -> Result<(), Refusal> {
+        let (Some(id), Some(gogdl)) = (product_id(game), &self.gogdl) else { return Err(Refusal::Unsupported) };
+        gogdl.install(id, folder)
+    }
+
+    fn uninstall(&self, game: &Game, _open: &mut dyn Opener) -> Result<(), Refusal> {
+        let (Some(id), Some(gogdl)) = (product_id(game), &self.gogdl) else { return Err(Refusal::Unsupported) };
+        gogdl.uninstall(id)
+    }
+
+    fn steer(&self, game: &Game, steer: Steer, _open: &mut dyn Opener) -> Result<(), Refusal> {
+        let (Some(id), Some(gogdl)) = (product_id(game), &self.gogdl) else { return Err(Refusal::Unsupported) };
+        gogdl.steer(id, steer)
     }
 }
 
