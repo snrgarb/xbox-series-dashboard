@@ -137,6 +137,17 @@
 //!       --bad-hash one that is not the zip's, so the download must be refused; with --not-public 404, as a private
 //!       repository's. Says `serve-updates: listening on <the update address>` and then a line a request (its path
 //!       and User-Agent, and whether it carried any Authorization), until it is killed.
+//!   standin serve-helpers --table <file> [--port <n>]
+//!       The stand-in helpers' release pages (`helpers::fake`), on 127.0.0.1 at <n> (any free port without one):
+//!       serves this program, and writes at <file> the helpers' table for `dashboard --helper-table <file>`, every
+//!       helper's address the stand-in's and its SHA-256 this program's. legendary's address serves this program, so
+//!       it is kept; gogdl's serves other bytes, so it must be refused. Says `serve-helpers: listening on
+//!       http://127.0.0.1:<n>` and then a line a request (its path and User-Agent, and whether it carried any
+//!       Authorization), until it is killed.
+//!   legendary.exe | gogdl.exe [--version | <args>...]
+//!       The stand-in helper, when this program is named as one (as `serve-helpers` serves it, kept in the
+//!       Dashboard's data folder): with --version says `<name> <version> (stand-in)` on standard output and a line on
+//!       standard error, and exits 0; with anything else says each argument a line, then `done`.
 //!   standin discord --pipe <name> [--port <n>]
 //!       A fake Discord (`discord::fake`), for `dashboard --discord-pipe <name> --discord-token-url
 //!       http://127.0.0.1:<n>/api/oauth2/token --discord-cdn-url http://127.0.0.1:<n>`: listens on the named pipe
@@ -187,6 +198,8 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>] [--candidates <n>]
        standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
+       standin serve-helpers --table <file> [--port <n>]
+       legendary.exe | gogdl.exe [--version | <args>...]
        standin discord --pipe <name> [--port <n>]
        standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel>
                                | dm <person> | group <person>... | join <person> | leave <person> | speak <who>
@@ -898,6 +911,7 @@ fn run(args: &[String]) -> i32 {
         }
         Some("serve-art") => serve_art(&args[1..]),
         Some("serve-updates") => serve_updates(&args[1..]),
+        Some("serve-helpers") => serve_helpers(&args[1..]),
         Some("discord") => serve_discord(&args[1..]),
         Some("discord-say") => match &args[1..] {
             [name, words @ ..] if !words.is_empty() => match discord::fake::say_to(name, &words.join(" ")) {
@@ -1049,6 +1063,7 @@ fn run(args: &[String]) -> i32 {
         }
         // As a fake Battle.net's client.
         _ if named("Battle.net") => battlenet(args),
+        _ if named("legendary") || named("gogdl") => helper(args),
         // As a fake Steam's client.
         _ if named("steam") => steam_client(args),
         // As a game's own program, in its install folder.
@@ -1227,6 +1242,77 @@ fn serve_updates(args: &[String]) -> i32 {
         }
         said = requests.len();
     }
+}
+
+fn serve_helpers(args: &[String]) -> i32 {
+    let (mut table, mut port) = (None, 0u16);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--table" => table = it.next().map(PathBuf::from),
+            "--port" => match it.next().and_then(|v| v.parse().ok()) {
+                Some(value) => port = value,
+                None => {
+                    note("serve-helpers: bad --port");
+                    return 2;
+                }
+            },
+            _ => {
+                note(USAGE);
+                return 2;
+            }
+        }
+    }
+    let Some(table) = table else {
+        note(&format!("serve-helpers: --table is needed\n{USAGE}"));
+        return 2;
+    };
+    let me = std::env::current_exe().and_then(std::fs::read);
+    let service = match me.and_then(|bytes| helpers::fake::FakeHelpers::start(port, bytes)) {
+        Ok(service) => service,
+        Err(e) => {
+            note(&format!("serve-helpers: port {port}: {e}"));
+            return 1;
+        }
+    };
+    let json = serde_json::to_string_pretty(&service.table()).expect("plain fields");
+    if let Err(e) = std::fs::write(&table, json) {
+        note(&format!("serve-helpers: {}: {e}", table.display()));
+        return 1;
+    }
+    note(&format!("serve-helpers: table at {}: legendary served as itself, gogdl as other bytes", table.display()));
+    note(&format!("serve-helpers: listening on {}", service.url("").trim_end_matches("/helpers/")));
+    let mut said = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let requests = service.requests();
+        for request in &requests[said..] {
+            let agent = request.user_agent.as_deref().unwrap_or("none");
+            let key = if request.authorization.is_some() { "an Authorization" } else { "no Authorization" };
+            note(&format!("serve-helpers: {} (User-Agent {agent}, {key})", request.path));
+        }
+        said = requests.len();
+    }
+}
+
+/// The stand-in helper: legendary or gogdl, as this program is named.
+fn helper(args: &[String]) -> i32 {
+    let name = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.file_stem()?.to_string_lossy().to_lowercase()))
+        .unwrap_or_default();
+    let version = helpers::builtin().into_iter().find(|h| h.key == name).map(|h| h.version).unwrap_or_default();
+    note(&format!("{name}: {}", if args.is_empty() { "no arguments".into() } else { args.join(" ") }));
+    if args.first().map(String::as_str) == Some("--version") {
+        println!("{name} {version} (stand-in)");
+        eprintln!("[cli] INFO: stand-in {name}, nothing downloaded");
+        return 0;
+    }
+    for arg in args {
+        println!("{arg}");
+    }
+    println!("done");
+    0
 }
 
 fn serve_art(args: &[String]) -> i32 {

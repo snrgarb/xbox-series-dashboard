@@ -8,6 +8,7 @@ use super::boxes::{Boxes, Item};
 use super::discord::Discord;
 use super::groups::Groups;
 use super::guide::Guide;
+use super::helpers::{self, Helpers};
 use super::idle::Idle;
 use super::launchers::{self, Launchers};
 use super::profiles::Profiles;
@@ -36,7 +37,11 @@ pub fn theme_settings() -> Boxes {
     // (#194).
     let storage =
         Item::Opens { icon: '\u{EDA2}', name: storage::TITLE, pane: |around| Box::new(Storage::open(around)) };
-    // Shell mode's page, the port's own, on a row of its own under Art (docs/spec/shell-mode.md, 2), and About beside
+    // The helper programs some stores install through, the port's own, on a row of its own under Art and Storage
+    // (docs/spec/helpers.md, 2).
+    let helpers =
+        Item::Opens { icon: '\u{E896}', name: helpers::TITLE, pane: |around| Box::new(Helpers::open(around)) };
+    // Shell mode's page, the port's own, on a row of its own under Helpers (docs/spec/shell-mode.md, 2), and About beside
     // it: which build this is (16.10).
     let system = Item::Opens { icon: '\u{E770}', name: system::TITLE, pane: |_| Box::new(system::System::default()) };
     let about = Item::Opens { icon: '\u{E946}', name: about::TITLE, pane: |around| Box::new(About::open(around)) };
@@ -47,6 +52,7 @@ pub fn theme_settings() -> Boxes {
             vec![guide, discord],
             vec![added, launchers],
             vec![art, storage],
+            vec![helpers],
             vec![system, about],
         ],
     )

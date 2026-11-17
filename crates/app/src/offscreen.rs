@@ -27,6 +27,9 @@ pub fn run(
     let target = Offscreen::new(&gpu, size);
     let mut host = Host::new(&gpu, FORMAT, || {});
     let mut dashboard = Dashboard::new(library);
+    // Settings > Helpers as they stand in `--data-dir`'s folder, if it names one.
+    let helpers = crate::helper_programs::Helpers::new(crate::helper_programs::table(args), args.data_dir.clone());
+    dashboard.set_helpers(helpers.shown());
     dashboard.set_options(options);
     for text in &args.notify {
         dashboard.record(text);

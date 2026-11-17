@@ -17,6 +17,7 @@ macro_rules! eprintln {
 mod as_shell;
 mod backdrop;
 mod games;
+mod helper_programs;
 mod media_folder;
 mod offscreen;
 mod sounds;
@@ -140,6 +141,9 @@ pub struct Args {
     /// The update address, in place of `update::SOURCE`: a test's stand-in (`standin serve-updates`). Never the
     /// real one in a test.
     update_source: Option<String>,
+    /// The helpers' table, in place of the `helpers` crate's: a test's, whose addresses are a stand-in's
+    /// (`standin serve-helpers`). Never the real one in a test.
+    helper_table: Option<PathBuf>,
     /// The version this Dashboard takes itself for, in place of its own: a test's, older than the one it serves.
     pretend_version: Option<model::update::Version>,
     /// An update's new Dashboard, started by the one with this pid (docs/spec/updates.md): it takes the
@@ -176,7 +180,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
                  [--from-shell] [--dry-shell] [--log-file <file>]
-                 [--update-source <url>] [--pretend-version <x.y.z>]
+                 [--update-source <url>] [--pretend-version <x.y.z>] [--helper-table <file>]
        dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
        dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
        dashboard --version: prints `dashboard <version> (<commit>)`
@@ -273,6 +277,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--dry-shell" => args.dry_shell = true,
             "--log-file" => args.log_file = Some(value()?.into()),
             "--update-source" => args.update_source = Some(value()?),
+            "--helper-table" => args.helper_table = Some(value()?.into()),
             "--pretend-version" => {
                 let value = value()?;
                 args.pretend_version =

@@ -218,6 +218,8 @@ struct App {
     discord: discord::Connection,
     /// Settings > About's updates and the daily check (docs/spec/updates.md).
     updater: crate::updates::Updater,
+    /// Settings > Helpers, carried out.
+    helpers: crate::helper_programs::Helpers,
 }
 
 /// What a Toast says when SteamGridDB refuses the key (a 401): once, and no lookups until another key is entered.
@@ -348,7 +350,13 @@ fn describe(window: &Window) -> String {
     }
 }
 
-pub fn run(args: &Args, started_with: &[String], library: Library, store: Store, as_shell: crate::as_shell::AsShell) {
+pub fn run(
+    args: &Args,
+    started_with: &[String],
+    library: Library,
+    mut store: Store,
+    as_shell: crate::as_shell::AsShell,
+) {
     shell::log_wgpu();
     let event_loop = EventLoop::new().unwrap_or_else(|e| crate::fail(&format!("no display: {e}")));
     let mut dashboard = Dashboard::new(library);
@@ -401,6 +409,9 @@ pub fn run(args: &Args, started_with: &[String], library: Library, store: Store,
     let current = model::update::Version::parse(crate::build().version).unwrap_or_default();
     let last_check = store.setting(screens::settings::LAST_UPDATE_CHECK);
     let updater = crate::updates::Updater::new(args.update_source.clone(), current, started_with, last_check);
+    let helpers = crate::helper_programs::Helpers::new(crate::helper_programs::table(args), data_dir.clone());
+    store.set_helpers(helpers.shown());
+    dashboard.set_helpers(helpers.shown());
     let mut app = App {
         windowed: args.windowed,
         as_shell,
@@ -499,6 +510,7 @@ pub fn run(args: &Args, started_with: &[String], library: Library, store: Store,
         idle_after: args.idle_after,
         discord,
         updater,
+        helpers,
     };
     // Where shell mode stands, for Settings > System: asked off the frame's thread, as schtasks is slow.
     let proxy = event_loop.create_proxy();
@@ -963,6 +975,14 @@ impl App {
                 }
                 // Settings > About: asked and downloaded off the frame's thread; the page follows how it goes.
                 Effect::CheckForUpdates => self.check_for_updates("Check for updates"),
+                // Settings > Helpers: a fetch goes off the frame's thread; the page follows how it goes.
+                Effect::Helper(ask) => {
+                    let proxy = self.proxy.clone();
+                    self.helpers.ask(ask, move || {
+                        let _ = proxy.send_event(());
+                    });
+                    self.show_helpers();
+                }
                 Effect::InstallUpdate => {
                     if self.dashboard.playing().is_some() {
                         eprintln!("update: Install refused while a game runs");
@@ -1178,6 +1198,15 @@ impl App {
             let of = self.dashboard.library().games.len();
             let state = if self.art.is_some() { ArtRefresh::Working { done: 0, of } } else { ArtRefresh::Paused };
             self.set_art_refresh(state);
+        }
+    }
+
+    /// How the helpers stand, on Settings > Helpers, without a new snapshot.
+    fn show_helpers(&mut self) {
+        let shown = self.helpers.shown();
+        self.store.set_helpers(shown.clone());
+        if self.dashboard.set_helpers(shown) {
+            self.stale = true;
         }
     }
 
@@ -1595,6 +1624,9 @@ impl ApplicationHandler for App {
             self.achievements_listed.1 |= update.library.is_some() || listed.is_some_and(|g| update.icons.contains(&g));
             self.show(update.library);
             self.dashboard.unlocked(update.unlocked);
+        }
+        if self.helpers.take() {
+            self.show_helpers();
         }
         if self.take_art() {
             toasts_changed = true;

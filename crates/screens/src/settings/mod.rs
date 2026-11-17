@@ -19,6 +19,7 @@ mod discord;
 mod group;
 pub mod groups;
 mod guide;
+pub mod helpers;
 pub mod idle;
 pub mod launchers;
 pub mod options;

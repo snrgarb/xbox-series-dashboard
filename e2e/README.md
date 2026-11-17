@@ -378,6 +378,22 @@ gh run download <run id> -n XboxSeriesDashboard-<version> -D target/release-test
 e2e/htpc/run.sh install --exe target/release-test/dashboard.exe --standin target/release-test/standin.exe
 ```
 
+## Helpers
+
+**`helpers`** (docs/spec/helpers.md, 5), safe on the TV PC. `standin serve-helpers` on 127.0.0.1 serves standin.exe
+and writes a helpers' table pointing at itself, which the Dashboard is given with `--helper-table`, on a data folder
+of the test's own. Walked by the virtual pad to Settings > Helpers: Add legendary asks, Yes fetches it, checks its
+SHA-256, keeps it as `<data>\helpers\legendary\legendary.exe` and runs it once with `--version` through the shell's
+runner (standin.exe, named so, is the stand-in helper), its lines logged; gogdl's address serves other bytes and is
+refused with nothing kept; legendary's Remove deletes its folder. Judged by the focus lines, the `helpers:` lines and
+`standin.log` (the one request, plain). Nothing is asked of the projects' real release pages. It needs the Windows
+build's two programs:
+
+```sh
+cargo build --release --target x86_64-pc-windows-gnullvm -j 3 -p app -p standin
+e2e/htpc/run.sh helpers
+```
+
 ## Updates
 
 **`updates`** (docs/spec/updates.md, 7), safe on the TV PC. A copy of the staged `dashboard.exe` in a folder of the

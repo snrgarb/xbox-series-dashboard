@@ -108,7 +108,8 @@ function Start-Copy([string] $Exe, [string] $Source, [string] $Log, [string] $Da
 function Open-About([string] $Log) {
     if (-not (Wait-Line $Log 'first frame presented' 60)) { throw "the copy never presented a frame" }
     Start-Sleep -Seconds 2
-    foreach ($button in 'Right', 'Down', 'Down', 'Down', 'Down', 'Right') { Push-Button $button; Start-Sleep -Milliseconds 400 }
+    # Down to the foot, System, wherever it is (the rows over it change as boxes come), then About beside it.
+    foreach ($button in 'Right', 'Down', 'Down', 'Down', 'Down', 'Down', 'Down', 'Right') { Push-Button $button; Start-Sleep -Milliseconds 400 }
     if (-not (Wait-Line $Log '^focus: Settings: Theme settings: About$' 10)) { throw 'focus never came to About in Theme settings' }
     Push-Button 'A'
     Expect-Line $Log "^focus: Settings: About: Version $([regex]::Escape($Pretend))\b.*; Check for updates; unchecked$" 10 'About opens as 0.0.1, focus on Check for updates'
