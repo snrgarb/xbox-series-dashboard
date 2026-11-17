@@ -2601,7 +2601,7 @@ impl Stage {
             } else {
                 model::InstallState::Queued
             };
-            model::Queued { game: row[tile].id, state, started: i as u64, speed: None }
+            model::Queued::new(row[tile].id, state, i as u64)
         });
         self.dashboard.set_queue(model::Queue::new(entries.collect(), Vec::new()));
     }

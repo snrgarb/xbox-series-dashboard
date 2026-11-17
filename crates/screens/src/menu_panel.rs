@@ -64,6 +64,9 @@ pub fn flight(ui: &mut Ui, id: impl Hash + Copy, leaving: bool) -> (f32, f32) {
 /// The icons the Bundle's menus and prompts use, in Segoe Fluent Icons.
 pub mod icon {
     pub const PLAY: char = '\u{E768}';
+    pub const PAUSE: char = '\u{E769}';
+    /// Cancel an install: the cross.
+    pub const CANCEL_INSTALL: char = '\u{E711}';
     pub const QUIT: char = '\u{E711}';
     pub const CANCEL: char = '\u{E72B}';
     pub const FAVOURITE: char = '\u{E734}';

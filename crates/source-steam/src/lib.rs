@@ -13,7 +13,7 @@
 //! [`Steam`] is the source the library reads (`model::Source`): it finds the install, reads it with [`load`],
 //! starts a game through Steam's own `steam://` address, installs and uninstalls one as the Bundle does, without
 //! Steam's windows ([`command`]; the shell types it into Steam's console over its CEF debugger where the user has
-//! that on, [`cef`]), and reports the installs Steam has under way from its app manifests ([`installs`]), how far
+//! that on, [`cef`]), all behind its `model::Installer`, and reports the installs Steam has under way from its app manifests ([`installs`]), how far
 //! each has got from Steam's own download overview where the debugger is on ([`overview`]) and else counted live
 //! ([`live`]), none said done while Steam is still at it ([`follow`]). [`probe`] is `--log-queue-sources`' look at
 //! every candidate count.
@@ -30,7 +30,7 @@ pub mod probe;
 pub mod vdf;
 
 use anyhow::{Context, Result};
-use model::{Ask, Found, Game, Install, Library, Source, Start};
+use model::{Ask, Can, Folder, Found, Game, Install, Installer, Library, Opener, Refusal, Source, Start, Steer};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -66,6 +66,13 @@ impl Steam {
 
     fn root(&self) -> Option<PathBuf> {
         self.root.clone().or_else(find_steam_root)
+    }
+
+    /// Whether the client is the end-to-end tests' stand-in Steam (`fixture::STANDIN_CLIENT` in a named install),
+    /// the one client that takes Pause, Resume and Cancel until the real Steam's are built (#171). Never so for
+    /// the install the registry names.
+    fn standin(&self) -> bool {
+        self.root.as_ref().is_some_and(|root| root.join(fixture::STANDIN_CLIENT).is_file())
     }
 
     /// The install's root, unless it is a named folder left empty: a machine with no Steam, as a test names one so
@@ -150,12 +157,68 @@ impl Source for Steam {
         let writes = if busy { live::writes(&root) } else { None };
         // Steam's own word, where it can be had: its debugger opened and its client running.
         let overview = (writes.is_some() && cef::enabled(&root)).then(overview::read).and_then(Result::ok);
-        Some(follow.look(found, overview.as_ref(), writes, &updating, self.started.elapsed().as_secs_f64()))
+        let dirs = steamapps_dirs(&root);
+        let mut found = follow.look(found, overview.as_ref(), writes, &updating, self.started.elapsed().as_secs_f64());
+        // #188: an app held installing while Steam fetches the Workshop items the account subscribes to is
+        // installed and playable; only its extras are still coming in. Their progress is #188's to read.
+        for install in &mut found {
+            let held = install.source_id.parse().ok().filter(|&appid| follow.held(appid));
+            if held.is_some_and(|appid| installs::workshop_pending(&dirs, appid)) {
+                install.state = model::InstallState::Extras { done: 0, total: 0 };
+                install.speed = None;
+            }
+        }
+        Some(found)
     }
 
     /// Asking is all it takes: `+app_uninstall` asks the user nothing.
     fn uninstalls_by_itself(&self) -> bool {
         true
+    }
+
+    fn installer(&self) -> Option<&dyn Installer> {
+        Some(self)
+    }
+}
+
+/// Steam's installer: today's route, its console over the CEF debugger where the user has that on, else
+/// `steam.exe -silent` (what [`Source::ask`] gives, which the shell opens without Steam's windows). That route
+/// installs into Steam's default library and uninstalls with no prompt, and can neither choose a folder nor pause,
+/// resume or cancel: those are `SteamClient.Installs` and `.Downloads` over the debugger (#171), and answer
+/// [`Refusal::Unsupported`] until then. The stand-in Steam of the end-to-end tests takes Pause, Resume and Cancel as
+/// commands of its own ([`fixture::steer_command`]).
+impl Installer for Steam {
+    fn can(&self) -> Can {
+        let standin = self.standin();
+        Can { pause: standin, cancel: standin, choose_folder: false, quiet_uninstall: true }
+    }
+
+    /// Steam's own library, its default: the console route has no way to name another.
+    fn folders(&self) -> Vec<Folder> {
+        let root = self.installed_root();
+        root.map(|root| vec![Folder { path: root.join("steamapps"), free: None, default: true }]).unwrap_or_default()
+    }
+
+    /// As the Bundle asks, wherever `folder` says: Steam puts it in its default library.
+    fn install(&self, game: &Game, _folder: Option<&Folder>, open: &mut dyn Opener) -> Result<(), Refusal> {
+        let start = self.ask(game, Ask::Install).ok_or(Refusal::Unsupported)?;
+        open.open(&start).map_err(Refusal::Failed)
+    }
+
+    fn uninstall(&self, game: &Game, open: &mut dyn Opener) -> Result<(), Refusal> {
+        let start = self.ask(game, Ask::Uninstall).ok_or(Refusal::Unsupported)?;
+        open.open(&start).map_err(Refusal::Failed)
+    }
+
+    fn steer(&self, game: &Game, steer: Steer, open: &mut dyn Opener) -> Result<(), Refusal> {
+        if !steer.allowed(self.can()) {
+            return Err(Refusal::Unsupported);
+        }
+        let appid = appid(game).ok_or(Refusal::Unsupported)?;
+        let exe = self.exe().ok_or_else(|| Refusal::Failed("the stand-in Steam has no steam.exe".into()))?;
+        let args = fixture::steer_command(steer, appid);
+        open.open(&Start::Program { dir: exe.parent().map(Path::to_path_buf), path: exe, args })
+            .map_err(Refusal::Failed)
     }
 }
 
@@ -591,6 +654,76 @@ mod registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Kept(Vec<String>);
+
+    impl Opener for Kept {
+        fn open(&mut self, start: &Start) -> Result<(), String> {
+            self.0.push(start.to_string());
+            Ok(())
+        }
+    }
+
+    fn steam_game(appid: &str) -> Game {
+        Game { source: SOURCE.into(), source_id: appid.into(), ..Game::default() }
+    }
+
+    /// Today's route behind the installer: what `ask` gives, opened, into Steam's own library whatever folder.
+    #[test]
+    fn steams_installer_asks_as_before_and_cannot_steer_a_real_steam() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("steam.exe"), "").unwrap();
+        let steam = Steam::at(Some(dir.path().to_path_buf()));
+        let installer = steam.installer().expect("Steam has an installer");
+        let folders = installer.folders();
+        assert_eq!(folders.len(), 1);
+        assert!(folders[0].default && folders[0].path == dir.path().join("steamapps"));
+        let mut kept = Kept(Vec::new());
+        installer.install(&steam_game("620"), folders.first(), &mut kept).unwrap();
+        installer.uninstall(&steam_game("620"), &mut kept).unwrap();
+        let exe = dir.path().join("steam.exe");
+        assert_eq!(
+            kept.0,
+            [
+                format!("{} -silent +app_install 620", exe.display()),
+                format!("{} -silent -console +app_uninstall 620", exe.display())
+            ]
+        );
+        assert_eq!(installer.can(), Can { quiet_uninstall: true, ..Can::NOTHING });
+        for steer in [Steer::Pause, Steer::Resume, Steer::Cancel] {
+            assert_eq!(installer.steer(&steam_game("620"), steer, &mut kept), Err(Refusal::Unsupported));
+        }
+        assert_eq!(kept.0.len(), 2);
+    }
+
+    #[test]
+    fn the_stand_in_steam_takes_pause_resume_and_cancel_as_commands_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("steam.exe"), "").unwrap();
+        std::fs::write(dir.path().join(fixture::STANDIN_CLIENT), "").unwrap();
+        let steam = Steam::at(Some(dir.path().to_path_buf()));
+        let installer = steam.installer().unwrap();
+        assert_eq!(installer.can(), Can { pause: true, cancel: true, quiet_uninstall: true, choose_folder: false });
+        let mut kept = Kept(Vec::new());
+        for steer in [Steer::Pause, Steer::Resume, Steer::Cancel] {
+            installer.steer(&steam_game("620"), steer, &mut kept).unwrap();
+        }
+        let exe = dir.path().join("steam.exe").display().to_string();
+        assert_eq!(
+            kept.0,
+            [
+                format!("{exe} -silent +standin_pause 620"),
+                format!("{exe} -silent +standin_resume 620"),
+                format!("{exe} -silent +standin_cancel 620")
+            ]
+        );
+        // Another store's game is none of Steam's.
+        let other = Game { source: "gog".into(), ..steam_game("620") };
+        assert_eq!(installer.steer(&other, Steer::Pause, &mut kept), Err(Refusal::Unsupported));
+        let args = fixture::steer_command(Steer::Cancel, 620);
+        assert_eq!(fixture::steer_asked(&args), Some((Steer::Cancel, 620)));
+        assert_eq!(fixture::steer_asked(&command(Ask::Install, 620)), None);
+    }
 
     #[test]
     fn localconfig_persona_and_apps() {

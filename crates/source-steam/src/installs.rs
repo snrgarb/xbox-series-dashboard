@@ -107,6 +107,17 @@ pub fn under_way(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<(
     found
 }
 
+/// Whether Steam's Workshop record for the app, `workshop/appworkshop_<appid>.acf` in any of these `steamapps`
+/// folders, says it still has items to fetch (`NeedsDownload`): the subscribed items Steam downloads once the game
+/// itself is installed (#188).
+pub fn workshop_pending(steamapps: &[PathBuf], appid: u32) -> bool {
+    steamapps.iter().any(|dir| {
+        let file = dir.join("workshop").join(format!("appworkshop_{appid}.acf"));
+        let record = fs::read(file).ok().and_then(|b| vdf::parse_text(&String::from_utf8_lossy(&b)).ok());
+        record.and_then(|record| record.u64_at(&["AppWorkshop", "NeedsDownload"])).is_some_and(|needs| needs != 0)
+    })
+}
+
 /// The installs under way in these `steamapps` folders, by their manifests alone ([`under_way`]).
 pub fn read(steamapps: &[PathBuf], updating: &dyn Fn(u32) -> bool) -> Vec<Install> {
     under_way(steamapps, updating).into_iter().map(|(appid, state, _)| Install::new(appid.to_string(), state)).collect()
@@ -171,5 +182,42 @@ mod tests {
         fixture::write_progress(&root, quiet, Progress::Dropped).unwrap();
         assert!(!game(&root).installed);
         assert_eq!(read(&|_| false), []);
+    }
+
+    #[test]
+    fn the_workshop_record_says_whether_items_are_still_to_fetch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, second) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::create_dir_all(second.join("workshop")).unwrap();
+        let record =
+            |needs: u32| format!("\"AppWorkshop\"\n{{\n\t\"appid\"\t\"4000\"\n\t\"NeedsDownload\"\t\"{needs}\"\n}}\n");
+        let file = second.join("workshop").join("appworkshop_4000.acf");
+        let dirs = [first, second];
+        assert!(!workshop_pending(&dirs, 4000), "no record");
+        std::fs::write(&file, record(1)).unwrap();
+        assert!(workshop_pending(&dirs, 4000) && !workshop_pending(&dirs, 4001));
+        std::fs::write(&file, record(0)).unwrap();
+        assert!(!workshop_pending(&dirs, 4000));
+    }
+
+    /// The stand-in Steam's Pause, Resume and Cancel (#170): from the bytes its manifest has.
+    #[test]
+    fn the_stand_in_pauses_resumes_and_cancels_at_the_bytes_it_has() {
+        use model::Steer;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("steam");
+        fixture::write(&root, &fixture::Fixture::standard()).unwrap();
+        let quiet = 9_100_040;
+        assert!(fixture::steered(&root, quiet, Steer::Pause).is_err(), "nothing under way");
+        fixture::write_progress(&root, quiet, Progress::Downloading { done: 30, total: 100 }).unwrap();
+        let paused = fixture::steered(&root, quiet, Steer::Pause).unwrap();
+        assert_eq!(paused, Progress::Paused { done: 30, total: 100 });
+        fixture::write_progress(&root, quiet, paused).unwrap();
+        let resumed = fixture::steered(&root, quiet, Steer::Resume).unwrap();
+        assert_eq!(resumed, Progress::Downloading { done: 30, total: 100 });
+        assert_eq!(fixture::steered(&root, quiet, Steer::Cancel).unwrap(), Progress::Dropped);
+        // An installed game has nothing to steer.
+        fixture::write_progress(&root, quiet, Progress::Done).unwrap();
+        assert!(fixture::steered(&root, quiet, Steer::Cancel).is_err());
     }
 }

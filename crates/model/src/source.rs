@@ -7,7 +7,7 @@
 //! of starting a game and following it is the shell's: a source only gives addresses and answers.
 use std::path::PathBuf;
 
-use crate::{Game, Install, Library};
+use crate::{Game, Install, Installer, Library};
 
 /// What a store is asked to do with a game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +133,13 @@ pub trait Source: Send + Sync {
     /// happen: it is followed a while longer, and the wait ends quietly. False, the default.
     fn uninstalls_by_itself(&self) -> bool {
         false
+    }
+
+    /// The store's own way to install, uninstall and steer installs (`crate::installer`), where it has one. None,
+    /// the default: the store is asked by what [`ask`](Source::ask) gives, and its installs cannot be paused or
+    /// cancelled from here. Where it has one, what it refuses as unsupported falls back to `ask` all the same.
+    fn installer(&self) -> Option<&dyn Installer> {
+        None
     }
 }
 

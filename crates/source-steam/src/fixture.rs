@@ -675,6 +675,46 @@ pub fn write_progress(root: &Path, appid: u32, progress: Progress) -> io::Result
     fs::rename(part, file)
 }
 
+/// The file beside the stand-in Steam's `steam.exe` that says it is the stand-in (written by `standin make-steam`):
+/// the client that takes the stand-in's own commands to pause, resume and cancel an install ([`steer_command`]),
+/// which the real Steam's console has no word for. Looked for only in an install named on the command line
+/// (`--steam`), never in the one the registry names.
+pub const STANDIN_CLIENT: &str = "standin-client.txt";
+
+/// What the stand-in Steam's client is given to pause, resume or cancel the install of `appid`: `-silent
+/// +standin_pause <appid>`, `+standin_resume`, `+standin_cancel`.
+pub fn steer_command(steer: model::Steer, appid: u32) -> Vec<String> {
+    let command = format!("+standin_{}", steer.verb());
+    vec!["-silent".to_string(), command, appid.to_string()]
+}
+
+/// The pause, resume or cancel a stand-in client's command asks for, and of which app, from its arguments.
+pub fn steer_asked(args: &[String]) -> Option<(model::Steer, u32)> {
+    use model::Steer;
+    let at = args.iter().position(|arg| arg.starts_with("+standin_"))?;
+    let steer = [Steer::Pause, Steer::Resume, Steer::Cancel]
+        .into_iter()
+        .find(|steer| args[at].eq_ignore_ascii_case(&format!("+standin_{}", steer.verb())))?;
+    let appid = args.get(at + 1)?.parse().ok().filter(|&appid| appid != 0)?;
+    Some((steer, appid))
+}
+
+/// Where the fake Steam's install of `appid` at `root` goes as its client is asked to pause, resume or cancel it,
+/// from its manifest as it is: paused or downloading at the bytes it has, or dropped, what was fetched gone with
+/// it. An app with no install under way has nothing to steer.
+pub fn steered(root: &Path, appid: u32, steer: model::Steer) -> io::Result<Progress> {
+    let file = root.join("steamapps").join(format!("appmanifest_{appid}.acf"));
+    let counts = crate::installs::counts(&file)
+        .filter(|counts| crate::installs::state(counts.flags, 0, 0, false).is_some())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no install of {appid} under way")))?;
+    let (done, total) = (counts.downloaded, counts.to_download);
+    Ok(match steer {
+        model::Steer::Pause => Progress::Paused { done, total },
+        model::Steer::Resume => Progress::Downloading { done, total },
+        model::Steer::Cancel => Progress::Dropped,
+    })
+}
+
 // ------------------------------------------------------------------- changes
 
 /// The game a change adds to the standard fixture ([`Change::AddGame`]): installed, never played.
