@@ -1488,6 +1488,7 @@ fn helpers_shown(legendary: model::helper::HelperState) -> Vec<model::helper::He
         licence: "GPL-3.0".into(),
         source: source.into(),
         state,
+        account: Default::default(),
     };
     vec![
         helper("legendary", "Epic Games", "0.21.1", "https://github.com/legendary-gl/legendary", legendary),

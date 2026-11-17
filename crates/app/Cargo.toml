@@ -20,6 +20,7 @@ source-ea = { path = "../source-ea" }
 source-ubisoft = { path = "../source-ubisoft" }
 source-battlenet = { path = "../source-battlenet" }
 source-xbox = { path = "../source-xbox" }
+source-kit = { path = "../source-kit" }
 render = { path = "../render" }
 ui = { path = "../ui" }
 screens = { path = "../screens" }

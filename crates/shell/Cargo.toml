@@ -10,6 +10,8 @@ log-line = { path = "../log-line" }
 model = { path = "../model" }
 # Steam's CEF console and which of its folders a program is in (`steam`).
 source-steam = { path = "../source-steam" }
+# The helper programs' runner (`helper`), which the stores that install through one share.
+source-kit = { path = "../source-kit" }
 render = { path = "../render" }
 wgpu = "30"
 log = "0.4"

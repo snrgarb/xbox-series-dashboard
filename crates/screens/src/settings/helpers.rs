@@ -6,7 +6,7 @@
 //! The page shows the helpers as the last snapshot has them (`Library::helpers`) and asks with `Effect::Helper`.
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use model::helper::{Helper, HelperAsk, HelperState};
+use model::helper::{Account, Helper, HelperAsk, HelperState};
 use ui::{Button, HAlign, Press, Rect, Ui, VAlign};
 
 use super::controls::{self, FIELD_HEIGHT, LEFT, ROW_WIDTH, TOP};
@@ -59,7 +59,15 @@ pub fn status(helper: &Helper) -> String {
     match &helper.state {
         HelperState::NotAdded => format!("Not added. {} games can't be installed from here without it.", helper.store),
         HelperState::Fetching => "Downloading and checking it...".into(),
-        HelperState::Added { version } => format!("Added: version {version}, in the Dashboard's data folder."),
+        HelperState::Added { version } => {
+            let added = format!("Added: version {version}, in the Dashboard's data folder.");
+            match &helper.account {
+                Account::Unknown => added,
+                Account::SignedIn(name) if name.is_empty() => format!("{added} Signed in to {}.", helper.store),
+                Account::SignedIn(name) => format!("{added} Signed in to {} as {name}.", helper.store),
+                Account::SignedOut(how) => format!("{added} Not signed in to {}: {how}", helper.store),
+            }
+        }
         HelperState::Failed(why) => why.clone(),
     }
 }
@@ -255,7 +263,24 @@ mod tests {
             licence: "GPL-3.0".into(),
             source: "https://github.com/legendary-gl/legendary".into(),
             state,
+            account: Account::Unknown,
         }
+    }
+
+    #[test]
+    fn an_added_helper_says_its_sign_in_as_its_own_records_keep_it() {
+        let added = || helper(HelperState::Added { version: "0.21.1".into() });
+        let base = "Added: version 0.21.1, in the Dashboard's data folder.";
+        assert_eq!(status(&added()), base);
+        let signed_in = Helper { account: Account::SignedIn("Stand-in Player".into()), ..added() };
+        assert_eq!(status(&signed_in), format!("{base} Signed in to Epic Games as Stand-in Player."));
+        let signed_out = Helper { account: Account::SignedOut("run legendary auth.".into()), ..added() };
+        assert_eq!(status(&signed_out), format!("{base} Not signed in to Epic Games: run legendary auth."));
+        // Not added: its sign-in is not said.
+        assert_eq!(
+            status(&Helper { state: HelperState::NotAdded, ..signed_in }),
+            status(&helper(HelperState::NotAdded))
+        );
     }
 
     #[test]

@@ -48,3 +48,5 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 tempfile = "3"
+# tests/helpers.rs: the stores' installers pointed at this program as their helper.
+source-kit = { path = "../source-kit" }

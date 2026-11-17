@@ -4,9 +4,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use model::helper::{HelperAsk, HelperState};
+use model::helper::{Account, HelperAsk, HelperState};
+use model::Source;
 
 /// How long a helper's first run may take to say its version.
 const FIRST_RUN: Duration = Duration::from_secs(30);
@@ -28,6 +30,10 @@ pub struct Helpers {
     data: Option<PathBuf>,
     states: HashMap<String, HelperState>,
     told: (Sender<Told>, Receiver<Told>),
+    /// How each helper's sign-in stands, read from its own records when Settings is shown it.
+    sign_ins: HashMap<String, Box<dyn Fn() -> Account>>,
+    /// The stores whose lists of owned games a helper brought up to date, to be read again.
+    refreshed: (Sender<Vec<String>>, Receiver<Vec<String>>),
 }
 
 /// A helper's key and how it stands now, as the thread that fetched it says.
@@ -54,9 +60,50 @@ impl Helpers {
                 (helper.key.clone(), state)
             })
             .collect();
-        let helpers = Self { table, data, states, told: mpsc::channel() };
+        let (told, sign_ins, refreshed) = (mpsc::channel(), HashMap::new(), mpsc::channel());
+        let helpers = Self { table, data, states, told, sign_ins, refreshed };
         eprintln!("helpers: {}", helpers.line());
         helpers
+    }
+
+    /// The Dashboard's: the table (`table`), and each helper's sign-in read where its store's route says.
+    pub fn for_args(args: &crate::Args, data: Option<PathBuf>) -> Self {
+        let mut helpers = Self::new(table(args), data);
+        if let Some(home) = crate::sources::legendary_home(args) {
+            helpers.sign_ins.insert("legendary".into(), Box::new(move || legendary_account(&home)));
+        }
+        // How each added helper's sign-in stands at start: `helpers: legendary: signed in as Stand-in Player`.
+        for shown in helpers.shown() {
+            match shown.account {
+                Account::Unknown => {}
+                Account::SignedIn(name) => eprintln!("helpers: {}: signed in as {name}", shown.key),
+                Account::SignedOut(_) => eprintln!("helpers: {}: not signed in", shown.key),
+            }
+        }
+        helpers
+    }
+
+    /// Brings each store's list of owned games up to date through its helper (`Installer::refresh`), on a thread
+    /// of its own; `wake` is called when it is over, and `refreshed` then names those to be read again.
+    pub fn refresh(&self, sources: &[Arc<dyn Source>], wake: impl Fn() + Send + 'static) {
+        let (tell, sources) = (self.refreshed.0.clone(), sources.to_vec());
+        std::thread::spawn(move || {
+            let keys: Vec<String> = sources
+                .iter()
+                .filter(|source| source.installer().is_some_and(|installer| installer.refresh()))
+                .map(|source| source.key().to_string())
+                .collect();
+            if !keys.is_empty() {
+                eprintln!("helpers: owned games listed again for {}", keys.join(", "));
+                let _ = tell.send(keys);
+                wake();
+            }
+        });
+    }
+
+    /// The stores a refresh brought up to date since last asked.
+    pub fn refreshed(&mut self) -> Vec<String> {
+        self.refreshed.1.try_iter().flatten().collect()
     }
 
     /// `legendary 0.21.1 not added, gogdl 1.4.0 added`.
@@ -79,7 +126,13 @@ impl Helpers {
 
     /// Every helper as Settings shows it.
     pub fn shown(&self) -> Vec<model::helper::Helper> {
-        self.table.iter().map(|helper| helpers::shown(helper, self.states[&helper.key].clone())).collect()
+        let shown = |helper: &helpers::Helper| {
+            let state = self.states[&helper.key].clone();
+            let added = matches!(state, HelperState::Added { .. });
+            let account = self.sign_ins.get(&helper.key).filter(|_| added).map(|read| read()).unwrap_or_default();
+            model::helper::Helper { account, ..helpers::shown(helper, state) }
+        };
+        self.table.iter().map(shown).collect()
     }
 
     /// Does what Settings asked. A fetch goes on a thread of its own; `wake` is called when it is over.
@@ -132,6 +185,26 @@ impl Helpers {
             changed = true;
         }
         changed
+    }
+}
+
+/// A wake for the window's loop, from another thread.
+pub fn wake(proxy: winit::event_loop::EventLoopProxy<()>) -> impl Fn() + Send + 'static {
+    move || {
+        let _ = proxy.send_event(());
+    }
+}
+
+/// What signing legendary in takes, said where it is not: legendary's own `auth`, which shows Epic's sign-in page in
+/// a window of its own. The Dashboard shows no sign-in page of its own yet (docs/spec/helpers.md 5).
+const LEGENDARY_SIGN_IN: &str = "that takes Epic's sign-in page, which the Dashboard doesn't show yet. Run \
+                                 \"legendary auth\" from the helper's folder once, with a keyboard. Until then the \
+                                 Epic Games Launcher installs.";
+
+fn legendary_account(home: &std::path::Path) -> Account {
+    match source_epic::legendary::signed_in(home) {
+        source_epic::legendary::SignIn::As(name) => Account::SignedIn(name),
+        source_epic::legendary::SignIn::No => Account::SignedOut(LEGENDARY_SIGN_IN.into()),
     }
 }
 

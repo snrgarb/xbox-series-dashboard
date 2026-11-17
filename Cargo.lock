@@ -107,6 +107,7 @@ dependencies = [
  "source-ea",
  "source-epic",
  "source-gog",
+ "source-kit",
  "source-steam",
  "source-ubisoft",
  "source-xbox",
@@ -2242,6 +2243,7 @@ dependencies = [
  "model",
  "pollster",
  "render",
+ "source-kit",
  "source-steam",
  "tempfile",
  "wgpu",
@@ -2411,6 +2413,7 @@ dependencies = [
  "log-line",
  "model",
  "serde_json",
+ "source-kit",
  "tempfile",
 ]
 
@@ -2432,6 +2435,7 @@ name = "source-kit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "log-line",
  "model",
  "serde_json",
  "tempfile",
@@ -2513,6 +2517,7 @@ dependencies = [
  "source-ea",
  "source-epic",
  "source-gog",
+ "source-kit",
  "source-steam",
  "source-ubisoft",
  "source-xbox",
