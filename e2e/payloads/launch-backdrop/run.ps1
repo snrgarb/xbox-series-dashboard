@@ -18,12 +18,15 @@
 #   - the pixel there: the desktop's own colour at that point, read before the Dashboard started (or 0.44 of it, under
 #     the Guide's dim), and not the Launch screen's, the game's or Home's, at two points at once, or at a point of the
 #     taskbar's row, is a failure.
-# While the windowed game has the foreground the taskbar's row is not judged: Windows puts its taskbar, a topmost
-# window, in front of any active window that does not fill the screen, and the Dashboard leaves the taskbar alone
-# (docs/spec/launch-screen.md, 3).
+# The taskbar's row is judged throughout, the windowed game's run included: the Dashboard marks the game's window
+# full screen for the shell, so the taskbar goes under the backdrop while the game is active (docs/spec/launch-screen.md,
+# 3).
 #
-# Judged too by the Dashboard's `launch:` lines: `backdrop up`, `game window seen`, `game gone, backdrop showing`,
-# `fading to Home`, `Home back`, in that order, and focus back on the game's tile (--log-focus).
+# Judged too by the Dashboard's `launch:` lines: `backdrop up` and `game window seen` (in either order: a game quick to
+# show its window is seen before the backdrop's first frame is up), then `game gone, backdrop showing`, `fading to Home`,
+# `Home back`, in that order; the backdrop alone for no more than 1.5 s between the game's window going and Home being
+# back (a look at the desktop every 0.2 s, the game's process gone, the 0.3 s fade); and focus back on the game's tile
+# (--log-focus).
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
@@ -124,10 +127,9 @@ function Read-Point($Point) {
 # Samples every point over and over, for at most $Seconds, until a Dashboard line matching $Until (a regular
 # expression, after $Mark) is logged; with no $Until, for $Seconds. A sample that finds the desktop is a failure: a
 # window there not the Dashboard's or the game's, two points the desktop's colour, or a point of the taskbar's row the
-# desktop's colour or the taskbar's window. -NoTaskbar leaves the taskbar's row out (the windowed game in front).
-# Returns the line that ended it, or $null; says how the samples looked.
-function Watch-Screen([string] $Phase, [double] $Seconds, [string] $Until = '', [int] $Mark = 0, [switch] $NoTaskbar) {
-    $judged = @($points + $(if (-not $NoTaskbar) { $taskbar }) | Where-Object { $_.Usable })
+# desktop's colour or the taskbar's window. Returns the line that ended it, or $null; says how the samples looked.
+function Watch-Screen([string] $Phase, [double] $Seconds, [string] $Until = '', [int] $Mark = 0) {
+    $judged = @($all | Where-Object { $_.Usable })
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $samples = 0; $seen = @{}; $bad = 0; $line = $null
     do {
@@ -200,13 +202,20 @@ function Start-Game {
 
 # After the game: Home back, in front, focus on the game's tile; the lines in order.
 function Expect-HomeBack([int] $Mark, [string] $What) {
-    Test-Order $Mark @('^launch: backdrop up at \d+ ms$', '^launch: game window seen at', '^launch: game gone, backdrop showing at',
-        '^launch: fading to Home at', '^launch: Home back at \d+ ms$') $What
+    # The backdrop's first frame and the game's first window, in either order, each before the rest.
+    $rest = @('^launch: game gone, backdrop showing at', '^launch: fading to Home at', '^launch: Home back at \d+ ms$')
+    Test-Order $Mark (@('^launch: backdrop up at \d+ ms$') + $rest) "${What} (the backdrop)"
+    Test-Order $Mark (@('^launch: game window seen at') + $rest) "${What} (the game's window)"
     $gone = Get-LaunchLines $Mark | Where-Object { $_ -match '^launch: game gone, backdrop showing at (\d+) ms' } | Select-Object -Last 1
     $goneAt = if ($gone -match 'at (\d+) ms') { [int] $Matches[1] }
     $back = Get-LaunchLines $Mark | Where-Object { $_ -match '^launch: Home back at (\d+) ms' } | Select-Object -Last 1
     $backAt = if ($back -match 'at (\d+) ms') { [int] $Matches[1] }
-    if ($goneAt -and $backAt) { Say "${What}: the backdrop alone for $($backAt - $goneAt) ms between the game's window going and Home being back" }
+    if ($goneAt -and $backAt) {
+        Say "${What}: the backdrop alone for $($backAt - $goneAt) ms between the game's window going and Home being back"
+        if ($backAt - $goneAt -gt 1500) { Fail "${What}: the backdrop held alone for $($backAt - $goneAt) ms, more than 1500" }
+    }
+    $taken = Get-LaunchLines $Mark | Where-Object { $_ -match "^launch: Home's window takes the foreground" } | Select-Object -Last 1
+    Say "${What}: $(if ($taken) { $taken } else { "no line of Home's window taking the foreground" })"
     $focus = Wait-DashboardLog '^focus: Recent\(0\)$' 5 $Mark
     if (-not $focus) { Fail "${What}: focus is not back on the game's tile" }
     $ok = Wait-Until { (Get-Foreground).Title -eq $dashboardTitle } 5
@@ -295,7 +304,8 @@ try {
         Say "round the windowed game at ($($p.X), $($p.Y)), $($p.Name): $(Format-Colour $seen), the Launch screen is $(Format-Colour $p.Splash)"
         if (-not (Test-Colour $seen $p.Splash 10)) { Fail "the backdrop is not round the windowed game at ($($p.X), $($p.Y)): $(Format-Colour $seen)" }
     }
-    Watch-Screen 'windowed' 5 -NoTaskbar | Out-Null
+    Expect-Log '^launch: the game''s window marked full screen' $mark 'the windowed game marked full screen for the shell' 1 | Out-Null
+    Watch-Screen 'windowed' 5 | Out-Null
     # The Guide, the running game's menu, Quit.
     $guideMark = Get-DashboardLogLength
     Push-Button Guide

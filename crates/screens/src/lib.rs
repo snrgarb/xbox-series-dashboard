@@ -1810,6 +1810,11 @@ impl Dashboard {
         self.backdrop.fading()
     }
 
+    /// Whether the backdrop was whole when last drawn: the game's art was in, or it has none to wait for.
+    pub fn backdrop_whole(&self) -> bool {
+        self.backdrop.whole()
+    }
+
     /// The game whose backdrop covers Home's window now.
     fn backdrop_game(&self) -> Option<&model::Game> {
         self.playing.filter(|_| self.home_covered()).and_then(|game| self.library.games.get(game))

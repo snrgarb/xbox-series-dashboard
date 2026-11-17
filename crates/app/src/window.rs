@@ -1616,7 +1616,7 @@ impl ApplicationHandler for App {
                 state.config.height = size.height;
                 state.surface.configure(&state.gpu.device, &state.config);
                 self.stale = true;
-                self.backdrop.resized();
+                self.backdrop.again(self.dashboard.home_covered(), "Home's window resized");
             }
             // Alt+Tab to the Dashboard while the game is played: Home in front of it, as Home chosen in the Guide.
             WindowEvent::Focused(true) if self.launch.as_ref().is_some_and(Launch::game_in_front) => {
@@ -1625,6 +1625,13 @@ impl ApplicationHandler for App {
                     self.dashboard.show_dashboard();
                     self.stale = true;
                 }
+            }
+            // What the backdrop drew may be gone: drawn again when Home's window is activated (as the game's goes),
+            // shown again or rescaled.
+            WindowEvent::Focused(true) => self.backdrop.again(self.dashboard.home_covered(), "Home's window activated"),
+            WindowEvent::Occluded(false) => self.backdrop.again(self.dashboard.home_covered(), "Home's window shown"),
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.backdrop.again(self.dashboard.home_covered(), "Home's window rescaled")
             }
             // Behind a game or under its Launch screen Home's window is the game's backdrop, drawn once.
             WindowEvent::RedrawRequested if self.backdrop.skip(self.dashboard.home_covered()) => {}
@@ -1694,9 +1701,8 @@ impl ApplicationHandler for App {
                     self.dashboard.toasts_presented(told(&mut self.told_time));
                 }
                 self.moving = state.host.animating();
-                let pending = state.host.art.pending() > 0;
                 let (covered, showing) = (self.dashboard.home_covered(), self.dashboard.backdrop_showing());
-                self.backdrop.presented(covered, showing, self.moving, pending);
+                self.backdrop.presented(covered, showing, self.moving, self.dashboard.backdrop_whole(), size);
                 if self.presented.is_none() {
                     self.presented = Some(Instant::now());
                     let [library, window, gpu, renderer] = state.ready;
