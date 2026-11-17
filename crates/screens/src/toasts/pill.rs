@@ -641,15 +641,18 @@ fn circle(ui: &mut Ui, pose: &Pose, palette: Palette, rare: bool, icon: Option<&
         }
         if !rare && pose.icon > 0.0 {
             ui.with_alpha(pose.icon, |ui| {
-                // The trophy, under the icon, which hides it once it is decoded; zoomed, it is cut to a square
-                // inside the circle, so nothing of it is outside.
-                let size = 60.0 * pose.icon_zoom * scale;
-                let inner = disc(CIRCLE / std::f32::consts::SQRT_2);
-                let clip = if pose.icon_zoom > 1.0 { inner } else { disc(CIRCLE) };
-                ui.with_clip(clip, |ui| ui.icon(cx, cy, glyph::TROPHY, size, Color::WHITE));
-                if let Some(path) = icon {
+                // The icon, and the trophy only while there is none decoded: letters are drawn over pictures
+                // whatever the order here, so the trophy drawn first still showed on the icon. Zoomed, the trophy
+                // is cut to a square inside the circle, so nothing of it is outside.
+                let drawn = icon.is_some_and(|path| {
                     let key = ArtKey { path: path.clone(), kind: Kind::Thumb(256) };
-                    ui.art_zoomed(disc(CIRCLE), &key, pose.icon_zoom, 1.0, CIRCLE * scale / 2.0);
+                    ui.art_zoomed(disc(CIRCLE), &key, pose.icon_zoom, 1.0, CIRCLE * scale / 2.0)
+                });
+                if !drawn {
+                    let size = 60.0 * pose.icon_zoom * scale;
+                    let inner = disc(CIRCLE / std::f32::consts::SQRT_2);
+                    let clip = if pose.icon_zoom > 1.0 { inner } else { disc(CIRCLE) };
+                    ui.with_clip(clip, |ui| ui.icon(cx, cy, glyph::TROPHY, size, Color::WHITE));
                 }
             });
         }
