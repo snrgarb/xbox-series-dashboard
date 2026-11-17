@@ -1,4 +1,4 @@
-//! Personalisation > Who's playing today? (docs/spec/settings.md, 6.4; docs/spec/start-up.md, section 6): a line,
+//! Account > Who's playing today? (docs/spec/settings.md, 6.4; docs/spec/start-up.md, section 6): a line,
 //! then two Rows, Ask every time and Sign in the last profile, the one in force ticked. A sets a Row at once and
 //! saved; the tick moves, focus stays. It is the Bundle's page (E/PersonalisationPane.xaml:289-294,
 //! E/PersonalisationPane.xaml.cs:194-200, 367-392), its line naming the Dashboard where the Bundle's names Playnite.

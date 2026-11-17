@@ -3,8 +3,8 @@
 # Discord on the TV PC is never reached and nothing is sent to discord.com. The Dashboard is pointed at it with
 # `--discord-pipe` and `--discord-token-url`.
 #
-# Settings > Theme settings > Discord is opened from the top bar's Settings (the rail, Personalisation, Down to Guide,
-# Right to Discord); a Client ID and a Secret are typed on the Console keyboard with the pad (one letter each: the fake
+# Settings > Account > Discord is opened from the top bar's Settings (the rail, Down to Account, Right to Profiles,
+# Down to Discord); a Client ID and a Secret are typed on the Console keyboard with the pad (one letter each: the fake
 # takes any), and kept with Menu; Connect. The fake approves at once and signs the user in as "E2E Tester". Then the
 # fake goes away, as Discord quitting does: the Dashboard says it lost Discord and tries again after 2 s, 4 s and so on;
 # the fake comes back, and the Dashboard signs in again by itself with the tokens it saved. Disconnect at the end
@@ -118,10 +118,10 @@ try {
 
     # --- To Settings > Discord.
     Walk Right 'TopBar\(Settings\)' 6
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Press Down 'Settings: Theme settings: Guide' | Out-Null
-    Press Right 'Settings: Theme settings: Discord' | Out-Null
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Right 'Settings: Account: Profiles' | Out-Null
+    Press Down 'Settings: Account: Discord' | Out-Null
     Press A 'Settings: Discord: Client ID Type; client id not set, secret not set, "Not connected"' '1-discord' | Out-Null
 
     # --- The Client ID and the Secret, one letter each on the Console keyboard, kept with Menu.

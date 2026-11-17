@@ -3,13 +3,13 @@
 # empty folder of the test's own, so no video is found and Start-up goes straight on.
 #
 #  1. Started at Home (--no-startup): the first Profile is made from the Windows user, and a second is added on
-#     Settings > Personalisation > Profiles by its gamertag, as the profiles payload does.
+#     Settings > Account > Profiles by its gamertag, as the profiles payload does.
 #  2. Started again with Start-up: Who's playing today? shows both, focus on the Windows user's, signed in last; Right
 #     until the other, A; Signing you in, then Home, the `profile:` line and the greeting for it.
 #  3. The Guide's Switch profile: the Guide goes and Who's playing today? asks, focus on the one signed in; Left until
 #     the Windows user's, A; signed in and greeted again.
 #  4. A wake from sleep, pretended by `standin wake` (--allow-toast-posts): Who's playing today? asks again; A.
-#  5. Settings > Personalisation > Who's playing today?: Sign in the last profile. A pretended wake asks nothing now;
+#  5. Settings > Account > Who's playing today?: Sign in the last profile. A pretended wake asks nothing now;
 #     started again, no Who's playing today?: Signing you in for the one signed in last, then Home and its greeting.
 #
 # Judged by the Dashboard's log, times in ms since the process started:
@@ -163,10 +163,9 @@ try {
     Wait-Greeting | Out-Null
     Ensure-Front
     Walk Right 'TopBar\(Settings\)' 5
-    Press A 'Settings: Rail: Theme settings'
-    Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Boot video'
-    Press Right 'Settings: Personalisation: Profiles'
+    Press A 'Settings: Rail: General'
+    Press Down 'Settings: Rail: Account'
+    Press Right 'Settings: Account: Profiles'
     Press A "Settings: Profiles: $([regex]::Escape($me))"
     Press Right 'Settings: Profiles: Add profile'
     Press A 'TextEntry: .+'
@@ -233,10 +232,10 @@ try {
     # --- 5. Settings: Sign in the last profile. Waking asks nothing; the next start signs the last one in by itself.
     Ensure-Front
     Walk Right 'TopBar\(Settings\)' 5
-    Press A 'Settings: Rail: Theme settings'
-    Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Boot video'
-    Press Down "Settings: Personalisation: Who's playing today\?"
+    Press A 'Settings: Rail: General'
+    Press Down 'Settings: Rail: Account'
+    Press Right 'Settings: Account: Profiles'
+    Press Right "Settings: Account: Who's playing today\?"
     Press A "Settings: Who's playing today\?: Ask every time; ticked" '08-setting'
     Press Down "Settings: Who's playing today\?: Sign in the last profile"
     $mark = Get-DashboardLogLength

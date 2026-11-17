@@ -19,6 +19,8 @@ Things marked **NOT FOUND** were looked for and are absent; things marked **UNVE
 
 Milestones are `docs/plan.md`'s. This page is **M3**; parts of it belong to features of later milestones and are marked so.
 
+**Where the port differs first**: in place of Theme settings its rail has four generic categories, General, Account, Games & apps and System, each with its boxes in rows or in titled sections, as the console's Settings has them (section 16.1; #194). Sections 1 to 15 are the Bundle's.
+
 ---
 
 ## 1. Page structure
@@ -241,7 +243,7 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
 | Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
 
-The port's own fifth, **Games & apps** (U+E71D), on a row of its own under the others, opens the page that adds games by hand and Apps: [apps.md](apps.md), section 4. The Bundle's four are at its places (Discord since #143); Games & apps is on a row of its own under them, **Launchers** (U+E8F1, [launchers.md](launchers.md); #163) beside it at (1, 2), Art (16.8) on the row under those at (0, 3), and **Storage** (U+EDA2, [storage.md](storage.md); #179) beside Art at (1, 3), and **Helpers** (U+E896, [helpers.md](helpers.md); #174) on a row of its own under them at (0, 4).
+**The port has no Theme settings** (#194): its rail lists four generic categories, General, Account, Games & apps and System, as the console's Settings does, and these four boxes, with Personalisation's that open pages and the port's own (Games & apps, Launchers, Art, Storage, Helpers, System, About), are placed among them: section 16.1.
 
 ### 6.2 Theme settings > Personalisation - M3 (three of its boxes open M5 pages)
 
@@ -715,7 +717,7 @@ What M3 builds, then: the shell (rail, header, pane of boxes, pages, B levels, e
 Questions 1, 2, 6 and 13 are answered in section 16, with what else building the page (#56) settled.
 
 1. **The sixth Personalisation row.** The Bundle's page runs off a 1080 screen and its last box shifts when focused (6.2). Options: scroll the pane (as Profiles does); put the checkbox boxes two wide and move the info elsewhere; or give every info text the row span. With the Groups entry added and M5's boxes possibly absent in M3, the page's rows change anyway: which layout?
-2. **The rail with one category.** With Playnite settings, More Playnite options and the Debug menu gone, the rail holds only Theme settings. Keep a one-item rail (and the name "Theme settings", which names a Playnite theme), promote Personalisation, Idle, Guide and Discord to rail categories, or something else? And are boxes for features of later milestones shown before those milestones?
+2. **The rail with one category.** With Playnite settings, More Playnite options and the Debug menu gone, the rail holds only Theme settings. Keep a one-item rail (and the name "Theme settings", which names a Playnite theme), promote Personalisation, Idle, Guide and Discord to rail categories, or something else? And are boxes for features of later milestones shown before those milestones? **Decided (#194)**: four generic categories, General, Account, Games & apps and System, as the console's (16.1).
 3. **Options that were Playnite's and have no entry of ours**: interface volume, display, language. Which exist in the port, and on which page?
 4. **Update library and Exit.** They lived in Playnite's main menu. Do they become boxes on Settings, entries in the Guide, or neither?
 5. **Update after downloads / Download metadata.** Confirm that the port refreshes its library after an install with no setting, and that fetching missing art is an M4 action (and where its box sits).
@@ -736,24 +738,40 @@ Questions 1, 2, 6 and 13 are answered in section 16, with what else building the
 
 What `crates/screens/src/settings/` does that the sections above leave open, or does differently. Decided in #56.
 
-### 16.1 What is there in M3
+### 16.1 The rail's categories and their boxes (#194)
 
-- **The rail keeps its shape with its one category** (open question 2): the title, and one item, **Theme settings**, at y 190. No dividers, there being nothing under them. Up, Down and Left on it do nothing; Right or A goes into the category on its first box; B leaves Settings. The fly-in (10.2) plays between categories and so never plays: nothing of it is built.
-- **Boxes of later milestones are absent** until their milestone (open question 2), and the boxes that are there close up in the grid, row by row:
+The Bundle's rail has one category of its own, Theme settings, and the port had every box under it in the order the boxes came. There is no theme here: since #194 the rail lists **generic categories, as the console's Settings does** (General, Account, System, Devices & connections, Preferences, Accessibility on an Xbox Series X; the reference is a 1920 x 1080 capture of its General > TV & display options and General > Power mode & startup pages, kept out of the repository). Four, the ones the port has boxes for, in this order: **General**, **Account**, **Games & apps**, **System**. Nothing is named "Theme".
 
-| Pane | Boxes |
-|---|---|
-| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art with Storage (#179) beside it, then Helpers (#174) on a row of its own, then System (16.9) on the row under Helpers with About (16.10) beside it. |
-| Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Who's playing today?** (0, 1) (start-up.md 9), at the Bundle's place, and **Groups** (1, 1) (filters.md 6.1), in the Bundle's empty slot; then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
-| Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
-| Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
+**Where it follows the Bundle**: the rail's drawing (2.1, 2.2: the title, items 441 x 58 at y 190 + 72 i, Bahnschrift 24 at weight 350, the focused item's green and glow, the selected item's lit fill and bar), the boxes (4.1, 4.2: 437 x 131, two columns at x 520 and 975, row pitch 149 from y 210), every page, and B one level at a time (8.2, 9.2). No dividers, there being nothing under the categories. The fly-in (10.2) is not built: categories change at once.
 
+**Where it follows the console**:
+
+- **The rail's Up and Down** go from category to category, stopping at the ends, and the category focus lands on shows beside the rail at once (as the Bundle's 2.3). Right or A goes into it; B leaves Settings; Left does nothing.
+- **Each category keeps where its focus was** while Settings is up: back to the rail and into the category again is the box focus was on, not its first (the Bundle's 9.1 always goes to the first). A page opened and closed keeps it too. Nothing is kept between visits: Settings opens as its entry point says, every category on its first box (8.1).
+- **The header** reads the category in **bold** (Bahnschrift 42, weight 700), then, where a page shows, the page's name 20 after it in the Bundle's weight 350: "**General** Idle", as the console's "**General** TV & display options". On a category's own boxes it is the category alone.
+- **A category with more than a handful of boxes** has them in columns, each under a section title, as the console's pages: the title in Bahnschrift 30 at weight 400 (the rail title's) at (x of the column, 210), the column's boxes from 52 under it (y 262 + 149 i), the columns at the grid's x (520, 975). Down and Up go along a column, stopping at its ends; Right and Left go to the column beside, as far down as it goes (min of the place and its length); Left from the first column is B, as on rows. Only Games & apps has sections now; the others are rows of two.
+
+| Category | Boxes | Layout |
+|---|---|---|
+| **General** | Personalisation (0, 0), Idle (1, 0), Guide (0, 1), **Boot video** (1, 1) | rows; the Bundle's Theme settings' first three at their places, Boot video in Discord's |
+| **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1) | rows |
+| **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers | sections |
+| **System** | System (0, 0), About (1, 0) | rows |
+
+- **Personalisation** keeps its four checkbox boxes, a row each: Background delay (y 210), Reduce motion (359), Show Play history (508), Show battery percentages (657). Its boxes that opened pages went to their categories: Boot video to General, Profiles and Who's playing today? to Account, Groups to Games & apps.
+- **Choices #194 made where the ticket did not say**: Games & apps (the box, games added by hand and Apps: apps.md 4) in Library, under Launchers, the ticket's "Recently added" being taken for it; Helpers under Storage in Installs, being what some stores install through; the System box (shell mode, the ticket's "Start-up as the shell") and About (with Updates, updates.md 2) in System. The sections are Library (where games come from, how Home groups them and their art) and Installs (where installs go and what installs them).
+- **The focus log**: `Settings: Rail: General` (`Account`, `Games & apps`, `System`); on a category's boxes `Settings: General: Idle`, `Settings: Games & apps: Storage`; a page's lines are as they were (`Settings: Idle: Dim after`). The Games & apps box on its category reads `Settings: Games & apps: Games & apps`; its page's lines start `Settings: GamesAndApps:`, so they are never taken for the category's.
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
 - **No hint bar** (open question 13): as the Bundle.
 
+| Page | What it holds |
+|---|---|
+| Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
+| Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
+
 ### 16.2 A pane that would run off the screen scrolls
 
-Open question 1. A pane of boxes scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. With six rows (Boot video and Profiles, Who's playing today? and Groups, then the four checkbox boxes) the last box's foot is at 1086 and its info text runs lower: the pane scrolls with focus on it, which the Bundle's page could not (6.2).
+Open question 1. A pane of boxes in rows scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. Personalisation, four rows since #194, fits the screen with every info text; the test pane of seven rows (`a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box`) scrolls. A pane in sections does not scroll: its columns are four boxes at most.
 
 The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (x 520), which its picture 29 of Theme settings has not: a clipping accident of that pane's grid, not copied.
 
@@ -761,12 +779,14 @@ The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (
 
 | From | Opens on | Focus | B |
 |---|---|---|---|
-| Home's top bar button; the Guide's Settings | Theme settings' boxes | the rail's Theme settings | Home: the button; from the Guide, Home's rows |
-| Home's **Settings** wide tile (the Bundle's "Playnite settings" tile, whose category is gone) | Theme settings' boxes | its first box, Personalisation | the rail, then the tile |
-| The Tile menu's Customise Home (`Entry::Personalisation`) | Personalisation | Groups (#57), the box that customises Home; the Bundle's is its first box, Boot video | Theme settings' boxes on Personalisation, the rail, then the tile |
-| Home's **Discord** tile with no Discord tab or the Guide off | Theme settings' boxes until Discord has a page (M6), which it then opens on, focus on Type | its first box | the rail, then the tile |
+| Home's top bar button; the Guide's Settings (`Entry::Rail`) | General's boxes | the rail's General | Home: the button; from the Guide, Home's rows |
+| Home's **Settings** wide tile (the Bundle's "Playnite settings" tile, whose category is gone; `Entry::Tile`) | General's boxes | its first box, Personalisation | the rail, then the tile |
+| The Tile menu's Customise Home (`Entry::CustomiseHome`) | Games & apps' boxes | **Groups** (#57), the box that customises Home; the Bundle's is Personalisation's first box, Boot video | the rail on Games & apps, then the tile |
+| Home's **Discord** tile with no Discord tab or the Guide off (`Entry::Discord`) | Account > Discord | Type | Account's boxes on Discord, the rail, then the tile |
 
-Left from a pane's first column is B, on the boxes and on the Guide page. From the boxes to the rail and into the category again is its first box, whatever had focus (9.1).
+Left from a pane's first column is B, on the boxes and on the Guide page. From the boxes to the rail and into the category again is the box focus was on (16.1).
+
+Where a line the user reads names a place in Settings it names the category: the SteamGridDB Toast's "Check it in Settings, Games & apps, Art.", the update's "Install it in Settings > System > About.", the art picker's "in Settings > Games & apps > Art", the Idle screen's tips "Settings › Games & apps › Groups".
 
 ### 16.4 The settings store
 
@@ -807,7 +827,7 @@ Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too
 
 The Dashboard's one rule for every screen (docs/ui.md, "Sounds") holds here: focus landing on another control is the move sound, a level up or down included, as Playnite's navigation sound is in the Bundle; A that turns a checkbox over is the activation sound, where the Bundle's is unverified (open question 11); B out of Settings is silent.
 
-`--log-focus` says `focus: Settings: ` and then the rail (`Rail: Theme settings`) or the pane and its control (`Theme settings: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3), a Profile's page the Profile and the Picture page `worn` (profiles.md 5).
+`--log-focus` says `focus: Settings: ` and then the rail (`Rail: General`) or the pane and its control (`General: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3), a Profile's page the Profile and the Picture page `worn` (profiles.md 5).
 
 The Groups page's menu is a dialog the page shows over itself: while it is up `Page::dialog` says so, it has a dialog's sounds and the Guide puts it away (filters.md 6.2).
 
@@ -819,7 +839,7 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 
 The Bundle has no such page: Playnite's metadata sources fetched missing art (section 14, "Download metadata"). The port's is the user's own SteamGridDB key, a way to take away what was downloaded, and a switch for all art online (#110) (docs/sources.md, "Art"), and is decided here.
 
-- **Its box**: **Art**, icon U+EB9F, at (0, 3) (x 520..957, y 657..788), on a row of its own under Games & apps, since Launchers took its place beside Games & apps (#163; launchers.md 1). Down from Games & apps is Art and from Launchers Storage, beside it (#179; storage.md 2); Up from Art is Games & apps; Down from Art or Storage is Helpers (helpers.md 2).
+- **Its box**: **Art**, icon U+EB9F, the last of Games & apps' Library section (x 520..957, y 709..840), under Groups (16.1; #194). Right from it is Helpers, the foot of Installs.
 - **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190:
 
 | Element | y | Notes |
@@ -835,7 +855,7 @@ The Bundle has no such page: Playnite's metadata sources fetched missing art (se
 | "Downloads art for games that have none on this PC: first from the game's own store, which needs no key, then from SteamGridDB. Turn it off to use only what is on this PC." (MutedText) | 4 under | |
 | Checkbox row **Download art online** (4.3's checkbox row, 560 wide, as Use the Guide's) | 18 under | on by default |
 
-- **Focus**: three rows, [Type, Clear], [Clear downloaded art, Refresh all art and details] and [Download art online]; the page opens on Type. Up and Down go between the rows, onto a row's first (Down from Clear is Clear downloaded art; Up from either of the second row is Type), Left and Right along the first two; Left from the first column, or B, goes back to Theme settings' boxes on Art.
+- **Focus**: three rows, [Type, Clear], [Clear downloaded art, Refresh all art and details] and [Download art online]; the page opens on Type. Up and Down go between the rows, onto a row's first (Down from Clear is Clear downloaded art; Up from either of the second row is Type), Left and Right along the first two; Left from the first column, or B, goes back to Games & apps' boxes on Art.
 - **Download art online** (`art.online` in the settings table, `Setting::DownloadArtOnline`; on until it is turned off, as every option is saved only once set): A turns it over, in force at once. Off, nothing is asked of any service, neither the stores' own art online nor SteamGridDB, and a lookup under way stops; the tiles keep what the stores' files and our cache have. On again, art is looked up at once. The key is kept either way.
 - **Type** opens text entry over the page (caption "SteamGridDB key", from empty, shown as dots, 64 at most). A kept key is in force at once: saved, and art is looked up with it; an empty one kept leaves the key as it was. **Clear** forgets the key, and lookups stop.
 - **Clear downloaded art** asks first, a prompt over the dimmed page as the Groups page's Delete asks (filters.md 6.2): "Clear downloaded art?", "The art downloaded for your games is removed from this PC. A store's own art stays.", **Clear** and **Cancel**, focus on Clear. Clear removes the data folder's `art` folder and nothing else; the tiles show the stores' own art, or their names, at once. B or Cancel does nothing. Art is not looked up again until the next start, or a new key.
@@ -852,7 +872,7 @@ The Bundle has no such page: Playnite's metadata sources fetched missing art (se
 
 ### 16.9 System (the port's own; #154)
 
-Theme settings' fifth row, one box at (0, 4): **System** (icon U+E770), the page that turns shell mode on and off,
+The System category's first box, at (0, 0): **System** (icon U+E770), the page that turns shell mode on and off,
 the Dashboard in place of the Windows desktop at sign-in. The Bundle set its Boot shell up from a terminal and has no
 such page; the words, the layout and what each state shows are in shell-mode.md, section 2. One control, the checkbox
 row **Start with Windows as the shell**: A asks before turning it on (Turn on, Cancel), turns it off at once, and does
@@ -862,9 +882,9 @@ up `Settings: System: Prompt(Turn on) of Start with Windows as the shell`; the e
 
 ### 16.10 About (the port's own; #155)
 
-Theme settings' fifth row, beside System: **About** (icon U+E946) at (1, 4) (x 975..1412, y 806..937). The Bundle has
-no such page (Playnite's own About said Playnite's version). Right from System is About, Up from it is Art (the row
-above has one box). Its page is laid out as System's (shell-mode.md, 2), groups of a label and its text, 40
+The System category's second box, beside System: **About** (icon U+E946) at (1, 0) (x 975..1412, y 210..341). The Bundle has
+no such page (Playnite's own About said Playnite's version). Right from System is About; Up and Down from it
+do nothing. Its page is laid out as System's (shell-mode.md, 2), groups of a label and its text, 40
 apart, from y 190; the second, **Updates**, is updates.md's (section 2), between the version and the licences:
 
 | Label | Text |
@@ -875,7 +895,7 @@ apart, from y 190; the second, **Updates**, is updates.md's (section 2), between
 | "Sounds and boot videos" | "The console's sounds and boot videos don't come with the Dashboard. It plays them from the Xbox Series Theme for Playnite, where that is installed, or from the media folder in %LOCALAPPDATA%\XboxSeriesDashboard. The README beside dashboard.exe says how to fill it." |
 
 - **Focus** is on Updates' three controls, from Check for updates (updates.md, 2). B, or Left from the first column,
-  goes back to Theme settings' boxes on About.
+  goes back to System's boxes on About.
 - **Where the version comes from**: the executable's `BUILD` (`crates/app`: `CARGO_PKG_VERSION`, and the commit its
   build script reads, `DASHBOARD_COMMIT` from the environment where CI gives one, else `git rev-parse --short=7
   HEAD`), handed over in `Options::build`. The core's own default is the version with no commit; the screenshot test
@@ -884,5 +904,5 @@ apart, from y 190; the second, **Updates**, is updates.md's (section 2), between
   the Dashboard says `dashboard 0.1.0 (0123abc)` in its log before it reads the library.
 - **The focus log**: `Settings: About: Version 0.1.0 (0123abc); Check for updates; unchecked`, the line a test reads
   the version by (with
-  `--screenshot --page settings --press right,down,down,down,down,right,a --log-focus`, the offscreen frame logs where
+  `--screenshot --page settings --press down,down,down,right,right,a --log-focus`, the offscreen frame logs where
   its presses left focus).

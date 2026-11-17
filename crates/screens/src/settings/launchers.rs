@@ -1,4 +1,4 @@
-//! Theme settings > Launchers (docs/spec/launchers.md): which launchers games come in from, and Update now, which
+//! Games & apps > Launchers (docs/spec/launchers.md): which launchers games come in from, and Update now, which
 //! reads every one switched on again. The Bundle has no such page (Playnite's own library settings did this job):
 //! it is the port's, made of Settings' Rows and pane button in the Bundle's look.
 //!
@@ -20,7 +20,7 @@ use crate::pages::{Around, PageAction};
 use crate::theme::{BODY, TEXT_DIM};
 use crate::Effect;
 
-/// The box on Theme settings, and the page's header.
+/// The box on Games & apps, and the page's header.
 pub const TITLE: &str = "Launchers";
 const ABOUT: &str = "Your games come in from the launchers switched on here, with their play time and collections. \
                      Switch one off to hide its games until you switch it on again.";

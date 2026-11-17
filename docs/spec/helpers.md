@@ -31,7 +31,7 @@ serve-helpers` writes one). Nothing else names an address.
 
 ## 2. Settings > Helpers
 
-Theme settings > **Helpers** (U+E896), on a row of its own under Art. One line about what helpers are, then a group a
+Games & apps > **Helpers** (U+E896), in the Installs section under Storage ([settings.md](settings.md) 6.1). One line about what helpers are, then a group a
 helper, as About's: its name and store ("legendary for Epic Games"), "Version 0.21.1. GPL-3.0 licence. Source:
 github.com/legendary-gl/legendary", how it stands, and one button.
 

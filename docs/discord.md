@@ -1,7 +1,7 @@
 # Discord
 
 How the Dashboard connects to the Discord running on the same PC (#143): the user's own Discord application, the
-local RPC client, its secrets, and Settings > Theme settings > Discord. The Guide's Discord tab, the Call, Shortcuts
+local RPC client, its secrets, and Settings > Account > Discord. The Guide's Discord tab, the Call, Shortcuts
 and Servers (#144, #145) are built on what is here. The behaviour is the Bundle's, ported from its C#
 (`XboxSeries.Core/ExtensionCore.Discord*.cs`, `extension/XboxSeries.Extension/DiscordPipe.cs` and `DiscordOAuth.cs`;
 the research is the Bundle's `docs/research/discord-rpc-dotnet.md`); the page is

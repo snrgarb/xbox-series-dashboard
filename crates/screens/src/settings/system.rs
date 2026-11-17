@@ -1,4 +1,4 @@
-//! Theme settings > System (docs/spec/shell-mode.md, 2): "Start with Windows as the shell", which puts the
+//! System > System (docs/spec/shell-mode.md, 2): "Start with Windows as the shell", which puts the
 //! Dashboard in place of the Windows desktop at sign-in, with what to know before turning it on. The Bundle has no
 //! such page (its Boot shell is set up from a terminal): its words are the port's own, laid out as the Bundle's
 //! Discord page is (docs/spec/settings.md, 6.9): a label, its description, the control, then the next group 40 under.

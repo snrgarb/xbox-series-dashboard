@@ -37,10 +37,10 @@ impl Shell {
         Self { database, dashboard, effects: Vec::new() }
     }
 
-    /// Personalisation > Groups, focus on its first Row.
+    /// Games & apps > Groups, focus on its first Row.
     fn groups() -> Self {
         let mut shell = Self::new();
-        shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
+        shell.dashboard.open_page(Open::Settings(Entry::CustomiseHome));
         shell.press(&[A]);
         assert_eq!(shell.focus(), "Settings: Groups: Favourites; shown");
         shell.effects.clear();
@@ -117,8 +117,8 @@ impl Shell {
 #[test]
 fn the_groups_box_is_where_customise_home_lands_and_opens_a_row_for_every_filter_then_new_group() {
     let mut shell = Shell::new();
-    shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
+    shell.dashboard.open_page(Open::Settings(Entry::CustomiseHome));
+    assert_eq!(shell.focus(), "Settings: Games & apps: Groups");
     shell.press(&[A]);
     let mut rows = Vec::new();
     for _ in 0..8 {
@@ -142,12 +142,12 @@ fn the_groups_box_is_where_customise_home_lands_and_opens_a_row_for_every_filter
     shell.press(&[Up; 9]);
     assert_eq!(shell.focus(), "Settings: Groups: Favourites; shown", "the top stops");
     assert_eq!(shell.dashboard.hints(), hint_bar::MORE_OPTIONS);
-    // Left, Right, X and Y do nothing; B is Personalisation, on the box that opened the page.
+    // Left, Right, X and Y do nothing; B is Games & apps, on the box that opened the page.
     shell.press(&[Left, Right, X, Y]);
     assert_eq!(shell.focus(), "Settings: Groups: Favourites; shown");
     assert!(shell.effects.is_empty());
     shell.press(&[B]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
+    assert_eq!(shell.focus(), "Settings: Games & apps: Groups");
 }
 
 #[test]
@@ -372,12 +372,12 @@ impl Stage {
     }
 }
 
-/// Personalisation, focus on Groups: under Boot video, alone on its row, the checkbox boxes under it.
+/// Games & apps, focus on Groups: the Library section's third box, Installs beside the section.
 #[test]
-fn settings_personalisation_groups() {
+fn settings_games_and_apps_groups() {
     let mut stage = Stage::groups();
     stage.press(&[B]);
-    stage.check("settings-personalisation-groups");
+    stage.check("settings-games-and-apps-groups");
 }
 
 /// The Groups page: a Row a filter, ticked while it shows, New Group last; the hint bar for the menu.

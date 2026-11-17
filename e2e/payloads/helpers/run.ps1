@@ -3,7 +3,7 @@
 # addresses the stand-in's and its SHA-256 standin.exe's). Nothing asks GitHub, and no real helper is fetched.
 #
 # What it walks:
-# - Theme settings > Helpers, under Art: focus on legendary's Add (`Settings: Helpers: legendary; Add; not added`).
+# - Games & apps > Helpers, under Storage: focus on legendary's Add (`Settings: Helpers: legendary; Add; not added`).
 # - Add asks first (`asking Add legendary?`), and Yes fetches: the stand-in asked `/helpers/good` with the plain
 #   User-Agent and no Authorization; `helpers: legendary: checked and kept at <data>\helpers\legendary\legendary.exe`;
 #   the shell's runner runs it once with --version, its lines said one by one (`helpers: legendary: says legendary
@@ -78,18 +78,18 @@ try {
     Start-Sleep -Seconds 2
     In-Front
 
-    # --- Theme settings > Helpers: Home starts on the profile, which logs no focus; each Right logs where it went.
+    # --- Games & apps > Helpers: Home starts on the profile, which logs no focus; each Right logs where it went.
     foreach ($i in 1..5) {
         if ((Focus-Now) -match '^focus: TopBar\(Settings\)$') { break }
         Push-Button Right; Start-Sleep -Milliseconds 800
     }
     if ((Focus-Now) -notmatch '^focus: TopBar\(Settings\)$') { throw "Right never reached the top bar's Settings: '$(Focus-Now)'" }
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Press Down 'Settings: Theme settings: Guide' | Out-Null
-    Press Down 'Settings: Theme settings: Games & apps' | Out-Null
-    Press Down 'Settings: Theme settings: Art' | Out-Null
-    Press Down 'Settings: Theme settings: Helpers' | Out-Null
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Down 'Settings: Rail: Games & apps' | Out-Null
+    Press Right 'Settings: Games & apps: Launchers' | Out-Null
+    Press Right 'Settings: Games & apps: Storage' | Out-Null
+    Press Down 'Settings: Games & apps: Helpers' | Out-Null
     Press A 'Settings: Helpers: legendary; Add; not added' '01-helpers' | Out-Null
 
     # --- legendary: Add asks, Yes fetches, checks, keeps and runs it once.
@@ -132,7 +132,7 @@ try {
     Press A 'Settings: Helpers: legendary; Add; not added' | Out-Null
     Expect-Logged '^helpers: legendary: removed .+\\helpers\\legendary$' $mark 'Removed' | Out-Null
     if (Test-Path (Join-Path $data 'helpers\legendary')) { throw "legendary's folder is still there" }
-    Press B 'Settings: Theme settings: Helpers' | Out-Null
+    Press B 'Settings: Games & apps: Helpers' | Out-Null
 
     if ($script:Dashboard.HasExited) { throw "The Dashboard exited with $($script:Dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }

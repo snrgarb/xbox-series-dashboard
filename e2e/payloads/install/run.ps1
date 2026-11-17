@@ -160,7 +160,7 @@ try {
     $commit = $Matches[2]
     $about = "Version $version$(if ($commit) { " ($commit)" })"
     $arguments = @('--screenshot', "`"$(Join-Path $Out 'about.png')`"", '--page', 'settings',
-        '--press', 'right,down,down,down,down,right,a', '--log-focus', '--data-dir', "`"$data`"",
+        '--press', 'down,down,down,right,right,a', '--log-focus', '--data-dir', "`"$data`"",
         '--store-art-service', 'http://127.0.0.1:9', '--art-service', 'http://127.0.0.1:9')
     if (Test-SafeMode) { $arguments += @(Get-SafeArguments $arguments) }
     $shot = Invoke-Bounded $exe 'about' $arguments 90

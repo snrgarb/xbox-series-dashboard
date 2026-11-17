@@ -1,4 +1,4 @@
-//! Theme settings > Art (docs/spec/settings.md, 16.8): the user's own SteamGridDB key, which art no store has for a
+//! Games & apps > Art (docs/spec/settings.md, 16.8): the user's own SteamGridDB key, which art no store has for a
 //! game is looked up with, "Clear downloaded art", "Refresh all art and details" (#190), which forgets everything
 //! downloaded and fetches it again in the background, and "Download art online", which turns every download of art
 //! off and on. The Bundle has no such page (Playnite's metadata sources did this); it is laid out as the Bundle's Discord

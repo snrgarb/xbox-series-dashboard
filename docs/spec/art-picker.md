@@ -99,8 +99,8 @@ each with `types=static&nsfw=false&humor=false&epilepsy=false&mimes=image/png,im
 
 Said in the foot:
 
-- No key: "Enter your SteamGridDB API key in Settings > Art to choose from its pictures." (the fixed entries alone, no Retry). The same once SteamGridDB has refused the key.
-- Art online turned off: "Turn on Download art online in Settings > Art to choose from SteamGridDB's pictures."
+- No key: "Enter your SteamGridDB API key in Settings > Games & apps > Art to choose from its pictures." (the fixed entries alone, no Retry). The same once SteamGridDB has refused the key.
+- Art online turned off: "Turn on Download art online in Settings > Games & apps > Art to choose from SteamGridDB's pictures."
 - A game the service does not know: "SteamGridDB doesn't know this game."
 - Asked to wait: "SteamGridDB is busy. Try again in a minute." with Retry.
 - Anything else: "These pictures couldn't be fetched: <why>." with Retry.

@@ -1,4 +1,4 @@
-//! Personalisation > Boot video (docs/spec/settings.md, 6.3; docs/spec/start-up.md): a line, then a Row for Off and
+//! General > Boot video (docs/spec/settings.md, 6.3; docs/spec/start-up.md): a line, then a Row for Off and
 //! one for each of the Bundle's boot videos the media folder has, oldest first, the one that plays ticked. A sets a
 //! Row at once and saved; the tick moves, focus stays, and no preview plays.
 //!

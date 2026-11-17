@@ -1,4 +1,4 @@
-//! Personalisation > Profiles, a Profile's page and its Picture page (docs/spec/settings.md 6.5 and 6.6;
+//! Account > Profiles, a Profile's page and its Picture page (docs/spec/settings.md 6.5 and 6.6;
 //! docs/spec/profiles.md, section 4), as the Bundle's `PersonalisationPane` has them.
 //!
 //! - **Profiles**: a box a Profile, two wide, its picture and gamertag, then Add profile. A on a Profile opens its
@@ -64,7 +64,7 @@ fn profile_box(ui: &mut Ui, rect: Rect, profile: &Profile, focused: bool) {
     }
 }
 
-/// Personalisation > Profiles.
+/// Account > Profiles.
 pub struct Profiles {
     /// The box focus is on: a Profile's place, or Add profile's after the last.
     focus: usize,
@@ -435,7 +435,7 @@ const COLUMNS: usize = 4;
 /// The hint's line and the 26 under it.
 const HINT_HEIGHT: f32 = 34.58 + 26.0;
 
-/// Personalisation > Profiles > a Profile > Picture.
+/// Account > Profiles > a Profile > Picture.
 pub struct Pictures {
     id: i64,
     offered: Vec<Offered>,

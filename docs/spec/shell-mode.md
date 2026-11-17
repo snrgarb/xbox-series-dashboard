@@ -35,7 +35,7 @@ Dashboard's exit.
 
 ## 2. Settings > System
 
-Theme settings has a fifth row, under Art, with one box, **System** (icon U+E770), the port's own. Its page, laid out as Discord's
+The System category's first box is **System** (icon U+E770), the port's own, About beside it ([settings.md](settings.md) 6.1). Its page, laid out as Discord's
 (settings.md, 6.9): a label, its description, the control, the next group 40 under.
 
 - **Start with Windows** — "Starts the Dashboard in place of the Windows desktop when you sign in, as a console starts.

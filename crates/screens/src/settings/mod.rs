@@ -4,16 +4,18 @@
 //! are a pane, and so is every page a box opens in the boxes' place: each a struct that implements [`Pane`], keeps
 //! its own focus, and is drawn from [`controls`]. B climbs one level at a time, a page to the box that opened it,
 //! the category's boxes to the rail, the rail out of Settings; an entry point that opens deep climbs the same way
-//! (section 8.2). The page remembers nothing between visits: it opens as its [`Entry`] says.
+//! (section 8.2). Each category's boxes keep where focus was while the page is up; the page remembers nothing
+//! between visits: it opens as its [`Entry`] says.
 //!
-//! **Adding a page:** a struct that implements [`Pane`], and a box that opens it on the pane it belongs to
-//! ([`boxes::Item::Opens`]). Nothing here changes.
+//! **Adding a page:** a struct that implements [`Pane`], and a box that opens it on the category it belongs to
+//! ([`categories`], [`boxes::Item::Opens`]). Nothing here changes.
 pub mod about;
 mod add;
 mod added;
 mod art;
 mod boot_video;
 pub mod boxes;
+pub mod categories;
 pub mod controls;
 mod discord;
 mod group;
@@ -26,12 +28,13 @@ pub mod options;
 mod profiles;
 pub mod storage;
 pub mod system;
-mod theme_settings;
 mod whos_playing;
 
 use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
 pub use self::boot_video::{ABOUT as BOOT_VIDEO_ABOUT, NONE_FOUND as NO_BOOT_VIDEOS};
+use self::boxes::Boxes;
+pub use self::categories::Category;
 pub use self::options::{BootVideo, Change, Found, Options, Setting, ART_KEY, BOOT_VIDEO, LAST_UPDATE_CHECK};
 use crate::hint_bar::{self, Hint};
 use crate::keyboard;
@@ -40,18 +43,18 @@ use crate::theme::ACCENT;
 use crate::Effect;
 
 /// How the page is opened: what shows, and so where focus lands and how many levels B climbs before the page
-/// closes (docs/spec/settings.md, 8.2).
+/// closes (docs/spec/settings.md, 8.2 and 16.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Entry {
-    /// Theme settings' boxes, focus on the rail: Home's top bar button, the Guide's Settings.
+    /// General's boxes, focus on the rail: Home's top bar button, the Guide's Settings.
     Rail,
     /// Home's Settings tile, which in the Bundle is "Playnite settings" and opens that category on its first box.
-    /// That category is gone: the tile opens the one there is, Theme settings, on its first box.
+    /// That category is gone: the tile opens the first there is, General, on its first box.
     Tile,
-    /// Personalisation's page, focus on Groups: the Tile menu's Customise Home.
-    Personalisation,
-    /// Home's Discord tile while there is no Discord tab in the Guide: Theme settings > Discord, focus on the
-    /// Client ID's Type; B goes back to Theme settings' boxes with focus on Discord.
+    /// Games & apps' boxes, focus on Groups: the Tile menu's Customise Home.
+    CustomiseHome,
+    /// Home's Discord tile while there is no Discord tab in the Guide: Account > Discord, focus on the Client ID's
+    /// Type; B goes back to Account's boxes with focus on Discord.
     Discord,
 }
 
@@ -136,59 +139,113 @@ const RAIL: f32 = 441.0;
 const DIVIDER: f32 = 2.0;
 /// The rail's text starts here, and its items' names end 43 short of its edge.
 const RAIL_LEFT: f32 = 75.0;
-/// The rail's one category, as the Bundle names it.
-const CATEGORY: &str = "Theme settings";
+/// The first rail item's top, and the pitch from one to the next: 58 tall, 14 between.
+const RAIL_TOP: f32 = 190.0;
+const RAIL_PITCH: f32 = 72.0;
 const SELECTED: Color = Color::rgb(0x262626);
 const TITLE: TextStyle = TextStyle::new(Font::Display, 30.0, 400);
 const ITEM: TextStyle = TextStyle::new(Font::Display, 24.0, 350);
 const HEADER: TextStyle = TextStyle::new(Font::Display, 42.0, 350);
+/// The header's category, before the page's name: bold, as the console's (docs/spec/settings.md, 3).
+const HEADER_CATEGORY: TextStyle = TextStyle::new(Font::Display, 42.0, 700);
+/// Between the category and the page's name in the header.
+const HEADER_GAP: f32 = 20.0;
 
 pub struct Settings {
-    /// Focus is on the rail's item; else on the last pane.
+    /// Focus is on the rail's item; else on the pane that shows.
     on_rail: bool,
-    /// The category's boxes, then each page opened from the one before it. The last shows.
-    panes: Vec<Box<dyn Pane>>,
+    /// The category showing, the rail's focused or selected item: its place in [`Category::ALL`].
+    category: usize,
+    /// Every category's boxes, each keeping where its focus was while the page is up (16.3).
+    categories: Vec<Boxes>,
+    /// Each page opened over the category's boxes, from the one before it. The last shows.
+    pages: Vec<Box<dyn Pane>>,
 }
 
 impl Settings {
     pub fn open(entry: Entry) -> Self {
-        let boxes: Box<dyn Pane> = Box::new(theme_settings::theme_settings());
         match entry {
-            Entry::Rail => Self { on_rail: true, panes: vec![boxes] },
-            Entry::Tile => Self { on_rail: false, panes: vec![boxes] },
+            Entry::Rail => Self { on_rail: true, ..Self::on(Category::General) },
+            Entry::Tile => Self::on(Category::General),
             Entry::Discord => {
-                let (row, column) = theme_settings::DISCORD;
-                let boxes = Box::new(theme_settings::theme_settings().with_focus(row, column));
-                Self { on_rail: false, panes: vec![boxes, Box::new(discord::Discord::default())] }
+                let (row, column) = categories::DISCORD;
+                let mut settings = Self::on(Category::Account);
+                settings.categories[Category::Account.index()] = Category::Account.boxes().with_focus(row, column);
+                settings.pages.push(Box::new(discord::Discord::default()));
+                settings
             }
-            // Personalisation is Theme settings' first box, where focus is as its boxes are made; on its own boxes
-            // focus is on Groups, the box that customises Home (docs/spec/settings.md, 16.3), beside Who's playing
-            // today?.
-            Entry::Personalisation => Self::showing(Box::new(theme_settings::personalisation().with_focus(1, 1))),
+            // Groups, the box that customises Home (docs/spec/settings.md, 16.3).
+            Entry::CustomiseHome => {
+                let (row, column) = categories::GROUPS;
+                let mut settings = Self::on(Category::GamesAndApps);
+                let boxes = Category::GamesAndApps.boxes().with_focus(row, column);
+                settings.categories[Category::GamesAndApps.index()] = boxes;
+                settings
+            }
         }
     }
 
-    /// Settings with this page showing, as if a box of Theme settings had opened it: B goes back to those boxes.
-    pub fn showing(pane: Box<dyn Pane>) -> Self {
-        Self { on_rail: false, panes: vec![Box::new(theme_settings::theme_settings()), pane] }
+    /// Settings on this category's boxes, focus on its first.
+    fn on(category: Category) -> Self {
+        let categories = Category::ALL.iter().map(|category| category.boxes()).collect();
+        Self { on_rail: false, category: category.index(), categories, pages: Vec::new() }
+    }
+
+    /// Settings with this page showing, as if a box of this category had opened it: B goes back to its boxes.
+    pub fn showing(category: Category, pane: Box<dyn Pane>) -> Self {
+        let mut settings = Self::on(category);
+        settings.pages.push(pane);
+        settings
+    }
+
+    /// The pane that shows: the last page, or the category's boxes.
+    fn pane(&self) -> &dyn Pane {
+        match self.pages.last() {
+            Some(page) => page.as_ref(),
+            None => &self.categories[self.category],
+        }
+    }
+
+    fn pane_mut(&mut self) -> &mut dyn Pane {
+        match self.pages.last_mut() {
+            Some(page) => page.as_mut(),
+            None => &mut self.categories[self.category],
+        }
     }
 
     fn rail(&self, ui: &mut Ui) {
         ui.label(RAIL_LEFT, 78.0, "Settings", &TITLE);
-        let item = Rect::new(0.0, 190.0, RAIL, 58.0);
+        let item = |at: usize| Rect::new(0.0, RAIL_TOP + RAIL_PITCH * at as f32, RAIL, 58.0);
+        let showing = item(self.category);
         if self.on_rail {
             // The darker green over the whole item, and the glow hugging it; no ring.
-            controls::glow(ui, item, 2.0);
-            ui.fill(item, ACCENT, 0.0);
+            controls::glow(ui, showing, 2.0);
+            ui.fill(showing, ACCENT, 0.0);
         } else {
             // The category showing: lit, with a bar on its right edge, against the line.
-            ui.fill(item, SELECTED, 0.0);
-            ui.fill(Rect::new(RAIL - 6.0, item.y, 6.0, item.h), ACCENT, 0.0);
+            ui.fill(showing, SELECTED, 0.0);
+            ui.fill(Rect::new(RAIL - 6.0, showing.y, 6.0, showing.h), ACCENT, 0.0);
         }
-        let name = Rect::new(RAIL_LEFT, item.y, RAIL - 43.0 - RAIL_LEFT, item.h);
-        ui.paragraph(name, CATEGORY, &ITEM, HAlign::Left, VAlign::Center, 1);
+        for (at, category) in Category::ALL.iter().enumerate() {
+            let item = item(at);
+            let name = Rect::new(RAIL_LEFT, item.y, RAIL - 43.0 - RAIL_LEFT, item.h);
+            ui.paragraph(name, category.name(), &ITEM, HAlign::Left, VAlign::Center, 1);
+        }
         // The line is over the focused item's glow, which shows again beyond it.
         ui.fill(Rect::new(RAIL, 0.0, DIVIDER, ui.screen().h), controls::LINE, 0.0);
+    }
+
+    /// The header: the category in bold, then the page's name where a page shows, as the console's.
+    fn header(&self, ui: &mut Ui) {
+        let category = Category::ALL[self.category].name();
+        let top = 72.0;
+        let header = Rect::new(controls::LEFT, top, controls::RIGHT - controls::LEFT, 60.0);
+        let bold = ui.paragraph(header, category, &HEADER_CATEGORY, HAlign::Left, VAlign::Top, 1).width;
+        if let Some(page) = self.pages.last() {
+            let x = controls::LEFT + bold + HEADER_GAP;
+            let rest = Rect::new(x, top, (controls::RIGHT - x).max(0.0), 60.0);
+            ui.paragraph(rest, &page.header(), &HEADER, HAlign::Left, VAlign::Top, 1);
+        }
     }
 }
 
@@ -198,9 +255,10 @@ impl Page for Settings {
     }
 
     fn focus(&self) -> String {
-        match self.panes.last() {
-            Some(pane) if !self.on_rail => pane.focus(),
-            _ => format!("Rail: {CATEGORY}"),
+        if self.on_rail {
+            format!("Rail: {}", Category::ALL[self.category].name())
+        } else {
+            self.pane().focus()
         }
     }
 
@@ -210,30 +268,28 @@ impl Page for Settings {
         }
         if self.on_rail {
             match press.button {
-                // Into the category, on its first box always.
+                // Into the category, on the box focus was on when it was left, its first the first time.
                 Button::Right | Button::A => self.on_rail = false,
                 Button::B => return Some(PageAction::Close),
-                // One item: Up and Down have nowhere to go. Everything else is swallowed.
+                // Along the rail, stopping at its ends: the category shows at once.
+                Button::Up if self.category > 0 => self.category -= 1,
+                Button::Down if self.category + 1 < Category::ALL.len() => self.category += 1,
+                // Everything else is swallowed.
                 _ => {}
             }
             return None;
         }
-        match self.panes.last_mut()?.press(press, around) {
+        match self.pane_mut().press(press, around) {
             Step::Stay => {}
-            Step::Back if self.panes.len() > 1 => {
-                self.panes.pop();
+            Step::Back if !self.pages.is_empty() => {
+                self.pages.pop();
             }
-            // From the category's boxes to the rail, which forgets where focus was on them.
-            Step::Back => {
-                self.panes = vec![Box::new(theme_settings::theme_settings())];
-                self.on_rail = true;
-            }
-            Step::Open(pane) => self.panes.push(pane),
+            // From the category's boxes to the rail, the boxes keeping where focus was.
+            Step::Back => self.on_rail = true,
+            Step::Open(pane) => self.pages.push(pane),
             Step::Do(action) => return Some(action),
             Step::BackWith(action) => {
-                if self.panes.len() > 1 {
-                    self.panes.pop();
-                }
+                self.pages.pop();
                 return Some(action);
             }
         }
@@ -241,59 +297,59 @@ impl Page for Settings {
     }
 
     fn state(&self) -> String {
-        match self.panes.last() {
-            Some(pane) if !self.on_rail => pane.state(),
-            _ => String::new(),
+        if self.on_rail {
+            String::new()
+        } else {
+            self.pane().state()
         }
     }
 
     fn hints(&self, around: Around) -> &'static [Hint] {
-        match self.panes.last() {
-            Some(pane) if !self.on_rail && pane.dialog().is_none() => pane.hints(around),
-            _ => hint_bar::NONE,
+        let pane = self.pane();
+        if !self.on_rail && pane.dialog().is_none() {
+            pane.hints(around)
+        } else {
+            hint_bar::NONE
         }
     }
 
     fn dialog(&self) -> Option<Dialog> {
-        self.panes.last().filter(|_| !self.on_rail).and_then(|pane| pane.dialog())
+        if self.on_rail {
+            None
+        } else {
+            self.pane().dialog()
+        }
     }
 
     fn dismiss_dialog(&mut self) -> bool {
-        if let Some(pane) = self.panes.last_mut() {
-            pane.dismiss_dialog();
-        }
+        self.pane_mut().dismiss_dialog();
         true
     }
 
     fn library_changed(&mut self, around: Around) {
-        let last = self.panes.len().saturating_sub(1);
-        let mut opened = None;
-        for (at, pane) in self.panes.iter_mut().enumerate() {
-            let over = pane.library_changed(around);
-            if at == last {
-                opened = over;
-            }
+        let mut opened = self.categories[self.category].library_changed(around);
+        for page in &mut self.pages {
+            opened = page.library_changed(around);
         }
         if let Some(pane) = opened.filter(|_| !self.on_rail) {
-            self.panes.push(pane);
+            self.pages.push(pane);
         }
     }
 
     fn entry_text(&self) -> String {
-        self.panes.last().map(|pane| pane.entry_text()).unwrap_or_default()
+        self.pane().entry_text()
     }
 
     fn entry(&mut self, event: keyboard::Event, around: Around) {
-        if let Some(pane) = self.panes.last_mut() {
-            pane.entry(event, around);
-        }
+        self.pane_mut().entry(event, around);
     }
 
     fn asks(&mut self) -> Vec<Effect> {
-        let asks = self.panes.iter_mut().flat_map(|pane| pane.asks()).collect();
-        // A pane that is done steps back, once what it asked has been taken.
-        if self.panes.len() > 1 && self.panes.last_mut().is_some_and(|pane| pane.closes()) {
-            self.panes.pop();
+        let mut asks = self.categories[self.category].asks();
+        asks.extend(self.pages.iter_mut().flat_map(|pane| pane.asks()));
+        // A page that is done steps back, once what it asked has been taken.
+        if self.pages.last_mut().is_some_and(|pane| pane.closes()) {
+            self.pages.pop();
         }
         asks
     }
@@ -301,9 +357,8 @@ impl Page for Settings {
     fn draw(&mut self, ui: &mut Ui, around: Around) {
         ui.fill(ui.screen(), controls::PAGE, 0.0);
         self.rail(ui);
-        let Some(pane) = self.panes.last_mut() else { return };
-        let header = Rect::new(controls::LEFT, 72.0, controls::RIGHT - controls::LEFT, 60.0);
-        ui.paragraph(header, &pane.header(), &HEADER, HAlign::Left, VAlign::Top, 1);
-        pane.draw(ui, around, !self.on_rail);
+        self.header(ui);
+        let focused = !self.on_rail;
+        self.pane_mut().draw(ui, around, focused);
     }
 }

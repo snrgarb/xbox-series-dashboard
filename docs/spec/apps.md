@@ -28,7 +28,7 @@ The Bundle's Search has an Apps row under Games (search.md, section 3.3). Here t
 
 ## 4. Settings: Games & apps
 
-A box on Theme settings, **Games & apps** (glyph U+E71D), on a row of its own under Personalisation and Guide, opens its page in the boxes' place. Everything on it is the port's: the Bundle adds both in Playnite's own windows.
+A box on the Games & apps category, **Games & apps** (glyph U+E71D), in its Library section under Launchers ([settings.md](settings.md) 6.1), opens its page in the boxes' place. Everything on it is the port's: the Bundle adds both in Playnite's own windows.
 
 ### 4.1 The page
 

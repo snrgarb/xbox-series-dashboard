@@ -1,4 +1,4 @@
-//! Personalisation > Groups (docs/spec/filters.md, 6.2): a Row for every saved filter in its order, ticked while it
+//! Games & apps > Groups (docs/spec/filters.md, 6.2): a Row for every saved filter in its order, ticked while it
 //! shows on Home and in Full library, and New Group last. A turns a tick over; Menu opens the Group's menu, the Tile
 //! menu's panel over the dimmed page, which moves the Group up or down, opens a custom Group's page, or deletes it
 //! after asking.

@@ -29,7 +29,7 @@ check stays off by default for as long as it is so.
 
 ## 2. Settings > About
 
-Theme settings > About (settings.md 16.10) gets a group **Updates** between the version and the licences:
+System > About (settings.md 16.10) gets a group **Updates** between the version and the licences:
 
 - a line saying where updates stand (below);
 - two buttons, **Check for updates** and **Install** beside it (18 apart, 58 tall, as Launchers' Update now). Install
@@ -39,7 +39,7 @@ Theme settings > About (settings.md 16.10) gets a group **Updates** between the 
   it asks for the newest version and downloads it. You're told when it's ready, never during a game."
 
 Focus opens on Check for updates. Right goes to Install, Left back (and Left from Check for updates or the checkbox,
-or B anywhere, back to Theme settings' boxes on About); Down from either button to the checkbox, Up back to Check for
+or B anywhere, back to System's boxes on About); Down from either button to the checkbox, Up back to Check for
 updates. A on Check for updates: `Effect::CheckForUpdates`; on Install with one ready: `Effect::InstallUpdate`; on
 the checkbox: the option turned over (`Setting::DailyUpdateCheck`, `updates.daily_check`), saved as every option is.
 
@@ -132,7 +132,7 @@ The handover is the same, and the watchdog does not fight it (`crates/shell-mode
 ## 6. The Toast
 
 When a version becomes Ready (by hand or by the daily check), a notification: "Version <v> of the Dashboard is
-ready. Install it in Settings > About.", a Toast with it, once per version. **Never during a game**: while one runs it
+ready. Install it in Settings > System > About.", a Toast with it, once per version. **Never during a game**: while one runs it
 waits, and shows once the game has ended. Nothing else about updates makes a Toast: not a 404, not a failure, not a
 refusal; those are on About and in the log.
 

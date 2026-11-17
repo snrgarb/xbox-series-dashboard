@@ -97,17 +97,19 @@ function Walk([string] $Button, [string] $Expect, [int] $Most = 8) {
 function Open-Art {
     Walk Up 'TopBar\(.+\)' 4
     Walk Right 'TopBar\(Settings\)' 6
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Press Down 'Settings: Theme settings: Guide' | Out-Null
-    Press Down 'Settings: Theme settings: Games & apps' | Out-Null
-    Press Down 'Settings: Theme settings: Art' | Out-Null
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Down 'Settings: Rail: Games & apps' | Out-Null
+    Press Right 'Settings: Games & apps: Launchers' | Out-Null
+    Press Down 'Settings: Games & apps: Games & apps' | Out-Null
+    Press Down 'Settings: Games & apps: Groups' | Out-Null
+    Press Down 'Settings: Games & apps: Art' | Out-Null
     Press A 'Settings: Art: Type(; .+)?' | Out-Null
 }
 
 function Leave-Settings {
-    Press B 'Settings: Theme settings: Art' | Out-Null
-    Press B 'Settings: Rail: Theme settings' | Out-Null
+    Press B 'Settings: Games & apps: Art' | Out-Null
+    Press B 'Settings: Rail: Games & apps' | Out-Null
     Press B 'TopBar\(Settings\)' | Out-Null
 }
 

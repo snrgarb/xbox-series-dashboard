@@ -284,7 +284,7 @@ impl TileMenu {
                 self.flights += 1;
                 None
             }
-            Choice::Customise => Some(PageAction::Replace(Open::Settings(settings::Entry::Personalisation))),
+            Choice::Customise => Some(PageAction::Replace(Open::Settings(settings::Entry::CustomiseHome))),
             // The flyout is made as it opens, from the library as it is then. A game that has gone meanwhile
             // closes the whole menu.
             Choice::MoreOptions => match game {

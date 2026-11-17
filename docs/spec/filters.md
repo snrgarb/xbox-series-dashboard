@@ -250,7 +250,7 @@ Focus, the ring and glow, the fly-in, B's levels and sounds are those of the Set
 
 ### 6.1 Where
 
-**Settings > Theme settings > Personalisation > Groups**: a Box on Personalisation in the slot the Bundle leaves empty, column 1 of row 1, beside Who's playing today? (x 975..1412, y 359..490; [settings.md](settings.md) sections 6.2 and 14). Icon U+E8FD (BulletedList), 34 px; name "Groups". Personalisation is where the Tile menu's Customise Home already lands (CONTEXT.md:47), so Customise Home on a Group's card reaches the page that edits Groups in two presses: Right, Down, A from Boot video.
+**Settings > Games & apps > Groups**: a Box in the Games & apps category's Library section, under Games & apps and over Art ([settings.md](settings.md) 6.1; #194). Icon U+E8FD (BulletedList), 34 px; name "Groups". The Tile menu's Customise Home lands on it (CONTEXT.md:47 has it land on Personalisation, which held it until #194), so Customise Home on a Group's card reaches the page that edits Groups in one press: A.
 
 **As built (#57).** Boot video, Profiles and Who's playing today? are M5's and not there yet, and the boxes that are close up row by row ([settings.md](settings.md) 16.1): Groups is Personalisation's **first box, alone on row 0** (520, 210), the four checkbox boxes under it from y 359, each still with a row to itself and the second column kept for its info. A box beside a checkbox box would be under its info text, so Groups has no other place in M3. Customise Home lands on it: one A from the Tile menu's Customise Home is the Groups page. When M5's boxes come, Groups goes to the Bundle's empty slot as above. Open question 7 is so decided.
 

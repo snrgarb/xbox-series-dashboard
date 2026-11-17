@@ -224,7 +224,7 @@ struct App {
 
 /// What a Toast says when SteamGridDB refuses the key (a 401): once, and no lookups until another key is entered.
 const KEY_REFUSED: &str =
-    "SteamGridDB didn't accept your key, so no art is being downloaded. Check it in Settings, Art.";
+    "SteamGridDB didn't accept your key, so no art is being downloaded. Check it in Settings, Games & apps, Art.";
 
 /// How long a window's frames took, for --log-frames: the wait for the swap chain to give a frame to draw on, the
 /// drawing and the present, and the time from one frame's start to the next while something moved: a frame that
@@ -1525,8 +1525,9 @@ impl ApplicationHandler for App {
         if self.updater.owes_toast() && self.home_presented.is_some() && self.dashboard.playing().is_none() {
             if let Some(version) = self.updater.untold() {
                 eprintln!("update: {version} is ready: a Toast tells of it");
-                self.dashboard
-                    .notify(&format!("Version {version} of the Dashboard is ready. Install it in Settings > About."));
+                self.dashboard.notify(&format!(
+                    "Version {version} of the Dashboard is ready. Install it in Settings > System > About."
+                ));
                 self.overlay_stale = true;
             }
         }

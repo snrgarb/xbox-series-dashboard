@@ -1,4 +1,4 @@
-//! Theme settings > Games & apps (docs/spec/apps.md, section 4): Add a game and Add an app, each opening its page
+//! Games & apps > Games & apps (docs/spec/apps.md, section 4): Add a game and Add an app, each opening its page
 //! in this one's place, then a Row for every game added by hand and every App. A or Menu on one of those opens its
 //! menu, the Tile menu's panel over the dimmed page: Rename, which opens text entry on its name, and Remove, which
 //! asks "Remove X?" first.
@@ -20,7 +20,7 @@ use crate::menu_panel::{self, icon, Answer, MenuPanel, Row as MenuRow, DIM, FLY}
 use crate::pages::{Around, Dialog, Open, PageAction};
 use crate::Effect;
 
-/// The box on Theme settings, and the page's header.
+/// The box on the Games & apps category, and the page's header.
 pub const TITLE: &str = "Games & apps";
 /// The line over the Rows.
 const ABOUT: &str = "Add games that no store brings in, and apps to start from My games & apps. Press A on one to \

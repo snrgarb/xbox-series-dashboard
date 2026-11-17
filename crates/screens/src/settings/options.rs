@@ -23,7 +23,7 @@ pub enum Setting {
     /// key (Settings > Art). Off, nothing is asked of any service.
     DownloadArtOnline,
     /// Who's playing today? asks on every start and on waking from sleep; off, the Profile signed in last signs in
-    /// by itself (Settings > Personalisation > Who's playing today?, docs/spec/start-up.md).
+    /// by itself (Settings > Account > Who's playing today?, docs/spec/start-up.md).
     AskWhosPlaying,
     /// Settings > About's Check for updates every day (docs/spec/updates.md): off by default, while the
     /// repository's releases are not public.
@@ -86,7 +86,7 @@ impl Change {
     }
 }
 
-/// The settings row that holds the Boot video chosen (Settings > Personalisation > Boot video): a
+/// The settings row that holds the Boot video chosen (Settings > General > Boot video): a
 /// [`BootVideo::key`], `Off` among them. None until one is chosen, which is the Bundle's Xbox Series X.
 pub const BOOT_VIDEO: &str = "startup.boot_video";
 

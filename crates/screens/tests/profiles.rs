@@ -1,4 +1,4 @@
-//! Profiles (docs/spec/profiles.md): Settings > Personalisation > Profiles, a Profile's page and its Picture page,
+//! Profiles (docs/spec/profiles.md): Settings > Account > Profiles, a Profile's page and its Picture page,
 //! each change carried out on a library database as the executable carries it out, and every place the Profile
 //! signed in shows (Home's top bar, the Guide, the greeting) following the next snapshot at once. The pictures are
 //! compared with the committed references (crates/shots): `SHOTS=bless cargo test -p screens --test profiles`
@@ -73,11 +73,11 @@ impl Shell {
         library
     }
 
-    /// Settings > Personalisation > Profiles, focus on its first box.
+    /// Settings > Account > Profiles, focus on its first box.
     fn profiles() -> Self {
         let mut shell = Self::new();
-        shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-        shell.press(&[Up, Right, A]);
+        shell.dashboard.open_page(Open::Settings(Entry::Rail));
+        shell.press(&[Down, Right, A]);
         assert_eq!(shell.focus(), "Settings: Profiles: Tester");
         shell
     }
@@ -146,32 +146,28 @@ impl Shell {
 }
 
 #[test]
-fn profiles_is_personalisations_second_box_and_lists_every_profile_then_add_profile() {
+fn profiles_is_accounts_first_box_and_lists_every_profile_then_add_profile() {
     let mut shell = Shell::new();
-    shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    // Customise Home lands on Groups, under Profiles; Profiles is beside Boot video, in the Bundle's place.
-    assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
-    shell.press(&[Up]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Profiles");
-    shell.press(&[Left]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Boot video");
-    // Down from Boot video is Who's playing today?, Groups beside it.
+    shell.dashboard.open_page(Open::Settings(Entry::Rail));
     shell.press(&[Down]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Who's playing today?");
+    assert_eq!(shell.focus(), "Settings: Rail: Account");
+    // Profiles is Account's first box, Who's playing today? beside it, Discord under Profiles.
     shell.press(&[Right]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Groups");
+    assert_eq!(shell.focus(), "Settings: Account: Profiles");
+    shell.press(&[Right]);
+    assert_eq!(shell.focus(), "Settings: Account: Who's playing today?");
     shell.press(&[Down]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Background delay");
-    shell.press(&[Up, Up, Right, A]);
+    assert_eq!(shell.focus(), "Settings: Account: Discord");
+    shell.press(&[Up, A]);
     assert_eq!(shell.focus(), "Settings: Profiles: Tester");
     // Left at the first column does nothing on the page; Right is Add profile; the row's end stops.
     shell.press(&[Left]);
     assert_eq!(shell.focus(), "Settings: Profiles: Tester");
     shell.press(&[Right, Right]);
     assert_eq!(shell.focus(), "Settings: Profiles: Add profile");
-    // B is Personalisation, on Profiles.
+    // B is Account, on Profiles.
     shell.press(&[B]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Profiles");
+    assert_eq!(shell.focus(), "Settings: Account: Profiles");
 }
 
 #[test]
@@ -282,11 +278,11 @@ fn picture_offers_the_files_then_the_plain_ones_then_a_path_and_a_wears_one() {
     assert_eq!(shell.focus(), "Settings: Profile: Picture; \"Tester\", real name \"\", Moth.png");
     shell.press(&[A]);
     assert_eq!(shell.focus(), "Settings: Picture: Moth.png; worn");
-    // B steps back a page at a time: the Profile, Profiles, Personalisation.
+    // B steps back a page at a time: the Profile, Profiles, Account.
     shell.press(&[B]);
     assert!(shell.focus().starts_with("Settings: Profile: Picture;"));
     shell.press(&[B, B]);
-    assert_eq!(shell.focus(), "Settings: Personalisation: Profiles");
+    assert_eq!(shell.focus(), "Settings: Account: Profiles");
 }
 
 #[test]
@@ -405,13 +401,13 @@ impl Stage {
     }
 }
 
-/// Personalisation, focus on Profiles beside Boot video.
+/// Account, focus on Profiles, its first box.
 #[test]
-fn settings_personalisation_profiles() {
+fn settings_account_profiles() {
     let mut stage = Stage::profiles();
     stage.press(&[B]);
-    assert_eq!(stage.shell.focus(), "Settings: Personalisation: Profiles");
-    stage.check("settings-personalisation-profiles");
+    assert_eq!(stage.shell.focus(), "Settings: Account: Profiles");
+    stage.check("settings-account-profiles");
 }
 
 /// Profiles: a box a Profile, its picture and gamertag, then Add profile; focus on the first, then on Add profile.
@@ -463,8 +459,8 @@ fn settings_profile_picture() {
 #[test]
 fn settings_profile_picture_hint() {
     let mut shell = Shell::offering(Vec::new());
-    shell.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    shell.press(&[Up, Right, A, A, Down, A]);
+    shell.dashboard.open_page(Open::Settings(Entry::Rail));
+    shell.press(&[Down, Right, A, A, Down, A]);
     assert_eq!(shell.focus(), "Settings: Picture: Shape 0; worn");
     Stage::over(shell).check("settings-profile-picture-hint");
 }

@@ -572,7 +572,7 @@ mod tests {
         stack.open(Open::MyGames(my_games::Entry::Games), around(&library));
         stack.open_over(Open::Search, around(&Library::default()));
         stack.open(Open::Settings(settings::Entry::Rail), around(&library));
-        assert_eq!((stack.depth(), focus(&stack)), (1, Some(("Settings", "Rail: Theme settings".into()))));
+        assert_eq!((stack.depth(), focus(&stack)), (1, Some(("Settings", "Rail: General".into()))));
         assert!(stack.clear() && stack.is_empty() && !stack.clear());
     }
 
