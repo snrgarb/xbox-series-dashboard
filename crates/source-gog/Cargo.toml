@@ -8,6 +8,8 @@ description = "GOG's games, from what their installers and GOG Galaxy leave on t
 [dependencies]
 log-line = { path = "../log-line" }
 model = { path = "../model" }
+# gogdl's runs, and where it is (`gogdl`).
+source-kit = { path = "../source-kit" }
 anyhow = "1"
 serde_json = "1"
 # Galaxy's database: read by the source, written by the fixture.

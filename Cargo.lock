@@ -2427,6 +2427,7 @@ dependencies = [
  "model",
  "rusqlite",
  "serde_json",
+ "source-kit",
  "tempfile",
 ]
 

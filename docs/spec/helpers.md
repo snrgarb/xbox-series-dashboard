@@ -135,6 +135,42 @@ named beside it in the module's comments):
 - *What it cannot do* is refused through `Installer::can`, not faked: no folder to choose, nothing while not signed
   in.
 
+**GOG through gogdl 1.4.0** (`source_gog::gogdl`; gogdl's source at that tag, and for the set-up and uninstall steps
+Heroic's, which drives gogdl the same way):
+
+- *Its folder* is the Dashboard's, `<data>\gogdl`: gogdl keeps no record of what it installed. `auth.json` is the
+  sign-in (`--auth-config-path`), `heroic_gogdl\manifests\<id>` the build's manifest (every run is given
+  `GOGDL_CONFIG_PATH`, so nothing goes to Heroic's own `%APPDATA%\heroic_gogdl`), `support\<id>` and `redist` the
+  support files and the script interpreter, and `installed.json` the Dashboard's record of the games it installed,
+  read by GOG's source beside the registry's (a gogdl install writes no `GOG.com\Games` key itself).
+- *The library*: gogdl lists none, so the games owned and not installed are Galaxy's database's alone. Without Galaxy
+  signed in once on the PC, there is nothing to install from here (listing it from GOG's own API with gogdl's token is
+  a decision for later: a source reads files, never the network).
+- *Install* is `gogdl --auth-config-path <auth.json> download <id> --platform windows --path <Games> --support
+  <support\id> --skip-dlcs --lang en-US`, into `<Games>\<installDirectory>`; progress is gogdl's own `[PROGRESS] INFO: =
+  Progress: <percent> <written>/<total>, ...` and ` + Download\t- <MiB> MiB/s (raw) ...` lines. Then the game's
+  *set-up step*, as Heroic runs it: where the manifest says `scriptInterpreter`, `scriptinterpreter.exe` (fetched with
+  `redist --ids ISI --path <redist>`) with `/VERYSILENT /DIR=<folder> /Language=English /LANG=English
+  /ProductId=<id> /galaxyclient /buildId=<build> /versionName=<version> /lang-code=en-US /supportDir=<support>
+  /nodesktopshortcut` (the build and version from `gogdl info`); else each product's `temp_executable` from its
+  support folder. Redistributables are not run.
+- *Windows' permission prompt*: Heroic always starts the set-up step elevated. The Dashboard starts it as it is, and
+  only where Windows answers that it needs an administrator (error 740) asks again through `powershell Start-Process
+  -Verb RunAs`, which puts the prompt up. That prompt is on Windows' secure desktop, where no program's input reaches,
+  the virtual pad's included: the pad cannot answer it. Ways out, for the user to decide: run the Dashboard elevated
+  (no prompt, a bigger blast radius), turn UAC's prompt for administrators down to "without the secure desktop" (then a
+  pad mapper can press Yes), or skip the set-up step for games whose build asks for it (most run without it).
+- *Pause* stops gogdl (it keeps `.gogdl-resume` in the game's folder), *Resume* runs the download again, *Cancel*
+  deletes the folders the install made (those not there before it began) and the manifest and support files.
+- *Uninstall* is the game's own `unins000.exe /VERYSILENT /dir=<folder>` (Heroic's, elevated only where Windows asks),
+  then what is left of the folder, the manifest, the support files and the record deleted. A GOG game the Dashboard
+  did not install through gogdl is uninstalled as before, its uninstaller asking the user.
+- *Play* is the game's own program, as for every GOG game (`.info`'s primary play task).
+- *Signing in*: GOG's sign-in is a web page (`login.gog.com`, Galaxy's client), which ends on an address carrying a
+  code; `gogdl auth --code <code>` turns that into `auth.json`. The Dashboard shows no page, asks for no password and
+  keeps none: Settings > Helpers says `Signed in to GOG.` or how to sign in, and the log `helpers: gogdl: signed in` or
+  `not signed in`. A pad-driven page (a web view catching the code, or a phone) is the user's decision.
+
 ## 6. Tests
 
 - `helpers`: the table's shape; a wrong SHA-256 refused with nothing kept; a right one kept and removed whole; no
@@ -151,3 +187,7 @@ named beside it in the module's comments):
 - `crates/standin/tests/helpers.rs`: Epic's installer driving the stand-in legendary (standin.exe copied as
   `legendary`): sign-in, library, install, pause, resume, cancel, install to the end, egl-sync, start, uninstall.
 - The payload `e2e/payloads/epic-legendary`: the same with the pad, against the stand-in legendary.
+- `source_gog::gogdl`: gogdl's lines (its format strings, made-up numbers), its sign-in and the Dashboard's record.
+- `crates/standin/tests/helpers.rs`: GOG's installer driving the stand-in gogdl: sign-in, download, pause, resume,
+  cancel (what was there before kept), to the end with the script interpreter's set-up step, start, uninstall.
+- The payload `e2e/payloads/gog-gogdl`: the same with the pad, against the stand-in gogdl.
