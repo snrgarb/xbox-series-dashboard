@@ -237,16 +237,14 @@ fn menu_and_view_open_the_games_tile_menu_and_b_there_comes_back() {
     assert!(page.focus_line().ends_with(" of Ashfall Courier"), "{}", page.focus_line());
 }
 
-/// #170: a row's menu is the queued game's, with Pause or Resume and Cancel after Install; each asks the game's
-/// store through the shell, Cancel once the player has said yes.
+/// #170, #171: a row's menu is the queued game's, with Pause or Resume and Cancel in Install's place; each asks the
+/// game's store through the shell, Cancel once the player has said yes.
 #[test]
 fn a_rows_menu_pauses_resumes_and_cancels_its_install() {
     let library = with_queue(library(), several);
     let (dune, ember) = (id(&library, "Dune Cartographer"), id(&library, "Ember Choir"));
     let mut page = on_page(library);
     press(&mut page, &[Down, View]);
-    assert_eq!(page.focus_line(), "TileMenu: Menu(Install) of Dune Cartographer");
-    press(&mut page, &[Down]);
     assert_eq!(page.focus_line(), "TileMenu: Menu(Pause installation) of Dune Cartographer");
     press(&mut page, &[Down]);
     assert_eq!(page.focus_line(), "TileMenu: Menu(Cancel installation) of Dune Cartographer");
@@ -257,13 +255,13 @@ fn a_rows_menu_pauses_resumes_and_cancels_its_install() {
     assert_eq!(after(&mut page, &[]), "Row(0) of Dune Cartographer");
 
     // The paused one resumes.
-    press(&mut page, &[Down, Menu, Down]);
+    press(&mut page, &[Down, Menu]);
     assert_eq!(page.focus_line(), "TileMenu: Menu(Resume installation) of Ember Choir");
     press(&mut page, &[A]);
     assert_eq!(asked(&mut page), [Effect::Steer { game: ember, steer: Steer::Resume }]);
 
     // Cancel asks first; Keep installing goes back to the menu, on Cancel installation.
-    press(&mut page, &[View, Down, Down]);
+    press(&mut page, &[View, Down]);
     press(&mut page, &[A]);
     assert_eq!(page.focus_line(), "TileMenu: Prompt(Cancel installation) of Ember Choir");
     assert!(asked(&mut page).is_empty());
@@ -296,14 +294,15 @@ fn a_workshop_row_says_what_it_is_and_its_game_is_played_as_an_installed_one() {
     assert_ne!(page.focus_line(), "TileMenu: Menu(Pause installation) of Glasswing Atlas");
 }
 
-/// A store that cannot steer its installs (Steam with its debugger off): the row's menu is the Bundle's.
+/// A store that cannot steer its installs (Steam with its debugger off): no Pause or Cancel, and no Install either,
+/// which would ask for it again (#171): the Favourites row first.
 #[test]
 fn a_rows_menu_has_no_pause_or_cancel_where_its_store_cannot() {
     let library = with_queue(library(), |library| {
         Queue::new(vec![Queued { can: Can::NOTHING, ..downloading(library) }], Vec::new())
     });
     let mut page = on_page(library);
-    press(&mut page, &[Down, View, Down]);
+    press(&mut page, &[Down, View]);
     assert_eq!(page.focus_line(), "TileMenu: Menu(Add to Favourites) of Dune Cartographer");
 }
 
@@ -471,11 +470,12 @@ fn manage_queue_several_scrolled() {
     stage.check("manage_queue_several_scrolled");
 }
 
-/// The menu of the current download's row (#170): Pause installation and Cancel installation after Install.
+/// The menu of the current download's row (#170, #171): Pause installation and Cancel installation in Install's
+/// place.
 #[test]
 fn manage_queue_menu_pause() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
-    stage.press(&[Down, View, Down]);
+    stage.press(&[Down, View]);
     stage.check("manage_queue_menu_pause");
 }
 
@@ -483,7 +483,7 @@ fn manage_queue_menu_pause() {
 #[test]
 fn manage_queue_menu_resume() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
-    stage.press(&[Down, Down, View, Down]);
+    stage.press(&[Down, Down, View]);
     stage.check("manage_queue_menu_resume");
 }
 
@@ -491,7 +491,7 @@ fn manage_queue_menu_resume() {
 #[test]
 fn manage_queue_cancel_prompt() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
-    stage.press(&[Down, View, Down, Down, A]);
+    stage.press(&[Down, View, Down, A]);
     stage.check("manage_queue_cancel_prompt");
 }
 

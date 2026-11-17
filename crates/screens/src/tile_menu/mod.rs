@@ -10,9 +10,10 @@
 //! The panels are [`MenuPanel`]s, the drawing the Guide's menus share. What is this file's own: which rows a game
 //! has, the three levels and where B goes from each, the dim, and how the panels come and go.
 //!
-//! Opened from the Queue (Manage Queue's row of a game being installed, [`Opener::Queue`]) it is the queued game's
-//! menu of the console: Pause installation or Resume installation, and Cancel installation, after the play row,
-//! each only where the game's store can be asked it (`model::Queued::can`; docs/spec/manage-queue.md, section 8).
+//! For a game being installed, from wherever it opens (Home, My games, the Queue's row, the Game hub's Manage), it is
+//! the queued game's menu of the console: Pause installation or Resume installation, and Cancel installation, in the
+//! Install row's place, each only where the game's store can be asked it (`model::Queued::can`;
+//! docs/spec/manage-queue.md, section 8; #171). Never Install, which would ask for it again.
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use model::{Game, GameKey, Library, Queued, Steer};
@@ -38,7 +39,7 @@ pub enum Opener {
     MyGames,
     /// The Game hub's Manage button: the menu has no Manage game row, the player being there already.
     GameHub,
-    /// A game's row in Manage Queue: as My games & apps', with the queued game's Pause or Resume and Cancel.
+    /// A game's row in Manage Queue: as My games & apps'.
     Queue,
 }
 
@@ -120,27 +121,32 @@ enum Confirm {
 }
 
 /// The menu's rows for a game (docs/spec/tile-menu.md, section 3): the play row, which is Quit for the running
-/// game and Install for one that is not installed; opened from the Queue, Pause installation or Resume installation
-/// and Cancel installation for a game being installed, where its store can (`queued`); the Favourites row; Manage
+/// game and Install for one that is not installed, or for a game being installed (`queued`) Pause installation or
+/// Resume installation and Cancel installation in its place, where its store can; the Favourites row; Manage
 /// game, unless the hub opened the menu; Uninstall for an installed game its store can uninstall, unless it is
 /// running; then, after a gap, Customise and More options.
 fn rows(game: &Game, running: bool, opener: Opener, queued: Option<&Queued>) -> Vec<Row<Choice>> {
-    let mut rows = vec![if running {
-        Row::new(icon::QUIT, "Quit", Choice::Quit)
-    } else if !game.installed {
-        Row::new(icon::INSTALL, "Install", Choice::Install)
-    } else {
-        Row::new(icon::PLAY, "Play game", Choice::Play)
-    }];
-    if let Some(entry) = queued.filter(|_| opener == Opener::Queue && !game.installed) {
-        if entry.can.pause && entry.state.paused() {
-            rows.push(Row::new(icon::PLAY, RESUME, Choice::Steer(Steer::Resume)));
-        } else if entry.can.pause {
-            rows.push(Row::new(icon::PAUSE, PAUSE, Choice::Steer(Steer::Pause)));
+    let mut rows = Vec::new();
+    match queued.filter(|_| !game.installed && !running) {
+        // Being installed (#171): no Install, which would ask for it again; Pause or Resume and Cancel in its place,
+        // from wherever the menu opens, each where its store can. With neither, no row in its place.
+        Some(entry) => {
+            if entry.can.pause && entry.state.paused() {
+                rows.push(Row::new(icon::PLAY, RESUME, Choice::Steer(Steer::Resume)));
+            } else if entry.can.pause {
+                rows.push(Row::new(icon::PAUSE, PAUSE, Choice::Steer(Steer::Pause)));
+            }
+            if entry.can.cancel {
+                rows.push(Row::new(icon::CANCEL_INSTALL, CANCEL, Choice::Steer(Steer::Cancel)));
+            }
         }
-        if entry.can.cancel {
-            rows.push(Row::new(icon::CANCEL_INSTALL, CANCEL, Choice::Steer(Steer::Cancel)));
-        }
+        None => rows.push(if running {
+            Row::new(icon::QUIT, "Quit", Choice::Quit)
+        } else if !game.installed {
+            Row::new(icon::INSTALL, "Install", Choice::Install)
+        } else {
+            Row::new(icon::PLAY, "Play game", Choice::Play)
+        }),
     }
     rows.push(if game.favourite {
         Row::new(icon::UNFAVOURITE, "Remove from Favourites", Choice::Favourite(false))
@@ -458,10 +464,10 @@ mod tests {
         rows(game, running, opener, None).into_iter().map(|row| row.label).collect()
     }
 
-    /// The queued game's menu (#170): Pause or Resume and Cancel after Install, only from the Queue and only what
-    /// its store can.
+    /// A game being installed (#170, #171): Pause or Resume and Cancel in the Install row's place, from wherever the
+    /// menu opens, and only what its store can; never Install, which would ask for it again.
     #[test]
-    fn from_the_queue_a_queued_game_can_be_paused_resumed_and_cancelled_where_its_store_can() {
+    fn a_game_being_installed_can_be_paused_resumed_and_cancelled_from_any_menu_where_its_store_can() {
         let absent = Game { installed: false, ..game() };
         let all = model::Can { pause: true, cancel: true, ..model::Can::NOTHING };
         let entry = |state, can| Queued { can, ..Queued::new(7, state, 0) };
@@ -471,24 +477,30 @@ mod tests {
         };
         assert_eq!(
             labels(Opener::Queue, &downloading),
-            ["Install", PAUSE, CANCEL, "Add to Favourites", "Manage game", "Customise games & apps", "More options"]
+            [PAUSE, CANCEL, "Add to Favourites", "Manage game", "Customise games & apps", "More options"]
         );
+        assert_eq!(
+            labels(Opener::Home, &downloading),
+            [PAUSE, CANCEL, "Add to Favourites", "Manage game", "Customise Home", "More options"]
+        );
+        assert_eq!(labels(Opener::GameHub, &downloading)[..3], [PAUSE, CANCEL, "Add to Favourites"]);
         let paused = entry(model::InstallState::Paused { done: 1, total: 2 }, all);
-        assert_eq!(labels(Opener::Queue, &paused)[1..3], [RESUME, CANCEL]);
+        assert_eq!(labels(Opener::MyGames, &paused)[..2], [RESUME, CANCEL]);
         // Waiting its turn, it can be paused too.
-        assert_eq!(labels(Opener::Queue, &entry(model::InstallState::Queued, all))[1], PAUSE);
-        // A store that cannot: as the Bundle's menu.
+        assert_eq!(labels(Opener::Queue, &entry(model::InstallState::Queued, all))[0], PAUSE);
+        // A store that can do neither: nothing in the row's place, and still no Install.
         let nothing = entry(model::InstallState::Downloading { done: 1, total: 2 }, model::Can::NOTHING);
-        assert_eq!(labels(Opener::Queue, &nothing), labels(Opener::MyGames, &nothing));
+        assert_eq!(
+            labels(Opener::Home, &nothing),
+            ["Add to Favourites", "Manage game", "Customise Home", "More options"]
+        );
         let cancel_only = entry(
             model::InstallState::Paused { done: 1, total: 2 },
             model::Can { cancel: true, ..model::Can::NOTHING },
         );
-        assert_eq!(labels(Opener::Queue, &cancel_only)[1], CANCEL);
-        // Anywhere but the Queue, the Bundle's menu.
-        for opener in [Opener::Home, Opener::MyGames, Opener::GameHub] {
-            assert!(!labels(opener, &downloading).iter().any(|label| label == PAUSE || label == CANCEL));
-        }
+        assert_eq!(labels(Opener::Queue, &cancel_only)[0], CANCEL);
+        // Not in the Queue: Install, as the Bundle's menu.
+        assert_eq!(rows(&absent, false, Opener::Home, None)[0].label, "Install");
     }
 
     #[test]

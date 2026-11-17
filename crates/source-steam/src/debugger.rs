@@ -243,8 +243,9 @@ pub fn takes(script: &str, call: &Call) -> Result<(), String> {
         Call::Steer { steer: Steer::Resume, .. } => {
             vec![format!("SteamClient.Downloads.ResumeAppUpdate({appid}, '0')")]
         }
+        // The real one's cancel is the pause, then these; the pause comes as a script of its own.
         Call::Steer { steer: Steer::Cancel, .. } => {
-            vec![pause, format!("SteamClient.Downloads.RemoveFromDownloadList({appid}, '0')"), uninstall]
+            vec![format!("SteamClient.Downloads.RemoveFromDownloadList({appid}, '0')"), uninstall]
         }
     };
     match needs.into_iter().find(|need| !script.contains(&format!("=> {need}"))) {
@@ -300,6 +301,16 @@ fn act(root: &Path, client: &mut Client, call: &Call, script: &str, say: &dyn Fn
             .and_then(|()| fixture::remove_workshop(root, appid))
             .map(|()| format!("{appid} uninstalled")),
         Call::Steer { steer, .. } => fixture::steered(root, appid, *steer).and_then(|progress| {
+            // Cancelled while its download still runs (not paused first and let stop), the files go but the
+            // manifest is left behind at StateFlags 514, as the real Steam's was on the TV PC (2026-11-17).
+            let file = root.join("steamapps").join(format!("appmanifest_{appid}.acf"));
+            let running = installs::counts(&file).filter(|counts| counts.flags & installs::UPDATE_RUNNING != 0);
+            let progress = match (steer, running) {
+                (Steer::Cancel, Some(counts)) => {
+                    Progress::Abandoned { done: counts.downloaded, total: counts.to_download }
+                }
+                _ => progress,
+            };
             fixture::write_progress(root, appid, progress)?;
             if *steer == Steer::Cancel {
                 fixture::remove_workshop(root, appid)?;
@@ -430,6 +441,22 @@ mod tests {
         assert_eq!(state(), Some(model::InstallState::Paused { done: 30, total: 100 }));
         assert_eq!(ask(&steer(Steer::Cancel)), Outcome::Took);
         assert_eq!(state(), None);
+        let manifest = root.join("steamapps").join(format!("appmanifest_{quiet}.acf"));
+        assert!(!manifest.exists(), "paused first and let stop: the manifest goes");
+
+        // Cancelled while the download still runs, with no pause first (#171, the TV PC): the manifest is left at
+        // 514. That reads as nothing under way and not installed, the cancel is said as what was seen, and Install
+        // on it works.
+        fixture::write_progress(&root, quiet, Progress::Downloading { done: 30, total: 100 }).unwrap();
+        assert!(answer(&steer(Steer::Cancel).script()).done);
+        assert_eq!(installs::counts(&manifest).map(|counts| counts.flags), Some(514));
+        assert_eq!(state(), None, "not shown as a paused download");
+        assert!(!crate::load(&root).unwrap().games.iter().any(|g| g.source_id == quiet.to_string() && g.installed));
+        let (done, seen) = client::on_disk(&crate::libraries(&root), &steer(Steer::Cancel)).unwrap();
+        assert!(done && seen.contains("left behind at StateFlags 514"), "{seen}");
+        assert_eq!(ask(&install), Outcome::Took);
+        assert_eq!(state(), Some(model::InstallState::Queued));
+        fixture::write_progress(&root, quiet, Progress::Dropped).unwrap();
         // Nothing under way: nothing to pause, and the outcome says so.
         assert!(matches!(ask(&steer(Steer::Pause)), Outcome::NotTaken(_)));
         // A library the fake has not.

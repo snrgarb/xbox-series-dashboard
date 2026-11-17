@@ -22,9 +22,12 @@
 //!   Taken only once the app's manifest says so ([`confirm`]).
 //! - Pause: `Downloads.PauseAppUpdate(appid, "0")`; resume: `Downloads.ResumeAppUpdate(appid, "0")`, seen to stop a
 //!   download and to have it go on. No `EnableAllDownloads`: resume worked without it, and Steam's script calls it
-//!   (as `EnableAllDownloads(false, id)`) in one place in a sense not known. Cancel: pause,
-//!   `Downloads.RemoveFromDownloadList(appid, "0")`, then the uninstall, which deletes what was fetched; taken once
-//!   the manifest is gone. Seen only on a download that had already finished: in mid-download it is unproven.
+//!   (as `EnableAllDownloads(false, id)`) in one place in a sense not known. Cancel: the pause in a script of its own,
+//!   a wait (5 s at most) for the manifest to stop saying the download runs, then
+//!   `Downloads.RemoveFromDownloadList(appid, "0")` and the uninstall, which deletes what was fetched; taken once the
+//!   manifest is gone or left behind with nothing under way, the log saying which ([`on_disk`]). Sent back to back in
+//!   mid-download on the TV PC (2026-11-17), Steam removed the files but left the manifest at StateFlags 514; the
+//!   wait is a guess at avoiding that, to be tried there.
 //!
 //! **Steam's main window.** `OpenInstallWizard` has Steam open its Install dialog (a page titled `Install`), which
 //! closes itself after `ContinueInstall`, and bring its main window up over the Dashboard, where it stays. So an
@@ -155,9 +158,8 @@ impl Call {
             Call::Uninstall { .. } => vec![Call::uninstall_wizard(appid)],
             Call::Steer { steer: Steer::Pause, .. } => vec![Call::pause(appid)],
             Call::Steer { steer: Steer::Resume, .. } => vec![Call::resume(appid)],
-            Call::Steer { steer: Steer::Cancel, .. } => {
-                vec![Call::pause(appid), Call::remove(appid), Call::uninstall_wizard(appid)]
-            }
+            // The pause goes first in a script of its own ([`ask`]), and the download is let stop before these.
+            Call::Steer { steer: Steer::Cancel, .. } => vec![Call::remove(appid), Call::uninstall_wizard(appid)],
         }
     }
 
@@ -283,7 +285,82 @@ pub fn ask(ports: &[u16], root: Option<&Path>, call: &Call) -> Outcome {
     let what = call.what();
     let list: Vec<String> = ports.iter().map(u16::to_string).collect();
     log(&format!("{what}: asking Steam's client over its CEF debugger on 127.0.0.1:{}", list.join("/")));
+    if let Call::Steer { appid, steer: Steer::Cancel } = *call {
+        if let Some(lost) = pause_first(ports, root, appid, &what) {
+            return lost;
+        }
+    }
     let before = matches!(call, Call::Install { .. }).then(|| main_window(ports, root, &what));
+    let (outcome, reached) = run(ports, call, &what);
+    // Whatever came of it, a script that reached Steam may have brought its main window up.
+    if let Some(before) = before.filter(|_| reached) {
+        put_back(ports, before, &what);
+    }
+    let outcome = match (&outcome, root) {
+        (Outcome::Took, Some(root)) if on_disk(&crate::libraries(root), call).is_some() => {
+            let steamapps = crate::libraries(root);
+            confirm(call, || on_disk(&steamapps, call).filter(|(done, _)| *done).map(|(_, said)| said))
+        }
+        _ => outcome,
+    };
+    match &outcome {
+        Outcome::Took => log(&format!("{what}: Steam's client took it")),
+        Outcome::NotTaken(why) => log(&format!("{what}: not taken: {why}")),
+        Outcome::Lost(why) => log(&format!("{what}: lost after sending ({why}); not asked again")),
+    }
+    outcome
+}
+
+/// How long a cancel waits, after its pause, for the app's manifest to say the download has stopped.
+pub const SETTLE_WAIT: Duration = Duration::from_secs(5);
+
+/// A cancel's first step: the pause, in a script of its own, then (with `root`) a wait of [`SETTLE_WAIT`] at most
+/// for the manifest to stop saying `UpdateRunning`, before the download is removed and the app uninstalled. On the
+/// TV PC (2026-11-17) the three sent back to back in mid-download left a stale manifest (StateFlags 514, the files
+/// gone) while Steam was still stopping the download; that the wait avoids it is a guess, to be tried there. The
+/// pause not taken (already paused, say) is said and the cancel goes on; lost, nothing more is asked.
+fn pause_first(ports: &[u16], root: Option<&Path>, appid: u32, what: &str) -> Option<Outcome> {
+    let pause = Call::Steer { appid, steer: Steer::Pause };
+    match run(ports, &pause, what).0 {
+        Outcome::Took => {}
+        Outcome::NotTaken(why) => {
+            log(&format!("{what}: its pause first was not taken ({why}); cancelling all the same"))
+        }
+        Outcome::Lost(why) => {
+            log(&format!("{what}: lost after sending its pause ({why}); not asked again"));
+            return Some(Outcome::Lost(why));
+        }
+    }
+    let root = root?;
+    let steamapps = crate::libraries(root);
+    let start = Instant::now();
+    loop {
+        let flags = manifest_flags(&steamapps, appid);
+        let running = flags.flatten().is_some_and(|flags| flags & crate::installs::UPDATE_RUNNING != 0);
+        if !running {
+            let said = match flags {
+                None => "its manifest is gone".to_string(),
+                Some(flags) => {
+                    format!("its manifest says StateFlags {}", flags.map_or("none".into(), |f| f.to_string()))
+                }
+            };
+            log(&format!("{what}: the download stopped ({said}) {} ms after the pause", start.elapsed().as_millis()));
+            return None;
+        }
+        if start.elapsed() >= SETTLE_WAIT {
+            log(&format!(
+                "{what}: its manifest still says the download runs {} s after the pause; cancelling all the same",
+                SETTLE_WAIT.as_secs()
+            ));
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Sends `call`'s script and says in the log each step and what came back: what it came to, and whether it reached
+/// Steam at all.
+fn run(ports: &[u16], call: &Call, what: &str) -> (Outcome, bool) {
     let sent = cef::evaluate_within(ports, cef::SHARED, &call.script(), WAIT);
     let reached = !matches!(sent, Err(Failed::NotSent(_)));
     let outcome = match sent {
@@ -306,56 +383,64 @@ pub fn ask(ports: &[u16], root: Option<&Path>, call: &Call) -> Outcome {
         Err(Failed::NotSent(why)) => Outcome::NotTaken(format!("its debugger could not be reached ({why})")),
         Err(Failed::Lost(why)) => Outcome::Lost(why),
     };
-    // Whatever came of it, a script that reached Steam may have brought its main window up.
-    if let Some(before) = before.filter(|_| reached) {
-        put_back(ports, before, &what);
-    }
-    let outcome = match (&outcome, root) {
-        (Outcome::Took, Some(root)) if done_on_disk(&crate::libraries(root), call).is_some() => {
-            let steamapps = crate::libraries(root);
-            confirm(call, || done_on_disk(&steamapps, call) == Some(true))
-        }
-        _ => outcome,
-    };
-    match &outcome {
-        Outcome::Took => log(&format!("{what}: Steam's client took it")),
-        Outcome::NotTaken(why) => log(&format!("{what}: not taken: {why}")),
-        Outcome::Lost(why) => log(&format!("{what}: lost after sending ({why}); not asked again")),
-    }
-    outcome
+    (outcome, reached)
 }
 
-/// Whether the app's manifest, in any of `steamapps`, says what `call` asked is done: an uninstall's app no longer
-/// installed (no manifest, or one that says it is not, or is being uninstalled); a cancel's manifest gone, or no
-/// longer under way and not installed. None for the other calls: nothing on disk says when they are done.
-pub fn done_on_disk(steamapps: &[PathBuf], call: &Call) -> Option<bool> {
-    let appid = call.appid();
-    // None: no manifest; Some(None): one with no StateFlags.
-    let flags: Option<Option<u64>> = steamapps.iter().find_map(|dir| {
+/// The app's manifest's `StateFlags` in any of `steamapps`: None with no manifest, Some(None) for one without flags.
+fn manifest_flags(steamapps: &[PathBuf], appid: u32) -> Option<Option<u64>> {
+    steamapps.iter().find_map(|dir| {
         let text = std::fs::read(dir.join(format!("appmanifest_{appid}.acf"))).ok()?;
         let manifest = crate::vdf::parse_text(&String::from_utf8_lossy(&text)).ok();
         Some(manifest.and_then(|manifest| manifest.u64_at(&["AppState", "StateFlags"])))
-    });
-    match call {
-        Call::Uninstall { .. } => Some(flags.is_none_or(|flags| !crate::installs::installed(flags))),
-        Call::Steer { steer: Steer::Cancel, .. } => Some(flags.is_none_or(|flags| {
-            flags.is_some_and(|flags| {
+    })
+}
+
+/// What the app's manifest, in any of `steamapps`, says of what `call` asked: whether it is done, and exactly what
+/// was seen, for the log. An uninstall is done when the app no longer reads installed (no manifest, or flags without
+/// `FullyInstalled`, or with `Uninstalling`). A cancel is done when the manifest is gone, or is left behind with no
+/// download under way and not installed: what Steam left on the TV PC after a cancel in mid-download (StateFlags 514,
+/// `UpdateRequired | UpdatePaused`, the files gone), which reads not installed and nothing under way here
+/// (`installs::state`), so the game is offered Install. None for the other calls: nothing on disk says when they
+/// are done.
+pub fn on_disk(steamapps: &[PathBuf], call: &Call) -> Option<(bool, String)> {
+    let flags = manifest_flags(steamapps, call.appid());
+    let named = |flags: Option<u64>| flags.map_or("no StateFlags".to_string(), |flags| format!("StateFlags {flags}"));
+    match (call, flags) {
+        (Call::Uninstall { .. } | Call::Steer { steer: Steer::Cancel, .. }, None) => {
+            Some((true, "its manifest is gone".into()))
+        }
+        (Call::Uninstall { .. }, Some(flags)) => Some(if crate::installs::installed(flags) {
+            (false, format!("its manifest still says installed ({})", named(flags)))
+        } else {
+            (true, format!("its manifest says not installed ({})", named(flags)))
+        }),
+        (Call::Steer { steer: Steer::Cancel, .. }, Some(flags)) => {
+            let left = flags.filter(|&flags| {
                 crate::installs::state(flags, 0, 0, false).is_none() && !crate::installs::installed(Some(flags))
+            });
+            Some(match left {
+                Some(flags) => (
+                    true,
+                    format!(
+                        "its manifest is left behind at StateFlags {flags}, no download under way and not installed"
+                    ),
+                ),
+                None => (false, format!("its manifest still says {}", named(flags))),
             })
-        })),
+        }
         _ => None,
     }
 }
 
 /// After Steam's client took an uninstall or a cancel: waits [`CONFIRM_WAIT`] at most for its manifest to say so
-/// (`done`, looked at every 250 ms), and says in the log what it found. Not seen: [`Outcome::NotTaken`], so that an
-/// uninstall is asked through `steam.exe` instead.
-pub fn confirm(call: &Call, done: impl Fn() -> bool) -> Outcome {
+/// (`done`, looked at every 250 ms, giving what it saw), and says in the log exactly what it found. Not seen:
+/// [`Outcome::NotTaken`], so that an uninstall is asked through `steam.exe` instead.
+pub fn confirm(call: &Call, done: impl Fn() -> Option<String>) -> Outcome {
     let what = call.what();
     let start = Instant::now();
     loop {
-        if done() {
-            log(&format!("{what}: its manifest says so {} ms on", start.elapsed().as_millis()));
+        if let Some(seen) = done() {
+            log(&format!("{what}: {seen}, {} ms on", start.elapsed().as_millis()));
             return Outcome::Took;
         }
         if start.elapsed() >= CONFIRM_WAIT {
@@ -611,9 +696,10 @@ mod tests {
         let resume = Call::Steer { appid: 70, steer: Steer::Resume }.script();
         assert!(resume.contains("() => SteamClient.Downloads.ResumeAppUpdate(70, '0'));"));
         assert!(!resume.contains("EnableAllDownloads"));
+        // Cancel's pause goes first in a script of its own (`pause_first`).
         let cancel = Call::Steer { appid: 70, steer: Steer::Cancel }.script();
+        assert!(!cancel.contains("PauseAppUpdate"));
         for made in [
-            "SteamClient.Downloads.PauseAppUpdate(70, '0')",
             "SteamClient.Downloads.RemoveFromDownloadList(70, '0')",
             "SteamClient.Installs.OpenUninstallWizard([70], '0', true)",
         ] {
@@ -667,18 +753,22 @@ mod tests {
             .unwrap();
         };
         let (uninstall, cancel) = (Call::Uninstall { appid: 70 }, Call::Steer { appid: 70, steer: Steer::Cancel });
-        assert_eq!(done_on_disk(&steamapps, &uninstall), Some(true), "no manifest");
-        assert_eq!(done_on_disk(&steamapps, &cancel), Some(true), "no manifest");
+        let seen = |call: &Call| on_disk(&steamapps, call).unwrap();
+        let gone = (true, "its manifest is gone".to_string());
+        assert_eq!(seen(&uninstall), gone);
+        assert_eq!(seen(&cancel), gone);
         manifest(Some(4));
-        assert_eq!(done_on_disk(&steamapps, &uninstall), Some(false));
+        assert_eq!(seen(&uninstall), (false, "its manifest still says installed (StateFlags 4)".into()));
         manifest(Some(4 | 2048));
-        assert_eq!(done_on_disk(&steamapps, &uninstall), Some(true), "uninstalling");
+        assert_eq!(seen(&uninstall), (true, "its manifest says not installed (StateFlags 2052)".into()));
         manifest(None);
-        assert_eq!(done_on_disk(&steamapps, &uninstall), Some(false), "no flags: taken at its word");
+        assert!(!seen(&uninstall).0, "no flags: taken at its word");
         manifest(Some(2 | 1024 | 256));
-        assert_eq!(done_on_disk(&steamapps, &cancel), Some(false), "downloading");
-        manifest(Some(2 | 512));
-        assert_eq!(done_on_disk(&steamapps, &cancel), Some(true), "left behind, no longer under way");
-        assert_eq!(done_on_disk(&steamapps, &Call::Steer { appid: 70, steer: Steer::Pause }), None);
+        assert_eq!(seen(&cancel), (false, "its manifest still says StateFlags 1282".into()));
+        // What Steam left on the TV PC after a cancel in mid-download: said as it is, not as "gone".
+        manifest(Some(514));
+        let left = "its manifest is left behind at StateFlags 514, no download under way and not installed";
+        assert_eq!(seen(&cancel), (true, left.to_string()));
+        assert_eq!(on_disk(&steamapps, &Call::Steer { appid: 70, steer: Steer::Pause }), None);
     }
 }

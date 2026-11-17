@@ -648,6 +648,9 @@ pub enum Progress {
     Done,
     /// Dropped, cancelled in Steam, or uninstalled: the manifest goes.
     Dropped,
+    /// Cancelled while the download still ran: the files gone, the manifest left behind at `UpdateRequired |
+    /// UpdatePaused` (StateFlags 514), as the real Steam left one on the TV PC (2026-11-17, #171).
+    Abandoned { done: u64, total: u64 },
 }
 
 /// Writes the manifest of the fixture's game `appid` (`Fixture::full_shelf`'s, else a made-up name and folder) as the
@@ -667,6 +670,7 @@ pub fn write_progress(root: &Path, appid: u32, progress: Progress) -> io::Result
             (crate::installs::QUEUED | crate::installs::UPDATE_RUNNING, done, total)
         }
         Progress::Paused { done, total } => (crate::installs::QUEUED | crate::installs::UPDATE_PAUSED, done, total),
+        Progress::Abandoned { done, total } => (2 | crate::installs::UPDATE_PAUSED, done, total),
         Progress::Done => (crate::installs::FULLY_INSTALLED, size, size),
         Progress::Dropped => {
             return match fs::remove_file(&file) {

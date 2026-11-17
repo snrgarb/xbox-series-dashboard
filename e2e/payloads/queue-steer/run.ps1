@@ -18,7 +18,8 @@
 #   back hidden (`steam: CEF: the main window, asked to Hide`) and keeps the foreground. Its download moved to 25% by
 #   `standin steam-install`.
 # - Manage Queue from Home's Downloads tile, Down to the row (`Installing... 25.0%`), View on it (`Back` on the virtual
-#   Xbox 360 pad, as Menu is `Start`): Install first, then Pause installation and Cancel installation.
+#   Xbox 360 pad, as Menu is `Start`): Pause installation first, then Cancel installation, and no Install (#171); the
+#   same on the game's Home tile while it downloads.
 # - Pause, Resume (then the bytes on to 60%), and Cancel after its question (Keep installing first): each `steam
 #   client: <verb> <appid>: Steam's client took it` and the stand-in's `steam: CEF: asked to <verb> <appid>`; the row
 #   Paused 25.0%, Installing... again, and gone (`queue: <name> dropped`, focus to the first cover).
@@ -124,7 +125,7 @@ function Menu-Row([string] $Line) { if ($Line -match '\((.+?)\) of ') { $Matches
 function Open-MenuOf([string] $Name) {
     Walk Left 'Recent\(0\)'
     foreach ($tile in 1..8) {
-        $line = Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
+        $line = Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation)\) of .+'
         if (-not $line) { return $null }
         if ((Menu-Game $line) -eq $Name) { return $line }
         Press B 'Recent\(\d+\)' | Out-Null
@@ -201,14 +202,20 @@ try {
     Expect-Logged "^queue: $name downloading, 25% of 100 bytes$" $mark 'Downloading' | Out-Null
     In-Front
 
+    # --- Its Home tile's menu while it downloads (#171): Pause installation first, then Cancel installation; no Install.
+    $menu = Open-MenuOf $game.name
+    if ($menu -and (Menu-Row $menu) -ne 'Pause installation') { $failures += "$($game.name)'s Home menu while it downloads starts with $(Menu-Row $menu)" }
+    Press Down "TileMenu: Menu\(Cancel installation\) of $name" '00-home-menu-installing' | Out-Null
+    Press B 'Recent\(\d+\)' | Out-Null
+    Walk Left 'Recent\(0\)'
+
     # --- Manage Queue from Home's Downloads tile, down to the row.
     Open-Queue '1'
     $row = "ManageQueue: Row\(0\) of $name; 1 installing, \d+ recently installed"
     Walk Down "$row; Installing\.\.\. 25\.0%" 2
 
-    # --- The queued game's menu: Install first, then Pause installation and Cancel installation.
-    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
-    Press Down "TileMenu: Menu\(Pause installation\) of $name" '01-menu-pause' | Out-Null
+    # --- The queued game's menu: Pause installation first, then Cancel installation; no Install (#171).
+    Press Back "TileMenu: Menu\(Pause installation\) of $name" '01-menu-pause' | Out-Null
     Press Down "TileMenu: Menu\(Cancel installation\) of $name" | Out-Null
     Press Up "TileMenu: Menu\(Pause installation\) of $name" | Out-Null
 
@@ -224,8 +231,7 @@ try {
     Save-Screen '02-row-paused'
 
     # --- Resume, from the same menu.
-    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
-    Press Down "TileMenu: Menu\(Resume installation\) of $name" '03-menu-resume' | Out-Null
+    Press Back "TileMenu: Menu\(Resume installation\) of $name" '03-menu-resume' | Out-Null
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
     Press A "$row; (Paused|Installing\.\.\.) 25\.0%" | Out-Null
@@ -237,7 +243,7 @@ try {
     Expect-Logged "^focus: $row; Installing\.\.\. 60\.0%$" $mark 'Resumed, the bytes move on' | Out-Null
 
     # --- Cancel: its question, Keep installing first, then yes.
-    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
+    Press Back "TileMenu: Menu\(Pause installation\) of $name" | Out-Null
     Walk Down "TileMenu: Menu\(Cancel installation\) of $name" 3
     Press A "TileMenu: Prompt\(Cancel installation\) of $name" '04-cancel-question' | Out-Null
     Press Down "TileMenu: Prompt\(Keep installing\) of $name" | Out-Null
@@ -249,6 +255,9 @@ try {
     $steamMark = Steam-LogLength
     Press A "ManageQueue: .+" | Out-Null
     Expect-Took "cancel $appid" $mark $steamMark "$appid is Dropped" 'Cancel'
+    # In mid-download: paused first and let stop, so the stand-in drops the manifest rather than leaving it at 514.
+    Expect-Logged "^steam client: cancel ${appid}: the download stopped \(its manifest says StateFlags \d+\) \d+ ms after the pause$" $mark 'Cancel, the pause let settle' | Out-Null
+    Expect-Logged "^steam client: cancel ${appid}: its manifest is gone, \d+ ms on$" $mark 'Cancel, the manifest gone' | Out-Null
     Expect-Logged "^queue: $name dropped$" $mark 'Cancel, the Queue' | Out-Null
     Expect-Logged '^focus: ManageQueue: Cover\(0\) of .+; 0 installing, \d+ recently installed$' $mark 'Cancel, focus to the first cover' | Out-Null
     Start-Sleep -Milliseconds 4500
