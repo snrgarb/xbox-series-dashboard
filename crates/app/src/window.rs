@@ -139,6 +139,8 @@ struct App {
     /// What says the machine has woken from sleep: Who's playing today? asks again (docs/spec/start-up.md, 8).
     wakes: Box<dyn Wakes>,
     launch: Option<Launch>,
+    /// When Home's window is drawn while it is a game's backdrop (docs/spec/launch-screen.md).
+    backdrop: crate::backdrop::Frames,
     /// Holds the running game still while the Guide is open over it, and lets it go as the Guide hands the
     /// foreground back (docs/spec/guide.md, 7.2). After `launch` here, so it outlives it.
     freezer: Freezer,
@@ -422,6 +424,7 @@ pub fn run(args: &Args, library: Library, store: Store, as_shell: crate::as_shel
             }
         })),
         launch: None,
+        backdrop: Default::default(),
         freezer,
         release_wait: None,
         hand_back: None,
@@ -626,6 +629,7 @@ impl App {
         let launch_screen = self.overlay.is_some();
         if let Some(launch) = Launch::start(found, source.clone(), dir, home, launch_screen, &mut *self.addresses) {
             self.launch = Some(launch);
+            self.backdrop.launch_started();
             self.dashboard.launch_started(game);
         }
     }
@@ -1230,6 +1234,7 @@ impl ApplicationHandler for App {
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
+        self.backdrop.art_came();
         self.stale = true;
         self.overlay_stale = true;
     }
@@ -1379,6 +1384,7 @@ impl ApplicationHandler for App {
                         self.dashboard.set_library(library);
                     }
                     self.dashboard.game_ended();
+                    self.backdrop.game_ended(self.dashboard.backdrop_fading());
                     self.last_frame = Instant::now();
                     self.stale = true;
                     self.overlay_stale = true;
@@ -1505,8 +1511,8 @@ impl ApplicationHandler for App {
                 (*frames, *since) = ([0; 3], Instant::now());
             }
         }
-        // Home's window is drawn when something changed or is moving, and when the minute changes for the clock; not
-        // at all behind a game or under its Launch screen, where it keeps the last frame it showed. The loop looks
+        // Home's window is drawn when something changed or is moving, and when the minute changes for the clock; behind
+        // a game or under its Launch screen only as the game's backdrop begins to cover it. The loop looks
         // every IDLE at most, which is how late the clock can be.
         let due = minute() != self.minute;
         // The Idle screen's time is on the Overlay.
@@ -1528,7 +1534,10 @@ impl ApplicationHandler for App {
         let toast_soon = [toasts_want, queue].into_iter().flatten().any(|wait| wait < frame_takes);
         let toast_soon = toast_soon || self.dashboard.toasts().awaits_frame();
         let held = HOME_HELD.saturating_sub(self.home_done.elapsed());
-        if !covered && (self.stale || pressed || due || woken || state.host.animating()) {
+        // Behind a game Home's window is its backdrop: drawn when it begins to cover, and left.
+        if self.backdrop.due(covered) {
+            state.window.request_redraw();
+        } else if !covered && (self.stale || pressed || due || woken || state.host.animating()) {
             if self.dashboard.home_gives_way() && toast_soon && !held.is_zero() {
                 self.stale |= pressed || due;
                 home_wants = Some(held);
@@ -1607,9 +1616,25 @@ impl ApplicationHandler for App {
                 state.config.height = size.height;
                 state.surface.configure(&state.gpu.device, &state.config);
                 self.stale = true;
+                self.backdrop.again(self.dashboard.home_covered(), "Home's window resized");
             }
-            // Behind a game or under its Launch screen nothing of Home's shows: nothing is drawn, whoever asked.
-            WindowEvent::RedrawRequested if self.dashboard.home_covered() => {}
+            // Alt+Tab to the Dashboard while the game is played: Home in front of it, as Home chosen in the Guide.
+            WindowEvent::Focused(true) if self.launch.as_ref().is_some_and(Launch::game_in_front) => {
+                if !self.dashboard.guide_open() {
+                    eprintln!("launch: Home's window chosen over the game at {:.0} ms", since_start());
+                    self.dashboard.show_dashboard();
+                    self.stale = true;
+                }
+            }
+            // What the backdrop drew may be gone: drawn again when Home's window is activated (as the game's goes),
+            // shown again or rescaled.
+            WindowEvent::Focused(true) => self.backdrop.again(self.dashboard.home_covered(), "Home's window activated"),
+            WindowEvent::Occluded(false) => self.backdrop.again(self.dashboard.home_covered(), "Home's window shown"),
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.backdrop.again(self.dashboard.home_covered(), "Home's window rescaled")
+            }
+            // Behind a game or under its Launch screen Home's window is the game's backdrop, drawn once.
+            WindowEvent::RedrawRequested if self.backdrop.skip(self.dashboard.home_covered()) => {}
             WindowEvent::RedrawRequested => {
                 let began = since_start();
                 let now = Instant::now();
@@ -1676,6 +1701,8 @@ impl ApplicationHandler for App {
                     self.dashboard.toasts_presented(told(&mut self.told_time));
                 }
                 self.moving = state.host.animating();
+                let (covered, showing) = (self.dashboard.home_covered(), self.dashboard.backdrop_showing());
+                self.backdrop.presented(covered, showing, self.moving, self.dashboard.backdrop_whole(), size);
                 if self.presented.is_none() {
                     self.presented = Some(Instant::now());
                     let [library, window, gpu, renderer] = state.ready;

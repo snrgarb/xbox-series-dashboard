@@ -128,6 +128,29 @@ pub(crate) fn prefixes_here(dir: &str) -> Vec<String> {
 }
 
 /// Whether a folder is a drive's root or a share's, under which every program on it would be.
+/// The game's processes still running on this machine: those whose program is under one of `prefixes`, without the
+/// Dashboard's own, as "name (id)". Asked when the game has no window left, to tell a game that has gone from one
+/// between windows or handing off to another of its programs.
+#[cfg(windows)]
+pub(crate) fn running_under(prefixes: &[String]) -> Vec<String> {
+    under(&*system(), prefixes)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn under(system: &dyn Processes, prefixes: &[String]) -> Vec<String> {
+    let own = system.own_id();
+    system
+        .list()
+        .into_iter()
+        .filter(|process| process.id != own && process.id != 0)
+        .filter(|process| {
+            let path = process.path.as_deref().map(normal);
+            path.is_some_and(|path| prefixes.iter().any(|prefix| path.starts_with(prefix)))
+        })
+        .map(|process| format!("{} ({})", process.name, process.id))
+        .collect()
+}
+
 fn is_root(dir: &str) -> bool {
     let dir = normal(dir);
     let dir = dir.trim_end_matches('\\');
@@ -596,6 +619,16 @@ mod tests {
         fake.0.borrow_mut().processes.push(Process { id: 30, name: "secret".into(), path: None });
         let freezer = Freezer::with(Box::new(fake.clone()), Some(data));
         (fake, freezer)
+    }
+
+    #[test]
+    fn the_games_processes_still_running_are_those_under_its_folder() {
+        let data = tempfile::tempdir().unwrap();
+        let (fake, _) = machine(data.path());
+        let prefixes = prefixes(GAME_DIR, None);
+        assert_eq!(under(&fake, &prefixes), ["game (10)", "helper (11)"]);
+        fake.0.borrow_mut().processes.retain(|process| process.id != 10 && process.id != 11);
+        assert!(under(&fake, &prefixes).is_empty(), "the game has gone");
     }
 
     #[test]
