@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use input::Pad;
 use library::art::Event as ArtEvent;
-use model::{Library, Sound};
+use model::{ArtRefresh, GameKey, Library, Sound};
 use render::gpu::{self, Gpu};
 use screens::keyboard::Typed;
 use screens::toasts::Seen;
@@ -187,8 +187,11 @@ struct App {
     art: Option<library::art::Lookup>,
     /// It has been started once the sources were read: a new key starts it again, nothing else does.
     art_started: bool,
-    /// What it says as it goes, for the loop to take in.
-    art_events: (Sender<ArtEvent>, Receiver<ArtEvent>),
+    /// What it says as it goes, for the loop to take in, with the number of the run that said it: a run stopped
+    /// for another (a new key, a refresh) still says it is done, and that is not the new run's end.
+    art_events: (Sender<(u64, ArtEvent)>, Receiver<(u64, ArtEvent)>),
+    /// The number of the run under way, or of the last one.
+    art_run: u64,
     /// The game whose whole list of achievements an Achievements page was last given, and whether it should be
     /// read again (new icons for it, or a new snapshot).
     achievements_listed: (Option<i64>, bool),
@@ -465,6 +468,7 @@ pub fn run(args: &Args, library: Library, store: Store, as_shell: crate::as_shel
         art: None,
         art_started: false,
         art_events: mpsc::channel(),
+        art_run: 0,
         achievements_listed: (None, false),
         input_clock: shell::idle::system(),
         idle_after: args.idle_after,
@@ -936,6 +940,29 @@ impl App {
                     let cleared = self.store.clear_art();
                     self.show(cleared);
                 }
+                // Settings > Art's Refresh all art and details: everything downloaded forgotten, then fetched again
+                // in the background, the achievements' rarity and icons with it. Before the stores have been read,
+                // the first lookup is the refresh's.
+                Effect::RefreshArt(None) => {
+                    self.art = None;
+                    let forgotten = self.store.refresh_art();
+                    self.show(forgotten);
+                    self.store.ask_achievements(library::achievements::Ask::ReadAll);
+                    if self.art_started {
+                        self.start_art();
+                    } else {
+                        self.set_art_refresh(ArtRefresh::Working { done: 0, of: self.dashboard.library().games.len() });
+                    }
+                }
+                // The Tile menu's Refresh art: that game's downloaded art forgotten, and it looked up first.
+                Effect::RefreshArt(Some(game)) => {
+                    let forgotten = self.store.refresh_art_of(&game);
+                    self.show(forgotten);
+                    if self.art_started {
+                        self.art = None;
+                        self.start_art_with(Some(game));
+                    }
+                }
                 // Settings > Launchers (docs/spec/launchers.md): a launcher's games leave every list or come back at
                 // once; one switched on is read again, as Update now reads them all.
                 Effect::Launcher { key, on } => {
@@ -1038,19 +1065,42 @@ impl App {
 
     /// Looks up the art the stores gave none for, with the key that is kept: what comes in wakes the loop.
     fn start_art(&mut self) {
-        self.art_started = true;
-        let (sender, proxy) = (self.art_events.0.clone(), self.proxy.clone());
-        self.art = self.store.look_up_art(self.dashboard.library(), move |event| {
-            let _ = sender.send(event);
-            let _ = proxy.send_event(());
-        });
+        self.start_art_with(None);
     }
 
-    /// Takes in what the art lookup has said: a game's new picture is in the next snapshot, and a refused key is
-    /// said once in a Toast. True if a Toast was posted.
+    /// The same, `first` looked up before every other game: the Tile menu's Refresh art. A refresh of all that was
+    /// asked for and is not over (Settings > Art) goes on in it, and says how far it has got.
+    fn start_art_with(&mut self, first: Option<GameKey>) {
+        self.art_started = true;
+        self.art_run += 1;
+        let run = self.art_run;
+        let (sender, proxy) = (self.art_events.0.clone(), self.proxy.clone());
+        self.art = self.store.look_up_art(self.dashboard.library(), first.as_ref(), move |event| {
+            let _ = sender.send((run, event));
+            let _ = proxy.send_event(());
+        });
+        if self.store.art_refreshing() {
+            let of = self.dashboard.library().games.len();
+            let state = if self.art.is_some() { ArtRefresh::Working { done: 0, of } } else { ArtRefresh::Paused };
+            self.set_art_refresh(state);
+        }
+    }
+
+    /// How a refresh of all art goes, on Settings > Art, without a new snapshot.
+    fn set_art_refresh(&mut self, state: ArtRefresh) {
+        self.store.set_art_refresh(state);
+        if self.dashboard.set_art_refresh(state) {
+            self.stale = true;
+        }
+    }
+
+    /// Takes in what the art lookup has said: a game's new picture is in the next snapshot, how far a refresh has
+    /// got, and a refused key is said once in a Toast. What a run stopped for another says of its end is not the
+    /// new one's. True if a Toast was posted.
     fn take_art(&mut self) -> bool {
         let (mut found, mut toast) = (false, false);
-        while let Ok(event) = self.art_events.1.try_recv() {
+        while let Ok((run, event)) = self.art_events.1.try_recv() {
+            let current = run == self.art_run;
             match event {
                 ArtEvent::Found { .. } => found = true,
                 ArtEvent::KeyRefused => {
@@ -1058,7 +1108,18 @@ impl App {
                     self.dashboard.notify(KEY_REFUSED);
                     toast = true;
                 }
-                ArtEvent::Done(_) => self.art = None,
+                ArtEvent::Looked { done, of } if current && self.store.art_refreshing() => {
+                    self.set_art_refresh(ArtRefresh::Working { done, of });
+                }
+                ArtEvent::Looked { .. } => {}
+                ArtEvent::Done(summary) if current => {
+                    self.art = None;
+                    if self.store.art_refreshing() {
+                        let state = self.store.art_refresh_over(&summary);
+                        self.set_art_refresh(state);
+                    }
+                }
+                ArtEvent::Done(_) => {}
             }
         }
         if found {

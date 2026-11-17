@@ -30,7 +30,7 @@ pub fn theme_settings() -> Boxes {
     // library's games come from (docs/spec/launchers.md), and Art under them (16.8).
     let launchers =
         Item::Opens { icon: '\u{E8F1}', name: launchers::TITLE, pane: |around| Box::new(Launchers::open(around)) };
-    let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |_| Box::new(Art::default()) };
+    let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |around| Box::new(Art::open(around)) };
     // Shell mode's page, the port's own, on a row of its own under Art (docs/spec/shell-mode.md, 2), and About beside
     // it: which build this is (16.10).
     let system = Item::Opens { icon: '\u{E770}', name: system::TITLE, pane: |_| Box::new(system::System::default()) };

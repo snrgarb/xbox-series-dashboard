@@ -3,10 +3,10 @@
 use std::hash::Hash;
 
 use model::Game;
-use ui::{Color, Crop, Ease, Gradient, HAlign, Rect, Ui, VAlign};
+use ui::{Color, Ease, Gradient, HAlign, Rect, Ui, VAlign};
 
 use super::look::{glyph as page_glyph, TEXT};
-use crate::home::{art_for, source, source_badge_at};
+use crate::home::{art_for, face_arriving, source, source_badge_at};
 use crate::theme::{self, glyph, BAND};
 
 const RADIUS: f32 = 6.0;
@@ -50,7 +50,7 @@ pub fn draw(ui: &mut Ui, rect: Rect, id: impl Hash, tile: &Tile) {
     ui.fill(rect, theme::TILE, RADIUS);
     // A cover downloaded while the Dashboard runs fades in over the name, as on Home's tiles.
     let key = art_for(game, rect, ui.px());
-    let cover = ui.art_arriving((&game.source, &game.source_id, &game.name), rect, key.as_ref(), Crop::Top, RADIUS);
+    let cover = face_arriving(ui, (&game.source, &game.source_id, &game.name), rect, key.as_ref(), RADIUS);
     if cover < 1.0 {
         // The Bundle's tile has no fallback of its own (Playnite supplies a default cover): here it is the game's
         // name, as on Home's tiles, which gives way to the title band.

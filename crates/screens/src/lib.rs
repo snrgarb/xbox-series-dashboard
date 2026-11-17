@@ -119,6 +119,10 @@ pub enum Effect {
     /// Settings > Art: remove the art downloaded into the data folder (the user has said yes). A store's own art is
     /// not touched.
     ClearArt,
+    /// Settings > Art's "Refresh all art and details" (none), or the Tile menu's "Refresh art" for one game:
+    /// forget what was downloaded for it and fetch it again in the background (docs/spec/settings.md, 16.8). The
+    /// snapshots that follow say how a refresh of all goes (`Library::art_refresh`).
+    RefreshArt(Option<model::GameKey>),
     /// Settings > Launchers switched the launcher with this key (`Game::source`) on or off (docs/spec/launchers.md).
     /// A new snapshot follows, in which its games are back, or in no list at all.
     Launcher { key: String, on: bool },
@@ -372,6 +376,25 @@ impl Dashboard {
             discord: &self.discord,
         };
         self.pages.library_changed(around);
+    }
+
+    /// How a refresh of every game's art goes (Settings > Art, `Library::art_refresh`), with no new snapshot: a page
+    /// that shows it is told, as of any change to the library. Whether it changed.
+    pub fn set_art_refresh(&mut self, refresh: model::ArtRefresh) -> bool {
+        if self.library.art_refresh == refresh {
+            return false;
+        }
+        self.library.art_refresh = refresh;
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+            discord: &self.discord,
+        };
+        self.pages.library_changed(around);
+        true
     }
 
     /// The Queue moved on (`library::queue`): it takes the old one's place, the games staying as they are. A page

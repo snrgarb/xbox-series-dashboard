@@ -206,7 +206,11 @@ by one word, a Steam install through the Queue to Recently installed, and an Uni
 each), `launchers` (Settings > Launchers on the fake Steam and Epic, docs/spec/launchers.md: Steam switched off with
 the pad, its games gone from Home's Recent row and Search and the page's count line, then on again with them back in
 their play order; a game added to the fake Steam and another's play time changed by `standin steam-change`, and Update
-now bringing both in with its summary line), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
+now bringing both in with its summary line), `refresh-art` (#190, on the fake Steam and `standin serve-art`: with no
+square anywhere a Recent tile shows its cover whole, never cropped; a key typed in and SteamGridDB's yellow squares on
+the Recent row; Settings > Art's Refresh all art and details asked and confirmed, the cache emptied, the page saying how
+far it has got, the Dashboard killed part way and the refresh going on at the next start until the cache is full again
+and the squares are back; then one game's Refresh art from the Tile menu's More options), `boot-video` (Start-up's Boot video: the spike's clip as Xbox Series X in a media folder of the test's own,
 its first frame, its end and Home's first frame logged in that order, then Off set on Settings with the pad and the
 Dashboard straight to Who's playing today? at the next start; it needs `video-spike.exe`, so build `-p video-spike` too),
 `whos-playing` (Start-up with the Boot video Off in folders of the test's own: a second Profile added, Who's playing

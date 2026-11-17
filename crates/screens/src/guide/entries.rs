@@ -2,11 +2,11 @@
 //! 2.7).
 use model::discord::Discord;
 use model::Library;
-use ui::{Color, Crop, HAlign, Rect, Ui, VAlign};
+use ui::{Color, HAlign, Rect, Ui, VAlign};
 
 use super::panel::{PANEL, STRIP};
 use super::{discord, focus_ring, marks, Around, Tab};
-use crate::home::square_art;
+use crate::home::{face, square_art};
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 use crate::{achievement, profile};
 
@@ -338,7 +338,7 @@ fn cover(ui: &mut Ui, rect: Rect, library: &Library, game: usize) {
     let Some(game) = library.games.get(game) else { return };
     ui.fill(rect, ACCENT_LIGHT, 0.0);
     let (cx, cy) = rect.center();
-    let drawn = square_art(game, ui.px()).is_some_and(|key| ui.art(rect, &key, Crop::Top, 1.0, 0.0));
+    let drawn = square_art(game, ui.px()).is_some_and(|key| face(ui, rect, &key, 1.0, 0.0));
     if !drawn {
         ui.icon(cx, cy, glyph::GAMEPAD, 36.0, Color::WHITE);
     }

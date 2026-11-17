@@ -27,6 +27,7 @@ pub mod history;
 pub mod launchers;
 pub mod profiles;
 pub mod queue;
+pub mod refresh;
 pub mod sources;
 
 use std::collections::HashMap;
@@ -461,6 +462,7 @@ impl Database {
             profiles: self.profiles()?,
             achievements: self.achievement_summary()?,
             launchers: self.launchers()?,
+            art_refresh: Default::default(),
         })
     }
 

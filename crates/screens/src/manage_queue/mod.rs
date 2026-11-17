@@ -15,7 +15,7 @@ pub mod figures;
 use std::time::{Duration, Instant};
 
 use model::{Game, Library};
-use ui::{Button, Color, Crop, HAlign, Press, Rect, Ui, VAlign};
+use ui::{Button, Color, HAlign, Press, Rect, Ui, VAlign};
 
 use self::figures::Figures;
 use crate::hint_bar::{self, Hint};
@@ -408,7 +408,7 @@ fn row(ui: &mut Ui, rect: Rect, game: Option<&Game>, figures: &Figures) {
     let cover = Rect::new(rect.x, rect.y, ROW, ROW);
     ui.fill(cover, theme::TILE, 0.0);
     if let Some(key) = game.and_then(|game| home::square_art(game, ui.px())) {
-        ui.art(cover, &key, Crop::Top, 1.0, 0.0);
+        home::face(ui, cover, &key, 1.0, 0.0);
     }
     let (left, right) = (cover.right() + ROW_TEXT.0, rect.right() - ROW_TEXT.1);
     let line = |y: f32, short: f32| Rect::new(left, y, right - short - left, LINE);

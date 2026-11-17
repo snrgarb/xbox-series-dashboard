@@ -61,6 +61,8 @@ pub struct Store {
     updating: Option<Receiver<Updated>>,
     /// Launchers switched on while an update was under way: read again once it is done.
     update_again: Vec<String>,
+    /// Settings > Art's refresh of all art: how it goes, as every snapshot carries it (`Library::art_refresh`).
+    art_refresh: model::ArtRefresh,
 }
 
 /// What an update of the launchers came to: what it changed, in a few words; none when it could not be done.
@@ -172,6 +174,12 @@ fn dressed(library: Library, mut store: Store) -> (Library, Store) {
     store.account_picture = shell::account::picture();
     let mut library = library;
     library.profiles.pictures = store.pictures();
+    // A refresh of all art cut short at an earlier start: it goes on with the first lookup.
+    if store.art_refreshing() {
+        eprintln!("art: refresh: under way since an earlier start");
+        store.art_refresh = model::ArtRefresh::Paused;
+        library.art_refresh = store.art_refresh;
+    }
     let profiles = &library.profiles;
     if let Some(signed_in) = profiles.signed_in() {
         eprintln!(
@@ -616,10 +624,73 @@ impl Store {
     /// `library` that lack a picture, those our cache has not got, from the store's own art online, then from
     /// SteamGridDB with a key (docs/sources.md, "Art"). `tell` is told as pictures come in. None when there is
     /// nothing to do it with.
-    pub fn look_up_art(&self, library: &Library, tell: impl Fn(Event) + Send + Sync + 'static) -> Option<Lookup> {
+    /// `first`, if it is among them, is looked up before the rest (the Tile menu's Refresh art).
+    pub fn look_up_art(
+        &self,
+        library: &Library,
+        first: Option<&model::GameKey>,
+        tell: impl Fn(Event) + Send + Sync + 'static,
+    ) -> Option<Lookup> {
         let (dir, services) = self.art_services()?;
         let log: art::Log = std::sync::Arc::new(|line| eprintln!("{line}"));
-        Some(Lookup::start(dir, services, art::wanted(library), library::now(), Pace::default(), log, tell))
+        let mut wants = art::wanted(library);
+        if let Some(first) = first {
+            let is = |want: &art::Want| want.source == first.source && want.source_id == first.source_id;
+            if let Some(at) = wants.iter().position(is) {
+                let want = wants.remove(at);
+                wants.insert(0, want);
+            }
+        }
+        Some(Lookup::start(dir, services, wants, library::now(), Pace::default(), log, tell))
+    }
+
+    /// Settings > Art's Refresh all art and details (docs/spec/settings.md, 16.8): everything fetched from outside
+    /// forgotten (`Database::forget_fetched`), and marked under way until a lookup has been through every game, at
+    /// this start or a later one. Gives the snapshot after: no downloaded art in it.
+    pub fn refresh_art(&mut self) -> Option<Library> {
+        let database = self.database.as_ref()?;
+        match database.forget_fetched() {
+            Ok(forgot) => eprintln!("art: refresh: {forgot}"),
+            Err(e) => eprintln!("art: refresh: {e:#}"),
+        }
+        let games = database.snapshot().map_or(0, |library| library.games.len());
+        self.art_refresh = model::ArtRefresh::Working { done: 0, of: games };
+        self.snapshot()
+    }
+
+    /// The Tile menu's Refresh art: the game's downloaded pictures forgotten, to be looked up again. The log names
+    /// no game. Gives the snapshot after.
+    pub fn refresh_art_of(&self, game: &model::GameKey) -> Option<Library> {
+        let database = self.database.as_ref()?;
+        match database.forget_art_of(&game.source, &game.source_id) {
+            Ok(pictures) => eprintln!("art: refresh: one game's art: forgot {pictures} pictures"),
+            Err(e) => eprintln!("art: refresh: {e:#}"),
+        }
+        self.snapshot()
+    }
+
+    /// Whether a refresh of all art was asked for and is not over: this start's or an earlier one's.
+    pub fn art_refreshing(&self) -> bool {
+        self.database.as_ref().is_some_and(|database| database.refreshing().unwrap_or(false))
+    }
+
+    pub fn set_art_refresh(&mut self, refresh: model::ArtRefresh) {
+        self.art_refresh = refresh;
+    }
+
+    /// A lookup that went on with a refresh is over: the refresh is done if it looked at every game, else it waits
+    /// for the next (art online on again, the next start). Gives how it stands.
+    pub fn art_refresh_over(&mut self, summary: &art::Summary) -> model::ArtRefresh {
+        if summary.stopped {
+            eprintln!("art: refresh: paused");
+            return model::ArtRefresh::Paused;
+        }
+        if let Some(Err(e)) = self.database.as_ref().map(Database::refreshed) {
+            eprintln!("art: refresh: {e:#}");
+        }
+        let pictures = summary.pictures.store_online + summary.pictures.steamgriddb;
+        eprintln!("art: refresh: done, {pictures} pictures downloaded");
+        model::ArtRefresh::Done { pictures }
     }
 
     /// The same here and now, for a picture drawn offscreen: gives the snapshot after, or `library` as it was.
@@ -681,6 +752,7 @@ impl Store {
         library.store_apps = self.store_apps.clone();
         library.profiles.pictures = self.pictures();
         library.launchers.update = self.update.clone();
+        library.art_refresh = self.art_refresh;
     }
 
     /// Switches a launcher on or off (Settings > Launchers): its games leave every list at once, or come back as
