@@ -55,7 +55,7 @@ function Walk-To([string] $Button, [string] $App, [int] $Most = 8) {
         if ((Focus-Now) -match "^focus: Settings: Set up this PC: $([regex]::Escape($App)); ") { return }
         Press $Button 'Settings: Set up this PC: [^;]+; .+' | Out-Null
     }
-    if ((Focus-Now) -notmatch "^focus: Settings: Set up this PC: $([regex]::Escape($App)); ") { throw "$Button never reached $App: '$(Focus-Now)'" }
+    if ((Focus-Now) -notmatch "^focus: Settings: Set up this PC: $([regex]::Escape($App)); ") { throw "$Button never reached ${App}: '$(Focus-Now)'" }
 }
 
 function Runs { if (Test-Path $runs) { @(Get-Content $runs) } else { @() } }
