@@ -700,6 +700,50 @@ pub fn write_progress(root: &Path, appid: u32, progress: Progress) -> io::Result
     fs::rename(part, file)
 }
 
+/// The file beside the stand-in Steam's `steam.exe` that says how its install wizard goes (#230), as `standin
+/// steam-wizard` writes it: which apps have licence agreements, which ask for a product key, and how much is free.
+pub const WIZARD_FILE: &str = "standin-wizard.json";
+
+/// How the stand-in Steam's install wizard goes for each app (`crate::debugger`): with no file, as it goes for
+/// most games, with no agreement, no key, and room for anything.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct WizardSetUp {
+    /// The apps with licence agreements, and how many each has: they are shown one after another.
+    #[serde(default)]
+    pub agreements: std::collections::BTreeMap<u32, u32>,
+    /// The apps whose wizard asks for a product key (`eInstallState` 4) in place of its config.
+    #[serde(default)]
+    pub keys: Vec<u32>,
+    /// The bytes free in every library, as the install manager says (`nDiskSpaceAvailable`); none: a TiB.
+    #[serde(default)]
+    pub free: Option<u64>,
+}
+
+impl WizardSetUp {
+    /// What the fake at `root` has written, or the plain wizard.
+    pub fn read(root: &Path) -> WizardSetUp {
+        fs::read_to_string(root.join(WIZARD_FILE))
+            .ok()
+            .and_then(|text| serde_json::from_str(text.trim_start_matches('\u{feff}')).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn write(&self, root: &Path) -> io::Result<()> {
+        fs::write(root.join(WIZARD_FILE), serde_json::to_string_pretty(self).map_err(io::Error::other)?)
+    }
+
+    /// The bytes free, as the install manager says.
+    pub fn free(&self) -> u64 {
+        self.free.unwrap_or(1 << 40)
+    }
+}
+
+/// What the stand-in's install manager says an app needs (`nDiskSpaceRequired`): the fixture's size for it
+/// (`Fixture::full_shelf`), else 1 GiB.
+pub fn needed(appid: u32) -> u64 {
+    Fixture::full_shelf().games.into_iter().find(|game| game.appid == appid).map_or(1 << 30, |game| game.size_on_disk)
+}
+
 /// The file beside the stand-in Steam's `steam.exe` that says it is the stand-in (written by `standin make-steam`):
 /// its debugger (`crate::debugger`) is asked on the port it writes down, never on a real Steam's (`cef::ports`).
 /// Looked for only in an install named on the command line (`--steam`), never in the one the registry names.

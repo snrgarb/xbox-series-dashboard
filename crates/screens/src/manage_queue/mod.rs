@@ -10,6 +10,10 @@
 //! Its covers and rows are a game's as a Home tile is: A opens the game's Game hub at once, where a second A is its
 //! Play; Menu and View open its Tile menu, which on a row is the queued game's menu,
 //! with Pause or Resume and Cancel where its store can (`tile_menu::Opener::Queue`, #170).
+//!
+//! Under them, "Stopped": a row for each game whose install stopped or that left the Queue without installing
+//! (#230, `model::Stopped`), saying why in a few words and then what to do, so that the Queue never just loses a
+//! game. Its menu is the game's, Install first; A on one stopped for want of space opens Settings > Storage.
 pub mod figures;
 
 use model::{Game, Library};
@@ -20,7 +24,7 @@ use crate::hint_bar::{self, Hint};
 use crate::my_games::look::{BOX, HEADER, LINE, PAGE, SECTION, TEXT};
 use crate::pages::{Around, Open, Page, PageAction};
 use crate::theme::{self, glyph};
-use crate::{game_hub, home, tile_menu};
+use crate::{game_hub, home, settings, tile_menu};
 
 /// What opens the page, from wherever: the hook Manage's Queue box, Home's Downloads tile and the hub's Queue action
 /// all call.
@@ -95,20 +99,32 @@ enum Focus {
     Nothing,
 }
 
-/// Where everything stands down the list, from its top, for so many covers and rows.
+/// Where everything stands down the list, from its top, for so many covers, rows and stopped rows.
 struct Layout {
     covers: Option<f32>,
     rows: Option<f32>,
+    /// How many rows are installing: the stopped rows come after them.
+    installing: usize,
+    stopped: Option<f32>,
     empty: Option<f32>,
     headers: Vec<(f32, &'static str)>,
     height: f32,
 }
 
 impl Layout {
-    fn of(covers: usize, rows: usize) -> Self {
+    /// For so many covers and rows installing, with `stopped` rows under their own header after those installing, or after the empty box (#230).
+    fn of(covers: usize, rows: usize, stopped: usize) -> Self {
         let mut y = 0.0;
         let mut headers = Vec::new();
-        let mut layout = Layout { covers: None, rows: None, empty: None, headers: Vec::new(), height: 0.0 };
+        let mut layout = Layout {
+            covers: None,
+            rows: None,
+            installing: rows,
+            stopped: None,
+            empty: None,
+            headers: Vec::new(),
+            height: 0.0,
+        };
         if covers > 0 {
             headers.push((y + RECENT_HEADER.0, "Recently installed"));
             y += RECENT_HEADER.0 + SECTION_LINE + RECENT_HEADER.1;
@@ -124,13 +140,35 @@ impl Layout {
             layout.empty = Some(y + EMPTY_DOWN);
             y += EMPTY_DOWN + EMPTY;
         }
+        if stopped > 0 {
+            headers.push((y + INSTALLING_HEADER.0, STOPPED));
+            y += INSTALLING_HEADER.0 + SECTION_LINE + INSTALLING_HEADER.1;
+            layout.stopped = Some(y);
+            y += stopped as f32 * ROW_PITCH;
+        }
         layout.headers = headers;
         layout.height = y + END_PADDING;
         layout
     }
 
+    /// The top of the row focus calls `Row(i)`: those installing, then those stopped.
     fn row(&self, i: usize) -> Option<f32> {
-        self.rows.map(|top| top + i as f32 * ROW_PITCH)
+        match i.checked_sub(self.installing) {
+            None => self.rows.map(|top| top + i as f32 * ROW_PITCH),
+            Some(i) => self.stopped.map(|top| top + i as f32 * ROW_PITCH),
+        }
+    }
+}
+
+/// The header over the stopped rows.
+pub const STOPPED: &str = "Stopped";
+
+/// The game of the row focus calls `Row(i)`: an install's, else a stopped one's.
+fn row_game(library: &Library, i: usize) -> Option<i64> {
+    let entries = &library.queue.entries;
+    match i.checked_sub(entries.len()) {
+        None => entries.get(i).map(|entry| entry.game),
+        Some(i) => library.queue.stopped.get(i).map(|stopped| stopped.game),
     }
 }
 
@@ -168,10 +206,15 @@ impl ManageQueue {
     fn keep(&mut self, library: &Library) {
         let covers = recently_installed(library);
         let rows = &library.queue.entries;
-        let row_of = |game: i64| rows.iter().position(|entry| entry.game == game);
+        let stopped = &library.queue.stopped;
+        let total = rows.len() + stopped.len();
+        let row_of = |game: i64| {
+            let stopped = || stopped.iter().position(|stopped| stopped.game == game).map(|i| rows.len() + i);
+            rows.iter().position(|entry| entry.game == game).or_else(stopped)
+        };
         let cover_of = |game: i64| covers.iter().position(|cover| cover.id == game);
         let still = match self.focus {
-            Focus::Row(i) => rows.get(i).filter(|entry| Some(entry.game) == self.game).map(|_| Focus::Row(i)),
+            Focus::Row(i) => row_game(library, i).filter(|&game| Some(game) == self.game).map(|_| Focus::Row(i)),
             Focus::Cover(i) => covers.get(i).filter(|cover| Some(cover.id) == self.game).map(|_| Focus::Cover(i)),
             Focus::Nothing => None,
         };
@@ -179,11 +222,11 @@ impl ManageQueue {
             .or_else(|| self.game.and_then(row_of).map(Focus::Row))
             .or_else(|| self.game.and_then(cover_of).map(Focus::Cover))
             .or_else(|| (!covers.is_empty()).then_some(Focus::Cover(0)))
-            .or_else(|| (!rows.is_empty()).then_some(Focus::Row(0)))
+            .or_else(|| (total > 0).then_some(Focus::Row(0)))
             .unwrap_or(Focus::Nothing);
         let game = match self.focus {
             Focus::Cover(i) => Some(covers[i].id),
-            Focus::Row(i) => Some(rows[i].game),
+            Focus::Row(i) => row_game(library, i),
             Focus::Nothing => None,
         };
         if let Focus::Cover(i) = self.focus {
@@ -193,6 +236,8 @@ impl ManageQueue {
         self.name = game.and_then(|game| library.game(game)).map(|game| game.name.clone()).unwrap_or_default();
         self.counts = (rows.len(), covers.len());
         self.row = match self.focus {
+            // A stopped one's few words: `Stopped: Not enough space`.
+            Focus::Row(i) if i >= rows.len() => stopped.get(i - rows.len()).map(|s| format!("Stopped: {}", s.headline())),
             Focus::Row(i) => {
                 // Its state, a Workshop download's items, and its share: `Downloading Workshop content 3 of 12
                 // items 25.0%`.
@@ -202,6 +247,12 @@ impl ManageQueue {
             }
             _ => None,
         };
+    }
+
+    /// Whether `Row(i)` is a game stopped for want of space.
+    fn no_space(&self, library: &Library, i: usize) -> bool {
+        let stopped = i.checked_sub(library.queue.entries.len()).and_then(|i| library.queue.stopped.get(i));
+        stopped.is_some_and(|stopped| matches!(stopped.stop, model::Stop::NoSpace { .. }))
     }
 
     /// The game focus is on, by its place in the library.
@@ -265,7 +316,7 @@ impl Page for ManageQueue {
         self.keep(library);
         let once = !press.repeat;
         let covers = self.counts.1;
-        let rows = library.queue.entries.len();
+        let rows = library.queue.entries.len() + library.queue.stopped.len();
         match (press.button, self.focus) {
             (Button::B, _) if once => return Some(PageAction::Close),
             // Along the covers, stopping at the ends; down to the first row.
@@ -276,6 +327,10 @@ impl Page for ManageQueue {
             (Button::Down, Focus::Row(i)) if i + 1 < rows => self.focus = Focus::Row(i + 1),
             (Button::Up, Focus::Row(i)) if i > 0 => self.focus = Focus::Row(i - 1),
             (Button::Up, Focus::Row(0)) if covers > 0 => self.focus = Focus::Cover(self.last_cover.min(covers - 1)),
+            // A game stopped for want of space: Settings > Storage, where space is made or another folder chosen.
+            (Button::A, Focus::Row(i)) if once && self.no_space(library, i) => {
+                return Some(PageAction::Open(Open::Settings(settings::Entry::Storage)));
+            }
             // The game's Game hub, at once, as a Home tile's.
             (Button::A, Focus::Cover(_) | Focus::Row(_)) if once => {
                 let place = self.place(library)?;
@@ -284,7 +339,7 @@ impl Page for ManageQueue {
             (Button::Menu | Button::View, Focus::Cover(_) | Focus::Row(_)) if once => {
                 let place = self.place(library)?;
                 let opener = match self.focus {
-                    Focus::Row(_) => tile_menu::Opener::Queue,
+                    Focus::Row(i) if i < library.queue.entries.len() => tile_menu::Opener::Queue,
                     _ => tile_menu::Opener::MyGames,
                 };
                 return Some(tile_menu::open(&library.games[place], opener));
@@ -294,7 +349,7 @@ impl Page for ManageQueue {
         // Where focus went names its game.
         let game = match self.focus {
             Focus::Cover(i) => recently_installed(library).get(i).map(|game| game.id),
-            Focus::Row(i) => library.queue.entries.get(i).map(|entry| entry.game),
+            Focus::Row(i) => row_game(library, i),
             Focus::Nothing => None,
         };
         self.game = game.or(self.game);
@@ -319,7 +374,8 @@ impl Page for ManageQueue {
 
         let covers = recently_installed(library);
         let entries = &library.queue.entries;
-        let layout = Layout::of(covers.len(), entries.len());
+        let stopped = &library.queue.stopped;
+        let layout = Layout::of(covers.len(), entries.len(), stopped.len());
         let view = screen.bottom() - LIST_TOP;
         self.scroll = self.scroll_to(self.scroll, &layout, view);
         let top = LIST_TOP - self.scroll;
@@ -348,6 +404,14 @@ impl Page for ManageQueue {
                     continue;
                 }
                 row(ui, rect, library.game(entry.game), &Figures::of(entry));
+            }
+            for (i, stopped) in stopped.iter().enumerate() {
+                let Some(y) = layout.row(entries.len() + i) else { break };
+                let rect = Rect::new(LEFT, top + y, RIGHT - LEFT, ROW);
+                if rect.bottom() < LIST_TOP || rect.y > screen.bottom() {
+                    continue;
+                }
+                stopped_row(ui, rect, library.game(stopped.game), stopped);
             }
             // The ring over everything round it, so that a neighbour's back does not cover its glow.
             match self.focus {
@@ -411,6 +475,26 @@ fn row(ui: &mut Ui, rect: Rect, game: Option<&Game>, figures: &Figures) {
     }
 }
 
+/// A game whose install stopped (#230): as an install's row, its cover and its name, then why in a few words where
+/// its state would be, and what happened and what to do in its amount's place, on two lines at most; no bar.
+fn stopped_row(ui: &mut Ui, rect: Rect, game: Option<&Game>, stopped: &model::Stopped) {
+    ui.fill(rect, BOX, 0.0);
+    let cover = Rect::new(rect.x, rect.y, ROW, ROW);
+    ui.fill(cover, theme::TILE, 0.0);
+    if let Some(key) = game.and_then(|game| home::square_art(game, ui.px())) {
+        home::face(ui, cover, &key, 1.0, 0.0);
+    }
+    let (left, right) = (cover.right() + ROW_TEXT.0, rect.right() - ROW_TEXT.1);
+    let first = rect.y + ROW_TEXT.2;
+    let name = game.map_or("", |game| game.name.as_str());
+    ui.paragraph(Rect::new(left, first, right - TITLE_SHORT - left, LINE), name, &ROW_TITLE, HAlign::Left, VAlign::Top, 1);
+    let second = first + LINE;
+    ui.paragraph(Rect::new(left, second, right - left, LINE), &stopped.headline(), &TEXT, HAlign::Left, VAlign::Top, 1);
+    let third = second + LINE + AMOUNT_DOWN;
+    let detail = TEXT.color(theme::TEXT_DIM);
+    ui.paragraph(Rect::new(left, third, right - left, 2.0 * LINE + 4.0), &stopped.line(), &detail, HAlign::Left, VAlign::Top, 2);
+}
+
 /// Nothing queued: a box with a thin light grey outline and no fill, the download arrow over the line saying where
 /// the Queue will show, both in its middle.
 fn empty(ui: &mut Ui, rect: Rect) {
@@ -431,16 +515,16 @@ mod tests {
     #[test]
     fn the_sections_stand_where_the_bundle_puts_them() {
         assert!((LIST_TOP - 122.4).abs() < 0.01);
-        let both = Layout::of(3, 2);
+        let both = Layout::of(3, 2, 0);
         assert_eq!(both.headers, [(14.0, "Recently installed"), (312.0 + 30.0, "Installing")]);
         assert_eq!(both.covers, Some(88.0));
         assert_eq!((both.row(0), both.row(1)), (Some(408.0), Some(674.0)));
         assert_eq!(both.height, 408.0 + 2.0 * 266.0 + 80.0);
         // Nothing installed and nothing queued: the outlined box 40 under the title's line.
-        let none = Layout::of(0, 0);
+        let none = Layout::of(0, 0, 0);
         assert!(none.headers.is_empty() && none.rows.is_none());
         assert_eq!((none.empty, none.height), (Some(40.0), 40.0 + 330.0 + 80.0));
         // Only rows: Installing 30 under the title's line.
-        assert_eq!(Layout::of(0, 1).headers, [(30.0, "Installing")]);
+        assert_eq!(Layout::of(0, 1, 0).headers, [(30.0, "Installing")]);
     }
 }

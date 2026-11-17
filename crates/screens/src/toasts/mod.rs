@@ -43,6 +43,9 @@ pub enum ToastKind {
     Installed,
     /// "<Name> was uninstalled". Its cover, else the bin. A tap opens the Guide.
     Uninstalled,
+    /// An install stopped, or a game left the Queue without installing (#230): why, in a few words ("Not enough
+    /// space"). Its cover, else the download arrow. A tap opens Manage Queue, where its row says the rest.
+    Stopped,
     /// "Achievement unlocked", or "<n> achievements unlocked": the green pill with the achievement's icon, or the
     /// trophy. A tap opens Profile & system.
     Achievement,

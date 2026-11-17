@@ -59,6 +59,9 @@ pub enum Open {
     Achievements(crate::achievements::Entry),
     /// A game's art picker, over whatever asked for it (`art_picker::open`).
     ArtPicker(art_picker::Entry),
+    /// A licence agreement a store's install asks the user to accept, over whatever is up (#230,
+    /// `Dashboard::ask_agreement`).
+    Agreement(crate::agreement::Entry),
 }
 
 impl Open {
@@ -70,7 +73,7 @@ impl Open {
             Open::MyGames(entry) => Box::new(my_games::MyGames::opened(entry, around)),
             Open::GameHub(entry) => Box::new(game_hub::GameHub::open(entry, around)),
             Open::Search => Box::new(search::Search::open(around.library)),
-            Open::Settings(entry) => Box::new(settings::Settings::open(entry)),
+            Open::Settings(entry) => Box::new(settings::Settings::open(entry, around)),
             Open::TextEntry(entry) => {
                 let text = under.map(|page| page.entry_text()).unwrap_or_default();
                 Box::new(keyboard::TextEntry::open(entry, text))
@@ -81,6 +84,7 @@ impl Open {
             Open::InstallWhere(entry) => Box::new(crate::install_where::InstallWhere::open(entry, around)?),
             Open::Achievements(entry) => Box::new(crate::achievements::Achievements::open(entry, around)?),
             Open::ArtPicker(entry) => Box::new(art_picker::ArtPicker::open(entry, around)?),
+            Open::Agreement(entry) => Box::new(crate::agreement::AgreementPrompt::open(entry)),
         })
     }
 }
@@ -256,6 +260,11 @@ pub trait Page {
     fn game_hub<'a>(&self, _library: &'a Library) -> Option<(u64, &'a model::Game)> {
         None
     }
+
+    /// For a licence agreement's prompt: the number of the question it answers (`agreement::Entry::id`).
+    fn agreement(&self) -> Option<u64> {
+        None
+    }
 }
 
 fn behind_key(page: u64) -> (&'static str, u64) {
@@ -377,6 +386,11 @@ impl Stack {
 
     pub fn art_picker_up(&self) -> bool {
         self.pages.iter().any(|page| page.is_art_picker())
+    }
+
+    /// The licence agreements' prompts that are up, by the number of the question each answers.
+    pub fn agreements(&self) -> Vec<u64> {
+        self.pages.iter().filter_map(|page| page.agreement()).collect()
     }
 
     /// What the pages ask of the shell beyond what the last press answered ([`Page::asks`]).

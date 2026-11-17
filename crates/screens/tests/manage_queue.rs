@@ -522,3 +522,132 @@ fn manage_queue_recently_installed_only() {
 fn my_games_manage_queued() {
     Stage::new(with_queue(library(), several), Open::MyGames(Entry::Manage)).check("my_games_manage_queued");
 }
+
+// --- Why an install stopped, and the licence agreement (#230) ---
+
+/// Dune Cartographer downloading; under Stopped, Fathom Nine too big for the drive, then Ember Choir declined.
+fn stopped(library: &Library) -> Queue {
+    let mut queue = Queue::new(vec![downloading(library)], Vec::new());
+    let stop = |name: &str, stop: model::Stop| model::Stopped { game: id(library, name), store: "Steam".into(), stop };
+    queue.stopped = vec![
+        stop("Fathom Nine", model::Stop::NoSpace { needed: 58_600_000_000, free: 12_900_000_000 }),
+        stop("Ember Choir", model::Stop::Declined),
+    ];
+    queue
+}
+
+/// The stopped rows come after those installing, say why in a few words, and A on one stopped for want of space
+/// opens Settings > Storage; A on another is its hub, and its menu is the game's, Install first.
+#[test]
+fn a_stopped_row_says_why_and_one_with_no_room_opens_storage() {
+    let mut page = on_page(with_queue(library(), stopped));
+    assert_eq!(after(&mut page, &[Down, Down]), "Row(1) of Fathom Nine");
+    let line = page.focus_line();
+    assert!(line.ends_with("; 1 installing, 5 recently installed; Stopped: Not enough space"), "{line}");
+    assert_eq!(after(&mut page, &[Down, Down]), "Row(2) of Ember Choir");
+    assert!(page.focus_line().ends_with("; Stopped: Licence agreement declined"), "{}", page.focus_line());
+    press(&mut page, &[View]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Install) of Ember Choir");
+    press(&mut page, &[B, A]);
+    assert_eq!(page.page(), Some("GameHub"));
+    press(&mut page, &[B, Up, A]);
+    assert!(page.focus_line().starts_with("Settings: Storage: "), "{}", page.focus_line());
+    // B back to Games & apps' boxes, on Storage, then to the rail, then back to the row, as Settings goes.
+    press(&mut page, &[B]);
+    assert!(page.focus_line().starts_with("Settings: Games & apps: Storage"), "{}", page.focus_line());
+    press(&mut page, &[B, B]);
+    assert_eq!(after(&mut page, &[]), "Row(1) of Fathom Nine");
+}
+
+/// A stopped game asked for again leaves Stopped for Installing, and focus goes with it.
+#[test]
+fn a_stopped_game_asked_for_again_is_a_row_of_installing() {
+    let library = with_queue(library(), stopped);
+    let mut page = on_page(library.clone());
+    assert_eq!(after(&mut page, &[Down, Down]), "Row(1) of Fathom Nine");
+    let fathom = id(&library, "Fathom Nine");
+    let mut queue = library.queue.clone();
+    queue.stopped.retain(|stopped| stopped.game != fathom);
+    queue.entries.push(Queued { can: STEERS, ..Queued::new(fathom, InstallState::Queued, 40) });
+    page.set_queue(queue);
+    assert_eq!(after(&mut page, &[]), "Row(1) of Fathom Nine");
+    let line = page.focus_line();
+    assert!(line.ends_with("; 2 installing, 5 recently installed; Queued 0.0%"), "{line}");
+}
+
+/// Stopped under Installing: the few words in the state's place, the rest dimmed under them, no bar; focus on the
+/// one stopped for want of space.
+#[test]
+fn manage_queue_stopped() {
+    let mut stage = Stage::new(with_queue(library(), stopped), screens::manage_queue::open());
+    stage.press(&[Down, Down]);
+    stage.check("manage_queue_stopped");
+}
+
+fn agreement(text: Result<String, String>) -> Open {
+    let agreement = model::Agreement { at: 1, of: 2, text };
+    screens::agreement::open(screens::agreement::Entry { id: 1, game: "Ember Choir".into(), agreement })
+}
+
+/// The licence agreement's words: a long one, made up, of clauses and lists.
+fn agreement_text() -> String {
+    let mut text =
+        String::from("EMBER CHOIR END USER LICENCE AGREEMENT\n\nPlease read this agreement carefully before installing.\n");
+    for clause in 1..=24 {
+        text.push_str(&format!(
+            "\n{clause}. The licensor grants you a limited, non-exclusive, non-transferable licence to install and \
+             play the game on a machine you own or control, for your own use and not for any other, as long as you \
+             keep to the terms in this clause and the others.\n"
+        ));
+        if clause % 6 == 0 {
+            text.push_str("\n• You may not copy it.\n• You may not sell it.\n");
+        }
+    }
+    text
+}
+
+/// The prompt over Home: the game's name, "Licence agreement 1 of 2", the words, the bar, Accept and Decline with
+/// focus on Decline, and the page it is on.
+#[test]
+fn agreement_prompt() {
+    let mut stage = Stage::new(library(), agreement(Ok(agreement_text())));
+    stage.check("agreement");
+}
+
+/// Scrolled on by a bumper and three lines more: the bar's thumb moved, the page said; focus on Accept.
+#[test]
+fn agreement_prompt_scrolled() {
+    let mut stage = Stage::new(library(), agreement(Ok(agreement_text())));
+    stage.check("agreement");
+    stage.press(&[Button::RightBumper, Down, Left]);
+    stage.check("agreement_scrolled");
+}
+
+/// Its words not had: said so, dimmed, and Open in Steam and Decline only.
+#[test]
+fn agreement_prompt_unread() {
+    let mut stage = Stage::new(library(), agreement(Err("the page did not answer in 15 seconds".into())));
+    stage.check("agreement_unread");
+}
+
+/// Only A on Accept accepts; B declines; focus starts on Decline.
+#[test]
+fn the_agreement_prompt_answers_with_the_users_own_choice() {
+    let entry = |id: u64| screens::agreement::Entry {
+        id,
+        game: "Ember Choir".into(),
+        agreement: model::Agreement { at: 1, of: 1, text: Ok("Terms.".into()) },
+    };
+    let mut dashboard = Dashboard::new(library());
+    dashboard.ask_agreement(entry(4));
+    let line = dashboard.focus_line();
+    assert!(line.starts_with("Agreement: Decline of Ember Choir; agreement 1 of 1"), "{line}");
+    assert_eq!(dashboard.agreements_up(), [4]);
+    dashboard.take_effects();
+    press(&mut dashboard, &[B]);
+    assert_eq!(asked(&mut dashboard), [Effect::Agreement { id: 4, reply: model::Reply::Decline }]);
+    assert!(dashboard.agreements_up().is_empty());
+    dashboard.ask_agreement(entry(5));
+    press(&mut dashboard, &[Left, A]);
+    assert_eq!(asked(&mut dashboard), [Effect::Agreement { id: 5, reply: model::Reply::Accept }]);
+}

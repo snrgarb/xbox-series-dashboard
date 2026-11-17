@@ -35,6 +35,7 @@ pub mod cef;
 pub mod client;
 pub mod collections;
 pub mod debugger;
+pub mod eula;
 pub mod fixture;
 pub mod follow;
 pub mod installs;
@@ -93,14 +94,34 @@ impl Steam {
 
     /// Asks Steam's client `call` on a thread of its own (the Dashboard's window never waits on its debugger), and
     /// where it is not taken, opens `fallback` with `open`: Steam's own program, as before #171. After an install,
-    /// whose wizard brings Steam's main window up, the Dashboard is put in front again (`Opener::front`).
-    fn ask_client(&self, ports: Vec<u16>, call: client::Call, fallback: Option<(Start, Box<dyn Opener + Send>)>) {
+    /// whose wizard brings Steam's main window up, the Dashboard is put in front again (`Opener::front`). An
+    /// install's licence agreements are put before the user through `open` (`Opener::agreement`), and an install
+    /// that stopped is told of there too (`Opener::stopped`, #230): neither falls back to `steam.exe`, which would go
+    /// round them.
+    fn ask_client(
+        &self,
+        ports: Vec<u16>,
+        call: client::Call,
+        game: Game,
+        fallback: Option<(Start, Box<dyn Opener + Send>)>,
+    ) {
         let root = self.installed_root();
         std::thread::spawn(move || {
-            let outcome = client::ask(&ports, root.as_deref(), &call);
+            let install = matches!(call, client::Call::Install { .. });
+            let mut fallback = fallback;
+            let outcome = match &mut fallback {
+                Some((_, open)) if install => {
+                    let mut asked = |agreement: &model::Agreement| {
+                        open.front();
+                        open.agreement(&game, agreement)
+                    };
+                    client::ask_user(&ports, root.as_deref(), &call, &mut asked)
+                }
+                _ => client::ask(&ports, root.as_deref(), &call),
+            };
             match (outcome, fallback) {
                 (client::Outcome::NotTaken(_), Some((start, mut open))) => {
-                    if matches!(call, client::Call::Install { .. }) {
+                    if install {
                         open.front();
                     }
                     client::log(&format!("{}: asking through steam.exe instead", call.what()));
@@ -111,7 +132,20 @@ impl Steam {
                 (client::Outcome::NotTaken(_), None) => {
                     client::log(&format!("{}: nothing else can do it: the Queue stays as it is", call.what()));
                 }
-                (_, Some((_, mut open))) if matches!(call, client::Call::Install { .. }) => open.front(),
+                (client::Outcome::Stopped(stop), Some((_, mut open))) => {
+                    open.front();
+                    open.stopped(&game, &stop);
+                }
+                (client::Outcome::LeftToSteam, Some((_, mut open))) => {
+                    let address = Start::Address(format!("steam://install/{}", call.appid()));
+                    client::log(&format!("{}: opening {address} for Steam's own install dialog", call.what()));
+                    if let Err(why) = open.open(&address) {
+                        client::log(&format!("{}: {address} could not be opened: {why}", call.what()));
+                        open.front();
+                        open.stopped(&game, &model::Stop::Failed("Steam's own install couldn't be opened.".into()));
+                    }
+                }
+                (_, Some((_, mut open))) if install => open.front(),
                 _ => {}
             }
         });
@@ -277,7 +311,7 @@ impl Installer for Steam {
         match (self.debugger(), open.detached()) {
             (Some(ports), Some(detached)) => {
                 let folder = folder.filter(|folder| !folder.default).map(|folder| folder.path.display().to_string());
-                self.ask_client(ports, client::Call::Install { appid, folder }, Some((start, detached)));
+                self.ask_client(ports, client::Call::Install { appid, folder }, game.clone(), Some((start, detached)));
                 Ok(())
             }
             _ => open.open(&start).map_err(Refusal::Failed),
@@ -290,7 +324,7 @@ impl Installer for Steam {
         let appid = appid(game).ok_or(Refusal::Unsupported)?;
         match (self.debugger(), open.detached()) {
             (Some(ports), Some(detached)) => {
-                self.ask_client(ports, client::Call::Uninstall { appid }, Some((start, detached)));
+                self.ask_client(ports, client::Call::Uninstall { appid }, game.clone(), Some((start, detached)));
                 Ok(())
             }
             _ => open.open(&start).map_err(Refusal::Failed),
@@ -301,7 +335,7 @@ impl Installer for Steam {
     fn steer(&self, game: &Game, steer: Steer, _open: &mut dyn Opener) -> Result<(), Refusal> {
         let appid = appid(game).ok_or(Refusal::Unsupported)?;
         let ports = self.debugger().filter(|_| steer.allowed(self.can())).ok_or(Refusal::Unsupported)?;
-        self.ask_client(ports, client::Call::Steer { appid, steer }, None);
+        self.ask_client(ports, client::Call::Steer { appid, steer }, game.clone(), None);
         Ok(())
     }
 }

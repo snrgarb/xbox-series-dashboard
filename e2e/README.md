@@ -207,7 +207,11 @@ controller glyph), `queue-steer` (#170, #171, #188: through the stand-in Steam's
 resumed and cancelled from a queued game's menu in Manage Queue, its question declined once; a second install to the
 end with its Workshop items coming in, Play offered and the Ready to play Toast meanwhile, the row reading Downloading
 Workshop content until all are in; and an uninstall with no prompt of Steam's; the fake named with `--steam` on the
-VM too, as only a named install is taken for the stand-in), `storage` (#179: the fake Steam given a second library by
+VM too, as only a named install is taken for the stand-in), `steam-eula` (#230: the stand-in Steam's install wizard
+with two licence agreements, set up with `standin steam-wizard`: the Dashboard's own prompt declined, the wizard
+cancelled and the user told why; both accepted, one after another, and the download starting; then a game too big for
+the room the stand-in's install manager says there is, refused before it is continued, its Toast, and its Stopped row
+in Manage Queue opening Settings > Storage; it stops at the first step that is not as it should be), `storage` (#179: the fake Steam given a second library by
 `standin steam-library`, its client's CEF debugger on; Settings > Storage listing both with the drives, the second
 chosen as Steam's default; the storage ring on My games & apps; Install asking "Where do you want to install X?" with
 the second focused, and Steam's client asked to install into it; then the Dashboard started again on the same data

@@ -57,6 +57,9 @@ pub enum Entry {
     /// Home's Discord tile while there is no Discord tab in the Guide: Account > Discord, focus on the Client ID's
     /// Type; B goes back to Account's boxes with focus on Discord.
     Discord,
+    /// Manage Queue's row of a game stopped for want of space (#230): Games & apps > Storage; B goes back to Games &
+    /// apps' boxes with focus on Storage.
+    Storage,
 }
 
 /// What a press on a pane came to.
@@ -164,8 +167,17 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn open(entry: Entry) -> Self {
+    /// Settings as `entry` says, from what is `around`: Storage's page reads the library as it opens.
+    pub fn open(entry: Entry, around: Around) -> Self {
         match entry {
+            Entry::Storage => {
+                let (row, column) = categories::STORAGE;
+                let mut settings = Self::on(Category::GamesAndApps);
+                let boxes = Category::GamesAndApps.boxes().with_focus(row, column);
+                settings.categories[Category::GamesAndApps.index()] = boxes;
+                settings.pages.push(Box::new(storage::Storage::open(around)));
+                settings
+            }
             Entry::Rail => Self { on_rail: true, ..Self::on(Category::General) },
             Entry::Tile => Self::on(Category::General),
             Entry::Discord => {

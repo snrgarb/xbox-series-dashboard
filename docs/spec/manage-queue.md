@@ -186,3 +186,39 @@ Workshop items the account subscribes to (Garry's Mod on the TV PC, #188: 3.9 GB
    downloading Workshop content, 3 of 12 items` (and `, <done> of <total> bytes` where known) at each whole percent,
    and `queue: <game> has all its store was fetching for it` as it leaves.
 6. **The nav's foot** (section 6) shows only a download, not this.
+
+## 10. Why an install stopped, and the licence agreement (decided in #230)
+
+Neither the Bundle nor the console's own pictures cover this; the console's manner, and the user's rule: **the
+Dashboard never just loses an install.** Every refusal, cancel or drop is told.
+
+1. **A licence agreement.** Where a store's install stops for the user to accept one (Steam's `eInstallState` 8),
+   the Dashboard shows its own prompt over whatever is up (`screens::agreement`): a dark panel 1200 by 880 in the
+   middle of the dimmed screen, the game's name (Bahnschrift 33), "Licence agreement" under it ("Licence agreement
+   1 of 2" where there are more), the agreement's own words in a box that **Up and Down** scroll three lines at a
+   time and the **bumpers and triggers** a box at a time, a thin bar at its right showing where, and **Accept** and
+   **Decline** side by side at its foot with "Page n of m" at the right. **Focus starts on Decline**, Left and Right
+   move between them, and **only A on Accept accepts**: B, A on Decline, and the prompt going unanswered (a page
+   over it, the Dashboard closing) all decline. Several are shown one after another; nothing is remembered for the
+   next install. Where the words could not be had, it says so in their place, dimmed, and offers **Open in Steam**
+   (Steam's own window, which shows them) and Decline only. Focus log: `Agreement: Decline of <game>; agreement 1
+   of 2, page 1 of 7`. Reference pictures: `crates/screens/tests/reference/agreement.png`, `agreement_scrolled.png`,
+   `agreement_unread.png`, and the row's `manage_queue_stopped.png`.
+2. **The Toast.** Each stop is told in a Toast with the game's cover, in a few words: **Not enough space**,
+   **Licence agreement declined**, **Install it in Steam** (what Steam asked for, the Dashboard can't answer),
+   **Couldn't install**, **Installation cancelled**, **Stopped in Steam** (it left the store's own list while
+   installing), **Steam didn't start it**, **No longer in Steam**. A tap of the Guide button opens this page, as
+   Queued's does.
+3. **The row.** Under the rows installing, a **Stopped** header and a row a game, the latest first: its cover and
+   name as an install's row, the few words in the state's place, then the rest on up to two dimmed lines in the
+   amount's, no bar: for want of room, "It needs 54.6 GB and 12.0 GB is free. Free up space in Settings > Storage,
+   or install it somewhere else." (the console's units, `model::storage::size`); for what Steam asked, "Steam asked
+   for a product key, which the Dashboard can't give. Install it in Steam."; a decline, "Nothing was installed.";
+   and so on. **A on a row stopped for
+   want of room opens Settings > Storage**, on Games & apps' Storage box; Menu opens the game's menu, whose Install
+   asks the folder question where another library has room (section 8.6). A on any other is the Game hub. The row
+   goes once the game is asked for again or installed; it is not kept across a restart. Focus log: `Row(1) of
+   <game>; 1 installing, 3 recently installed; Stopped: Not enough space`.
+4. **The log.** `queue: <game> stopped: <few words>: <the rest>`, after the Queue's own `queue: <game> dropped`
+   where it was in the Queue, and the store's line before them naming the state by name and number (docs/sources.md,
+   "Steam's own calls").

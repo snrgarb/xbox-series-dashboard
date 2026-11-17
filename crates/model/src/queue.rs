@@ -4,7 +4,7 @@
 //! screens read it from the snapshot (`Library::queue`).
 use serde::{Deserialize, Serialize};
 
-use crate::Can;
+use crate::{Can, Stop};
 
 /// What a game's tiles read while it waits its turn, or is paused.
 pub const QUEUED: &str = "Queued";
@@ -146,6 +146,29 @@ pub struct Installed {
     pub finished: u64,
 }
 
+/// A game whose install stopped before it was installed, or that left the Queue without installing (#230): its
+/// row stays in Manage Queue saying why, so that the Queue never just loses a game, until the game is asked for
+/// again or installed, or the Dashboard starts again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stopped {
+    pub game: i64,
+    /// Its store's name, as its lines say it.
+    pub store: String,
+    pub stop: Stop,
+}
+
+impl Stopped {
+    /// What its row and its Toast say first.
+    pub fn headline(&self) -> String {
+        self.stop.headline(&self.store)
+    }
+
+    /// Its row's last line.
+    pub fn line(&self) -> String {
+        self.stop.line(&self.store)
+    }
+}
+
 /// The Queue as a snapshot has it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Queue {
@@ -154,13 +177,21 @@ pub struct Queue {
     /// The games the Queue held that have finished installing, the latest first (Manage Queue's Recently
     /// installed, #79).
     pub installed: Vec<Installed>,
+    /// The games whose install stopped, the latest first (#230): rows after those installing, each saying why.
+    #[serde(default)]
+    pub stopped: Vec<Stopped>,
 }
 
 impl Queue {
     /// The Queue's entries in its order: those downloading first, then by when they started.
     pub fn new(mut entries: Vec<Queued>, installed: Vec<Installed>) -> Self {
         entries.sort_by_key(|entry| (!(entry.state.downloading() || entry.state.extras()), entry.started, entry.game));
-        Self { entries, installed }
+        Self { entries, installed, stopped: Vec::new() }
+    }
+
+    /// The game's stopped row, if it has one.
+    pub fn stopped(&self, game: i64) -> Option<&Stopped> {
+        self.stopped.iter().find(|stopped| stopped.game == game)
     }
 
     /// The game's place in the Queue, if it is in it.
