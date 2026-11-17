@@ -201,21 +201,26 @@ Dashboard never just loses an install.** Every refusal, cancel or drop is told.
    move between them, and **only A on Accept accepts**: B, A on Decline, and the prompt going unanswered (a page
    over it, the Dashboard closing) all decline. Several are shown one after another; nothing is remembered for the
    next install. Where the words could not be had, it says so in their place, dimmed, and offers **Open in Steam**
-   (Steam's own window, which shows them) and Decline only. Focus log: `Agreement: Decline of <game>; agreement 1
-   of 2, page 1 of 7`. Reference pictures: `crates/screens/tests/reference/agreement.png`, `agreement_scrolled.png`,
+   (Steam's own window, which shows them) and Decline only. A text that fits the box is one page: "Page 1 of 1",
+   no bar, and Up, Down, the bumpers and the triggers do nothing (focus is always on the buttons). Focus log:
+   `Agreement: Decline of <game>; agreement 1 of 2, page 1 of 7`; as it opens, before it is first drawn and its
+   pages counted, `..., page 1`, so the first press after says the count. A press that scrolls within a page logs
+   no new line. Reference pictures: `crates/screens/tests/reference/agreement.png`, `agreement_scrolled.png`,
    `agreement_unread.png`, and the row's `manage_queue_stopped.png`.
 2. **The Toast.** Each stop is told in a Toast with the game's cover, in a few words: **Not enough space**,
    **Licence agreement declined**, **Install it in Steam** (what Steam asked for, the Dashboard can't answer),
    **Couldn't install**, **Installation cancelled**, **Stopped in Steam** (it left the store's own list while
    installing), **Steam didn't start it**, **No longer in Steam**. A tap of the Guide button opens this page, as
    Queued's does.
-3. **The row.** Under the rows installing, a **Stopped** header and a row a game, the latest first: its cover and
+3. **The row.** Only for what stopped **without the user asking** (no room, what Steam asked for, a failure,
+   never started, no longer listed): the user's own **Cancel** and **Decline**, and a drop in the store's own
+   client (Stopped in Steam: as a player cancels it there), are told in the Toast and the row simply goes, as before (the lead's decision on #235, 2026-11-17). Under the rows installing, a
+   **Stopped** header and a row a game, the latest first: its cover and
    name as an install's row, the few words in the state's place, then the rest on up to two dimmed lines in the
    amount's, no bar: for want of room, "It needs 54.6 GB and 12.0 GB is free. Free up space in Settings > Storage,
    or install it somewhere else." (the console's units, `model::storage::size`); for what Steam asked, "Steam asked
-   for a product key, which the Dashboard can't give. Install it in Steam."; a decline, "Nothing was installed.";
-   and so on. **A on a row stopped for
-   want of room opens Settings > Storage**, on Games & apps' Storage box; Menu opens the game's menu, whose Install
+   for a product key, which the Dashboard can't give. Install it in Steam."; and so on. **A on a row stopped for want
+   of room opens Settings > Storage**, on Games & apps' Storage box; Menu opens the game's menu, whose Install
    asks the folder question where another library has room (section 8.6). A on any other is the Game hub. The row
    goes once the game is asked for again or installed; it is not kept across a restart. Focus log: `Row(1) of
    <game>; 1 installing, 3 recently installed; Stopped: Not enough space`.

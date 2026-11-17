@@ -26,8 +26,10 @@
 //!
 //! What the screens tell the user of in a Toast ([`Tell`]) goes with each update: a game joining the Queue (but for
 //! those already in it as the Dashboard starts), one finishing installing, one seen uninstalled, and one whose
-//! install stopped (#230). A game never just leaves the Queue: one that leaves without installing keeps a row in
-//! Manage Queue saying why (`model::Stopped`, held here and not in the database), told by its store's installer
+//! install stopped (#230). A game never just leaves the Queue: one that leaves without installing is told of with
+//! why, and, where the user did not ask for it (not their own Cancel or Decline, nor a drop in the store's own
+//! client), keeps a row in Manage Queue saying so (`model::Stopped`, held here and not in the database), told by its
+//! store's installer
 //! (`Ask::Stopped`: not enough space, a licence agreement declined, what the store asked for) or worked out here
 //! (cancelled here, stopped in the store's own client, never started, no longer listed). The row goes once the game
 //! is asked for again or installed.
@@ -346,8 +348,11 @@ pub struct Follower {
     watched_at: Option<u64>,
     /// The games whose install the user cancelled here, until they leave the Queue.
     cancels: HashSet<i64>,
-    /// The games whose install stopped and why, the latest first: their rows in Manage Queue.
+    /// The games whose install stopped without the user asking, and why, the latest first: their rows in Manage
+    /// Queue (`Stop::keeps_row`).
     stopped: Vec<Stopped>,
+    /// Each game's latest stop, row or not: what its Toast tells.
+    last_stops: HashMap<i64, Stopped>,
 }
 
 impl Follower {
@@ -362,10 +367,12 @@ impl Follower {
             watched_at: None,
             cancels: HashSet::new(),
             stopped: Vec::new(),
+            last_stops: HashMap::new(),
         }
     }
 
-    /// The game's install stopped: its row says why, in the place of any it had, first. Said in the log.
+    /// The game's install stopped: said in the log and told in a Toast; where the user did not ask for it, its row
+    /// says why, in the place of any it had, first.
     fn stop(&mut self, db: &Database, game: i64, stop: Stop) -> Result<Stopped> {
         let found = db.game(game)?;
         let key = found.as_ref().map(|game| game.source.clone()).unwrap_or_default();
@@ -374,7 +381,10 @@ impl Follower {
         let name = found.map_or_else(|| format!("game {game}"), |game| game.name);
         eprintln!("queue: {name} stopped: {}: {}", stopped.headline(), stopped.line());
         self.stopped.retain(|was| was.game != game);
-        self.stopped.insert(0, stopped.clone());
+        if stopped.stop.keeps_row() {
+            self.stopped.insert(0, stopped.clone());
+        }
+        self.last_stops.insert(game, stopped.clone());
         Ok(stopped)
     }
 
@@ -413,6 +423,11 @@ impl Follower {
     /// The stopped row of a game, as last said.
     pub fn stopped(&self, game: i64) -> Option<&Stopped> {
         self.stopped.iter().find(|stopped| stopped.game == game)
+    }
+
+    /// Why the game's install last stopped, row or not: what its Toast tells.
+    pub fn last_stop(&self, game: i64) -> Option<&Stopped> {
+        self.last_stops.get(&game)
     }
 
     /// The sources whose client's word of what is installed has changed since the last look, every
@@ -524,6 +539,7 @@ impl Follower {
         }
         // Asked for again: its stopped row goes.
         self.stopped.retain(|was| was.game != game);
+        self.last_stops.remove(&game);
         self.cancels.remove(&game);
         db.join(game, now, true, InstallState::Queued)?;
         Ok(true)
@@ -801,7 +817,7 @@ pub fn tells(changes: &[Change], first: bool, follower: &Follower) -> Vec<Tell> 
     changes
         .iter()
         .filter_map(|change| match change {
-            Change::Dropped(game) => follower.stopped(*game).cloned().map(Tell::Stopped),
+            Change::Dropped(game) => follower.last_stop(*game).cloned().map(Tell::Stopped),
             change => Tell::of(change, first),
         })
         .collect()
@@ -1308,7 +1324,11 @@ mod tests {
     fn a_game_that_leaves_without_installing_says_why_until_it_is_asked_for_again() {
         let mut world = World::new();
         let (moss, tern) = (world.id("Moss"), world.id("Tern"));
-        let stop_of = |world: &World, game: i64| world.follower.stopped(game).map(|stopped| stopped.stop.clone());
+        let stop_of = |world: &World, game: i64| world.follower.last_stop(game).map(|stopped| stopped.stop.clone());
+        let rows = |world: &World| {
+            let queue = world.follower.queue(&world.db).unwrap();
+            queue.stopped.iter().map(|stopped| stopped.game).collect::<Vec<_>>()
+        };
 
         // Stopped by its store's installer: told at once, out of the Queue.
         world.ask("Moss", 0);
@@ -1335,8 +1355,10 @@ mod tests {
         assert_eq!(stop_of(&world, moss), Some(Stop::Cancelled));
         assert_eq!(
             tells(&polled.changes, false, &world.follower),
-            [Tell::Stopped(world.follower.stopped(moss).unwrap().clone())]
+            [Tell::Stopped(world.follower.last_stop(moss).unwrap().clone())]
         );
+        // The user's own Cancel leaves no row: the Toast is enough.
+        assert!(rows(&world).is_empty());
 
         // Taken on, then dropped in the store's own client: "Stopped in <store>".
         world.ask("Tern", 4);
@@ -1350,9 +1372,14 @@ mod tests {
         world.ask("Tern", 7);
         world.poll(7 + GIVE_UP_AFTER);
         assert_eq!(stop_of(&world, tern), Some(Stop::NeverStarted));
-        // The latest first.
-        let queue = world.follower.queue(&world.db).unwrap();
-        assert_eq!(queue.stopped.iter().map(|stopped| stopped.game).collect::<Vec<_>>(), [tern, moss]);
+        assert_eq!(rows(&world), [tern]);
+        // The user's own Decline: told, no row; one stopped without asking: a row, the latest first.
+        world.ask("Moss", 8);
+        world.follower.stopped_by_store(&mut world.db, moss, Stop::Declined).unwrap();
+        assert_eq!((stop_of(&world, moss), rows(&world)), (Some(Stop::Declined), vec![tern]));
+        world.ask("Moss", 9);
+        world.follower.stopped_by_store(&mut world.db, moss, Stop::StoreAsks("a product key".into())).unwrap();
+        assert_eq!(rows(&world), [moss, tern]);
 
         // Installed after all: its row goes.
         world.fake.set_installed("2", true);

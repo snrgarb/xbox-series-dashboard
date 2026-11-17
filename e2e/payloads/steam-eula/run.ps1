@@ -10,7 +10,8 @@
 # What it walks, stopping at the first thing that is not as it should be:
 # - Decline. Install Saltwind Rally from its Tile menu: `steam client: install 9100060 ...: eInstallState 8
 #   (ShowEULAs)`, and the Dashboard's own prompt over Home, focus on Decline (`focus: Agreement: Decline of Saltwind
-#   Rally; agreement 1 of 2, page 1 of <n>`). Down and RB scroll it (its page moves on), Left is Accept, Right back on
+#   Rally; agreement 1 of 2, page 1`, its count said from the first press on). RB scrolls it until its page number
+#   rises (a press within a page logs no new line, so none is waited for), Left is Accept, Right back on
 #   Decline, and A on it declines: the wizard cancelled (`steam: CEF: install wizard cancelled: eInstallState 8 ->
 #   0`), nothing marked accepted, the Queue's `queue: Saltwind Rally stopped: Licence agreement declined: ...`, and
 #   its Toast.
@@ -106,6 +107,25 @@ function Standin([string[]] $Arguments) {
 }
 function Wizard([string[]] $Rest) { Standin (@('steam-wizard', "`"$script:root`"") + $Rest) }
 
+# The page number a prompt's focus line says (1 where it has no count yet).
+function Page-Of([string] $Line) { if ($Line -match ', page (\d+)') { [int]$Matches[1] } else { 1 } }
+
+# Presses $Button, $Most times at most, until a focus line like "$Expect, page <n> of <m>" says page $Page or more.
+# A press that scrolls within a page logs no new line: none is waited for but the one with the page risen.
+function Scroll-On([string] $Button, [string] $Expect, [int] $Page, [int] $Most = 6) {
+    $pattern = "^focus: $Expect, page (\d+) of (\d+)`$"
+    foreach ($press in 1..$Most) {
+        Start-Sleep -Milliseconds 130
+        Push-Button $Button
+        $got = Wait-Until { $line = Focus-Now; if ($line -match $pattern -and (Page-Of $line) -ge $Page) { $line } } 3
+        if ($got) {
+            Say "$Button x$press -> $got"
+            return $got
+        }
+    }
+    Fail "$Button $Most times never brought '$Expect' to page $Page: '$(Focus-Now)'"
+}
+
 function Menu-Game([string] $Line) { if ($Line -match ' of (.+)$') { $Matches[1] } }
 
 # From the Recent row's first tile rightwards, opens each game's Tile menu until one is the menu of $Name; leaves it
@@ -163,7 +183,6 @@ try {
     Press Down 'Recent\(0\)' | Out-Null
 
     $install = "install $agreedId into Steam's default library"
-    $prompt = "Agreement: (Accept|Decline) of $agreedName; agreement (\d) of 2, page (\d+) of (\d+)"
 
     # --- Decline: the prompt over Home, focus on Decline; it scrolls; A on Decline cancels the wizard.
     Open-InstallOf $agreed.name
@@ -171,13 +190,11 @@ try {
     $steamMark = Steam-LogLength
     Press A 'Recent\(\d+\)' | Out-Null
     Expect-Logged "^steam client: ${install}: .+: eInstallState 8 \(ShowEULAs\) at \d+ ms$" $mark 'Decline, the wizard at its agreements' | Out-Null
-    $first = Expect-Logged "^focus: Agreement: Decline of $agreedName; agreement 1 of 2, page 1 of \d+$" $mark 'Decline, the prompt with focus on Decline'
+    $first = Expect-Logged "^focus: Agreement: Decline of $agreedName; agreement 1 of 2, page 1( of \d+)?$" $mark 'Decline, the prompt with focus on Decline'
     In-Front
     Start-Sleep -Milliseconds 4500
     Save-Screen '01-agreement'
-    Press Down "Agreement: Decline of $agreedName; agreement 1 of 2, page \d+ of \d+" | Out-Null
-    $paged = Press RB "Agreement: Decline of $agreedName; agreement 1 of 2, page \d+ of \d+"
-    if ($paged -notmatch 'page ([2-9]|\d\d+) of ') { Fail "a bumper should have moved the agreement on a page: '$paged'" }
+    Scroll-On RB "Agreement: Decline of $agreedName; agreement 1 of 2" 2 | Out-Null
     Save-Screen '02-agreement-scrolled'
     Press Left "Agreement: Accept of $agreedName; agreement 1 of 2, page \d+ of \d+" | Out-Null
     Press Right "Agreement: Decline of $agreedName; agreement 1 of 2, page \d+ of \d+" | Out-Null
@@ -198,15 +215,15 @@ try {
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Logged "^focus: Agreement: Decline of $agreedName; agreement 1 of 2, page 1 of \d+$" $mark 'Accept, the first agreement' | Out-Null
+    Expect-Logged "^focus: Agreement: Decline of $agreedName; agreement 1 of 2, page 1( of \d+)?$" $mark 'Accept, the first agreement' | Out-Null
     In-Front
-    Press Left "Agreement: Accept of $agreedName; agreement 1 of 2, page 1 of \d+" | Out-Null
+    Press Left "Agreement: Accept of $agreedName; agreement 1 of 2, page 1( of \d+)?" | Out-Null
     $second = Get-DashboardLogLength
     Push-Button A
-    Expect-Logged "^focus: Agreement: Decline of $agreedName; agreement 2 of 2, page 1 of \d+$" $second 'Accept, the second agreement' | Out-Null
+    Expect-Logged "^focus: Agreement: Decline of $agreedName; agreement 2 of 2, page 1( of \d+)?$" $second 'Accept, the second agreement' | Out-Null
     Start-Sleep -Milliseconds 4500
     Save-Screen '04-second-agreement'
-    Press Left "Agreement: Accept of $agreedName; agreement 2 of 2, page 1 of \d+" | Out-Null
+    Press Left "Agreement: Accept of $agreedName; agreement 2 of 2, page 1( of \d+)?" | Out-Null
     Press A 'Recent\(\d+\)' | Out-Null
     Expect-Steam "steam: CEF: licence agreement `"${agreedId}_eula_2`" version 3 of $agreedId marked accepted" $steamMark 'Accept, the second marked accepted'
     if ((Count-Steam 'marked accepted' $steamMark) -ne 2) { Fail "Accept: the stand-in marked $(Count-Steam 'marked accepted' $steamMark) agreements accepted, not 2" }

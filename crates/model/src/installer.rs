@@ -104,6 +104,13 @@ impl Stop {
         }
     }
 
+    /// Whether it keeps a row under Stopped in Manage Queue: only what stopped without the user asking. The user's
+    /// own Cancel or Decline, and a drop in the store's own client (as a player cancels there), are told in a
+    /// Toast, and the row simply goes.
+    pub fn keeps_row(&self) -> bool {
+        !matches!(self, Stop::Cancelled | Stop::Declined | Stop::InStore)
+    }
+
     /// The row's last line: what happened, and what the user can do, the sizes as the console writes them.
     pub fn line(&self, store: &str) -> String {
         match self {

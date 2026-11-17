@@ -138,9 +138,16 @@ impl AgreementPrompt {
         (self.total() - self.view).max(0.0)
     }
 
-    /// Which box-full of the text shows, and how many there are: "page 2 of 7".
+    /// Whether the text has been measured: it is, at its first draw. Before that how many pages it has is not
+    /// known, and is not said.
+    fn measured(&self) -> bool {
+        self.view > 0.0 && self.heights.len() == self.blocks.len()
+    }
+
+    /// Which box-full of the text shows, and how many there are: "page 2 of 7". A text that fits is one page,
+    /// with no bar, and the pad's scrolling does nothing.
     fn pages(&self) -> (usize, usize) {
-        if self.view <= 0.0 || self.heights.is_empty() {
+        if !self.measured() {
             return (1, 1);
         }
         let of = ((self.total() / self.view).ceil() as usize).max(1);
@@ -173,10 +180,12 @@ impl Page for AgreementPrompt {
     }
 
     /// Which agreement and where the text is: `agreement 1 of 2, page 3 of 7`; `agreement 1 of 1, not read` where
-    /// it could not be had.
+    /// it could not be had. Before its first draw, how many pages there are is not known: `agreement 1 of 2, page
+    /// 1`, so that the first press after it is drawn says the count.
     fn state(&self) -> String {
         let which = format!("agreement {} of {}", self.entry.agreement.at, self.entry.agreement.of);
         match self.entry.agreement.text {
+            Ok(_) if !self.measured() => format!("{which}, page 1"),
             Ok(_) => {
                 let (at, of) = self.pages();
                 format!("{which}, page {at} of {of}")
@@ -334,7 +343,15 @@ mod tests {
     fn focus_starts_on_decline_and_only_a_on_accept_accepts() {
         let mut page = AgreementPrompt::open(entry(Ok("Terms.")));
         assert_eq!(page.focus(), "Decline of Saltwind Rally");
+        assert_eq!(page.state(), "agreement 1 of 2, page 1", "not drawn: its count not known");
+        // Drawn, it fits: one page, and Up and Down move nothing.
+        page.view = 500.0;
+        page.heights = vec![LINE];
         assert_eq!(page.state(), "agreement 1 of 2, page 1 of 1");
+        for button in [Button::Down, Button::RightBumper, Button::RightTrigger, Button::Up] {
+            assert_eq!(press(&mut page, button), None);
+            assert_eq!((page.scroll, page.state().as_str()), (0.0, "agreement 1 of 2, page 1 of 1"));
+        }
         // B, and A on Decline, decline.
         let decline = Some(PageAction::CloseWith(Effect::Agreement { id: 7, reply: Reply::Decline }));
         assert_eq!(press(&mut page, Button::B), decline);
@@ -372,9 +389,10 @@ mod tests {
     #[test]
     fn the_text_scrolls_within_its_ends_and_says_where_it_is() {
         let mut page = AgreementPrompt::open(entry(Ok("a\n\nb")));
-        // As if drawn: ten boxes of text.
+        // As if drawn: ten boxes of text, a height a block.
         page.view = 500.0;
         page.heights = vec![2000.0, PARAGRAPH_GAP, 3000.0 - PARAGRAPH_GAP];
+        assert_eq!(page.blocks.len(), 3);
         assert_eq!(page.pages(), (1, 10));
         press(&mut page, Button::Up);
         assert_eq!(page.scroll, 0.0);

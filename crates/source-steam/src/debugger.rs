@@ -538,11 +538,14 @@ fn agreement_page(root: &Path, path: &str) -> Option<String> {
          This is the stand-in Steam&#39;s own made-up text: it binds nobody to anything.</p>\n",
         n + 1
     );
-    for clause in 1..=24 {
+    // Long enough to be several pages of the prompt at any screen size: some 20 of its boxes at 1080p.
+    for clause in 1..=60 {
         body.push_str(&format!(
             "<h2>{clause}. Clause {clause}</h2>\n<p>The stand-in's clause {clause} goes on for a while, so that \
              the agreement is long enough to scroll with the pad. It says nothing &amp; means nothing, \
-             and is here only to be read through.</p>\n"
+             and is here only to be read through. It runs on over a second line and a third, as a real \
+             agreement's clauses do, and then it ends.</p>\n<ul><li>Its first point.</li><li>Its second \
+             point.</li></ul>\n"
         ));
     }
     body.push_str("<p>End of the stand-in licence agreement.</p>\n");

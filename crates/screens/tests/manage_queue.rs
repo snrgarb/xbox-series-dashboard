@@ -525,13 +525,14 @@ fn my_games_manage_queued() {
 
 // --- Why an install stopped, and the licence agreement (#230) ---
 
-/// Dune Cartographer downloading; under Stopped, Fathom Nine too big for the drive, then Ember Choir declined.
+/// Dune Cartographer downloading; under Stopped, Fathom Nine too big for the drive, then Ember Choir, for which Steam
+/// asked a product key. (The user's own Cancel or Decline leaves no row.)
 fn stopped(library: &Library) -> Queue {
     let mut queue = Queue::new(vec![downloading(library)], Vec::new());
     let stop = |name: &str, stop: model::Stop| model::Stopped { game: id(library, name), store: "Steam".into(), stop };
     queue.stopped = vec![
         stop("Fathom Nine", model::Stop::NoSpace { needed: 58_600_000_000, free: 12_900_000_000 }),
-        stop("Ember Choir", model::Stop::Declined),
+        stop("Ember Choir", model::Stop::StoreAsks("a product key".into())),
     ];
     queue
 }
@@ -545,7 +546,7 @@ fn a_stopped_row_says_why_and_one_with_no_room_opens_storage() {
     let line = page.focus_line();
     assert!(line.ends_with("; 1 installing, 5 recently installed; Stopped: Not enough space"), "{line}");
     assert_eq!(after(&mut page, &[Down, Down]), "Row(2) of Ember Choir");
-    assert!(page.focus_line().ends_with("; Stopped: Licence agreement declined"), "{}", page.focus_line());
+    assert!(page.focus_line().ends_with("; Stopped: Install it in Steam"), "{}", page.focus_line());
     press(&mut page, &[View]);
     assert_eq!(page.focus_line(), "TileMenu: Menu(Install) of Ember Choir");
     press(&mut page, &[B, A]);
