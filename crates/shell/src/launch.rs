@@ -1,7 +1,8 @@
 //! Launching a game through its source and following it: asked of its store (or its program run), its window up,
-//! booted, ended. While the game starts the Launch screen is over everything, on the Overlay; this says when it should go, hides Home's window
-//! behind the game, and brings Home back when the game ends. Home's window is otherwise left as it is: it is never
-//! made topmost, layered or clipped.
+//! booted, ended. While the game starts the Launch screen is over everything, on the Overlay; this says when it should
+//! go, and puts Home's window, which shows the game's backdrop meanwhile, directly behind the game's window, where it
+//! stays, never activated, until the game has ended and Home comes back in it (docs/spec/launch-screen.md). Home's
+//! window is otherwise left as it is: it is never made topmost, layered or clipped.
 use std::ffi::c_void;
 use std::path::Path;
 use std::sync::Arc;
@@ -71,6 +72,10 @@ impl Launch {
     pub fn show_game(&mut self, _: bool) -> bool {
         false
     }
+
+    pub fn game_in_front(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -108,10 +113,10 @@ mod win {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum State {
         /// Asked of its store. The Launch screen is over whatever the store and the game put up; Home's window is
-        /// under it all, as it was.
+        /// under it all, as it was, showing the game's backdrop once the Launch screen covers it.
         Starting,
-        /// The Launch screen is fading away, Home's window hidden: what shows through is the game, or the window
-        /// that wants the user.
+        /// The Launch screen is fading away, Home's window directly behind the game's: what shows through is the
+        /// game, or the window that wants the user, with the backdrop round it.
         Revealing,
         /// The Launch screen has gone. The game runs, with the Guide over it or not.
         Running,
@@ -154,6 +159,12 @@ mod win {
         guide: bool,
         /// Whether the game has been asked to quit: from then on it is not frozen, so it is free to close.
         quitting: bool,
+        /// Whether a window of the game's was up at the last look: its coming and going are said.
+        window_up: bool,
+        /// The window Home's window was last put directly behind, once the Launch screen has gone.
+        behind: HWND,
+        /// Whether Home's window is in front of the running game: Home was chosen in the Guide, or with Alt+Tab.
+        home_in_front: bool,
     }
 
     fn log(message: &str) {
@@ -214,6 +225,9 @@ mod win {
                 game: None,
                 guide: false,
                 quitting: false,
+                window_up: false,
+                behind: std::ptr::null_mut(),
+                home_in_front: false,
             })
         }
 
@@ -235,6 +249,16 @@ mod win {
             let running = self.source.running(&self.playing);
             self.seen |= running || look.any;
             self.game = look.largest;
+            let starting = self.state == State::Starting;
+            if look.any != self.window_up {
+                self.window_up = look.any;
+                log(match (look.any, starting) {
+                    (true, _) => "game window seen",
+                    (false, true) => "game gone, Launch screen showing",
+                    (false, false) if self.home_in_front => "game gone, Home in front",
+                    (false, false) => "game gone, backdrop showing",
+                });
+            }
 
             match self.state {
                 State::Starting => self.starting(now, since_last, &look, overlay),
@@ -244,6 +268,7 @@ mod win {
                         self.said_up = true;
                         log("the game's window is up");
                     }
+                    self.keep_behind(look.largest);
                     if running || look.any {
                         self.gone_since = None;
                     } else if now - *self.gone_since.get_or_insert(now) >= GONE {
@@ -321,12 +346,54 @@ mod win {
             Step::Same
         }
 
-        /// The Launch screen is to go. Home's window, covered by it until now, hides first, so what the fade
-        /// shows is the game or the window that wants the user and never Home.
+        /// The Launch screen is to go. Home's window, covered by it until now and showing the game's backdrop, goes
+        /// directly behind the window in front (the game's, or the one that wants the user), so what the fade shows
+        /// is that window with the backdrop round it, and never Home or the desktop.
         fn reveal(&mut self) -> Step {
-            unsafe { ShowWindow(self.home, SW_HIDE) };
+            let front = unsafe { GetForegroundWindow() };
+            let front = if front.is_null() || ours(front) || unsafe { IsWindowVisible(front) } == 0 {
+                self.game.unwrap_or(std::ptr::null_mut())
+            } else {
+                front
+            };
+            if front.is_null() {
+                log("no window of the game's to put Home's window behind: it stays where it is");
+            } else {
+                self.put_behind(front);
+            }
             self.state = State::Revealing;
             Step::LaunchScreenGoes
+        }
+
+        /// Home's window directly behind `front` in the z-order, shown and not activated: whatever does not cover
+        /// round `front`, and whatever is left when it goes, is Home's window, which shows the game's backdrop
+        /// meanwhile. Behind every topmost window instead, when `front` is one: a window put after a topmost one is
+        /// made topmost itself, and Home's must never be.
+        fn put_behind(&mut self, front: HWND) {
+            unsafe {
+                let topmost = GetWindowLongPtrW(front, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST != 0;
+                let after = if topmost { HWND_TOP } else { front };
+                let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+                SetWindowPos(self.home, after, 0, 0, 0, 0, flags);
+                let which = if topmost { "the topmost windows, below " } else { "" };
+                log(&format!("Home's window behind {which}{} as the game's backdrop", crate::describe(front)));
+            }
+            self.behind = front;
+        }
+
+        /// A window of the game's that came since Home's window was put behind the last: after a hand-off to another
+        /// process, or a window the game made anew. Home's window goes behind it, and it is given the foreground if
+        /// Home's window has it, as it has when Windows gave it on the last window's going.
+        fn keep_behind(&mut self, largest: Option<HWND>) {
+            let Some(window) = largest else { return };
+            if self.home_in_front || window == self.behind {
+                return;
+            }
+            self.put_behind(window);
+            if !self.guide && unsafe { GetForegroundWindow() } == self.home {
+                let given = unsafe { SetForegroundWindow(window) } != 0;
+                log(&format!("the game's new window given the foreground: {given}"));
+            }
         }
 
         /// The Launch screen has faded away, or there was none to fade.
@@ -413,6 +480,7 @@ mod win {
         /// Home's window in front of the running game, which runs on behind it: Home or a page was chosen in the
         /// Guide. With `foreground` it takes the foreground too; without, the Overlay is about to hand it over.
         pub fn show_home(&mut self, foreground: bool) {
+            self.home_in_front = true;
             unsafe {
                 if foreground {
                     restore(self.home);
@@ -424,15 +492,16 @@ mod win {
             log("Home in front of the game");
         }
 
-        /// The game in front again and Home's window hidden behind it, as while it was played. With `foreground`
-        /// the game's window is given the foreground, which is Home's to give; without, the Overlay has just
-        /// handed it over. False when the game has no window to go back to: nothing is done.
+        /// The game in front again and Home's window directly behind it as its backdrop, as while it was played.
+        /// With `foreground` the game's window is given the foreground, which is Home's to give; without, the
+        /// Overlay has just handed it over. False when the game has no window to go back to: nothing is done.
         pub fn show_game(&mut self, foreground: bool) -> bool {
             let game = self.game_window();
             if game.is_null() {
                 log("the game has no window to go back to");
                 return false;
             }
+            self.home_in_front = false;
             unsafe {
                 if foreground {
                     if IsIconic(game) != 0 {
@@ -440,11 +509,29 @@ mod win {
                     }
                     SetForegroundWindow(game);
                 }
-                ShowWindow(self.home, SW_HIDE);
             }
-            log("back to the game, Home hidden");
+            self.put_behind(game);
+            log("back to the game, Home behind it");
             true
         }
+
+        /// Whether the game is what the user is playing: the Launch screen has gone, Home was not chosen over it, and
+        /// its window is up. Home's window getting the foreground then is the user choosing the Dashboard (Alt+Tab),
+        /// and not Windows handing it on as the game's window went.
+        pub fn game_in_front(&self) -> bool {
+            let game = self.game_window();
+            self.state == State::Running
+                && !self.home_in_front
+                && !game.is_null()
+                && unsafe { IsWindowVisible(game) } != 0
+        }
+    }
+
+    /// Whether `hwnd` is a window of the Dashboard's own: Home's, the Overlay, the Toast strip.
+    fn ours(hwnd: HWND) -> bool {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        pid == std::process::id()
     }
 
     /// How long a window holds the foreground before it needs the user: `DASHBOARD_NEEDS_USER_MS`, or 5 s.

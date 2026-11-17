@@ -811,7 +811,7 @@ From the Bundle's C# (`C/ExtensionCore.cs` 500-746, 2040-2154, 2376-2493, 2576-2
 **What the shell does** (`crates/shell/src/launch.rs`, `overlay.rs`; `crates/app/src/window.rs`):
 
 - Who gets the foreground as the Guide lets go of it is the Overlay's to carry out, once the button that closed the Guide is up (3.5): `Overlay::give_back_to` names Home's window (Home chosen, or a game that ended under the Guide) or the game's (the Running entry) in place of the window recorded as the Guide opened. Thawed first, then handed the foreground, as ever.
-- Home's window, hidden behind a running game since the Launch screen went, is shown again in front of it for Home (`Launch::show_home`) and hidden again when the game is gone back to (`Launch::show_game`), so behind a game it never draws.
+- Home's window, behind a running game as its backdrop since the Launch screen went (docs/spec/launch-screen.md), is brought in front of it for Home (`Launch::show_home`) and put directly behind it again when the game is gone back to (`Launch::show_game`); behind a game it draws the backdrop once and nothing more.
 - A game ending under the open Guide brings Home's window back **without** the foreground (`launch: the game has ended, Home back behind the Guide`): the Guide keeps it, as the Bundle's test `A_game_exiting_under_the_open_Guide_leaves_the_foreground_with_the_Guide` has it.
 - The library is read again before the core is told a game ended, so the game that starts next is named by its place in the library as it then is.
 

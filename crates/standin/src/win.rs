@@ -3,6 +3,8 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -15,6 +17,7 @@ use windows_sys::Win32::System::Registry::{
     RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, RRF_RT_REG_SZ,
 };
 use windows_sys::Win32::System::SystemInformation::GetTickCount64;
+use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{install_dir, note, GameArgs};
@@ -25,6 +28,11 @@ const SPLASH_OVER: usize = 1;
 const TIME_UP: usize = 2;
 /// The timer the game's pulse beats to.
 const PULSE: usize = 3;
+/// The timers that end the game as a crash does, and that hand it off to another process.
+const CRASH: usize = 4;
+const HAND_OFF: usize = 5;
+/// The exit code of a crash: an access violation.
+const CRASHED: u32 = 0xC000_0005;
 /// How often the pulse beats: the square in the game's window changes colour each time.
 const PULSE_MS: u32 = 250;
 /// A beat this long after the one before means the game stood still meanwhile: it was frozen.
@@ -46,6 +54,8 @@ static GAME: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 /// How many times the pulse has beaten, and when it last did, in ms since Windows started.
 static BEATS: AtomicU64 = AtomicU64::new(0);
 static LAST_BEAT: AtomicU64 = AtomicU64::new(0);
+/// The arguments of the game it hands off to (--hand-off-ms).
+static HANDED_OFF: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Where the pulse is in a window this size: on a 1920x1080 screen the square x 1700..1820, y 900..1020, clear of
 /// everything the Guide draws over the game but its dim.
@@ -76,9 +86,12 @@ pub fn game(args: &GameArgs) -> i32 {
             return 1;
         }
         let (width, height) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
-        let open = |title: &str, x: i32, y: i32, w: i32, h: i32| {
+        if args.start_ms > 0 {
+            note(&format!("game: starting, no window for {} ms", args.start_ms));
+            std::thread::sleep(Duration::from_millis(args.start_ms.into()));
+        }
+        let open_styled = |title: &str, style: u32, x: i32, y: i32, w: i32, h: i32| {
             let title = wide(title);
-            let style = WS_POPUP | WS_VISIBLE;
             CreateWindowExW(
                 0,
                 class.as_ptr(),
@@ -97,7 +110,8 @@ pub fn game(args: &GameArgs) -> i32 {
 
         if args.splash_ms > 0 {
             let title = format!("{} launcher", args.title);
-            let splash = open(&title, (width - 400) / 2, (height - 200) / 2, 400, 200);
+            let (x, y) = ((width - 400) / 2, (height - 200) / 2);
+            let splash = open_styled(&title, WS_POPUP | WS_VISIBLE, x, y, 400, 200);
             if splash.is_null() {
                 note("game: could not open its launcher's window");
                 return 1;
@@ -109,9 +123,21 @@ pub fn game(args: &GameArgs) -> i32 {
                 note("game: closed at its launcher");
                 return 0;
             }
+            if args.gap_ms > 0 {
+                note(&format!("game: launcher gone, no window for {} ms", args.gap_ms));
+                std::thread::sleep(Duration::from_millis(args.gap_ms.into()));
+            }
         }
 
-        let window = open(&args.title, 0, 0, width, height);
+        // Borderless over the whole screen, or with --windowed in a frame in the screen's middle.
+        let (style, x, y, w, h) = match args.windowed {
+            0 => (WS_POPUP | WS_VISIBLE, 0, 0, width, height),
+            percent => {
+                let (w, h) = (width * percent as i32 / 100, height * percent as i32 / 100);
+                (WS_OVERLAPPEDWINDOW | WS_VISIBLE, (width - w) / 2, (height - h) / 2, w, h)
+            }
+        };
+        let window = open_styled(&args.title, style, x, y, w, h);
         if window.is_null() {
             note("game: could not open its window");
             return 1;
@@ -121,8 +147,16 @@ pub fn game(args: &GameArgs) -> i32 {
         GAME.store(window, Ordering::Relaxed);
         LAST_BEAT.store(GetTickCount64(), Ordering::Relaxed);
         SetTimer(window, PULSE, PULSE_MS, None);
+        if args.crash_ms > 0 {
+            SetTimer(window, CRASH, args.crash_ms, None);
+        }
+        if args.hand_off_ms > 0 {
+            HANDED_OFF.get_or_init(|| args.handed_off());
+            SetTimer(window, HAND_OFF, args.hand_off_ms, None);
+        }
         SetForegroundWindow(window);
-        note(&format!("game: \"{}\" up, {width}x{height}", args.title));
+        let framed = if args.windowed > 0 { ", in a frame" } else { "" };
+        note(&format!("game: \"{}\" up, {w}x{h} at ({x}, {y}){framed}", args.title));
         pump();
         note(&format!("game: \"{}\" closed", args.title));
     }
@@ -153,6 +187,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
             let mut client: RECT = std::mem::zeroed();
             GetClientRect(hwnd, &mut client);
             InvalidateRect(hwnd, &pulse_rect(&client), 0);
+        }
+        // A crash: the process ends where it is, its window with it, nothing asked and nothing closed.
+        WM_TIMER if wparam == CRASH => {
+            note(&format!("game: crashing, exit code {CRASHED:#X}"));
+            TerminateProcess(GetCurrentProcess(), CRASHED);
+        }
+        // A hand-off: the game again as another process, and this one gone at once, its window with it.
+        WM_TIMER if wparam == HAND_OFF => {
+            KillTimer(hwnd, HAND_OFF);
+            let args = HANDED_OFF.get().cloned().unwrap_or_default();
+            let started = std::env::current_exe().and_then(|exe| {
+                let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+                std::process::Command::new(exe).args(&args).current_dir(dir).spawn()
+            });
+            match started {
+                Ok(child) => note(&format!("game: handed off to pid {}, exiting", child.id())),
+                Err(e) => note(&format!("game: could not hand off ({e}), exiting")),
+            }
+            std::process::exit(0);
         }
         // A game that has hung: asked to close, it stays, until it is ended or its time is up.
         WM_CLOSE if IGNORE_CLOSE.load(Ordering::Relaxed) => note("game: asked to close, and staying"),
