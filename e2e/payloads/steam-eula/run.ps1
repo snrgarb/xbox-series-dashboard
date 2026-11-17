@@ -194,7 +194,7 @@ try {
     In-Front
     Start-Sleep -Milliseconds 4500
     Save-Screen '01-agreement'
-    Scroll-On RB "Agreement: Decline of $agreedName; agreement 1 of 2" 2 | Out-Null
+    Scroll-On RightShoulder "Agreement: Decline of $agreedName; agreement 1 of 2" 2 | Out-Null
     Save-Screen '02-agreement-scrolled'
     Press Left "Agreement: Accept of $agreedName; agreement 1 of 2, page \d+ of \d+" | Out-Null
     Press Right "Agreement: Decline of $agreedName; agreement 1 of 2, page \d+ of \d+" | Out-Null
