@@ -250,7 +250,7 @@ impl ArtPicker {
     }
 
     /// To another page of the grid, focus on the same cell where the page has it, else its last.
-    fn to_page(&mut self, page: usize, cell: Option<usize>) -> bool {
+    fn go_to_page(&mut self, page: usize, cell: Option<usize>) -> bool {
         let state = self.current_mut();
         if page == state.page || page >= state.pager.pages() {
             return false;
@@ -445,22 +445,22 @@ impl Page for ArtPicker {
                 }
             }
             (Button::LeftTrigger, _) if page > 0 => {
-                self.to_page(page - 1, None);
+                self.go_to_page(page - 1, None);
             }
             (Button::RightTrigger, _) if page + 1 < pages => {
-                self.to_page(page + 1, None);
+                self.go_to_page(page + 1, None);
             }
             (Button::Left, Focus::Cell(at)) if at % columns > 0 => self.current_mut().focus = Focus::Cell(at - 1),
             // Past the grid's left edge: the page before, on the same row's last cell.
             (Button::Left, Focus::Cell(at)) if page > 0 => {
-                self.to_page(page - 1, Some(at - at % columns + columns - 1));
+                self.go_to_page(page - 1, Some(at - at % columns + columns - 1));
             }
             (Button::Right, Focus::Cell(at)) if at % columns + 1 < columns && at + 1 < cells => {
                 self.current_mut().focus = Focus::Cell(at + 1);
             }
             // Past the grid's right edge, or its last cell: the next page, on the same row's first cell.
             (Button::Right, Focus::Cell(at)) if page + 1 < pages => {
-                self.to_page(page + 1, Some(at - at % columns));
+                self.go_to_page(page + 1, Some(at - at % columns));
             }
             (Button::Up, Focus::Cell(at)) if at >= columns => self.current_mut().focus = Focus::Cell(at - columns),
             (Button::Up, Focus::Retry) => self.current_mut().focus = Focus::Cell(cells.saturating_sub(1)),

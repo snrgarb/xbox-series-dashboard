@@ -36,7 +36,7 @@ fn pictures() -> &'static PathBuf {
         std::fs::create_dir_all(&dir).unwrap();
         let banded = |w: u32, h: u32, rgb: [u8; 3]| {
             image::RgbImage::from_fn(w, h, |_, y| {
-                let dim = if (y * 8 / h) % 2 == 0 { 1 } else { 2 };
+                let dim = if (y * 8 / h).is_multiple_of(2) { 1 } else { 2 };
                 image::Rgb(rgb.map(|c| c / dim))
             })
         };
