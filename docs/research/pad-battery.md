@@ -18,8 +18,8 @@ The Bundle found (its `BluetoothBattery.cs`) that for an Xbox pad on Bluetooth L
 |---|---|---|---|---|---|
 | Xbox Wireless Controller over **Bluetooth** (Series, and One with the newer firmware) | wireless; report a placeholder | no battery | **the percentage** | the cell at that charge, and the figure | the Bundle's finding; Microsoft for the LE property's use in Settings is not documented |
 | Xbox pad on a **USB cable** | wired | wired | — | the controller glyph | Microsoft (`IsWireless`, `BATTERY_TYPE_WIRED`) |
-| Xbox pad on the **Xbox Wireless Adapter** (GIP over Microsoft's own radio) | wireless; a level (100/70/40/10) | a level | — | the cell at that level, no figure | Microsoft documents the levels for wireless pads; **not tried**. The user expected the plain glyph here (#191): if the adapter answers with a level, it shows a level |
-| Xbox 360 wireless pad on its receiver (XUSB) | wireless; a level | a level | — | the cell at that level | as above |
+| Xbox pad on the **Xbox Wireless Adapter** (GIP over Microsoft's own radio) | wireless; a level (100/70/40/10) | a level | — | the glyph (the level is logged) | Microsoft documents the levels for wireless pads; **not tried**. The user's call (#191): a level only is not shown |
+| Xbox 360 wireless pad on its receiver (XUSB) | wireless; a level | a level | — | the glyph (the level is logged) | as above |
 | A **virtual** pad (ViGEm's Xbox 360 pad, a streaming host's) | XUSB, wired | wired | — | the glyph | the test VM's pad; ViGEm reports a wired pad |
 | An 8BitDo or other pad on its **2.4 GHz dongle** in XInput mode | XUSB, as a wired Xbox 360 pad | wired | — | the glyph | how such dongles present themselves; not tried |
 | A pad with real battery reporting (design capacity given) | wireless; a true percentage | — | — | the cell and the figure | Microsoft (`DesignCapacityInMilliwattHours` non-null) |
@@ -33,6 +33,8 @@ The Bundle found (its `BluetoothBattery.cs`) that for an Xbox pad on Bluetooth L
 2. Wireless: the Bluetooth LE percentage of a connected Bluetooth LE HID device with its vendor and product, if Windows keeps one: `Percent`.
 3. Else its battery report: with a design capacity, `Percent`; without, the band its percentage falls in, `Level` (0 empty .. 3 full); a report that says no battery, nothing.
 4. Else, and when Windows.Gaming.Input has no pad yet (it finds the pads already connected a moment after it is first asked, and says so with `GamepadAdded`, which reads again), XInput's word for the first connected slot: `Wired` or `Level`.
+
+**Only `Percent` draws a battery** (the cell, and the figure while Show battery percentages is on). `Level`, `Wired` and nothing known all show the controller glyph: the user's call on #191 for pads that give only a rough level. A level is still read and logged (`gamepad: battery level 1 of 3`).
 
 It is read on a thread of its own, never the pad's (which reads the buttons every 4 ms) nor the window's: as the first pad connects, when Windows.Gaming.Input finds a pad, and once a minute while a pad stays (the Bundle's minute). XInput's own battery call costs nothing, but the SetupAPI walk and Windows.Gaming.Input are not free, and a minute is what the Bundle asks. The thread tells the window what it read as a pad connects, and after that only when the answer changes.
 

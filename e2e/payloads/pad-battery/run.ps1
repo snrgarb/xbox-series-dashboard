@@ -6,7 +6,7 @@
 #      battery` line says what it was given, and Home's top bar and the Guide's Status area are pictured.
 #
 # Judged by the Dashboard's `gamepad:` lines. The pictures are for a person to look at: the cell with "85%" beside it;
-# the cell a little filled and no figure; the controller glyph.
+# for low and for none the controller glyph (a level only is logged and not shown, #191).
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
@@ -40,6 +40,27 @@ function Show-Battery([string[]] $Arguments, [string] $Battery, [string] $Name) 
     Remove-Item (Join-Path $env:E2E_OUT 'dashboard.log') -ErrorAction SilentlyContinue
 }
 
+# The Guide's battery line in a saved picture: each pixel's brightness, row by row.
+function Get-StatusLine([string] $Name) {
+    $bmp = New-Object System.Drawing.Bitmap (Join-Path $env:E2E_OUT "$Name.png")
+    try {
+        $sx = $bmp.Width / 1920.0; $sy = $bmp.Height / 1080.0
+        foreach ($y in 84..114) {
+            foreach ($x in 1560..1775) {
+                $c = $bmp.GetPixel([int] ($x * $sx), [int] ($y * $sy))
+                [int] (($c.R + $c.G + $c.B) / 3)
+            }
+        }
+    } finally { $bmp.Dispose() }
+}
+
+# How many pixels of two battery lines differ by more than a little.
+function Compare-StatusLine($A, $B) {
+    $n = 0
+    for ($i = 0; $i -lt [Math]::Min($A.Count, $B.Count); $i++) { if ([Math]::Abs($A[$i] - $B[$i]) -gt 48) { $n++ } }
+    $n
+}
+
 try {
     Close-WindowsPrompts
     Connect-Pad
@@ -51,6 +72,15 @@ try {
     Show-Battery @('--fake-pad-battery', '85') '85%' '02-percent'
     Show-Battery @('--fake-pad-battery', 'low') 'level 1 of 3' '03-level'
     Show-Battery @('--fake-pad-battery', 'none') 'not known' '04-none'
+
+    # A level only is not shown (#191): the Guide's battery line is the same with `low` as with `none`, the glyph,
+    # and not the same with 85%, the cell and its figure. The line is x 1560..1775, y 84..114 of the 1920 picture.
+    $none = Get-StatusLine '04-none-guide'
+    $level = Compare-StatusLine $none (Get-StatusLine '03-level-guide')
+    $percent = Compare-StatusLine $none (Get-StatusLine '02-percent-guide')
+    Say "the Guide's battery line against none's: low differs in $level pixels, 85% in $percent"
+    if ($level -gt 40) { Fail "a level only was drawn: $level pixels of the battery line differ from none's" }
+    if ($percent -le 40) { Fail "85% looks like none: only $percent pixels of the battery line differ" }
 
     if ($failures.Count -eq 0) { $result = 'PASS' }
 } catch {

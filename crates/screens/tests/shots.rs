@@ -2881,7 +2881,8 @@ impl Stage {
     }
 }
 
-// --- The pad's battery (#191, docs/research/pad-battery.md): a percentage, a level only, nothing known. ---
+// --- The pad's battery (#191, docs/research/pad-battery.md): a percentage, a level only, nothing known. Only a
+// percentage draws a battery. ---
 
 /// Home with a pad connected that says this of its battery, and the Guide open over it.
 fn pad_battery(battery: Option<ui::Battery>, home: &str, guide: &str) {
@@ -2898,7 +2899,7 @@ fn pad_battery_with_a_percentage() {
     pad_battery(Some(ui::Battery::Percent(85)), "pad-battery-percent-home", "pad-battery-percent-guide");
 }
 
-/// XInput's or Windows.Gaming.Input's word alone: the cell at the level, low here (40%), and no figure.
+/// XInput's or Windows.Gaming.Input's word alone, low here: not shown, the controller's glyph (the user's call, #191).
 #[test]
 fn pad_battery_with_a_level_only() {
     pad_battery(Some(ui::Battery::Level(1)), "pad-battery-level-home", "pad-battery-level-guide");

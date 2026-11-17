@@ -113,11 +113,12 @@ pub(crate) fn call_mark(ui: &mut Ui, right: f32, middle: f32, mark: CallMark) ->
     area.x
 }
 
-/// The pad's battery ending at `right`: its charge as a cell on its side, with the figure beside it where the pad
-/// says a percentage (and Settings wants figures); at its level and with no figure where it says only a level; and
-/// the pad's glyph for one on a cable or one that says nothing (docs/spec/home.md 2.4). Returns where it starts.
+/// The pad's battery ending at `right`: where the pad says a percentage, its charge as a cell on its side, with the
+/// figure beside it while Settings wants figures; for any other pad (on a cable, saying only a rough level, or
+/// nothing) the pad's glyph: a level is not shown, the user's call on #191 (docs/spec/home.md 2.4). Returns where it
+/// starts.
 pub(crate) fn pad_battery(ui: &mut Ui, right: f32, middle: f32, status: &Status) -> f32 {
-    let Some((battery, fill)) = status.pad_battery.and_then(|battery| Some((battery, battery.fill()?))) else {
+    let Some(Battery::Percent(percent)) = status.pad_battery else {
         ui.icon(right - 12.0, middle, glyph::GAMEPAD, 24.0, Color::WHITE);
         return right - 24.0;
     };
@@ -126,8 +127,8 @@ pub(crate) fn pad_battery(ui: &mut Ui, right: f32, middle: f32, status: &Status)
     let cell = Rect::new(right - 33.0, middle - 8.0, 30.0, 16.0);
     ui.ring(cell, Color::WHITE, 3.0, 2.0);
     let inside = cell.grow(-4.0);
+    let fill = percent.min(100) as f32 / 100.0;
     ui.fill(Rect::new(inside.x, inside.y, inside.w * fill, inside.h), Color::WHITE, 1.0);
-    let Battery::Percent(percent) = battery else { return cell.x };
     if !status.show_percent {
         return cell.x;
     }
