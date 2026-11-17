@@ -9,7 +9,7 @@
 //! as the grid page on screen needs and never past the last the total allows, and makes the grid's pages from what
 //! it has. A candidate the service gives twice (its list moved between two requests) is shown once.
 use std::collections::HashSet;
-use std::ops::RangeInclusive;
+use std::ops::Range;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -389,14 +389,14 @@ impl Pager {
 }
 
 /// The service pages a grid page's candidates are on, before any repeat: what [`Pager`] asks for, in order, to show
-/// it. Empty (`1..=0`) when the page holds fixed entries alone.
-pub fn service_pages(grid_page: usize, per_page: usize, fixed: usize, limit: usize) -> RangeInclusive<u32> {
+/// it. Empty when the page holds fixed entries alone.
+pub fn service_pages(grid_page: usize, per_page: usize, fixed: usize, limit: usize) -> Range<u32> {
     let first = (grid_page * per_page).saturating_sub(fixed);
     let last = ((grid_page + 1) * per_page).saturating_sub(fixed);
     if last == 0 {
-        return 1..=0;
+        return 0..0;
     }
-    (first / limit) as u32..=((last - 1) / limit) as u32
+    (first / limit) as u32..((last - 1) / limit) as u32 + 1
 }
 
 #[cfg(test)]
@@ -480,9 +480,9 @@ mod tests {
         let (asked, shown) = walk(&list, 5, 2, 14);
         assert_eq!(asked, (0..8).collect::<Vec<u32>>());
         assert_eq!(flat(&shown), list);
-        assert_eq!(service_pages(0, 14, 2, 5), 0..=2);
-        assert_eq!(service_pages(1, 14, 2, 5), 2..=5);
-        assert_eq!(service_pages(0, 2, 2, 5), 1..=0, "fixed entries alone");
+        assert_eq!(service_pages(0, 14, 2, 5), 0..3);
+        assert_eq!(service_pages(1, 14, 2, 5), 2..6);
+        assert_eq!(service_pages(0, 2, 2, 5), 0..0, "fixed entries alone");
     }
 
     #[test]
