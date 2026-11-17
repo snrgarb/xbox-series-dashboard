@@ -10,8 +10,6 @@ mod tile;
 mod top_bar;
 mod wide;
 
-use std::time::{Duration, Instant};
-
 use model::Library;
 use ui::{Button, Ease, Ui};
 
@@ -36,9 +34,6 @@ pub const RECENT_GAMES: usize = recent::GAMES;
 const SLIDE_SECONDS: f32 = 0.3;
 /// How far from the screen's top the Group with focus rests.
 const GROUP_REST: f32 = 64.0;
-/// The double tap's time: a second A on the same game's tile this soon after the first plays the game; with none,
-/// the game's Game hub opens when the time is up (docs/spec/game-hub.md, 9.1).
-pub const DOUBLE_TAP: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Focus {
@@ -56,35 +51,12 @@ pub enum Focus {
 /// What a press on Home asks the Dashboard to do.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HomeAction {
-    /// A on a game's tile: nothing yet. Its Game hub opens when the double tap's time is up ([`Home::tap`]).
-    Chosen,
-    /// The second A of a double tap: launch the game at this place in the library.
-    Launch(usize),
     /// Open the Guide: the profile was chosen, or the Achievements tile.
     OpenGuide,
     /// Open this page over Home.
     Open(Open),
     /// The Discord tile was chosen: the Guide's Discord tab while there is one, else Settings on Discord.
     Discord,
-}
-
-/// An A on a game's tile that may yet be the first of a double tap.
-#[derive(Debug, Clone)]
-struct Chosen {
-    at: Instant,
-    tile: Focus,
-    game: game_hub::Entry,
-}
-
-/// What has become of the last A on a game's tile.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Tap {
-    /// There is none to wait for.
-    None,
-    /// A second A may still come, for this long.
-    Waiting(Duration),
-    /// None came: the game's Game hub opens.
-    Hub(game_hub::Entry),
 }
 
 /// Where the page rests: how far it has risen (the Recent row, the wide tiles and the Groups together), and how
@@ -122,8 +94,6 @@ pub struct Home {
     left_recent: Option<usize>,
     /// The wide tile that last had focus, which Up from the first Group goes back to.
     last_wide: usize,
-    /// The last A on a game's tile, while a second may still follow it.
-    chosen: Option<Chosen>,
     /// Settings' Show Play history: whether the Recent row ends with the Play history tile.
     play_history: bool,
     background: Background,
@@ -137,7 +107,6 @@ impl Default for Home {
             last_game: 0,
             left_recent: None,
             last_wide: 0,
-            chosen: None,
             play_history: true,
             background: Background::default(),
         }
@@ -213,11 +182,6 @@ impl Home {
         }
     }
 
-    /// The game whose tile A chose, while the double tap's time is waited out: its hub may open when it is up.
-    pub fn chosen(&self) -> Option<&game_hub::Entry> {
-        self.chosen.as_ref().map(|chosen| &chosen.game)
-    }
-
     /// The game focus is on, by its place in the library.
     pub fn focused_game(&self, library: &Library) -> Option<usize> {
         match self.focus {
@@ -227,42 +191,21 @@ impl Home {
         }
     }
 
-    /// What has become of the last A on a game's tile, at `now`. `has_pad` is whether Home still has the pad:
-    /// under the Guide, a page or a game no hub opens, and the A is forgotten. Moving focus does not forget it: as
-    /// in the Bundle, the hub of the tile that was chosen opens all the same.
-    pub fn tap(&mut self, now: Instant, has_pad: bool) -> Tap {
-        let Some(chosen) = self.chosen.clone() else { return Tap::None };
-        let since = now.saturating_duration_since(chosen.at);
-        if has_pad && since < DOUBLE_TAP {
-            return Tap::Waiting(DOUBLE_TAP - since);
-        }
-        self.chosen = None;
-        if has_pad {
-            Tap::Hub(chosen.game)
-        } else {
-            Tap::None
-        }
-    }
-
-    /// A press of the pad at `now`, which is only to tell a double tap by.
-    pub fn press(&mut self, button: Button, library: &Library, now: Instant) -> Option<HomeAction> {
+    /// A press of the pad.
+    pub fn press(&mut self, button: Button, library: &Library) -> Option<HomeAction> {
         let before = self.focus;
-        let action = self.pressed(button, library, now);
+        let action = self.pressed(button, library);
         if self.focus != before {
             self.background.focus_moved();
         }
         action
     }
 
-    fn pressed(&mut self, button: Button, library: &Library, now: Instant) -> Option<HomeAction> {
+    fn pressed(&mut self, button: Button, library: &Library) -> Option<HomeAction> {
         let row = Row::of(library, self.play_history);
         let groups = groups::of(library);
         self.keep_focus_in(&row, &groups);
         let open = |page: Open| Some(HomeAction::Open(page));
-        // Menu is the Tile menu's, which is then what the tile's A was not waiting for: no hub opens.
-        if button == Button::Menu {
-            self.chosen = None;
-        }
         match (self.focus, button) {
             // Y is Search, wherever focus is.
             (_, Button::Y) => return open(Open::Search),
@@ -288,8 +231,8 @@ impl Home {
                 self.left_recent = Some(i);
                 self.go_wide(wide::nearest(tile_middle(&row, i)));
             }
-            (Focus::Recent(i), Button::A) if i < row.games.len() => return self.choose(&row.games[i], Some(i), now),
-            // The Play history tile, at once: it has no double tap to wait for.
+            (Focus::Recent(i), Button::A) if i < row.games.len() => return open(hub(&row.games[i])),
+            // The Play history tile.
             (Focus::Recent(_), Button::A) => return open(Open::MyGames(my_games::Entry::PlayHistory)),
 
             // Menu on a game's tile is its Tile menu: every game of the Recent row and of the Groups, a hidden
@@ -334,25 +277,12 @@ impl Home {
                     // See all: Full library on this Group's tab.
                     return open(Open::MyGames(my_games::Entry::FullLibrary { filter: groups[group].filter }));
                 };
-                // A hidden game's card (the Hidden Group, where the user shows it) has a hub, but no place to
-                // launch from.
-                return self.choose(game, place(library, game), now);
+                // A hidden game's card (the Hidden Group, where the user shows it) has a hub too.
+                return open(hub(game));
             }
             _ => {}
         }
         None
-    }
-
-    /// A on a game's tile. The first waits: the game's Game hub opens if no second follows within the double tap's
-    /// time (`tap`). A second on the same tile within it plays the game, from its `place` in the library, and no
-    /// hub opens.
-    fn choose(&mut self, game: &model::Game, place: Option<usize>, now: Instant) -> Option<HomeAction> {
-        let first = self.chosen.take();
-        if first.is_some_and(|first| first.tile == self.focus && now.saturating_duration_since(first.at) < DOUBLE_TAP) {
-            return place.map(HomeAction::Launch);
-        }
-        self.chosen = Some(Chosen { at: now, tile: self.focus, game: game_hub::Entry::of(game) });
-        Some(HomeAction::Chosen)
     }
 
     fn go_recent(&mut self, tile: usize, row: &Row) {
@@ -425,6 +355,12 @@ impl Home {
 /// A game's place in the library's games, which a hidden game has none in.
 fn place(library: &Library, game: &model::Game) -> Option<usize> {
     library.games.iter().position(|g| std::ptr::eq(g, game))
+}
+
+/// A on a game's tile: its Game hub, at once. There is no double tap: to play straight away, A again lands on the
+/// hub's Play, or the Tile menu's Play game (docs/spec/game-hub.md 9.1, the user's decision of 2026-11-17).
+fn hub(game: &model::Game) -> Open {
+    Open::GameHub(game_hub::Entry::of(game))
 }
 
 /// The middle, across, of the Recent row's tile `i` while it has focus.

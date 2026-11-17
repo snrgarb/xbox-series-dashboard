@@ -88,7 +88,7 @@ impl Pane for Games {
                 // Nothing is over the first row on Games.
                 Step::Moved | Step::Stopped | Step::Off(_) => {}
             },
-            // At once: the grid has no double tap to wait for.
+            // At once, as on Home.
             (false, Button::A) if once => return open_game_hub(game).map_or(Outcome::Stay, Outcome::Action),
             (false, Button::Menu | Button::X) if once => {
                 return open_tile_menu(game).map_or(Outcome::Stay, Outcome::Action)

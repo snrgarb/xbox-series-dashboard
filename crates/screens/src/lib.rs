@@ -280,8 +280,6 @@ pub struct Dashboard {
     /// The Dashboard's clock: where the time it is told (`advance`, `toasts_presented`) has brought it. Nothing in
     /// the Dashboard reads the system's.
     now: Instant,
-    /// How long from `now` until the double tap's wait is over, if one is waited out (`wait_out`).
-    waiting: Option<Duration>,
     /// Start-up, while it shows (docs/spec/start-up.md): full screen over everything, with the pad and the Guide
     /// button to itself.
     startup: Option<Startup>,
@@ -338,7 +336,6 @@ impl Dashboard {
             now_playing_second: None,
             discord: model::discord::Discord::default(),
             now,
-            waiting: None,
             startup: None,
             idle: idle::Idle::new(now),
             date: None,
@@ -778,10 +775,9 @@ impl Dashboard {
     /// when what `draw_toasts` draws may have changed.
     ///
     /// It is the Dashboard's one clock (docs/ui.md, "The pad's timing"), with `toasts_presented`: a press is at the
-    /// time the two have brought it to. Besides Toasts, what it times is the double tap of A on a game's tile, whose
-    /// Game hub opens once it is over with no second A (docs/spec/game-hub.md, 9.1), and Play history's the same.
-    /// The quit of a game is timed by it too (docs/spec/guide.md, 7.4): "Force quit?" once the game has had
-    /// `QUIT_TIMEOUT` to close, and the Guide closing `CLOSE_AFTER_QUIT` after a game quit from it has stopped.
+    /// time the two have brought it to. Besides Toasts, the quit of a game is timed by it (docs/spec/guide.md, 7.4):
+    /// "Force quit?" once the game has had `QUIT_TIMEOUT` to close, and the Guide closing `CLOSE_AFTER_QUIT` after a
+    /// game quit from it has stopped.
     /// Whether anything came of that is `take_timed`'s to say.
     pub fn advance(&mut self, seconds: f32) -> bool {
         let before = (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some());
@@ -797,14 +793,13 @@ impl Dashboard {
         before != (self.toasts.shown(), self.toasts.showing().is_some(), self.toasts.on_screen().is_some())
     }
 
-    /// The time the double tap and the quit of a game go by.
+    /// The time the quit of a game, Start-up and the Idle screen go by.
     fn pass(&mut self, seconds: f32) {
         // To the microsecond: steps a test adds up land where it says, not a hair short.
         self.now += Duration::from_micros((f64::from(seconds) * 1e6).round().max(0.0) as u64);
         if self.startup.as_mut().is_some_and(|startup| startup.advance(seconds)) {
             self.end_startup();
         }
-        self.timed |= self.wait_out();
         self.timed |= self.idle_tick();
         // The Now Playing card's time turned a second: it is drawn again.
         let second = self.now_playing_second();
@@ -832,7 +827,7 @@ impl Dashboard {
     }
 
     /// Whether the time told since this was last asked changed what is shown: "Force quit?" came up, the Guide
-    /// closed after a quit, or a Game hub opened at the end of the double tap's wait.
+    /// closed after a quit.
     pub fn take_timed(&mut self) -> bool {
         std::mem::take(&mut self.timed)
     }
@@ -840,14 +835,13 @@ impl Dashboard {
     /// How soon `advance` has something to do, in seconds: None when nothing is being timed.
     pub fn timer(&self) -> Option<f32> {
         let quit = self.quit.filter(|quit| !quit.asked).map(|quit| quit.left);
-        let tap = self.waiting.map(|left| left.as_secs_f32());
         // The Now Playing card's time, while the Audio Flyout shows a track playing.
         let second = self.audio_shown().then(|| self.now_playing.next_second(self.now)).flatten();
         let second = second.map(|left| left.as_secs_f32());
         // Signing you in's three seconds.
         let signing_in = self.startup.as_ref().and_then(Startup::timer);
         let unlocks = self.unlocks.timer();
-        [quit, self.close_in, tap, second, signing_in, unlocks]
+        [quit, self.close_in, second, signing_in, unlocks]
             .into_iter()
             .flatten()
             .reduce(f32::min)
@@ -860,50 +854,17 @@ impl Dashboard {
         self.idle.due(self.now).map(|left| left.as_secs_f32())
     }
 
-    /// The double tap's wait, at `now`: the Game hub of the game whose tile A chose on Home once its time has
-    /// passed with no second A, or what the top page's own wait brings (Play history's, for the same double tap).
-    /// What its time brings while something else has the pad is dropped. Keeps how long is left in `waiting`, and
-    /// is true when something opened.
-    fn wait_out(&mut self) -> bool {
-        let now = self.now;
-        let free = !self.guide.is_open() && !self.launch.up() && (self.playing.is_none() || self.in_front);
-        self.waiting = None;
-        if !self.pages.is_empty() {
-            // A page over Home has the pad: a tile's A is forgotten.
-            self.home.tap(now, false);
-            let around = pages::Around {
-                library: &self.library,
-                playing: self.playing,
-                options: self.options,
-                now: self.now,
-                now_playing: &self.now_playing,
-                discord: &self.discord,
-            };
-            return match self.pages.tick(around) {
-                pages::Tick::Wait(left) if free => {
-                    self.waiting = Some(left);
-                    false
-                }
-                pages::Tick::Act(action) if free => {
-                    self.page_asks(action);
-                    true
-                }
-                _ => false,
-            };
-        }
-        match self.home.tap(now, free) {
-            home::Tap::None => false,
-            home::Tap::Waiting(left) => {
-                self.waiting = Some(left);
-                false
-            }
-            // A game that has left the library since has no hub to show.
-            home::Tap::Hub(game) if game.in_library(&self.library) => {
-                self.open_page(Open::GameHub(game));
-                true
-            }
-            home::Tap::Hub(_) => false,
-        }
+    /// The top page is told of a press: Search follows a library that changed while its Game hub was over it.
+    fn tick_page(&mut self) {
+        let around = pages::Around {
+            library: &self.library,
+            playing: self.playing,
+            options: self.options,
+            now: self.now,
+            now_playing: &self.now_playing,
+            discord: &self.discord,
+        };
+        self.pages.tick(around);
     }
 
     /// Whether the running game has been asked to quit and has not stopped yet, nor been given up on: it is not
@@ -1042,7 +1003,6 @@ impl Dashboard {
         if self.idle_press(press) {
             return;
         }
-        let now = self.now;
         let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
@@ -1050,7 +1010,7 @@ impl Dashboard {
         let dialog = self.guide.dialog();
         let page_dialog = self.pages.dialog();
         let asked = self.effects.len();
-        let activated = self.steer(press, now);
+        let activated = self.steer(press);
         self.settle_quit();
         let select = activated.then_some(Sound::GuideSelect);
         // A dialog a page shows over itself (Settings' menu of a Group) coming up or going is no move either.
@@ -1089,8 +1049,7 @@ impl Dashboard {
         for (at, sound) in sounds.into_iter().flatten().enumerate() {
             self.effects.insert(asked + at, Effect::Sound(sound));
         }
-        // What the press set waiting: a tile's A, the double tap's time.
-        self.wait_out();
+        self.tick_page();
     }
 
     /// Does what the top page asked for.
@@ -1190,7 +1149,7 @@ impl Dashboard {
     }
 
     /// Gives the press to whatever takes input now. True when it was A and it chose something.
-    fn steer(&mut self, press: Press, now: Instant) -> bool {
+    fn steer(&mut self, press: Press) -> bool {
         if self.guide.is_open() {
             let around = Around {
                 library: &self.library,
@@ -1263,19 +1222,11 @@ impl Dashboard {
             }
             return press.button == Button::A;
         }
-        // A held A is one A, not a double tap.
+        // A held A is one A: it opens nothing again.
         if press.repeat && press.button == Button::A {
             return false;
         }
-        match self.home.press(press.button, &self.library, now) {
-            // The first A of a double tap, or the only one: the tile is chosen, and sounds so.
-            Some(HomeAction::Chosen) => {}
-            // The second: the pair is one choice, which has sounded. With another game running it is asked about
-            // first.
-            Some(HomeAction::Launch(game)) => {
-                self.play(game);
-                return false;
-            }
+        match self.home.press(press.button, &self.library) {
             // The profile opens the Guide where the profile is.
             Some(HomeAction::OpenGuide) if !press.repeat && self.options.use_guide => {
                 self.open_guide_on(Tab::ProfileAndSystem);
@@ -2061,10 +2012,6 @@ impl Dashboard {
         self.home.set_in_front(!self.guide.is_open() && !self.pages.hides_home() && !self.home_gives_way());
         if !self.pages.hides_home() {
             self.home.draw(ui, &self.library, &status);
-            // The hub a tile's A may open in the double tap's time has its pictures read meanwhile (#214).
-            if let Some(game) = self.home.chosen().and_then(|entry| entry.game(&self.library)) {
-                game_hub::prefetch(ui, game);
-            }
         }
         let around = pages::Around {
             library: &self.library,

@@ -1,5 +1,6 @@
-//! The Game hub's opening (#214): its first frame waits on nothing that is not loaded yet, and the pictures it shows
-//! are asked for at the tile's A, while the double tap's time is waited out. The fonts are tools/test-fonts.sh's.
+//! The Game hub's opening (#214): A on a tile puts it up at once, its first frame is the one that answers A and waits
+//! on nothing that is not loaded yet, and the pictures it shows are asked for in that frame. The fonts are
+//! tools/test-fonts.sh's.
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -73,10 +74,9 @@ fn the_hubs_first_frame_waits_on_neither_its_pictures_nor_its_achievements() {
     let target = Offscreen::new(&gpu, size);
     let mut dashboard = Dashboard::new(library(&never("never-cover"), &never("never-hero")));
 
-    // A on the Recent row's first tile, a frame of Home meanwhile, and the double tap's time up: the hub is up.
+    // A on the Recent row's first tile: the hub is up at once, with no time passed.
     press(&mut dashboard, &[Button::Down, Button::A]);
-    frame(&gpu, &mut host, &target, &mut dashboard);
-    dashboard.advance(screens::home::DOUBLE_TAP.as_secs_f32());
+    assert_eq!(dashboard.timer(), None, "nothing is waited out");
     let (_, game) = dashboard.game_hub_up().expect("the hub is up");
     let keys = screens::game_hub::art_keys(game, 1.0);
     assert_eq!(keys.len(), 2, "the hero and the cover: {keys:?}");
@@ -100,7 +100,7 @@ fn the_hubs_first_frame_waits_on_neither_its_pictures_nor_its_achievements() {
 }
 
 #[test]
-fn a_tiles_a_asks_for_the_hubs_pictures_before_the_hub_opens() {
+fn the_frame_that_answers_a_tiles_a_is_the_hubs_and_asks_for_its_pictures() {
     fonts();
     let _drawing = DRAWING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("hub-open");
@@ -122,10 +122,10 @@ fn a_tiles_a_asks_for_the_hubs_pictures_before_the_hub_opens() {
         "Home alone asks for none of the hub's pictures"
     );
 
-    // A, and the frame that answers it: the hub's pictures are on their way while the double tap's time runs.
+    // A, and the frame that answers it: the hub, its pictures on their way.
     press(&mut dashboard, &[Button::A]);
+    assert!(dashboard.game_hub_up().is_some(), "the hub is up in the turn that took A");
     frame(&gpu, &mut host, &target, &mut dashboard);
-    assert!(dashboard.game_hub_up().is_none(), "the hub waits out the double tap");
     for (name, key) in &keys {
         assert!(host.art.timing(key).is_some(), "the {name} was not asked for at A");
     }

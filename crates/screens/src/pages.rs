@@ -11,7 +11,7 @@
 //!
 //! **Adding a page:** a module with a struct that implements [`Page`], a variant of [`Open`] that carries how it is
 //! opened, and that variant's line in [`Open::page`]. Nothing else here changes, and nothing in `Dashboard`.
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use model::{Library, Sound};
 use ui::{Button, Press, Repeat, Snapshot, Ui};
@@ -121,17 +121,6 @@ impl Dialog {
     }
 }
 
-/// What time has brought a page ([`Page::tick`]).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Tick {
-    /// The page waits for nothing.
-    Nothing,
-    /// Something of the page's is this long off: ask again by then.
-    Wait(Duration),
-    /// Its time has come: what the page asks for, as a press would.
-    Act(PageAction),
-}
-
 /// A page over Home. It owns its state and its focus, as every screen does (docs/ui.md): `press` moves them, `draw`
 /// declares the frame from them.
 pub trait Page {
@@ -146,12 +135,9 @@ pub trait Page {
     /// anything but movement. B that the page has no use of its own for answers [`PageAction::Close`].
     fn press(&mut self, press: Press, around: Around) -> Option<PageAction>;
 
-    /// What time has brought the page by `around.now`, for a page that waits on something: Play history's rows
-    /// wait out the double tap's time before a game's hub opens. Asked each time the Dashboard's clock moves on
-    /// (`Dashboard::advance`) and after each press, while the page is on top.
-    fn tick(&mut self, _around: Around) -> Tick {
-        Tick::Nothing
-    }
+    /// Asked after each press while the page is on top, whatever had the press: for a page that follows
+    /// something the press may have changed under it (Search, its rows a library that changed under its hub).
+    fn tick(&mut self, _around: Around) {}
 
     /// Declares the frame. A page that covers the screen fills it first: nothing of Home is drawn under it.
     fn draw(&mut self, ui: &mut Ui, around: Around);
@@ -440,9 +426,11 @@ impl Stack {
         }
     }
 
-    /// What time has brought the top page.
-    pub fn tick(&mut self, around: Around) -> Tick {
-        self.pages.last_mut().map_or(Tick::Nothing, |page| page.tick(around))
+    /// The top page is told a press has been dealt with ([`Page::tick`]).
+    pub fn tick(&mut self, around: Around) {
+        if let Some(page) = self.pages.last_mut() {
+            page.tick(around);
+        }
     }
 
     /// Whether a page fills the screen: Home is not drawn, its top bar neither.

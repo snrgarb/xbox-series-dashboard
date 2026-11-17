@@ -75,7 +75,7 @@ stays above it when it has games.
 | A cover | Left, Right | Along the covers; nothing at their ends |
 | A cover | Down | The first row |
 | A row | Up, Down | Along the rows; Up from the first goes to the cover last focused |
-| A cover or row | A | As on a Home tile: the game's hub, a second A within 300 ms plays it (home.md 6) |
+| A cover or row | A | As on a Home tile: the game's hub, at once; A again is its Play (home.md 11) |
 | A cover or row | Menu, View | The game's Tile menu, its Customise row "Customise games & apps"; on a row, the queued game's menu (section 8) |
 | Anywhere | B | Back to where the page was opened from |
 
@@ -114,7 +114,7 @@ hub's Queue action, B back to the hub on Queue; the Guide button during a Queued
    where is `Cover(i) of <name>`, `Row(i) of <name>` or `Nothing`, and a row adds what it reads: `Installing...
    25.0%`, `Queued 0.0%`; `Installing...` alone with no whole known. The speed is left out: it changes every second. A change of the Queue that moves focus or
    changes the row's share logs a new line without a press.
-5. **A on a game** is Home's tile's, the hub after the double tap's 300 ms; a row's game, not installed, has its hub
+5. **A on a game** is Home's tile's, the hub at once (no double tap, the user's decision of 2026-11-17, departing from the Bundle); a row's game, not installed, has its hub
    on Installing or Queued.
 6. **Not drawn yet:** the Queued Toast, and the Guide button's way in during it (Toasts for the Queue are not
    built). The storage ring under the foot's block is drawn since #179 (storage.md, section 6).
