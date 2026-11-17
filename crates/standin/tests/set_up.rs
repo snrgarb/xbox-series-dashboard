@@ -11,6 +11,12 @@ use helpers::clients::{self, Client, Outcome};
 use model::Source;
 use source_kit::registry::Registry;
 
+/// The test's own folder, under Cargo's `target/tmp` rather than the system's temp folder: each test copies this
+/// crate's program (tens of MB) into it, which filled a small `/tmp` and failed the tests now and then (#158).
+fn scratch() -> tempfile::TempDir {
+    tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap()
+}
+
 fn registry(sandbox: &Path) -> Registry {
     Registry::load(&sandbox.join("registry.json")).unwrap_or(Registry::File(Default::default()))
 }
@@ -42,7 +48,7 @@ fn run(client: &Client, command: &clients::Uninstall, sandbox: &Path, installed:
 
 #[test]
 fn battlenet_is_downloaded_checked_installed_with_its_switches_read_and_removed_by_its_own_uninstaller() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = scratch();
     let (data, sandbox) = (dir.path().join("data"), dir.path().join("sandbox"));
     std::fs::create_dir_all(&sandbox).unwrap();
     let me = std::fs::read(env!("CARGO_BIN_EXE_standin")).unwrap();
@@ -83,7 +89,7 @@ fn battlenet_is_downloaded_checked_installed_with_its_switches_read_and_removed_
 
 #[test]
 fn steams_installer_runs_quiet_and_its_uninstaller_is_told_to_be_quiet_too() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = scratch();
     let (data, sandbox) = (dir.path().join("data"), dir.path().join("sandbox"));
     std::fs::create_dir_all(&sandbox).unwrap();
     let service = helpers::fake::FakeHelpers::start(0, std::fs::read(env!("CARGO_BIN_EXE_standin")).unwrap()).unwrap();
@@ -102,7 +108,7 @@ fn steams_installer_runs_quiet_and_its_uninstaller_is_told_to_be_quiet_too() {
 
 #[test]
 fn an_installer_that_installs_nothing_is_not_taken_for_done_and_without_its_folder_the_stand_in_writes_nothing() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = scratch();
     let (data, sandbox) = (dir.path().join("data"), dir.path().join("sandbox"));
     std::fs::create_dir_all(&sandbox).unwrap();
     let service = helpers::fake::FakeHelpers::start(0, std::fs::read(env!("CARGO_BIN_EXE_standin")).unwrap()).unwrap();
