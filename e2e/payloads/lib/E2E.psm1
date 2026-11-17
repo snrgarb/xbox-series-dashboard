@@ -316,6 +316,10 @@ function Push-Button([string] $Button, [int] $HoldMs = 120) {
     Start-Sleep -Milliseconds $HoldMs
     $script:Pad.SetButtonState($b, $false)
     $held.Stop()
+    # Stays up for a moment: a press of the same button begun within a few milliseconds of this release reaches the
+    # Dashboard as one long hold, its release never read (a hub that opens in one frame showed it: the A that opened
+    # it and the A on Play, 4 ms apart, were one A).
+    Start-Sleep -Milliseconds 30
     # A hold that ran long says so: it may have counted twice.
     $late = if ($held.ElapsedMilliseconds -gt $HoldMs + 200) { ", held $($held.ElapsedMilliseconds) ms" }
     Say "pressed $Button for $HoldMs ms$late"
