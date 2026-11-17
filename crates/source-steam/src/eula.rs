@@ -50,8 +50,28 @@ const DROPPED: [&str; 12] =
     ["script", "style", "head", "noscript", "template", "svg", "nav", "header", "footer", "form", "button", "select"];
 /// Elements that stand on lines of their own.
 const BLOCKS: [&str; 22] = [
-    "p", "div", "section", "article", "main", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "table", "tr",
-    "blockquote", "pre", "hr", "dl", "dt", "dd",
+    "p",
+    "div",
+    "section",
+    "article",
+    "main",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "li",
+    "table",
+    "tr",
+    "blockquote",
+    "pre",
+    "hr",
+    "dl",
+    "dt",
+    "dd",
 ];
 
 /// A page's HTML as the text a reader sees: its words with the spaces between them made single, a paragraph,

@@ -591,8 +591,9 @@ fn agreement(text: Result<String, String>) -> Open {
 
 /// The licence agreement's words: a long one, made up, of clauses and lists.
 fn agreement_text() -> String {
-    let mut text =
-        String::from("EMBER CHOIR END USER LICENCE AGREEMENT\n\nPlease read this agreement carefully before installing.\n");
+    let mut text = String::from(
+        "EMBER CHOIR END USER LICENCE AGREEMENT\n\nPlease read this agreement carefully before installing.\n",
+    );
     for clause in 1..=24 {
         text.push_str(&format!(
             "\n{clause}. The licensor grants you a limited, non-exclusive, non-transferable licence to install and \

@@ -1333,7 +1333,10 @@ mod tests {
         let polled = world.poll(3);
         assert_eq!(polled.changes, [Change::Dropped(moss)]);
         assert_eq!(stop_of(&world, moss), Some(Stop::Cancelled));
-        assert_eq!(tells(&polled.changes, false, &world.follower), [Tell::Stopped(world.follower.stopped(moss).unwrap().clone())]);
+        assert_eq!(
+            tells(&polled.changes, false, &world.follower),
+            [Tell::Stopped(world.follower.stopped(moss).unwrap().clone())]
+        );
 
         // Taken on, then dropped in the store's own client: "Stopped in <store>".
         world.ask("Tern", 4);

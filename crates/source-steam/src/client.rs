@@ -417,14 +417,12 @@ impl Manager {
     pub fn of(value: Option<&serde_json::Value>) -> Manager {
         let number = |key: &str| {
             let field = value.and_then(|value| value.get(key))?;
-            field.as_u64().or_else(|| field.as_f64().filter(|n| *n >= 0.0).map(|n| n as u64)).or_else(|| {
-                field.as_str().and_then(|text| text.trim().parse().ok())
-            })
+            field
+                .as_u64()
+                .or_else(|| field.as_f64().filter(|n| *n >= 0.0).map(|n| n as u64))
+                .or_else(|| field.as_str().and_then(|text| text.trim().parse().ok()))
         };
-        let state = value
-            .and_then(|value| value.get("eInstallState"))
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(0);
+        let state = value.and_then(|value| value.get("eInstallState")).and_then(serde_json::Value::as_i64).unwrap_or(0);
         Manager { state: State(state), needed: number("nDiskSpaceRequired"), free: number("nDiskSpaceAvailable") }
     }
 
@@ -626,7 +624,9 @@ impl Steps<'_> {
     fn cancel(&mut self, stop: Outcome) -> Outcome {
         match self.step(&Wizard::Cancel) {
             Ok(_) => match self.wait("the wizard cancelled", |state| state == State::NONE) {
-                Ok((manager, true)) => log(&format!("{}: the wizard is closed, eInstallState {}", self.what, manager.state)),
+                Ok((manager, true)) => {
+                    log(&format!("{}: the wizard is closed, eInstallState {}", self.what, manager.state))
+                }
                 Ok((manager, false)) => log(&format!(
                     "{}: the wizard was cancelled and eInstallState is still {}: Steam's dialog may be left open",
                     self.what, manager.state
@@ -665,7 +665,8 @@ fn install(wizard: &mut Steps, appid: u32, folder: Option<String>) -> Outcome {
         Ok(value) => value.and_then(|value| value.get("index").and_then(serde_json::Value::as_i64)),
         Err(outcome) => return outcome,
     };
-    let opened = |state: State| state != State::NONE && !state.on_the_way() && (state != was || state == State::SHOW_CONFIG);
+    let opened =
+        |state: State| state != State::NONE && !state.on_the_way() && (state != was || state == State::SHOW_CONFIG);
     let (manager, settled) = match wizard.wait(WIZARD_OPEN, opened) {
         Ok(seen) => seen,
         Err(Outcome::NotTaken(why)) => return wizard.failed(Outcome::NotTaken(why), "Steam's install didn't open"),
@@ -680,7 +681,10 @@ fn install(wizard: &mut Steps, appid: u32, folder: Option<String>) -> Outcome {
                 WIZARD_WAIT.as_millis()
             ));
         }
-        return wizard.failed(Outcome::NotTaken(format!("stuck at {}", manager.state)), "Steam didn't get the game ready to install");
+        return wizard.failed(
+            Outcome::NotTaken(format!("stuck at {}", manager.state)),
+            "Steam didn't get the game ready to install",
+        );
     }
     wizard.put_back();
     match manager.state {
@@ -725,10 +729,13 @@ fn go_on(wizard: &mut Steps, appid: u32, from: State) -> Outcome {
     wizard.put_back();
     match manager.state {
         State::STARTED => Outcome::Took,
-        _ if !settled && from == State::SHOW_EULAS => {
-            wizard.failed(Outcome::NotTaken(format!("still {}", manager.state)), "Steam still asks for its licence agreement")
+        _ if !settled && from == State::SHOW_EULAS => wizard.failed(
+            Outcome::NotTaken(format!("still {}", manager.state)),
+            "Steam still asks for its licence agreement",
+        ),
+        _ if !settled => {
+            wizard.failed(Outcome::NotTaken(format!("still {}", manager.state)), "Steam didn't start the install")
         }
-        _ if !settled => wizard.failed(Outcome::NotTaken(format!("still {}", manager.state)), "Steam didn't start the install"),
         State::SHOW_EULAS => agreements(wizard, appid),
         State::NONE => {
             log(&format!("{}: Steam closed its install wizard by itself", wizard.what));
@@ -754,7 +761,8 @@ fn agreements(wizard: &mut Steps, appid: u32) -> Outcome {
         Err(why) => return wizard.failed(why, "Steam didn't give its licence agreement"),
     };
     if list.is_empty() {
-        return wizard.failed(Outcome::NotTaken("LoadEula gave none".into()), "Steam didn't give its licence agreement");
+        return wizard
+            .failed(Outcome::NotTaken("LoadEula gave none".into()), "Steam didn't give its licence agreement");
     }
     let of = list.len();
     for (at, eula) in list.iter().enumerate() {

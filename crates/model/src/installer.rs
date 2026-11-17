@@ -113,7 +113,9 @@ impl Stop {
                 crate::storage::size(*free)
             ),
             Stop::Declined => "Nothing was installed.".into(),
-            Stop::StoreAsks(what) => format!("{store} asked for {what}, which the Dashboard can't give. Install it in {store}."),
+            Stop::StoreAsks(what) => {
+                format!("{store} asked for {what}, which the Dashboard can't give. Install it in {store}.")
+            }
             Stop::Failed(why) => why.clone(),
             Stop::Cancelled => "What had downloaded was deleted.".into(),
             Stop::InStore => format!("{store} stopped installing it."),

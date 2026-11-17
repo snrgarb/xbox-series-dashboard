@@ -237,7 +237,9 @@ impl ManageQueue {
         self.counts = (rows.len(), covers.len());
         self.row = match self.focus {
             // A stopped one's few words: `Stopped: Not enough space`.
-            Focus::Row(i) if i >= rows.len() => stopped.get(i - rows.len()).map(|s| format!("Stopped: {}", s.headline())),
+            Focus::Row(i) if i >= rows.len() => {
+                stopped.get(i - rows.len()).map(|s| format!("Stopped: {}", s.headline()))
+            }
             Focus::Row(i) => {
                 // Its state, a Workshop download's items, and its share: `Downloading Workshop content 3 of 12
                 // items 25.0%`.
@@ -487,12 +489,26 @@ fn stopped_row(ui: &mut Ui, rect: Rect, game: Option<&Game>, stopped: &model::St
     let (left, right) = (cover.right() + ROW_TEXT.0, rect.right() - ROW_TEXT.1);
     let first = rect.y + ROW_TEXT.2;
     let name = game.map_or("", |game| game.name.as_str());
-    ui.paragraph(Rect::new(left, first, right - TITLE_SHORT - left, LINE), name, &ROW_TITLE, HAlign::Left, VAlign::Top, 1);
+    ui.paragraph(
+        Rect::new(left, first, right - TITLE_SHORT - left, LINE),
+        name,
+        &ROW_TITLE,
+        HAlign::Left,
+        VAlign::Top,
+        1,
+    );
     let second = first + LINE;
     ui.paragraph(Rect::new(left, second, right - left, LINE), &stopped.headline(), &TEXT, HAlign::Left, VAlign::Top, 1);
     let third = second + LINE + AMOUNT_DOWN;
     let detail = TEXT.color(theme::TEXT_DIM);
-    ui.paragraph(Rect::new(left, third, right - left, 2.0 * LINE + 4.0), &stopped.line(), &detail, HAlign::Left, VAlign::Top, 2);
+    ui.paragraph(
+        Rect::new(left, third, right - left, 2.0 * LINE + 4.0),
+        &stopped.line(),
+        &detail,
+        HAlign::Left,
+        VAlign::Top,
+        2,
+    );
 }
 
 /// Nothing queued: a box with a thin light grey outline and no fill, the download arrow over the line saying where

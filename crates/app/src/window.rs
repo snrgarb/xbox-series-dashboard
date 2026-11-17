@@ -1693,7 +1693,11 @@ impl ApplicationHandler for App {
                 self.overlay_stale = true;
             }
             // A game installed or uninstalled has filled or freed its drive: the ring and Storage read again.
-            if update.tell.iter().any(|tell| matches!(tell, library::queue::Tell::Ready(_) | library::queue::Tell::Uninstalled(_))) {
+            if update
+                .tell
+                .iter()
+                .any(|tell| matches!(tell, library::queue::Tell::Ready(_) | library::queue::Tell::Uninstalled(_)))
+            {
                 self.look_at_storage();
             }
             // A game queued, ready to play, uninstalled, or stopped: a Toast each, with its cover (#132, #230).

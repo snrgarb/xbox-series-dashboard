@@ -205,8 +205,11 @@ fn connection(
     let id = message.get("id").cloned().unwrap_or(serde_json::Value::Null);
     let expression = message["params"]["expression"].as_str().unwrap_or_default();
     let mut client = client.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let evaluated =
-        if main { main_window(&mut client, expression, say) } else { evaluate(root, &mut client, port, expression, say) };
+    let evaluated = if main {
+        main_window(&mut client, expression, say)
+    } else {
+        evaluate(root, &mut client, port, expression, say)
+    };
     drop(client);
     let result = match evaluated {
         Ok(value) => serde_json::json!({ "result": { "type": "string", "value": value } }),
@@ -408,7 +411,11 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
         say(&format!(
             "CEF: install wizard: {step:?}: not done: the script does not call {missing}, so Steam's client returns undefined"
         ));
-        return Answer { done: true, steps: step.calls().into_iter().map(|c| gone(c, "undefined")).collect(), value: None };
+        return Answer {
+            done: true,
+            steps: step.calls().into_iter().map(|c| gone(c, "undefined")).collect(),
+            value: None,
+        };
     }
     let set_up = WizardSetUp::read(root);
     let manager = &mut client.manager;
@@ -460,20 +467,17 @@ fn wizard(root: &Path, client: &mut Client, port: u16, step: &Wizard, script: &s
         Wizard::Continue => {
             let open = manager.open.clone();
             let count = |appid: u32| set_up.agreements.get(&appid).copied().unwrap_or(0);
-            let all_accepted = |open: &Opened| {
-                (0..count(open.appid)).all(|n| open.accepted.contains(&agreement_id(open.appid, n)))
-            };
+            let all_accepted =
+                |open: &Opened| (0..count(open.appid)).all(|n| open.accepted.contains(&agreement_id(open.appid, n)));
             match (manager.state, open) {
                 (7, Some(open)) if count(open.appid) > 0 && !all_accepted(&open) => manager.state = 8,
                 (7 | 8, Some(open)) if all_accepted(&open) => {
                     manager.state = 14;
                     let what = Call::Install { appid: open.appid, folder: open.folder.clone() }.what();
                     match fixture::write_progress(root, open.appid, Progress::Queued) {
-                        Ok(()) => say(&format!(
-                            "CEF: asked to {what}: {} queued in {}",
-                            open.appid,
-                            open.library.display()
-                        )),
+                        Ok(()) => {
+                            say(&format!("CEF: asked to {what}: {} queued in {}", open.appid, open.library.display()))
+                        }
                         Err(e) => say(&format!("CEF: asked to {what}: not done: {e}")),
                     }
                 }
@@ -714,9 +718,8 @@ mod tests {
             set_up.write(&root).unwrap();
         };
         set_up(None);
-        let queued = |appid: u32| {
-            installs::under_way(&crate::libraries(&root), &|_| false).iter().any(|found| found.0 == appid)
-        };
+        let queued =
+            |appid: u32| installs::under_way(&crate::libraries(&root), &|_| false).iter().any(|found| found.0 == appid);
         let install = |appid: u32| Call::Install { appid, folder: None };
         // What the install came to, and each agreement the user was shown.
         let ask = |appid: u32, replies: &[model::Reply]| {
@@ -784,7 +787,9 @@ mod tests {
         assert!(has("CEF: install wizard cancelled: eInstallState 8 -> 0"), "{said:#?}");
         assert!(has("CEF: install wizard cancelled: eInstallState 4 -> 0"), "{said:#?}");
         assert!(has("CEF: install wizard cancelled: eInstallState 7 -> 0"), "{said:#?}");
-        assert!(said.iter().any(|line| line.starts_with(&format!("CEF: asked to install {agreed} into Steam's default library: {agreed} queued in "))));
+        assert!(said.iter().any(|line| line.starts_with(&format!(
+            "CEF: asked to install {agreed} into Steam's default library: {agreed} queued in "
+        ))));
     }
 
     /// A script that makes Steam's calls otherwise than the real client takes them does nothing, as Steam's does.
@@ -794,7 +799,13 @@ mod tests {
         assert_eq!(wizard_takes(&step.script(), &step), Ok(()));
         let without = step.script().replace("MarkEulaAccepted(7, ", "MarkEulaAccepted(");
         assert!(wizard_takes(&without, &step).is_err());
-        for step in [Wizard::Look, Wizard::Continue, Wizard::Cancel, Wizard::Agreements { appid: 7 }, Wizard::Prepare { index: Some(1) }] {
+        for step in [
+            Wizard::Look,
+            Wizard::Continue,
+            Wizard::Cancel,
+            Wizard::Agreements { appid: 7 },
+            Wizard::Prepare { index: Some(1) },
+        ] {
             assert_eq!(wizard_takes(&step.script(), &step), Ok(()), "{step:?}");
         }
         let open = Wizard::Open { appid: 7, folder: None };
