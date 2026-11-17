@@ -33,6 +33,9 @@ use crate::startup::Playing;
 use crate::store::Store;
 use crate::{since_start, Args};
 
+/// What an art lookup says, with the number of the run that said it.
+type RunEvent = (u64, ArtEvent);
+
 /// How long the loop sleeps with nothing to draw: the pad's thread, the art cache and the window wake it sooner.
 const IDLE: Duration = Duration::from_millis(250);
 /// How soon the Overlay is tried again when it had no frame to draw on.
@@ -189,7 +192,7 @@ struct App {
     art_started: bool,
     /// What it says as it goes, for the loop to take in, with the number of the run that said it: a run stopped
     /// for another (a new key, a refresh) still says it is done, and that is not the new run's end.
-    art_events: (Sender<(u64, ArtEvent)>, Receiver<(u64, ArtEvent)>),
+    art_events: (Sender<RunEvent>, Receiver<RunEvent>),
     /// The number of the run under way, or of the last one.
     art_run: u64,
     /// The game whose whole list of achievements an Achievements page was last given, and whether it should be
