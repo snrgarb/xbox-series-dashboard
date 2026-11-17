@@ -28,6 +28,7 @@ mod startup;
 mod storage;
 mod store;
 mod store_apps;
+mod turns;
 mod updates;
 mod window;
 

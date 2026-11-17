@@ -23,6 +23,8 @@ pub struct FrameCost {
     /// Art decoded on the decoding threads, uploaded to the GPU: how many pieces, and the time.
     pub uploads: u32,
     pub upload: Duration,
+    /// Art decoded and left for a later frame by the upload budget (`art::UPLOAD_BUDGET`).
+    pub upload_left: usize,
     /// The screens declaring the frame (text measured in it included).
     pub declare: Duration,
     /// Pictures of the screen taken (`Ui::snapshot`): how many, and the time, drawing what they show included.
@@ -44,6 +46,9 @@ impl FrameCost {
         let mut parts = Vec::new();
         if self.uploads > 0 {
             parts.push(format!("{} art uploaded in {:.1} ms", self.uploads, ms(self.upload)));
+        }
+        if self.upload_left > 0 {
+            parts.push(format!("{} art left for the next frame", self.upload_left));
         }
         parts.push(format!("declare {:.1} ms", ms(self.declare)));
         if self.snapshots > 0 {
@@ -99,6 +104,7 @@ impl Host {
         let mut cost = FrameCost::default();
         self.art.pump(gpu, &mut self.renderer);
         (cost.uploads, cost.upload) = self.art.take_uploads();
+        cost.upload_left = self.art.waiting();
         // A place for a picture the frame may ask to have taken (`Ui::snapshot`), ready before it is declared.
         if self.store.snaps.wants_spare() {
             self.store.snaps.set_spare(self.renderer.reserve_texture(&gpu.device, &gpu.queue));

@@ -31,6 +31,7 @@ use winit::window::{Fullscreen, Window, WindowId};
 use crate::sounds::Sounds;
 use crate::startup::Playing;
 use crate::store::Store;
+use crate::turns::{LateFrames, Ledger, Part, Totals};
 use crate::{since_start, Args};
 
 /// What an art lookup says, with the number of the run that said it.
@@ -198,6 +199,12 @@ struct App {
     frames: Option<([u32; 3], Instant)>,
     /// With --log-frames: how long Home's frames and the Overlay's took, since they were last said.
     frame_times: [FrameTimes; 2],
+    /// Where the loop's thread spends its time, part by part (#99); what had been spent when Home's last frame and
+    /// the Overlay's had their buffers; what each one's last draw spent its time on; and the late frames said.
+    ledger: Ledger,
+    frame_spent: [Totals; 2],
+    draw_cost: [ui::FrameCost; 2],
+    late: LateFrames,
     /// A Game hub's opening, timed from A to its first frame and its last moving one, always (#214).
     hub_open: crate::hub_open::HubOpen,
     /// The art lookup under way, if one is (docs/sources.md, "Art"): dropped, it stops.
@@ -270,8 +277,10 @@ impl FrameTimes {
     /// Ignoring 12 ms or less, at 120 Hz a refresh and a half: a gap over it is a refresh missed.
     const LATE: Duration = Duration::from_millis(12);
 
-    fn frame(&mut self, began: Instant, acquired: Instant, done: Instant, was_moving: bool) {
+    /// Counts a frame; the gap before it, if it was late.
+    fn frame(&mut self, began: Instant, acquired: Instant, done: Instant, was_moving: bool) -> Option<Duration> {
         self.frames += 1;
+        let mut late = None;
         let (acquire, draw) = (acquired - began, done - acquired);
         self.acquire += acquire;
         self.acquire_most = self.acquire_most.max(acquire);
@@ -285,7 +294,10 @@ impl FrameTimes {
                 if gap > self.gap_most {
                     (self.gap_most, self.gap_most_wait) = (gap, acquire);
                 }
-                self.late += u32::from(gap > Self::LATE);
+                if gap > Self::LATE {
+                    self.late += 1;
+                    late = Some(gap);
+                }
             }
             None => {
                 self.from_rest += 1;
@@ -293,6 +305,7 @@ impl FrameTimes {
             }
         }
         self.last = Some(acquired);
+        late
     }
 
     /// What they were, and forgets them.
@@ -348,6 +361,12 @@ const LEAVING_AT_MOST: Duration = Duration::from_secs(4);
 
 /// How often the system's sound is read while the Audio Flyout is open.
 const AUDIO_EVERY: Duration = Duration::from_millis(250);
+
+/// What Home's last draw and the Overlay's spent their time on, by the part each one's drawing is billed to: for a
+/// late frame's line.
+fn draws(cost: &[ui::FrameCost; 2]) -> [(&'static str, Part, &ui::FrameCost); 2] {
+    [("home", Part::HomeDraw, &cost[0]), ("overlay", Part::OverlayDraw, &cost[1])]
+}
 
 /// How often --log-frames says what was drawn.
 const FRAMES_EVERY: Duration = Duration::from_secs(5);
@@ -550,6 +569,10 @@ pub fn run(
         minute: minute(),
         frames: args.log_frames.then(|| ([0; 3], Instant::now())),
         frame_times: Default::default(),
+        ledger: Ledger::new(Instant::now()),
+        frame_spent: Default::default(),
+        draw_cost: Default::default(),
+        late: Default::default(),
         art: None,
         art_started: false,
         art_events: mpsc::channel(),
@@ -584,6 +607,7 @@ impl App {
             return;
         }
         self.overlay_tried = true;
+        let was = self.ledger.enter(Part::MakeOverlay);
         self.overlay = Overlay::new(&state.gpu, state.config.format);
         if self.overlay.is_none() {
             self.dashboard.set_overlay(false);
@@ -601,6 +625,7 @@ impl App {
         if self.toast_strip.is_none() && cfg!(windows) {
             eprintln!("toasts: no strip: Toasts show in Home's window, and not over a game");
         }
+        self.ledger.enter(was);
         self.dashboard.toasts_ready();
         for text in self.toasts_to_post.take().unwrap_or_default() {
             self.dashboard.notify(&text);
@@ -750,7 +775,9 @@ impl App {
                 self.overlay_last_frame = Instant::now();
                 self.overlay_moving = false;
             }
+            let was = self.ledger.enter(Part::OverlayShown);
             overlay.set(mode);
+            self.ledger.enter(was);
             self.overlay_stale = true;
         }
         mode?;
@@ -766,7 +793,9 @@ impl App {
             }
         }
         let began = Instant::now();
+        let was = self.ledger.enter_at(Part::OverlayWait, began);
         let Some(frame) = overlay.frame(&state.gpu) else {
+            self.ledger.enter(was);
             if overlay.lost() {
                 // It said why. From here on the Dashboard shows nothing that needs it: the game is let go, and
                 // the Guide at Home is in Home's window.
@@ -779,6 +808,8 @@ impl App {
             return Some(OVERLAY_RETRY);
         };
         let now = Instant::now();
+        self.ledger.enter_at(Part::OverlayDraw, now);
+        let spent = self.frames.is_some().then(|| self.ledger.totals_at(now));
         // Something that was moving has moved on by as long as this frame is after the last, so a fade takes its
         // time by the clock however few frames a slow renderer gives it; from rest, a frame starts what it starts.
         let dt = (now - self.overlay_last_frame).as_secs_f32().min(if self.overlay_moving { 1.0 } else { 0.1 });
@@ -793,9 +824,15 @@ impl App {
         state.host.with_store(&mut self.overlay_store, |host| {
             host.draw(gpu, &view, size, dt, wgpu::Color::TRANSPARENT, |ui| dashboard.draw_overlay(ui))
         });
+        self.draw_cost[1] = state.host.cost;
+        self.ledger.enter(Part::OverlayPresent);
         overlay.present(gpu, frame);
-        if self.frames.is_some() {
-            self.frame_times[1].frame(began, now, Instant::now(), self.overlay_moving);
+        self.ledger.enter(was);
+        if let Some(totals) = spent {
+            let spent = totals.since(&std::mem::replace(&mut self.frame_spent[1], totals));
+            if let Some(gap) = self.frame_times[1].frame(began, now, Instant::now(), self.overlay_moving) {
+                self.late.say("overlay", gap, &spent, draws(&self.draw_cost));
+            }
         }
         self.overlay_next = overlay_due(began, began.elapsed());
         // At once if something is moving, or if that frame was the last of something: the Overlay is then hidden
@@ -1343,8 +1380,10 @@ impl App {
             }
         }
         if found {
+            let was = self.ledger.enter(Part::Library);
             let library = self.store.snapshot();
             self.show(library);
+            self.ledger.enter(was);
         }
         toast
     }
@@ -1429,6 +1468,7 @@ impl App {
     /// A newer snapshot of the library, if there is one, takes the place of the one on screen.
     fn show(&mut self, library: Option<Library>) {
         if let Some(library) = library {
+            let was = self.ledger.enter(Part::Library);
             let groups = self.dashboard.home_groups();
             self.dashboard.set_library(library);
             self.stale = true;
@@ -1437,6 +1477,7 @@ impl App {
                 self.log_groups();
             }
             self.log_profile();
+            self.ledger.enter(was);
         }
     }
 
@@ -1566,8 +1607,8 @@ impl ApplicationHandler for App {
             let hertz = window.current_monitor().and_then(|monitor| monitor.refresh_rate_millihertz());
             let hertz = hertz.map_or("unknown".to_string(), |rate| format!("{:.1} Hz", f64::from(rate) / 1000.0));
             eprintln!(
-                "display: {}x{} at {hertz}, Home presents {:?}",
-                config.width, config.height, config.present_mode
+                "display: {}x{} at {hertz}, Home presents {:?}, at most {} frames queued",
+                config.width, config.height, config.present_mode, config.desired_maximum_frame_latency
             );
         }
 
@@ -1586,12 +1627,15 @@ impl ApplicationHandler for App {
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, _: ()) {
+        self.ledger.back(Part::Events);
         self.backdrop.art_came();
         self.stale = true;
         self.overlay_stale = true;
+        self.ledger.away();
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.ledger.back(Part::Updates);
         // Another program asked the Dashboard to close through a window of the shell's, as taskkill does.
         if shell::close_asked() {
             event_loop.exit();
@@ -1678,8 +1722,12 @@ impl ApplicationHandler for App {
             self.stale = true;
             self.overlay_stale = true;
         }
+        self.ledger.enter(Part::Sources);
         let read = self.store.sources_read();
-        if let Some(library) = self.store.changed() {
+        let was = self.ledger.enter(Part::Library);
+        let changed = self.store.changed();
+        self.ledger.enter(was);
+        if let Some(library) = changed {
             self.show(Some(library));
             // The sources have been read: an install started in a client meanwhile joins the Queue now.
             self.store.tell_queue(library::queue::Ask::Look);
@@ -1795,6 +1843,7 @@ impl ApplicationHandler for App {
             toasts_changed = true;
             self.overlay_stale = true;
         }
+        self.ledger.enter(Part::Launch);
         // The keyboard is the Overlay's while it is the Guide over a game.
         if let Some(overlay) = &mut self.overlay {
             presses.extend(overlay.take_keys().into_iter().map(|(key, repeat)| {
@@ -1850,6 +1899,7 @@ impl ApplicationHandler for App {
             self.stale = true;
             self.overlay_stale = true;
         }
+        self.ledger.enter(Part::Input);
         let pressed = typed || !presses.is_empty() || !events.is_empty();
         let began = Instant::now();
         for event in events {
@@ -1902,8 +1952,10 @@ impl ApplicationHandler for App {
         self.stale |= self.dashboard.focus_line() != focus;
         let said = (self.dashboard.focus_line(), self.dashboard.guide_line());
         let began = Instant::now();
+        self.ledger.enter_at(Part::Effects, began);
         self.carry_out(event_loop);
         self.hub_open.spent(began.elapsed());
+        self.ledger.enter(Part::Follow);
         // A Game hub that this turn put up starts being timed (#214).
         if let Some(state) = &self.state {
             let px = ui::scale_for((state.config.width, state.config.height));
@@ -1948,8 +2000,10 @@ impl ApplicationHandler for App {
         }
         let home_hides = self.hand_back();
         let overlay_wants = self.follow_overlay();
+        self.ledger.enter(Part::Toasts);
         let toasts_want = self.follow_toasts();
         self.say_toasts();
+        self.ledger.enter(Part::Launch);
         if let Some(launch) = &mut self.launch {
             // The game has the foreground again, from the Overlay: Home's window goes behind it as it was.
             if home_hides {
@@ -1968,6 +2022,7 @@ impl ApplicationHandler for App {
             }
         }
 
+        self.ledger.enter(Part::End);
         self.follow_boot_video();
         let Some(state) = &self.state else { return };
         if let Some((frames, since)) = &mut self.frames {
@@ -1979,6 +2034,10 @@ impl ApplicationHandler for App {
                     if times.frames > 0 {
                         eprintln!("frame times: {name}: {}", times.said());
                     }
+                }
+                let unsaid = self.late.take_unsaid();
+                if unsaid > 0 {
+                    eprintln!("frame late: {unsaid} more, not said one by one");
                 }
                 (*frames, *since) = ([0; 3], Instant::now());
             }
@@ -2041,10 +2100,22 @@ impl ApplicationHandler for App {
             discord_wants,
         ];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
-        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + wait));
+        let wake = Instant::now() + wait;
+        event_loop.set_control_flow(ControlFlow::WaitUntil(wake));
+        self.ledger.wake_at(wake);
+        self.ledger.away();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        self.ledger.back(Part::Events);
+        self.window_event_billed(event_loop, event);
+        self.ledger.away();
+    }
+}
+
+impl App {
+    /// A window event, its time billed to `Part::Events`, Home's frames' to their parts.
+    fn window_event_billed(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
         let Some(state) = &mut self.state else { return };
         match event {
             WindowEvent::CloseRequested => {
@@ -2110,6 +2181,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let began = since_start();
                 let turn = Instant::now();
+                self.ledger.enter_at(Part::HomeWait, turn);
                 self.stale = false;
                 self.minute = minute();
                 if let Some((frames, _)) = &mut self.frames {
@@ -2142,6 +2214,8 @@ impl ApplicationHandler for App {
                 // and the movement would jump by it between two frames a refresh apart.
                 let now = Instant::now();
                 let acquired = now;
+                self.ledger.enter_at(Part::HomeDraw, acquired);
+                let spent = self.frames.is_some().then(|| self.ledger.totals_at(acquired));
                 // From rest an animation starts with a tenth of a second at most, however long Home sat still. One
                 // that was moving has moved on by as long as this frame is after the last, as the Overlay's does: a
                 // fade takes its time by the clock however few frames a slow renderer gives it.
@@ -2158,7 +2232,10 @@ impl ApplicationHandler for App {
                 }
                 let dashboard = &mut self.dashboard;
                 state.host.draw(&state.gpu, &view, size, dt, wgpu::Color::BLACK, |ui| dashboard.draw(ui));
+                self.draw_cost[0] = state.host.cost;
+                self.ledger.enter(Part::HomePresent);
                 state.gpu.queue.present(frame);
+                self.ledger.enter(Part::HomeAfter);
                 if let Some(playing) = &mut self.boot_video {
                     playing.after_present();
                 }
@@ -2171,8 +2248,11 @@ impl ApplicationHandler for App {
                         state.window.set_window_level(winit::window::WindowLevel::Normal);
                     }
                 }
-                if self.frames.is_some() {
-                    self.frame_times[0].frame(turn, acquired, Instant::now(), self.moving);
+                if let Some(totals) = spent {
+                    let spent = totals.since(&std::mem::replace(&mut self.frame_spent[0], totals));
+                    if let Some(gap) = self.frame_times[0].frame(turn, acquired, Instant::now(), self.moving) {
+                        self.late.say("home", gap, &spent, draws(&self.draw_cost));
+                    }
                 }
                 (self.home_took, self.home_done) = (turn.elapsed(), Instant::now());
                 // Without a strip the Toast was in that frame.

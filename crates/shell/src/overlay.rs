@@ -348,8 +348,13 @@ pub(crate) mod win {
             }
             composition.commit();
             log(&format!(
-                "configured: {}x{} {:?}, alpha {:?}, present {:?}",
-                config.width, config.height, config.format, config.alpha_mode, config.present_mode
+                "configured: {}x{} {:?}, alpha {:?}, present {:?}, at most {} frames queued",
+                config.width,
+                config.height,
+                config.format,
+                config.alpha_mode,
+                config.present_mode,
+                config.desired_maximum_frame_latency
             ));
             Some(Self {
                 surface: Some(surface),
