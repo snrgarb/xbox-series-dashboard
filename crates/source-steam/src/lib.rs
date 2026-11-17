@@ -17,6 +17,15 @@
 //! each has got from Steam's own download overview where the debugger is on ([`overview`]) and else counted live
 //! ([`live`]), none said done while Steam is still at it ([`follow`]). [`probe`] is `--log-queue-sources`' look at
 //! every candidate count.
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod achievements;
 pub mod appcache;
 pub mod cef;

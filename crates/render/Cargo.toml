@@ -6,6 +6,7 @@ edition = "2021"
 description = "The GPU renderer: quads, images and text."
 
 [dependencies]
+log-line = { path = "../log-line" }
 wgpu = "30"
 glyphon = "0.12"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

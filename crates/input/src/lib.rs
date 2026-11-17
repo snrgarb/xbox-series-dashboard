@@ -7,6 +7,15 @@
 //! tap and hold (docs/spec/guide.md, 7.1). The thread that reads the pads is the one thing that looks at them every
 //! few milliseconds whatever is being drawn, and it wakes the Dashboard when there is something to tell it. Which
 //! pace a held direction repeats at is the Dashboard's to say (`Pad::set_repeat`).
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 

@@ -1,6 +1,15 @@
 //! The UI layer. A screen keeps its own state (where focus is, what is open) and, every frame, declares what it
 //! looks like to a [`Ui`]: quads, images and text in design units on a 1920-wide canvas, with animated values asked
 //! for by id. Nothing is retained between frames but those values and the art cache. See docs/ui.md.
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod anim;
 pub mod art;
 pub mod host;

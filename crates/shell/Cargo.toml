@@ -6,6 +6,7 @@ edition = "2021"
 description = "Windows itself: the Overlay window, launching and tracking games, z-order and the foreground."
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 # Steam's CEF console and which of its folders a program is in (`steam`).
 source-steam = { path = "../source-steam" }

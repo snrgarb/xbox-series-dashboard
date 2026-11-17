@@ -15,6 +15,15 @@
 //!
 //! `BattleNet::at(Some(dir))` reads a fake Battle.net instead (`--battlenet <dir>`, and `fixture`): its registry is
 //! `<dir>/registry.json` (`source_kit::registry`), its agent's files are in `<dir>/Agent`.
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod fixture;
 pub mod product;
 

@@ -5,6 +5,15 @@
 //! (`shell_mode::dashboard::attach_parent_console`), but cmd and PowerShell don't wait for a GUI program: `start
 //! /wait dashboard.exe ...`, or `Start-Process -Wait -NoNewWindow`, to wait for it and have its exit code.
 #![cfg_attr(windows, windows_subsystem = "windows")]
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 mod as_shell;
 mod backdrop;
 mod games;
@@ -281,6 +290,8 @@ fn fail(message: &str) -> ! {
 
 fn main() {
     since_start();
+    // A panic's message in one write too, like every other line (crates/log-line).
+    log_line::panics_in_one_write();
     let given: Vec<String> = std::env::args().skip(1).collect();
     // A GUI program, so no console window opens for it however it is started; run from a terminal it prints there.
     // The --shell process and the sentinel never take a terminal's console, which would tie them to it.

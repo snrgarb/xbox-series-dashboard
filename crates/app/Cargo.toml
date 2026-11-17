@@ -10,6 +10,7 @@ name = "dashboard"
 path = "src/main.rs"
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 library = { path = "../library" }
 source-steam = { path = "../source-steam" }

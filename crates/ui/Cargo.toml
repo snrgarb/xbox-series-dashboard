@@ -6,6 +6,7 @@ edition = "2021"
 description = "The UI layer: drawing in design units, animation, art, and the pad's buttons."
 
 [dependencies]
+log-line = { path = "../log-line" }
 render = { path = "../render" }
 wgpu = "30"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }

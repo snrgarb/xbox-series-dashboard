@@ -6,6 +6,7 @@ edition = "2021"
 description = "GOG's games, from what their installers and GOG Galaxy leave on the machine."
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 anyhow = "1"
 serde_json = "1"
