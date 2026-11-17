@@ -293,12 +293,18 @@ try {
     $foundOn = Search-Count $searched
     if ($foundOn -ne $foundBefore) { $failures += "Steam is on again, and Search finds $foundOn games for $searched, not $foundBefore" }
 
-    # --- The fake Steam changes while the Dashboard runs; nothing comes in by itself.
+    # --- The fake Steam changes while the Dashboard runs. A game installed in Steam's own client comes in by itself
+    # (the Queue's watch of what is installed, M8); play time does not: that is Update now's.
     $mark = Get-DashboardLogLength
     Change-Steam @('add-game')
+    Expect-Logged "^queue: steam's installed games changed in its own client .+: reading it again$" $mark 'the game installed in Steam is seen' 30 | Out-Null
+    Expect-Logged '^steam: \d+ games from ' $mark 'Steam read again' 15 | Out-Null
+    if ((Search-Count $added) -lt 1) { $failures += "$added, installed in Steam, is not found by itself" }
+    $mark = Get-DashboardLogLength
     Change-Steam @('played', $more.source_id, '45')
-    Expect-NotLogged '^launchers: update: ' $mark 'nothing read by itself' 5
-    if ((Search-Count $added) -ne 0) { $failures += "$added is found before Update now" }
+    Expect-NotLogged '^(launchers: update: |steam: \d+ games from )' $mark 'play time is not read by itself' 5
+    $count = "$($S + 1 + $E) games from 2 launchers"
+    $S = $S + 1
 
     # --- Update now.
     Open-Launchers "on, $S games; $count; .+"
@@ -307,11 +313,11 @@ try {
     Press A "Settings: Launchers: Update now; .+" | Out-Null
     Expect-Logged '^launchers: update: reading every launcher switched on$' $mark 'Update now' | Out-Null
     $summary = Expect-Logged '^launchers: update: .*steam.* read in \d+ ms: .+$' $mark 'Update now read' 60
-    if ($summary -and ($summary -notmatch '\b1 new game\b' -or $summary -notmatch '\bplay time for 1\b')) {
-        $failures += "the update's summary should say 1 new game and play time for 1: '$summary'"
+    if ($summary -and ($summary -match '\bnew game\b' -or $summary -notmatch '\bplay time for 1\b')) {
+        $failures += "the update's summary should say play time for 1 and no new game: '$summary'"
     }
     $said = if ($summary -match ' ms: (.+)$') { Esc $Matches[1] } else { '.+' }
-    $newCount = "$($S + 1 + $E) games from 2 launchers"
+    $newCount = $count
     Expect-Focus "Settings: Launchers: Update now; $newCount; updated: $said" 'the summary on the page' 30 | Out-Null
     Picture '07-updated'
     # Pressed again once it is done, it updates again, and finds nothing new.
@@ -320,7 +326,7 @@ try {
     Expect-Logged '^launchers: update: .*steam.* read in \d+ ms: nothing new$' $mark 'Update now again' 60 | Out-Null
     Expect-Focus "Settings: Launchers: Update now; $newCount; updated: nothing new" 'nothing new on the page' 30 | Out-Null
 
-    # --- Both arrived: the game added found by Search; the game played heads the Recent row.
+    # --- Both are there: the game added found by Search; the game played heads the Recent row.
     Press B 'Settings: Games & apps: Launchers' | Out-Null
     Press B 'Settings: Rail: Games & apps' | Out-Null
     Press B 'TopBar\(Settings\)' | Out-Null
