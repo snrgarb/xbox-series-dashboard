@@ -20,7 +20,7 @@ Picture: `crates/screens/tests/reference/settings-theme-settings-launchers-box.p
 | The Rows | 26 under the count | One a launcher, 892 x 66 every 74 (settings.md, 4.3), in the order Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net, Xbox |
 | Update now | 40 under the last Row | A pane button (settings.md, 4.4), and beside it, 30 to its right, one line (section 4) |
 
-A Row: the launcher's mark (the plain-shape placeholder the tiles draw, `home::source_mark`, 28 x 28, centred 45 in), its name where a Row's text goes, what it says (right-aligned, from 340 in to just before the checkbox), and its checkbox (28 px, 18 from the right): ticked when the launcher is switched on. A launcher that cannot be switched (section 3) is drawn at 40 % and has no checkbox. The page scrolls as the other Settings pages do (`controls::scrolled`), so focus is always whole on screen.
+A Row: the launcher's mark (the drawing the tiles carry, home.md 3.3.1, `home::source_mark`, 28 x 28, centred 45 in), its name where a Row's text goes, what it says (right-aligned, from 340 in to just before the checkbox), and its checkbox (28 px, 18 from the right): ticked when the launcher is switched on. A launcher that cannot be switched (section 3) is drawn at 40 % and has no checkbox. The page scrolls as the other Settings pages do (`controls::scrolled`), so focus is always whole on screen.
 
 What a Row says:
 
