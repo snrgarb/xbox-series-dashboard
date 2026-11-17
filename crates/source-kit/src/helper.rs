@@ -201,6 +201,12 @@ mod tests {
         assert_eq!(out, [Said::Out("one".into()), Said::Out("two".into()), Said::Out("50%".into())]);
         assert!(said.contains(&Said::Err("progress".into())));
         assert_eq!(said.last(), Some(&Said::Ended(Some(3))));
+        // A wake comes after what it wakes for is said, so the end's may still be on its way when the end is read:
+        // waited for, not raced (#238).
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while woken.load(std::sync::atomic::Ordering::Relaxed) < 5 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         assert!(woken.load(std::sync::atomic::Ordering::Relaxed) >= 5);
     }
 
