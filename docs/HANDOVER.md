@@ -95,10 +95,16 @@ Things only the TV PC can settle. Each lists the run, the log lines to read, and
   next's (#99: it was from turn to turn, which billed the wait before a stretch's first frame to the second frame);
   that first wait is said under `from rest`, as how late a stretch starts. Closed when the Overlay's moving rate is
   at the display's (about 120 a second) with 0 late (a gap over 12 ms) per open and close; it was 108 to 115 a
-  second with 2 to 7 late on 2026-11-16, 123 to 135 with 1 late on four of six on 2026-11-17. The issue's other
-  half: `taskkill /pid <the --from-shell Dashboard>` without `/f`, from the desktop, must close it: its shell log
-  says `window: asked to close (WM_CLOSE to ...)`, and the watchdog's log `pid <n> exited with code 0x0: Exit to
-  desktop`. Its first lines say `window: runs elevated: <yes|no>`.
+  second with 2 to 7 late on 2026-11-16, 123 to 135 with 1 late on four of six on 2026-11-17, 124 to 129 with 1
+  late on two of five on 2026-11-18. Each late frame is also said on its own line, with what the loop's thread did
+  in its gap, every moment of it billed to one part of a turn (`crates/app/src/turns.rs`), longest first:
+  `frame late: <window> at <ms> ms, gap <ms> ms: most <part> <ms>; <part> <ms>, ...` and, for a draw of a
+  millisecond or more in the gap, `; <window>'s draw: <n> art uploaded in <ms> ms, declare ..., render ...`. The
+  parts: `asleep` (as the loop asked), `in Windows` (the loop's own time past the wake it asked for: messages, the
+  thread not run), `window events`, `updates`, `making the Overlay`, `sources`, `library snapshot`, `launch`,
+  `input`, `effects`, `follow`, `overlay shown or hidden`, `overlay wait|draw|present`, `toasts`, `home
+  wait|draw|present`, `home after present`, `turn end`. The issue's other half, done: `taskkill /pid` without `/f`
+  closes a `--from-shell` Dashboard (2026-11-18).
 - **#123, Steam's toast after the Guide** (once #232 is in). With the real Steam running and a game up, open the Guide, have Steam
   show "Controller Connected" (switch the pad off and on while the Guide is up), close the Guide. Read the
   `overlay:` lines: `... a window smaller than a game's: it goes back all the same` then `foreground given back to

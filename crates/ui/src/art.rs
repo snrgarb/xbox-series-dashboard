@@ -11,6 +11,14 @@ pub use image::RgbaImage;
 use render::gpu::Gpu;
 use render::{Renderer, TexId};
 
+/// How long a frame spends uploading decoded art, at most: once it has spent this, what is left waits for the next
+/// frame. A frame always uploads one piece, so art keeps coming however big a piece is (#99: a frame that took in
+/// every cover that had come in at once was 15 to 20 ms long, two refreshes missed at 120 Hz).
+pub const UPLOAD_BUDGET: Duration = Duration::from_millis(2);
+/// And how many bytes, at most, past the first piece: a piece is not begun if it would take the frame past this.
+/// The clock says what was spent only once it has been, and a 4K background alone is 20 MB to copy.
+pub const UPLOAD_BYTES: usize = 8 << 20;
+
 /// How an image is prepared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -110,6 +118,9 @@ pub struct ArtCache {
     entries: HashMap<ArtKey, Entry>,
     queue: Arc<Queue>,
     results: Receiver<Loaded>,
+    /// Decoded and not yet uploaded: what a frame's budget left for the next.
+    decoded: VecDeque<Loaded>,
+    /// Asked for and not yet uploaded: being decoded, or decoded and waiting its turn to be uploaded.
     pending: usize,
     frame: u64,
     bytes: usize,
@@ -133,6 +144,7 @@ impl ArtCache {
             entries: HashMap::new(),
             queue,
             results,
+            decoded: VecDeque::new(),
             pending: 0,
             frame: 0,
             bytes: 0,
@@ -178,16 +190,33 @@ impl ArtCache {
         std::mem::take(&mut self.uploads)
     }
 
-    /// How many pieces are still being decoded.
+    /// How many pieces are still on their way: being decoded, or decoded and waiting to be uploaded.
     pub fn pending(&self) -> usize {
         self.pending
     }
 
-    /// Uploads what has been decoded since the last call and, over budget, frees what has gone unused longest.
-    /// Called once a frame, before drawing.
+    /// How many pieces have been decoded and wait for a frame to upload them.
+    pub fn waiting(&self) -> usize {
+        self.decoded.len()
+    }
+
+    /// Uploads what has been decoded since the last call, as much as a frame's budget allows (`UPLOAD_BUDGET`,
+    /// `UPLOAD_BYTES`), and, over the cache's budget, frees what has gone unused longest. Called once a frame,
+    /// before drawing.
     pub fn pump(&mut self, gpu: &Gpu, renderer: &mut Renderer) {
         self.frame += 1;
-        while let Ok(loaded) = self.results.try_recv() {
+        self.decoded.extend(self.results.try_iter());
+        let began = Instant::now();
+        let mut bytes = 0;
+        while let Some(next) = self.decoded.front() {
+            let size: usize = next.mips.iter().map(|mip| mip.as_raw().len()).sum();
+            // The first piece always goes: a frame gives art its turn however big the piece is.
+            let first = bytes == 0;
+            if !first && (began.elapsed() >= UPLOAD_BUDGET || bytes + size > UPLOAD_BYTES) {
+                break;
+            }
+            bytes += size.max(1);
+            let loaded = self.decoded.pop_front().expect("the front");
             self.take(gpu, renderer, loaded);
         }
         if self.bytes > self.budget {
@@ -210,10 +239,14 @@ impl ArtCache {
         }
     }
 
-    /// Waits for one more piece to be decoded and uploads it; false when nothing is pending.
+    /// Uploads one more piece, waiting for it to be decoded if none is waiting; false when nothing is pending.
     pub fn wait(&mut self, gpu: &Gpu, renderer: &mut Renderer) -> bool {
         if self.pending == 0 {
             return false;
+        }
+        if let Some(loaded) = self.decoded.pop_front() {
+            self.take(gpu, renderer, loaded);
+            return true;
         }
         match self.results.recv() {
             Ok(loaded) => {
@@ -317,4 +350,39 @@ fn decode(key: &ArtKey) -> image::ImageResult<Vec<RgbaImage>> {
         }
         Kind::Painted(_) => unreachable!("painted above"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 16 MB: over the bytes a frame uploads past its first piece.
+    fn big() -> RgbaImage {
+        RgbaImage::new(2048, 2048)
+    }
+
+    #[test]
+    fn a_frame_uploads_what_its_budget_allows_and_leaves_the_rest_for_the_next() {
+        let gpu = render::gpu::init(render::gpu::instance(None), None);
+        let mut renderer = Renderer::new(&gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8Unorm);
+        let mut cache = ArtCache::new(|| {});
+        let keys: Vec<ArtKey> =
+            (0..3).map(|n| ArtKey { path: format!("big {n}").into(), kind: Kind::Painted(Painter(big)) }).collect();
+        for key in &keys {
+            assert_eq!(cache.get(key), Art::Loading);
+        }
+        // All three decoded before a frame takes them in.
+        for _ in &keys {
+            let loaded = cache.results.recv().unwrap();
+            cache.decoded.push_back(loaded);
+        }
+        cache.pump(&gpu, &mut renderer);
+        assert_eq!((cache.take_uploads().0, cache.waiting(), cache.pending()), (1, 2, 2));
+        cache.pump(&gpu, &mut renderer);
+        assert_eq!((cache.take_uploads().0, cache.waiting(), cache.pending()), (1, 1, 1));
+        // A picture taken offscreen waits for all of it, one piece at a time.
+        assert!(cache.wait(&gpu, &mut renderer));
+        assert!(!cache.wait(&gpu, &mut renderer));
+        assert!(keys.iter().all(|key| cache.is_ready(key)));
+    }
 }
