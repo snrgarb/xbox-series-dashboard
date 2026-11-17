@@ -45,11 +45,11 @@ impl Shell {
         Self { database, dashboard, effects: Vec::new(), done: Vec::new() }
     }
 
-    /// Theme settings > Games & apps, focus on its first Row.
+    /// Settings > Games & apps > Games & apps, focus on its first Row.
     fn games_and_apps(&mut self) {
         self.dashboard.open_page(Open::Settings(settings::Entry::Rail));
-        self.press(&[Right, Down, Down]);
-        assert_eq!(self.focus(), "Settings: Theme settings: Games & apps");
+        self.press(&[Down, Down, Right, Down]);
+        assert_eq!(self.focus(), "Settings: Games & apps: Games & apps");
         self.press(&[A]);
         assert!(self.focus().starts_with("Settings: GamesAndApps: Add a game; "), "{}", self.focus());
         self.effects.clear();
@@ -121,7 +121,7 @@ impl Shell {
 // --- Settings: Games & apps ---
 
 #[test]
-fn games_and_apps_is_a_box_on_theme_settings_with_the_two_that_add() {
+fn games_and_apps_is_a_box_on_the_games_and_apps_category_with_the_two_that_add() {
     let mut shell = Shell::new();
     shell.games_and_apps();
     assert_eq!(shell.focus(), "Settings: GamesAndApps: Add a game; 0 games, 0 apps");
@@ -136,7 +136,7 @@ fn games_and_apps_is_a_box_on_theme_settings_with_the_two_that_add() {
     shell.press(&[B]);
     assert_eq!(shell.focus(), "Settings: GamesAndApps: Add an app; 0 games, 0 apps", "back where it was");
     shell.press(&[B]);
-    assert_eq!(shell.focus(), "Settings: Theme settings: Games & apps");
+    assert_eq!(shell.focus(), "Settings: Games & apps: Games & apps");
 }
 
 /// The issue's own: a game added by typing its path is in the library as any game is, from the source `manual`.
@@ -546,13 +546,13 @@ fn my_games_apps() {
     stage.check("my-games-apps-focused-long-name");
 }
 
-/// Theme settings with its third box; Games & apps with a game and Apps; a Row's menu.
+/// The Games & apps category, focus on its Games & apps box; that page with a game and Apps; a Row's menu.
 #[test]
 fn settings_games_and_apps() {
     let mut stage = Stage::with_apps();
     stage.shell.dashboard.open_page(Open::Settings(settings::Entry::Rail));
-    stage.press(&[Right, Down, Down]);
-    stage.check("settings-theme-settings-games-and-apps");
+    stage.press(&[Down, Down, Right, Down]);
+    stage.check("settings-games-and-apps-boxes");
     stage.press(&[A, Down, Down, Down]);
     assert_eq!(stage.shell.focus(), "Settings: GamesAndApps: App Orbit; 1 game, 4 apps");
     stage.check("settings-games-and-apps");

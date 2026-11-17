@@ -12,7 +12,9 @@ use screens::home::{Focus, TopButton};
 use screens::pages::{Around, Open, Page};
 use screens::settings::boxes::{Boxes, Item};
 use screens::settings::controls::{self, FIELD_HEIGHT, LEFT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH};
-use screens::settings::{BootVideo, Change, Entry, Found, Options, Pane, Setting, Settings, Step, BOOT_VIDEO};
+use screens::settings::{
+    BootVideo, Category, Change, Entry, Found, Options, Pane, Setting, Settings, Step, BOOT_VIDEO,
+};
 use screens::{Dashboard, Effect};
 use ui::host::Offscreen;
 use ui::Button::{self, Down, Guide, Left, LeftBumper, Menu, Right, RightBumper, Up, A, B, X, Y};
@@ -68,36 +70,63 @@ fn save(dashboard: &mut Dashboard, database: &library::Database) -> Vec<Change> 
 fn settings(database: &library::Database) -> Dashboard {
     let mut dashboard = start(database);
     press(&mut dashboard, &[Right, Right, Right, A]);
-    assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
     dashboard.take_effects();
     dashboard
 }
 
-/// Personalisation, focus on the checkbox box this far down it: under Boot video and Groups.
+/// Personalisation, General's first box, focus on the checkbox box this far down it.
 fn personalisation(database: &library::Database, down: usize) -> Dashboard {
     let mut dashboard = settings(database);
     press(&mut dashboard, &[Right, A]);
-    press(&mut dashboard, &vec![Down; down + 2]);
+    press(&mut dashboard, &vec![Down; down]);
     dashboard.take_effects();
     dashboard
 }
 
 #[test]
-fn the_rail_shows_theme_settings_and_right_or_a_goes_into_its_boxes() {
+fn the_rail_lists_four_categories_each_showing_as_it_has_focus_and_right_or_a_goes_into_it() {
     let database = database();
     for into in [Right, A] {
         let mut dashboard = settings(&database);
-        // One item: nowhere to go along the rail, and nothing to its left.
-        press(&mut dashboard, &[Up, Down, Left]);
-        assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
+        // General, Account, Games & apps, System: the ends stop, and nothing is left of the rail.
+        press(&mut dashboard, &[Up, Left]);
+        assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
+        for category in ["Account", "Games & apps", "System", "System"] {
+            press(&mut dashboard, &[Down]);
+            assert_eq!(dashboard.focus_line(), format!("Settings: Rail: {category}"));
+        }
+        press(&mut dashboard, &[Up, Up, Up]);
+        assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
         press(&mut dashboard, &[into]);
-        assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
+        assert_eq!(dashboard.focus_line(), "Settings: General: Personalisation");
         // B is the rail again, and B there is Home, on the button that opened the page.
         press(&mut dashboard, &[B]);
-        assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
+        assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
         press(&mut dashboard, &[B]);
         assert_eq!((dashboard.page(), dashboard.home_focus()), (None, Focus::TopBar(TopButton::Settings)));
     }
+}
+
+#[test]
+fn each_category_keeps_where_focus_was_while_the_page_is_up() {
+    let database = database();
+    let mut dashboard = settings(&database);
+    // General on Idle, then Account on Who's playing today?, each left for the rail.
+    press(&mut dashboard, &[Right, Right, B, Down, Right, Right, B]);
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: Account");
+    press(&mut dashboard, &[Up, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: General: Idle");
+    press(&mut dashboard, &[B, Down, A]);
+    assert_eq!(dashboard.focus_line(), "Settings: Account: Who's playing today?");
+    // A visit to a page and back keeps it too.
+    press(&mut dashboard, &[A, B, B, Up, Up, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: General: Idle");
+    // Not between visits: Settings opens as its entry says, on each category's first box.
+    press(&mut dashboard, &[B, B, A, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: General: Personalisation");
+    press(&mut dashboard, &[B, Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Account: Profiles");
 }
 
 #[test]
@@ -105,65 +134,64 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     let database = database();
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right]);
-    // Theme settings: Personalisation and Idle beside it, Guide under Personalisation with Discord beside it, then
-    // Games & apps and Launchers, then Art, then Helpers, then System. The row's end, the top and the foot stop.
+    // General: Personalisation and Idle beside it, the Bundle's first row; Guide under Personalisation with Boot
+    // video beside it. The row's end, the top and the foot stop.
     press(&mut dashboard, &[Right, Right, Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
-    // Down from Idle is Discord; Right there stops, Left is Guide.
-    press(&mut dashboard, &[Down, Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Discord");
+    assert_eq!(dashboard.focus_line(), "Settings: General: Idle");
+    press(&mut dashboard, &[Down, Right, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: General: Boot video");
     press(&mut dashboard, &[Left]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
-    press(&mut dashboard, &[Down, Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
-    // Down from Launchers is Storage, beside Art; Helpers is the fifth row's one box, under both, and System
-    // under that, where the foot stops, with About beside it, where the row ends.
-    press(&mut dashboard, &[Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
-    press(&mut dashboard, &[Left]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
-    press(&mut dashboard, &[Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Helpers");
-    press(&mut dashboard, &[Down, Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
-    press(&mut dashboard, &[Right, Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: About");
-    // Up from About is Helpers, the row above having one box; Up from Helpers is Art, and from Art Games & apps.
+    assert_eq!(dashboard.focus_line(), "Settings: General: Guide");
     press(&mut dashboard, &[Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Helpers");
-    press(&mut dashboard, &[Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: System");
-    press(&mut dashboard, &[Up, Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Art");
-    press(&mut dashboard, &[Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
-    press(&mut dashboard, &[Right, Left]);
-    press(&mut dashboard, &[Up, Up, Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Idle");
-    press(&mut dashboard, &[Left]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
-    press(&mut dashboard, &[Down, Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Games & apps");
-    press(&mut dashboard, &[Up, Up]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
+    assert_eq!(dashboard.focus_line(), "Settings: General: Personalisation");
     // Left from the first column is back a level, as B: the rail.
     press(&mut dashboard, &[Left]);
-    assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
 
-    // Personalisation: Boot video and Profiles, Groups under Boot video, then a checkbox box a row.
-    press(&mut dashboard, &[A, A]);
-    let boxes =
-        ["Boot video", "Groups", "Background delay", "Reduce motion", "Show Play history", "Show battery percentages"];
+    // Account: Profiles and Who's playing today?, Discord under Profiles.
+    press(&mut dashboard, &[Down, Right, Right, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Account: Discord");
+    press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: Account");
+
+    // Games & apps, in two sections: Library (Launchers, Games & apps, Groups, Art) and Installs (Storage, Helpers).
+    // Down and Up go along a section, stopping at its ends; Right and Left to the section beside, as far down as it
+    // goes.
+    press(&mut dashboard, &[Down, Right]);
+    for name in ["Launchers", "Games & apps", "Groups", "Art", "Art"] {
+        assert_eq!(dashboard.focus_line(), format!("Settings: Games & apps: {name}"));
+        press(&mut dashboard, &[Down]);
+    }
+    press(&mut dashboard, &[Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Helpers", "the shorter section's foot");
+    press(&mut dashboard, &[Right, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Helpers", "the last section, and its foot, stop");
+    press(&mut dashboard, &[Up, Up]);
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Storage");
+    press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Launchers");
+    press(&mut dashboard, &[Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: Games & apps");
+
+    // System: System and About beside it.
+    press(&mut dashboard, &[Down, Right, Right, Right, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: System: About");
+    press(&mut dashboard, &[Left, Left]);
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: System");
+
+    // Personalisation: a checkbox box a row.
+    press(&mut dashboard, &[Up, Up, Up, Right, A]);
+    let boxes = ["Background delay", "Reduce motion", "Show Play history", "Show battery percentages"];
     for name in boxes {
         assert_eq!(dashboard.focus_line(), format!("Settings: Personalisation: {name}"));
         press(&mut dashboard, &[Right, Down]);
     }
     assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Show battery percentages", "the foot stops");
-    press(&mut dashboard, &[Up; 6]);
-    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Boot video", "the top stops");
-    // Left steps back to Theme settings' boxes, focus on the box that opened the page.
+    press(&mut dashboard, &[Up; 4]);
+    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Background delay", "the top stops");
+    // Left steps back to General's boxes, focus on the box that opened the page.
     press(&mut dashboard, &[Left]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
+    assert_eq!(dashboard.focus_line(), "Settings: General: Personalisation");
 }
 
 #[test]
@@ -180,40 +208,38 @@ fn b_climbs_one_level_at_a_time_and_a_page_gives_focus_back_to_the_box_that_open
     press(&mut dashboard, &[Up]);
     for back in [B, Left] {
         press(&mut dashboard, &[back]);
-        assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Guide");
+        assert_eq!(dashboard.focus_line(), "Settings: General: Guide");
         press(&mut dashboard, &[A]);
     }
     // Page, boxes, rail, out.
     press(&mut dashboard, &[B, B]);
-    assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
-    // Into the category again: its first box, wherever focus was when it was left.
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
+    // Into the category again: the box focus was on when it was left.
     press(&mut dashboard, &[Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
+    assert_eq!(dashboard.focus_line(), "Settings: General: Guide");
     press(&mut dashboard, &[B, B]);
     assert_eq!(dashboard.page(), None);
     assert!(save(&mut dashboard, &database).is_empty(), "walking the page changes nothing");
 }
 
 #[test]
-fn customise_home_opens_personalisation_and_b_climbs_back_through_every_level() {
+fn customise_home_opens_games_and_apps_on_groups_and_b_climbs_back_through_every_level() {
     let database = database();
     let mut dashboard = start(&database);
     press(&mut dashboard, &[Down, Right]);
-    dashboard.open_page(Open::Settings(Entry::Personalisation));
-    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Groups");
+    dashboard.open_page(Open::Settings(Entry::CustomiseHome));
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Groups");
     press(&mut dashboard, &[B]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Personalisation");
-    press(&mut dashboard, &[B]);
-    assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
+    assert_eq!(dashboard.focus_line(), "Settings: Rail: Games & apps");
     press(&mut dashboard, &[B]);
     assert_eq!((dashboard.page(), dashboard.home_focus()), (None, Focus::Recent(1)), "back on the tile");
 }
 
 #[test]
-fn the_settings_tile_opens_theme_settings_on_its_first_box_and_the_discord_tile_on_discord() {
+fn the_settings_tile_opens_general_on_its_first_box_and_the_discord_tile_account_on_discord() {
     let database = database();
     let discord = "Settings: Discord: Client ID Type; client id not set, secret not set, \"Not connected\"";
-    for (tile, opens) in [(0, discord), (1, "Settings: Theme settings: Personalisation")] {
+    for (tile, opens, rail) in [(0, discord, "Account"), (1, "Settings: General: Personalisation", "General")] {
         let mut dashboard = start(&database);
         press(&mut dashboard, &[Down, Down]);
         press(&mut dashboard, &vec![Right; tile]);
@@ -221,12 +247,12 @@ fn the_settings_tile_opens_theme_settings_on_its_first_box_and_the_discord_tile_
         press(&mut dashboard, &[A]);
         assert_eq!(dashboard.focus_line(), opens);
         if tile == 0 {
-            // Discord's page, then Theme settings' boxes with focus on Discord.
+            // Discord's page, then Account's boxes with focus on Discord.
             press(&mut dashboard, &[B]);
-            assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Discord");
+            assert_eq!(dashboard.focus_line(), "Settings: Account: Discord");
         }
         press(&mut dashboard, &[B]);
-        assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings");
+        assert_eq!(dashboard.focus_line(), format!("Settings: Rail: {rail}"));
         press(&mut dashboard, &[B]);
         assert_eq!((dashboard.page(), dashboard.home_focus()), (None, Focus::Wide(tile)));
     }
@@ -272,8 +298,8 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
     assert_eq!((dashboard.home_focus(), dashboard.focused_game()), (Focus::Recent(7), None));
 
     // Off, with focus left on the tile: it is on the game that took its place, at once.
-    dashboard.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut dashboard, &[Down, Down, Down, A, B, B, B]);
+    dashboard.open_page(Open::Settings(Entry::Tile));
+    press(&mut dashboard, &[A, Down, Down, A, B, B, B]);
     assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::ShowPlayHistory, on: false }]);
     assert_eq!(dashboard.page(), None);
     press(&mut dashboard, &[Right; 9]);
@@ -283,8 +309,8 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
     assert!(dashboard.take_effects().contains(&Effect::Launch(7)), "A twice on the eighth tile plays its game");
 
     // On again: the tile is back, and A on it is Play history.
-    dashboard.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut dashboard, &[Down, Down, Down, A, B, B, B]);
+    dashboard.open_page(Open::Settings(Entry::Tile));
+    press(&mut dashboard, &[A, Down, Down, A, B, B, B]);
     assert_eq!((dashboard.home_focus(), dashboard.focused_game()), (Focus::Recent(6), Some(6)));
     press(&mut dashboard, &[Right, A]);
     assert_eq!(dashboard.focus_line(), "MyGames: PlayHistory: Row(0)");
@@ -368,8 +394,8 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
     assert!(Setting::ALL.iter().all(|setting| database.setting(setting.key()).unwrap().is_none()));
 
     // Every checkbox on Personalisation turned over, and Use the Guide.
-    dashboard.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut dashboard, &[Down, A, Down, A, Down, A, Down, A, B, Down, A, A]);
+    dashboard.open_page(Open::Settings(Entry::Tile));
+    press(&mut dashboard, &[A, A, Down, A, Down, A, Down, A, B, Down, A, A]);
     // And Idle's Dim after, from 2 min to 10 min, which raises Show things after to 10 min with it.
     press(&mut dashboard, &[B, Up, Right, A, A, Down, Down, A]);
     assert_eq!(save(&mut dashboard, &database).len(), 5);
@@ -403,8 +429,8 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
     assert!(!again.guide_open(), "and the Guide button is left alone");
 
     // One turned back, and a third start.
-    again.open_page(Open::Settings(Entry::Personalisation));
-    press(&mut again, &[Down, Down, A]);
+    again.open_page(Open::Settings(Entry::Tile));
+    press(&mut again, &[A, Down, A]);
     assert_eq!(save(&mut again, &database), [Change { setting: Setting::ReduceMotion, on: false }]);
     assert_eq!(start(&database).options(), Options { reduce_motion: false, ..left });
 }
@@ -506,7 +532,7 @@ impl Stage {
     /// A Settings page of the test's own in the real shell, at rest: what a pane built from the controls looks
     /// like.
     fn check_pane(&mut self, name: &str, pane: Box<dyn Pane>) {
-        let mut page = Settings::showing(pane);
+        let mut page = Settings::showing(Category::General, pane);
         let library = Library::default();
         let around = Around {
             library: &library,
@@ -535,25 +561,50 @@ fn settings_stage() -> Stage {
     stage
 }
 
-/// The Bundle's picture 28: focus on the rail's Theme settings, its boxes beside it with no ring.
+/// The Bundle's picture 28, with the console's four categories: focus on the rail's General, its boxes beside it
+/// with no ring.
 #[test]
-fn settings_theme_settings() {
-    settings_stage().check("settings-theme-settings");
+fn settings_general() {
+    settings_stage().check("settings-general");
 }
 
-/// The Bundle's picture 29: focus on Theme settings' first box.
+/// The Bundle's picture 29: focus on General's first box.
 #[test]
-fn settings_theme_settings_box_focused() {
+fn settings_general_box_focused() {
     let mut stage = settings_stage();
     stage.press(&[Right]);
-    stage.check("settings-theme-settings-box");
+    stage.check("settings-general-box");
+}
+
+/// Each other category, focus on its first box.
+#[test]
+fn settings_account_games_and_apps_and_system() {
+    let mut stage = settings_stage();
+    for (category, first) in [("account", "Account: Profiles"), ("games-and-apps", "Games & apps: Launchers")] {
+        stage.press(&[Down, Right]);
+        assert_eq!(stage.dashboard.focus_line(), format!("Settings: {first}"));
+        stage.check(&format!("settings-category-{category}"));
+        stage.press(&[B]);
+    }
+    stage.press(&[Down, Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: System");
+    stage.check("settings-category-system");
+}
+
+/// A page's header: the category in bold, then the page.
+#[test]
+fn settings_page_header_names_the_category_then_the_page() {
+    let mut stage = settings_stage();
+    stage.press(&[Right, Right, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Idle: Dim after");
+    stage.check("settings-idle-header");
 }
 
 /// The Bundle's picture 31: Personalisation, focus on Background delay, its info text beside it.
 #[test]
 fn settings_personalisation_checkbox_focused() {
     let mut stage = settings_stage();
-    stage.press(&[Right, A, Down, Down]);
+    stage.press(&[Right, A]);
     stage.check("settings-personalisation-checkbox");
     // Another box, turned over: its info moves with focus, and nothing else does.
     stage.press(&[Down, Down, A]);
@@ -565,13 +616,13 @@ fn found(videos: &[BootVideo]) -> Found {
     videos.iter().fold(Found::NONE, |found, video| found.with(*video))
 }
 
-/// Personalisation's first box, Boot video, focused: Profiles beside it, Groups under it.
+/// General's Boot video box focused, beside Guide.
 #[test]
-fn settings_personalisation_boot_video_box() {
+fn settings_general_boot_video_box() {
     let mut stage = settings_stage();
-    stage.press(&[Right, A]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Personalisation: Boot video");
-    stage.check("settings-personalisation-boot-video");
+    stage.press(&[Right, Down, Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: General: Boot video");
+    stage.check("settings-general-boot-video");
 }
 
 /// The Boot video page with every video found, the Bundle's default ticked and focused; then focus on another
@@ -580,7 +631,7 @@ fn settings_personalisation_boot_video_box() {
 fn settings_boot_video() {
     let mut stage = settings_stage();
     stage.dashboard.set_options(Options { boot_videos: found(&BootVideo::ALL), ..Options::default() });
-    stage.press(&[Right, A, A]);
+    stage.press(&[Right, Down, Right, A]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Boot video: Xbox Series X (2020); ticked");
     stage.check("settings-boot-video");
     stage.press(&[Up, Up, Up]);
@@ -591,7 +642,7 @@ fn settings_boot_video() {
 #[test]
 fn settings_boot_video_none_found() {
     let mut stage = settings_stage();
-    stage.press(&[Right, A, A]);
+    stage.press(&[Right, Down, Right, A]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Boot video: Off; ticked");
     stage.check("settings-boot-video-none-found");
 }
@@ -601,7 +652,7 @@ fn boot_video_page(database: &library::Database, videos: &[BootVideo]) -> Dashbo
     let mut dashboard = settings(database);
     let options = dashboard.options();
     dashboard.set_options(Options { boot_videos: found(videos), ..options });
-    press(&mut dashboard, &[Right, A, A]);
+    press(&mut dashboard, &[Right, Down, Right, A]);
     dashboard.take_effects();
     dashboard
 }
@@ -629,13 +680,13 @@ fn boot_video_lists_off_and_the_videos_found_in_the_bundles_order_focus_on_the_o
         ],
         "the top and the foot stop"
     );
-    // Left, Right and the rest do nothing; B is Personalisation, on Boot video.
+    // Left, Right and the rest do nothing; B is General, on Boot video.
     dashboard.take_effects();
     press(&mut dashboard, &[Left, Right, X, Y, Menu]);
     assert_eq!(dashboard.focus_line(), "Settings: Boot video: Xbox Series X (2020); ticked");
     assert!(dashboard.take_effects().is_empty());
     press(&mut dashboard, &[B]);
-    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Boot video");
+    assert_eq!(dashboard.focus_line(), "Settings: General: Boot video");
 }
 
 #[test]
@@ -668,7 +719,7 @@ fn a_choice_whose_video_is_gone_ticks_off_and_is_kept_until_another_is_made() {
     let options = dashboard.options();
     assert_eq!(options.boot_video, BootVideo::XboxOneX);
     dashboard.set_options(Options { boot_videos: found(&[BootVideo::Xbox]), ..options });
-    press(&mut dashboard, &[Right, A, A]);
+    press(&mut dashboard, &[Right, Down, Right, A]);
     assert_eq!(dashboard.focus_line(), "Settings: Boot video: Off; ticked", "Off is what plays");
     // A on it makes Off the choice.
     dashboard.take_effects();
@@ -852,8 +903,8 @@ fn background_delay_off_shows_a_games_art_almost_at_once() {
     assert!(blue(shown), "{shown:?}");
 
     // Turned off in Settings, and back on Home: a second after a move the background is the game's focus is on.
-    stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[Down, A, B, B, B]);
+    stage.dashboard.open_page(Open::Settings(Entry::Tile));
+    stage.press(&[A, A, B, B, B]);
     assert!(!stage.dashboard.options().background_delay && stage.dashboard.page().is_none());
     assert!(blue(background(&stage.after(1.0))));
     stage.press(&[Left]);
@@ -866,8 +917,8 @@ fn reduce_motion_is_in_force_from_the_next_frame() {
     let mut stage = Stage::new(database().snapshot().unwrap());
     stage.after(0.1);
     assert!(!stage.host.store.reduce_motion);
-    stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[Down, Down, A]);
+    stage.dashboard.open_page(Open::Settings(Entry::Tile));
+    stage.press(&[A, Down, A]);
     stage.after(0.04);
     assert!(stage.host.store.reduce_motion, "what slides is told to stand in place");
     // The Guide then shows whole in its first frame, where it would slide in.
@@ -877,8 +928,8 @@ fn reduce_motion_is_in_force_from_the_next_frame() {
     assert!(shots::difference(&first, &at_rest).share < 0.001, "the Guide was still on its way in");
     // And off again.
     stage.press(&[B]);
-    stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[Down, Down, A]);
+    stage.dashboard.open_page(Open::Settings(Entry::Tile));
+    stage.press(&[A, Down, A]);
     stage.after(0.04);
     assert!(!stage.host.store.reduce_motion);
 }
@@ -897,23 +948,23 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
     home.save(PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("home-pad-battery.png")).unwrap();
     let with = white(&home);
 
-    stage.dashboard.open_page(Open::Settings(Entry::Personalisation));
-    stage.press(&[Down, Down, Down, Down, A, B, B, B]);
+    stage.dashboard.open_page(Open::Settings(Entry::Tile));
+    stage.press(&[A, Down, Down, Down, A, B, B, B]);
     assert!(!stage.dashboard.options().show_battery_percent && stage.dashboard.page().is_none());
     let without = white(&stage.still());
     assert!(without > 100, "the battery's cell is still there: {without}");
     assert!(with > without + 60, "the figure went with the setting: {with} with it, {without} without");
 }
 
-/// Theme settings > Art (docs/spec/settings.md, 16.8): no key, a key typed and kept, and the question before the
+/// Games & apps > Art (docs/spec/settings.md, 16.8): no key, a key typed and kept, and the question before the
 /// downloaded art goes. The key is never on screen, in the focus log or in an effect's `Debug`.
 #[test]
 fn settings_art() {
     const KEY: &str = "f00dfeedcafe1234";
     let mut stage = settings_stage();
-    stage.press(&[Right, Down, Down, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
-    stage.check("settings-theme-settings-art-box");
+    stage.press(&[Down, Down, Right, Down, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Art");
+    stage.check("settings-games-and-apps-art-box");
     stage.press(&[A]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Type");
     stage.check("settings-art");
@@ -949,9 +1000,9 @@ fn settings_art() {
     assert!(!asked(&mut stage).contains(&Effect::ClearArt));
     stage.press(&[A, A]);
     assert!(asked(&mut stage).contains(&Effect::ClearArt));
-    // Left from the first column, as B, goes back to Theme settings' boxes on Art.
+    // Left from the first column, as B, goes back to Games & apps' boxes on Art.
     stage.press(&[Up, Left]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Art");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Art");
 }
 
 /// Settings > Art's Refresh all art and details (#190; docs/spec/settings.md, 16.8): beside Clear downloaded art,
@@ -961,7 +1012,7 @@ fn settings_art() {
 fn settings_art_refresh() {
     use model::ArtRefresh;
     let mut stage = settings_stage();
-    stage.press(&[Right, Down, Down, Down, A, Down]);
+    stage.press(&[Down, Down, Right, Down, Down, Down, A, Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Clear downloaded art");
     stage.press(&[Right]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Refresh all art and details");
@@ -1007,7 +1058,7 @@ fn settings_art_refresh() {
     );
 }
 
-/// Theme settings > System (docs/spec/shell-mode.md, 2): the question before turning shell mode on, none before
+/// System > System (docs/spec/shell-mode.md, 2): the question before turning shell mode on, none before
 /// turning it off, nothing while it is refused, and the page following where the executable says it stands.
 #[test]
 fn settings_system() {
@@ -1018,8 +1069,8 @@ fn settings_system() {
         stage.dashboard.set_options(Options { shell, ..options });
     };
     shell(&mut stage, ShellMode::Off);
-    stage.press(&[Right, Down, Down, Down, Down, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
+    stage.press(&[Down, Down, Down, Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: System");
     stage.press(&[A]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
     stage.check("settings-system-off");
@@ -1049,18 +1100,18 @@ fn settings_system() {
     assert!(asked(&mut stage).is_empty());
     assert_eq!(stage.dashboard.focus_line(), "Settings: System: Start with Windows as the shell");
     stage.press(&[B]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: System");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: System");
 }
 
-/// Theme settings > About (docs/spec/settings.md, 16.10; docs/spec/updates.md) on a stage, with a made-up build so
+/// System > About (docs/spec/settings.md, 16.10; docs/spec/updates.md) on a stage, with a made-up build so
 /// that the picture never changes with a release or a commit, and updates where `updates` stand.
 fn about_stage(updates: model::update::Updates) -> Stage {
     use screens::settings::about::Build;
     let mut stage = settings_stage();
     let options = stage.dashboard.options();
     stage.dashboard.set_options(Options { build: Build { version: "1.2.3", commit: "0123abc" }, updates, ..options });
-    stage.press(&[Right, Down, Down, Down, Down, Down, Right]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
+    stage.press(&[Down, Down, Down, Right, Right]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: About");
     stage.press(&[A]);
     stage
 }
@@ -1081,9 +1132,9 @@ fn settings_about() {
         "Settings: About: Version 1.2.3 (0123abc); Check for updates every day; unchecked"
     );
     stage.press(&[Up, B]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: About");
     stage.press(&[A, Left]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: About");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: System: About");
 }
 
 /// Check for updates asks the executable; Install asks only with an update ready and no game running; the daily
@@ -1160,7 +1211,7 @@ fn settings_about_checking() {
     stage.check("settings-about-checking");
 }
 
-/// Theme settings > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): the Bundle's picture 36, its
+/// Account > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): the Bundle's picture 36, its
 /// three rows of two walked, Type and Paste asked of the shell, the Secret never on screen or in the log, and the
 /// page following the connection as the shell tells it.
 #[test]
@@ -1169,8 +1220,8 @@ fn settings_discord() {
     const ID: &str = "1290000000000000001";
     const SECRET: &str = "s3cr3t-s3cr3t-s3cr3t-s3cr3t-0001";
     let mut stage = settings_stage();
-    stage.press(&[Right, Down, Right]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Discord");
+    stage.press(&[Down, Right, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord");
     stage.press(&[A]);
     let line = |rest: &str| format!("Settings: Discord: {rest}; client id not set, secret not set, \"Not connected\"");
     assert_eq!(stage.dashboard.focus_line(), line("Client ID Type"));
@@ -1244,9 +1295,9 @@ fn settings_discord() {
     stage.press(&[A]);
     assert_eq!(asked(&mut stage), [Effect::Discord(Ask::Disconnect)]);
 
-    // Left from the first column, as B, goes back to Theme settings' boxes on Discord.
+    // Left from the first column, as B, goes back to Account's boxes on Discord.
     stage.press(&[Left, Left]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Discord");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord");
 }
 
 /// What the Dashboard asked of the shell since last time, but its sounds.
@@ -1254,7 +1305,7 @@ fn asked(stage: &mut Stage) -> Vec<Effect> {
     stage.dashboard.take_effects().into_iter().filter(|e| !matches!(e, Effect::Sound(_))).collect()
 }
 
-// --- Theme settings > Launchers (docs/spec/launchers.md) ---
+// --- Games & apps > Launchers (docs/spec/launchers.md) ---
 
 /// Now, in Unix seconds: the page says how long ago each launcher was read.
 fn unix_now() -> u64 {
@@ -1279,11 +1330,11 @@ fn launchers_database() -> library::Database {
     database
 }
 
-/// Theme settings, focus on Launchers' box.
+/// Games & apps, focus on Launchers' box.
 fn to_launchers(dashboard: &mut Dashboard) {
     dashboard.open_page(Open::Settings(Entry::Rail));
-    press(dashboard, &[Right, Down, Down, Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
+    press(dashboard, &[Down, Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Launchers");
 }
 
 /// Carries out what the page asked of the shell, as the executable does, the snapshot after handed back. The
@@ -1336,9 +1387,9 @@ fn launchers_are_walked_by_those_that_can_be_switched_and_one_off_leaves_every_l
     assert_eq!(carry_out(&mut dashboard, &database), [Effect::Launcher { key: "epic".into(), on: true }]);
     assert_eq!(dashboard.focus_line(), line("Epic Games; on, 9 games", "14 games from 2 launchers"));
     assert_eq!(names_of(&dashboard, "epic"), epic);
-    // Left, as B, is Theme settings' boxes on Launchers.
+    // Left, as B, is Games & apps' boxes on Launchers.
     press(&mut dashboard, &[Left]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Launchers");
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Launchers");
 }
 
 #[test]
@@ -1396,7 +1447,7 @@ fn settings_launchers() {
     let database = launchers_database();
     let mut stage = Stage::new(database.snapshot().unwrap());
     to_launchers(&mut stage.dashboard);
-    stage.check("settings-theme-settings-launchers-box");
+    stage.check("settings-games-and-apps-launchers-box");
     stage.press(&[A]);
     stage.check("settings-launchers");
 
@@ -1425,7 +1476,7 @@ fn settings_launchers() {
     stage.check("settings-launchers-refused");
 }
 
-// --- Theme settings > Helpers (docs/spec/helpers.md) ---
+// --- Games & apps > Helpers (docs/spec/helpers.md) ---
 
 /// The two helpers as the table has them: legendary as `legendary` stands, gogdl added.
 fn helpers_shown(legendary: model::helper::HelperState) -> Vec<model::helper::Helper> {
@@ -1457,8 +1508,8 @@ fn settings_helpers() {
     use model::helper::{HelperAsk, HelperState};
     let mut stage = settings_stage();
     stage.dashboard.set_helpers(helpers_shown(HelperState::NotAdded));
-    stage.press(&[Right, Down, Down, Down, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Helpers");
+    stage.press(&[Down, Down, Right, Right, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Helpers");
     stage.press(&[A]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Helpers: legendary; Add; not added");
     stage.check("settings-helpers");
@@ -1490,5 +1541,5 @@ fn settings_helpers() {
     stage.press(&[A, A]);
     assert_eq!(asked(&mut stage), [Effect::Helper(HelperAsk::Remove("gogdl".into()))]);
     stage.press(&[B]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Theme settings: Helpers");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Helpers");
 }

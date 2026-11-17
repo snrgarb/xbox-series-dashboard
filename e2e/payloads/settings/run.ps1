@@ -1,16 +1,16 @@
-# Settings, walked with the virtual pad on a fake Steam library: the rail, Theme settings' boxes, the Guide page and
-# Personalisation; Background delay and Reduce motion turned over; then the Dashboard killed and started again, to
-# see that both are as they were left.
+# Settings, walked with the virtual pad on a fake Steam library: the rail's four categories (General, Account, Games &
+# apps, System), General's boxes, the Idle and Guide pages, Games & apps' two sections (Library and Installs), each
+# category keeping where focus was, and Personalisation; Background delay and Reduce motion turned over; then the
+# Dashboard killed and started again, to see that both are as they were left.
 #
 # Judged by the Dashboard's log, a press at a time. --log-focus says where focus is after every press that moved it
 # (`focus: Settings: Personalisation: Reduce motion`); a checkbox turned over is `settings: <key> = <value>` as it is
 # saved; and at start-up every option that has been set is `settings: <key> is <value>`. Passes when every press is
 # followed by the line expected of it, the second start reads back what the first saved, and the Dashboard stays up.
 #
-# The pictures are to look at beside the Bundle's of the same name (docs/spec/pictures.md, 28 to 35). 30, 32, 33
-# and 34 have none here: Boot video, and Idle with its dropdown, come with M5, and Personalisation opens on its
-# first box, Groups (the groups test's), with Background delay under it, which is 31. 35 has no Now Playing source
-# under the checkbox, for the same reason.
+# The pictures are to look at beside the Bundle's of the same number (docs/spec/pictures.md, 28 to 35), and the
+# sectioned page beside the console's own Settings (docs/spec/settings.md, 16.1). The categories are the console's,
+# not the Bundle's one "Theme settings" (#194).
 #
 # The settings are in a data folder of the test's own, empty as it starts, so every option starts at its default and
 # nothing is left changed for the next test.
@@ -112,7 +112,7 @@ function Start-OnData {
 # From Home as it starts, focus on the profile, to Settings' rail by the top bar's button.
 function Open-Settings([string] $Name = '') {
     Walk Right 'TopBar\(Settings\)' 5
-    Press A 'Settings: Rail: Theme settings' $Name
+    Press A 'Settings: Rail: General' $Name
 }
 
 try {
@@ -124,29 +124,45 @@ try {
     $set = @(Get-DashboardLog | Where-Object { $_ -match '^settings: .* is ' })
     if ($set.Count) { $failures += "a new data folder should have no option set, and the log says: $($set -join '; ')" }
 
-    # The rail: its one category, the boxes beside it with no ring. Up and Down have nowhere to go.
-    Open-Settings '28-settings-theme-settings'
-    Push-Button Down
-    Start-Sleep -Milliseconds 800
-    if ((Focus-Now) -notmatch 'Settings: Rail: Theme settings$') { $failures += "Down on the rail's one item moved focus: '$(Focus-Now)'" }
+    # The rail: the four categories, each showing beside it as focus lands on it, with no ring. Down to the foot, where
+    # it stops, and Up to the top again.
+    Open-Settings '28-settings-general'
+    Press Down 'Settings: Rail: Account' '28-settings-account'
+    Press Down 'Settings: Rail: Games & apps' '28-settings-games-and-apps'
+    Press Down 'Settings: Rail: System' '28-settings-system'
+    Walk-ToEdge Down 'Settings: Rail: System'
+    Walk-ToEdge Up 'Settings: Rail: General'
 
-    # Into the category: its first box. Along the row to its end, the Idle box; its page, and B back on the box. Then
-    # down to the Guide box, its page, and back.
-    Press Right 'Settings: Theme settings: Personalisation' '29-settings-theme-settings-box-focused'
-    Walk-ToEdge Right 'Settings: Theme settings: Idle'
+    # Into General: its first box. Along the row to its end, the Idle box; its page (the header: General, then Idle),
+    # and B back on the box. Then down to the Guide box, its page, and back.
+    Press Right 'Settings: General: Personalisation' '29-settings-general-box-focused'
+    Walk-ToEdge Right 'Settings: General: Idle'
     Press A 'Settings: Idle: Dim after' '33-settings-idle'
-    Press B 'Settings: Theme settings: Idle'
-    Walk Left 'Settings: Theme settings: Personalisation' 3
-    Press Down 'Settings: Theme settings: Guide'
+    Press B 'Settings: General: Idle'
+    Press Down 'Settings: General: Boot video'
+    Press Left 'Settings: General: Guide'
     Press A 'Settings: Guide: Use the Guide' '35-settings-guide'
-    Press B 'Settings: Theme settings: Guide'
-    Press Up 'Settings: Theme settings: Personalisation'
+    Press B 'Settings: General: Guide'
 
-    # Personalisation: Boot video and Profiles, Who's playing today? and Groups, then a checkbox box a row, the
-    # focused one's info beside it. Background delay off, Reduce motion on.
-    Press A 'Settings: Personalisation: Boot video'
-    Press Down "Settings: Personalisation: Who's playing today\?"
-    Press Down 'Settings: Personalisation: Background delay' '31-settings-personalisation-checkbox'
+    # Games & apps, from the rail: two sections, Library and Installs. Down along Library to its foot, Right across to
+    # Installs, as far down as it goes, Left back to Library, Left again to the rail.
+    Press B 'Settings: Rail: General'
+    Press Down 'Settings: Rail: Account'
+    Press Down 'Settings: Rail: Games & apps'
+    Press Right 'Settings: Games & apps: Launchers' '29-settings-games-and-apps-sections'
+    Walk-ToEdge Down 'Settings: Games & apps: Art'
+    Press Right 'Settings: Games & apps: Helpers'
+    Press Up 'Settings: Games & apps: Storage'
+    Press Left 'Settings: Games & apps: Launchers'
+    Press Left 'Settings: Rail: Games & apps'
+
+    # Each category keeps where focus was: General is still on Guide.
+    Walk-ToEdge Up 'Settings: Rail: General'
+    Press Right 'Settings: General: Guide'
+
+    # Personalisation: a checkbox box a row, the focused one's info beside it. Background delay off, Reduce motion on.
+    Press Up 'Settings: General: Personalisation'
+    Press A 'Settings: Personalisation: Background delay' '31-settings-personalisation-checkbox'
     Turn-Over 'home.background_delay' 'false' '31-background-delay-off'
     Press Down 'Settings: Personalisation: Reduce motion'
     Turn-Over 'motion.reduce' 'true' '31-reduce-motion-on'
@@ -155,8 +171,8 @@ try {
     Save-Screen '31-personalisation-last-box'
 
     # B, a level at a time: the box that opened the page, the rail, Home on the button that opened Settings.
-    Press B 'Settings: Theme settings: Personalisation'
-    Press B 'Settings: Rail: Theme settings'
+    Press B 'Settings: General: Personalisation'
+    Press B 'Settings: Rail: General'
     Press B 'TopBar\(Settings\)' 'home-after-settings'
 
     # Killed, not closed: an option is saved as it is turned over. The second start reads both back.
@@ -175,13 +191,12 @@ try {
 
     # And the page shows them so: the first box unticked, the second ticked. Then both put back as they were.
     Open-Settings
-    Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Boot video'
-    Press Down "Settings: Personalisation: Who's playing today\?"
-    Press Down 'Settings: Personalisation: Background delay' '31-after-restart'
+    Press Right 'Settings: General: Personalisation'
+    Press A 'Settings: Personalisation: Background delay' '31-after-restart'
     Turn-Over 'home.background_delay' 'true'
     Press Down 'Settings: Personalisation: Reduce motion'
     Turn-Over 'motion.reduce' 'false' '31-put-back'
+
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }

@@ -240,17 +240,18 @@ function Go-TopBar([string] $Button) {
 # Settings, from Home's top bar, on Games & apps' page, focus on its first Row.
 function Open-GamesAndApps {
     Go-TopBar 'Settings'
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Press Down 'Settings: Theme settings: Guide' | Out-Null
-    Press Down 'Settings: Theme settings: Games & apps' | Out-Null
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Down 'Settings: Rail: Games & apps' | Out-Null
+    Press Right 'Settings: Games & apps: Launchers' | Out-Null
+    Press Down 'Settings: Games & apps: Games & apps' | Out-Null
     Press A 'Settings: GamesAndApps: Add a game; .+' | Out-Null
 }
 
 # From Games & apps' page back to Home's top bar, a level at a time.
 function Leave-Settings {
-    Press B 'Settings: Theme settings: Games & apps' | Out-Null
-    Press B 'Settings: Rail: Theme settings' | Out-Null
+    Press B 'Settings: Games & apps: Games & apps' | Out-Null
+    Press B 'Settings: Rail: Games & apps' | Out-Null
     Press B 'TopBar\(Settings\)' | Out-Null
 }
 

@@ -12,7 +12,7 @@ One number, the workspace's: `version` under `[workspace.package]` in `Cargo.tom
 The executable says it, with the commit it was built from (`crates/app/build.rs`: `DASHBOARD_COMMIT` if CI sets it,
 else `git rev-parse --short=7 HEAD`):
 
-- Settings > Theme settings > About: "Version 0.1.0 (0123abc)" (docs/spec/settings.md, 16.10);
+- Settings > System > About: "Version 0.1.0 (0123abc)" (docs/spec/settings.md, 16.10);
 - `dashboard.exe --version`: `dashboard 0.1.0 (0123abc)`;
 - the first lines of every start's log.
 

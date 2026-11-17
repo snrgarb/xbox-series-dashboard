@@ -145,10 +145,10 @@ try {
 
     # --- 1. Connect in Settings > Discord, then back to the top bar.
     Walk Right 'TopBar\(Settings\)' 6
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Press Down 'Settings: Theme settings: Guide' | Out-Null
-    Press Right 'Settings: Theme settings: Discord' | Out-Null
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Right 'Settings: Account: Profiles' | Out-Null
+    Press Down 'Settings: Account: Discord' | Out-Null
     Press A 'Settings: Discord: Client ID Type; .*' | Out-Null
     Press A 'TextEntry: Q; "\|" .+' | Out-Null
     Press A 'TextEntry: Q; "Q\|" .+' | Out-Null

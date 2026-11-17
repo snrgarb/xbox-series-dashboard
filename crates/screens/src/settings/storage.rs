@@ -1,4 +1,4 @@
-//! Theme settings > Storage (docs/spec/storage.md; #179): the drives of this PC with their free and total space,
+//! Games & apps > Storage (docs/spec/storage.md; #179): the drives of this PC with their free and total space,
 //! and each store's install folders, the one its installs go to ticked. The Bundle has no such page (Playnite left
 //! it to the stores): it is the port's, after the console's Storage, made of Settings' Rows in the Bundle's look.
 //!
@@ -16,7 +16,7 @@ use crate::pages::{Around, PageAction};
 use crate::theme::{ACCENT, BODY, TEXT_DIM};
 use crate::Effect;
 
-/// The box on Theme settings, and the page's header.
+/// The box on Games & apps, and the page's header.
 pub const TITLE: &str = "Storage";
 const ABOUT: &str = "Where your games are installed. Choose the folder each store installs into; where a store has \
                      more than one, Install asks which, starting on the one ticked here.";

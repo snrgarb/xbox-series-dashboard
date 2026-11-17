@@ -1,4 +1,4 @@
-//! Theme settings > Idle (docs/spec/settings.md, 6.7): the Idle screen's two times, each a dropdown of the same
+//! General > Idle (docs/spec/settings.md, 6.7): the Idle screen's two times, each a dropdown of the same
 //! steps, Show things after never shorter than Dim after (docs/spec/idle-screen.md).
 use std::time::Duration;
 

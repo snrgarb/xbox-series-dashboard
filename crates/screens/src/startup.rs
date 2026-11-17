@@ -1,5 +1,5 @@
 //! Start-up (docs/spec/start-up.md): the console's start-up sequence, full screen before Home. The **Boot video**,
-//! one console generation's boot animation chosen on Settings > Personalisation > Boot video, or Off; then
+//! one console generation's boot animation chosen on Settings > General > Boot video, or Off; then
 //! **Who's playing today?**, the Profiles in a row, focus on the one signed in last, A signing the focused one in;
 //! then **Signing you in**, the Profile's picture alone with the Spinner turning round it for three seconds; then
 //! Home, and the greeting's Toast. With Who's playing today? turned off on Settings, the Profile signed in last goes

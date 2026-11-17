@@ -63,8 +63,8 @@ The tips are the Bundle's that apply to the port. The ones about the Guide are l
 - Press {Guide} anywhere, even in a game, to open the Guide.
 - Press {Start} on a game tile to play it, favourite it or manage it.
 - Press {Y} on Home to search your games and apps.
-- Customise Home from a tile's menu, or Settings › Theme settings › Personalisation.
-- Choose the Groups Home shows in Settings › Theme settings › Personalisation › Groups. (This is the Bundle's tip about Playnite's filter presets, as the port has them.)
+- Customise Home from a tile's menu, or Settings › Games & apps › Groups.
+- Choose the Groups Home shows in Settings › Games & apps › Groups. (This is the Bundle's tip about Playnite's filter presets, as the port has them.)
 - On the keyboard, {X} is backspace, {Y} is space, {Start} is Enter.
 - See what's downloading in My games & apps › Manage › Queue.
 - See what's playing in the Guide's Audio, under Now Playing.
@@ -82,7 +82,7 @@ The tips are the Bundle's that apply to the port. The ones about the Guide are l
 
 ## 6. Settings
 
-Settings › Theme settings › **Idle** (`docs/spec/settings.md`, 6.7) has two dropdowns of the same steps: 1, 2, 5, 10, 15 and 30 min, 1, 2, 3 and 4 h, Never.
+Settings › General › **Idle** (`docs/spec/settings.md`, 6.7) has two dropdowns of the same steps: 1, 2, 5, 10, 15 and 30 min, 1, 2, 3 and 4 h, Never.
 
 - Show things after is never shorter than Dim after. Its list leaves out the steps below Dim after, and raising Dim after past it raises it too.
 - Both are saved at once, as the rows `idle.dim_after` and `idle.show_things_after`, in seconds or `never`. They count from the moment they are set.

@@ -100,13 +100,12 @@ function Start-Here {
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
 }
 
-# From Home's top bar into Settings > Personalisation > Profiles, focus on its first Profile.
+# From Home's top bar into Settings > Account > Profiles, focus on its first Profile.
 function Open-Profiles([string] $First, [string] $Name = '') {
     Walk Right 'TopBar\(Settings\)' 5
-    Press A 'Settings: Rail: Theme settings'
-    Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Boot video'
-    Press Right 'Settings: Personalisation: Profiles' $Name
+    Press A 'Settings: Rail: General'
+    Press Down 'Settings: Rail: Account'
+    Press Right 'Settings: Account: Profiles' $Name
     Press A "Settings: Profiles: $([regex]::Escape($First))"
 }
 
@@ -177,9 +176,8 @@ try {
     Expect-Profile $renamed $realName 'shape 2' $mark 'the Profile signed in after the removal'
 
     # Home's top bar and the Guide's Profile & system draw it: the pictures show both.
-    Press B 'Settings: Personalisation: Profiles'
-    Press B 'Settings: Theme settings: Personalisation'
-    Press B 'Settings: Rail: Theme settings'
+    Press B 'Settings: Account: Profiles'
+    Press B 'Settings: Rail: Account'
     Press B 'TopBar\(Settings\)' '11-home-after'
     Walk Left 'TopBar\(Profile\)' 6
     $mark = Get-DashboardLogLength

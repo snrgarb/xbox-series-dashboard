@@ -77,13 +77,13 @@ remove it. In File Explorer, or in a Command Prompt:
     copy "%APPDATA%\Playnite\Extensions\XboxSeries_eb759ff1-325b-4c34-9a64-d9704f72612b\Videos\*.mp4" "%LOCALAPPDATA%\XboxSeriesDashboard\media\videos"
 
 Keep the files' names as they are: the Dashboard finds them by name (navigation.wav, XboxSeriesX.mp4 and so on).
-Settings > Theme settings > Personalisation > Boot video lists the videos it found.
+Settings > General > Boot video lists the videos it found.
 
 
 Shell mode
 ----------
 
-Settings > Theme settings > System can start the Dashboard in place of the Windows desktop when you sign in, as a
+Settings > System > System can start the Dashboard in place of the Windows desktop when you sign in, as a
 console starts. The uninstaller turns it off first. To turn it off by hand, from a Command Prompt:
 
   "%LOCALAPPDATA%\Programs\XboxSeriesDashboard\dashboard.exe" --shell-off
@@ -92,7 +92,7 @@ console starts. The uninstaller turns it off first. To turn it off by hand, from
 Which version
 -------------
 
-Settings > Theme settings > About shows the version and the build. From a Command Prompt:
+Settings > System > About shows the version and the build. From a Command Prompt:
 
   dashboard.exe --version
 

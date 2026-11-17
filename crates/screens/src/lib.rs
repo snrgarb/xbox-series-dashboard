@@ -148,7 +148,7 @@ pub enum Effect {
     /// (`Dashboard::sign_in`). A new snapshot follows, as for a favourite, and every place a Profile shows follows
     /// it (docs/spec/profiles.md).
     Profile(ProfileChange),
-    /// Settings > Personalisation > Boot video chose this one, or Off (docs/spec/start-up.md). The Dashboard has it
+    /// Settings > General > Boot video chose this one, or Off (docs/spec/start-up.md). The Dashboard has it
     /// already: this is for whoever keeps the settings to save, and it plays from the next start.
     BootVideo(BootVideo),
     /// Settings > Discord: a Client ID or Secret typed, a Paste, Connect or Disconnect (docs/discord.md). The
@@ -1381,7 +1381,7 @@ impl Dashboard {
     }
 
     /// What is on top of Home's window, the Guide aside, and where its focus is: Home's focus as it is written
-    /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail: Theme settings`). A press that
+    /// (`Recent(2)`), or a page's name and what it says of its own (`Settings: Rail: General`). A press that
     /// changes this moved focus.
     fn focus_place(&self) -> String {
         if let Some(startup) = &self.startup {

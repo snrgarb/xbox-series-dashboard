@@ -138,13 +138,14 @@ try {
     Say "Home's Groups: $($initial -join ', ')"
     if ($initial.Count -lt 3) { throw "the fixture should give Home three Groups at least, and it has: $($initial -join ', ')" }
 
-    # Settings by the top bar's button, Personalisation, Groups under Profiles, its second box.
+    # Settings by the top bar's button, the rail down to Games & apps, Groups the Library section's third box.
     Walk Right 'TopBar\(Settings\)' 5
-    Press A 'Settings: Rail: Theme settings'
-    Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Boot video'
-    Press Right 'Settings: Personalisation: Profiles'
-    Press Down 'Settings: Personalisation: Groups' '01-personalisation-groups'
+    Press A 'Settings: Rail: General'
+    Press Down 'Settings: Rail: Account'
+    Press Down 'Settings: Rail: Games & apps'
+    Press Right 'Settings: Games & apps: Launchers'
+    Press Down 'Settings: Games & apps: Games & apps'
+    Press Down 'Settings: Games & apps: Groups' '01-games-and-apps-groups'
     Press A 'Settings: Groups: .+; (not )?shown' '02-groups-page'
 
     # --- Hide Home's first Group: it leaves Home at once.
@@ -222,9 +223,8 @@ try {
     Expect-Groups $initial $mark "showing $hidden again"
 
     # B, a level at a time, to Home, whose Groups are as they were at the start.
-    Press B 'Settings: Personalisation: Groups'
-    Press B 'Settings: Theme settings: Personalisation'
-    Press B 'Settings: Rail: Theme settings'
+    Press B 'Settings: Games & apps: Groups'
+    Press B 'Settings: Rail: Games & apps'
     Press B 'TopBar\(Settings\)' '09-home-after'
     if (((Groups-Now) -join ', ') -ne ($initial -join ', ')) { $failures += "Home's Groups should be as they were: '$((Groups-Now) -join ', ')'" }
 

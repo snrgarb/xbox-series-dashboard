@@ -1,4 +1,4 @@
-# Storage (Settings > Theme settings > Storage; #179)
+# Storage (Settings > Games & apps > Storage; #179)
 
 Where installs may go: this PC's drives with their free and total space, each store's install folders with the one its installs go to ticked, the question an Install asks where a store has more than one, and the storage ring on My games & apps (my-games.md 2.6). From docs/research/installs.md 10.2 and 13, item 11.
 
@@ -16,7 +16,7 @@ All of it is `model::Storage`, put together by `model::storage::read` with no I/
 
 ## 2. Its box
 
-**Storage**, icon U+EDA2 (Segoe Fluent's hard drive), at (1, 3) of Theme settings' boxes (975, 657, 437, 131), beside Art and under Launchers, until Settings is regrouped (#194). Down from Launchers is Storage; Left from it is Art; Down from it is About.
+**Storage**, icon U+EDA2 (Segoe Fluent's hard drive), the first box of Games & apps' Installs section (975, 262, 437, 131), beside Launchers, Helpers under it ([settings.md](settings.md) 6.1). Left from it is Launchers; Down from it is Helpers.
 
 Picture: `crates/screens/tests/reference/settings-theme-settings-launchers-box.png`.
 
@@ -38,7 +38,7 @@ The page scrolls as the other Settings pages do (`controls::scrolled`), so the f
 
 - Focus is only ever on a folder's Row, top to bottom across the stores: Up and Down move a Row, and stop at the ends. It opens on the first store's ticked folder. With no store, focus is nowhere.
 - **A** on a folder of a store that can be told makes it the store's default, at once: ticked here, saved (`Effect::DefaultFolder`, `settings: storage.default.steam = D:\SteamLibrary`), and the store's default in every snapshot from then. On the ticked one, or a store that chooses for itself, A does nothing.
-- **B** or **Left** goes back to Theme settings' boxes, on Storage.
+- **B** or **Left** goes back to Games & apps' boxes, on Storage.
 - A new snapshot keeps focus on the same folder of the same store where it still is, else on the first store's ticked one.
 - **The focus log**: `Settings: Storage: Steam D:\SteamLibrary; the default; 2 drives`, `...; not the default; ...`; `Settings: Storage: Nothing; 1 drive` with no store.
 

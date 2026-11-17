@@ -139,17 +139,18 @@ function Typed([string] $Path, [string] $Name, [string] $Ready = 'ready') {
 # Settings, from Home's top bar, on Games & apps' page, focus on its first Row.
 function Open-GamesAndApps {
     Go-TopBar 'Settings'
-    Press A 'Settings: Rail: Theme settings'
-    Press Right 'Settings: Theme settings: Personalisation'
-    Press Down 'Settings: Theme settings: Guide'
-    Press Down 'Settings: Theme settings: Games & apps'
+    Press A 'Settings: Rail: General'
+    Press Down 'Settings: Rail: Account'
+    Press Down 'Settings: Rail: Games & apps'
+    Press Right 'Settings: Games & apps: Launchers'
+    Press Down 'Settings: Games & apps: Games & apps'
     Press A 'Settings: GamesAndApps: Add a game; .+'
 }
 
 # From Games & apps' page back to Home, a level at a time.
 function Leave-Settings {
-    Press B 'Settings: Theme settings: Games & apps'
-    Press B 'Settings: Rail: Theme settings'
+    Press B 'Settings: Games & apps: Games & apps'
+    Press B 'Settings: Rail: Games & apps'
     Press B 'TopBar\(Settings\)'
 }
 

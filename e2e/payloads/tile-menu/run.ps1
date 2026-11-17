@@ -2,7 +2,7 @@
 # and on a Group's card, its rows by a game's state, More options and its flyout, "Uninstall X?" and its answers, B a
 # level at a time, and what each row then does: Add to and Remove from Favourites and Hide this game (the library
 # database), Install and Uninstall (what the stand-in Steam client is asked), Customise Home (Settings on
-# Personalisation, B back to the tile), Manage game (the game's Game hub in the menu's place, whose own Tile menu has
+# Games & apps on Groups, B back to the tile), Manage game (the game's Game hub in the menu's place, whose own Tile menu has
 # no Manage game row, and B back to the tile) and Play game (a launch).
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: TileMenu: Menu(Play game) of <game>`,
@@ -167,15 +167,14 @@ try {
     Press A 'Recent\(\d+\)' | Out-Null
     Expect-Logged "^library: $game is (a|no longer a) favourite" $mark 'Favourites, back' | Out-Null
 
-    # --- Customise Home: Settings on Personalisation, and B back on the tile. Manage game: the game's Game hub in
+    # --- Customise Home: Settings on Games & apps' Groups, and B back on the tile. Manage game: the game's Game hub in
     # the menu's place; Menu there is the same game's Tile menu without its Manage game row; B a level at a time
     # back to the tile.
     Press Start "TileMenu: Menu\(Play game\) of $game" | Out-Null
     Walk Down "TileMenu: Menu\(Customise Home\) of $game"
-    Press A 'Settings: Personalisation: .+' '09-settings-on-personalisation' | Out-Null
-    # Settings' own way back: Theme settings' boxes, its rail, then the tile.
-    Press B 'Settings: Theme settings: Personalisation' | Out-Null
-    Press B 'Settings: Rail: Theme settings' | Out-Null
+    Press A 'Settings: Games & apps: Groups' '09-settings-on-groups' | Out-Null
+    # Settings' own way back: its rail, then the tile.
+    Press B 'Settings: Rail: Games & apps' | Out-Null
     $back = ($tile -replace '^focus: ', '')
     if ($back) { Press B ([regex]::Escape($back)) | Out-Null }
     Press Start "TileMenu: Menu\(Play game\) of $game" | Out-Null

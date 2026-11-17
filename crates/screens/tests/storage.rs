@@ -70,12 +70,12 @@ fn pressed(dashboard: &mut Dashboard, buttons: &[Button]) -> Vec<Effect> {
     dashboard.take_effects().into_iter().filter(|effect| !matches!(effect, Effect::Sound(_))).collect()
 }
 
-/// Settings > Storage, opened from Theme settings' box beside Art.
+/// Settings > Storage, opened from the Games & apps category's Installs section.
 fn storage_page(library: Library) -> Dashboard {
     let mut dashboard = Dashboard::new(library);
     dashboard.open_page(Open::Settings(settings::Entry::Tile));
-    press(&mut dashboard, &[Down, Down, Down, Right]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
+    press(&mut dashboard, &[B, Down, Down, Right, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Storage");
     press(&mut dashboard, &[A]);
     dashboard
 }
@@ -101,9 +101,9 @@ fn storage_lists_each_stores_folders_focus_on_the_first_stores_ticked_one_and_as
     assert_eq!(dashboard.focus_line(), r"Settings: Storage: Battle.net C:\Program Files (x86); the default; 2 drives");
     press(&mut dashboard, &[Down, Up, Up, Up]);
     assert_eq!(dashboard.focus_line(), r"Settings: Storage: Steam D:\SteamLibrary; not the default; 2 drives");
-    // B is Theme settings again, on Storage.
+    // B is Games & apps again, on Storage.
     press(&mut dashboard, &[B]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Storage");
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn with_no_store_that_names_its_folders_focus_has_nowhere_to_go() {
     press(&mut dashboard, &[Down, Up, A]);
     assert_eq!(dashboard.focus_line(), "Settings: Storage: Nothing; 1 drive");
     press(&mut dashboard, &[Left]);
-    assert_eq!(dashboard.focus_line(), "Settings: Theme settings: Storage");
+    assert_eq!(dashboard.focus_line(), "Settings: Games & apps: Storage");
 }
 
 #[test]

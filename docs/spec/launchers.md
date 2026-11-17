@@ -1,4 +1,4 @@
-# Launchers (Settings > Theme settings > Launchers; #163)
+# Launchers (Settings > Games & apps > Launchers; #163)
 
 The page that says which launchers the Dashboard reads games from, switches one off or on, and brings the library up to date while the Dashboard runs.
 
@@ -6,7 +6,7 @@ The page that says which launchers the Dashboard reads games from, switches one 
 
 ## 1. Its box
 
-**Launchers**, icon U+E8F1, at (1, 2) of Theme settings' boxes (975, 508, 437, 131), beside Games & apps. Art, which was there, is on the row under them at (0, 3) (520, 657). Down from Discord is Launchers; Left from it is Games & apps; Down from Games & apps or from Launchers is Art.
+**Launchers**, icon U+E8F1, the first box of Games & apps' Library section (520, 262, 437, 131), Games & apps, Groups and Art under it ([settings.md](settings.md) 6.1). Right from it is Storage, the Installs section's first.
 
 Picture: `crates/screens/tests/reference/settings-theme-settings-launchers-box.png`.
 
@@ -78,7 +78,7 @@ From [../sources.md](../sources.md), "The stores". What a launcher does not keep
 Focus lines (`--log-focus`), with the page's state after the `;`:
 
 ```
-focus: Settings: Theme settings: Launchers
+focus: Settings: Games & apps: Launchers
 focus: Settings: Launchers: Steam; on, 5 games; 14 games from 2 launchers; ready
 focus: Settings: Launchers: Epic Games; off, 9 games; 5 games from 1 launcher; ready
 focus: Settings: Launchers: GOG; off, 3 games, not installed; ...

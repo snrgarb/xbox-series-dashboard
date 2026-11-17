@@ -1,4 +1,4 @@
-//! Theme settings > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): connecting the user's own
+//! Account > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): connecting the user's own
 //! Discord application. The intro and the four steps, the developer portal's QR code with its address under it, the
 //! Client ID and Client Secret rows with Type and Paste, Connect and Disconnect, and the status line.
 //!

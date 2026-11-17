@@ -1,4 +1,4 @@
-//! Theme settings > About (docs/spec/settings.md, 16.10; docs/spec/updates.md): which Dashboard this is, its version
+//! System > About (docs/spec/settings.md, 16.10; docs/spec/updates.md): which Dashboard this is, its version
 //! and the commit it was built from; updates, checked by hand or once a day, and installed; and what comes with it
 //! and what does not. The Bundle has no such page (Playnite's own About said Playnite's version): its words are the
 //! port's own, laid out as System's, a label and its text a group, the next group 40 under.

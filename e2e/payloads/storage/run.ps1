@@ -6,7 +6,7 @@
 # What it walks:
 # - The Dashboard reads the drives and Steam's folders after its first frame: `storage: <n> drives; Steam: 2 folders,
 #   installs into <the Steam folder> unless asked; ring on C:\`.
-# - Settings > Storage, from Theme settings' box beside Art: focus on Steam's ticked folder, the Steam folder
+# - Settings > Storage, from Games & apps' Installs section: focus on Steam's ticked folder, the Steam folder
 #   (`Settings: Storage: Steam <root>; the default; <n> drives`); the drives read again as it opens. Up to the second
 #   library, A: it is the default from now (`settings: storage.default.steam = <second>`, the row ticked).
 # - My games & apps: the storage ring at the nav's foot (a picture to look at).
@@ -117,13 +117,14 @@ function Start-OnFake {
 }
 
 # Settings > Storage from Home as it starts, focus on the profile: the top bar's Settings (each Right logs where focus
-# went), Theme settings' boxes, down to Art, right to Storage, A.
+# went), the rail down to Games & apps, right to Launchers and Storage, A.
 function Open-Storage([string] $Expect) {
     Walk Right 'TopBar\(Settings\)' 5
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Walk Down 'Settings: Theme settings: Art' 4
-    Press Right 'Settings: Theme settings: Storage' | Out-Null
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Down 'Settings: Rail: Games & apps' | Out-Null
+    Press Right 'Settings: Games & apps: Launchers' | Out-Null
+    Press Right 'Settings: Games & apps: Storage' | Out-Null
     $mark = Get-DashboardLogLength
     Press A "Settings: Storage: Steam $Expect; the default; \d+ drives?" | Out-Null
     Expect-Logged '^storage: \d+ drives?; Steam: 2 folders' $mark 'Storage read again as the page opened' | Out-Null
@@ -184,8 +185,8 @@ try {
 
     # --- My games & apps: the storage ring at the nav's foot. B climbs Settings a level a press: the page to its box,
     # the boxes to the rail, the rail out to the top bar's Settings, which opened it.
-    Press B 'Settings: Theme settings: Storage' | Out-Null
-    Press B 'Settings: Rail: Theme settings' | Out-Null
+    Press B 'Settings: Games & apps: Storage' | Out-Null
+    Press B 'Settings: Rail: Games & apps' | Out-Null
     Press B 'TopBar\(Settings\)' | Out-Null
     Walk Left 'TopBar\(MyGames\)' 4
     Press A 'MyGames: Games: Tile\(0\)' '03-my-games-storage-ring' | Out-Null

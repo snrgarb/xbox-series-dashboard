@@ -178,10 +178,11 @@ impl Failure {
     pub fn says(&self) -> String {
         match self {
             Failure::NoKey | Failure::KeyRefused => {
-                "Enter your SteamGridDB API key in Settings > Art to choose from its pictures.".into()
+                "Enter your SteamGridDB API key in Settings > Games & apps > Art to choose from its pictures.".into()
             }
             Failure::Offline => {
-                "Turn on Download art online in Settings > Art to choose from SteamGridDB's pictures.".into()
+                "Turn on Download art online in Settings > Games & apps > Art to choose from SteamGridDB's pictures."
+                    .into()
             }
             Failure::NoGame => "SteamGridDB doesn't know this game.".into(),
             Failure::Busy => "SteamGridDB is busy. Try again in a minute.".into(),

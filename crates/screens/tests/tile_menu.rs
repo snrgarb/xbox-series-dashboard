@@ -261,20 +261,20 @@ fn manage_game_opens_the_game_hub_in_the_menus_place() {
 }
 
 #[test]
-fn customise_home_opens_settings_on_personalisation_and_b_comes_back_to_the_tile() {
+fn customise_home_opens_settings_on_groups_and_b_comes_back_to_the_tile() {
     let mut menu = menu_on(3);
     down_to(&mut menu, "Customise Home");
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER]);
-    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("Settings: Personalisation: Groups", 1));
-    // Settings' own way back: Theme settings' boxes, its rail, then what the menu was over.
-    press(&mut menu, &[B, B, B]);
+    assert_eq!((menu.focus_line().as_str(), menu.pages_up()), ("Settings: Games & apps: Groups", 1));
+    // Settings' own way back: Games & apps' boxes, its rail, then what the menu was over.
+    press(&mut menu, &[B, B]);
     assert_eq!((menu.page(), menu.home_focus()), (None, Focus::Recent(3)));
 
     // From a Group's card: back on the card.
     press(&mut menu, &[Down, Down, Right, Menu]);
     down_to(&mut menu, "Customise Home");
-    press(&mut menu, &[A, B, B, B]);
+    press(&mut menu, &[A, B, B]);
     assert_eq!((menu.page(), menu.home_focus()), (None, Focus::Group { group: 0, card: 1 }));
 }
 

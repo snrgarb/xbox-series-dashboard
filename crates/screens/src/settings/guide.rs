@@ -1,4 +1,4 @@
-//! Theme settings > Guide (docs/spec/settings.md, 6.8): Use the Guide, and under it the Now Playing source, which
+//! General > Guide (docs/spec/settings.md, 6.8): Use the Guide, and under it the Now Playing source, which
 //! app the Audio Flyout's Now Playing card follows (docs/spec/now-playing.md).
 use ui::{Button, Press, Rect, Ui};
 

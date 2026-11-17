@@ -3,7 +3,7 @@
 # on it (`--media`) and on a data folder of the test's own, with Start-up (`Start-Dashboard -Startup`). With no choice
 # made, Xbox Series X plays: its first frame and its end are logged with their times; Who's playing today? follows
 # (A signs its one Profile in: the whos-playing payload is that screen's own test), and Home's first frame after.
-# Then Settings > Personalisation > Boot video, walked with the pad, sets Off; the Dashboard is started again, and goes
+# Then Settings > General > Boot video, walked with the pad, sets Off; the Dashboard is started again, and goes
 # straight to Who's playing today? with no video.
 #
 # Judged by the Dashboard's log, times in ms since the process started:
@@ -140,11 +140,12 @@ try {
     Save-Screen '02-home-after-the-video'
     if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
 
-    # --- Settings > Personalisation > Boot video: the one found ticked; Off chosen with A.
+    # --- Settings > General > Boot video: the one found ticked; Off chosen with A.
     Walk Right 'TopBar\(Settings\)' 5
-    Press A 'Settings: Rail: Theme settings'
-    Press Right 'Settings: Theme settings: Personalisation'
-    Press A 'Settings: Personalisation: Boot video' '03-personalisation'
+    Press A 'Settings: Rail: General'
+    Press Right 'Settings: General: Personalisation'
+    Press Down 'Settings: General: Guide'
+    Press Right 'Settings: General: Boot video' '03-general'
     Press A 'Settings: Boot video: Xbox Series X \(2020\); ticked' '04-boot-video-page'
     Press Up 'Settings: Boot video: Off'
     $mark = Get-DashboardLogLength

@@ -4,7 +4,7 @@
 # two steps, the keyboard put away and then the page left.
 #
 # Judged by what --log-focus says after each press, a press at a time: `focus: Recent(2)` on Home, and
-# `focus: Settings: Rail: Theme settings` with a page on top (the page's name, then where it says its focus is). Passes when every
+# `focus: Settings: Rail: General` with a page on top (the page's name, then where it says its focus is). Passes when every
 # press is followed by the line expected of it and the Dashboard stays up. The screenshots are to look at.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
@@ -102,22 +102,22 @@ try {
     Press B 'Search: RecentlyAdded\(0\) .+; "" away, RecentlyAdded \d+'
     Press B 'TopBar\(Search\)' '04-back-on-the-search-button'
     Walk Right 'TopBar\(Settings\)' 2
-    Press A 'Settings: Rail: Theme settings' '05-settings'
+    Press A 'Settings: Rail: General' '05-settings'
     Press B 'TopBar\(Settings\)'
 
     # The wide tiles: Discord (Settings' Discord page, there being no Discord tab), Settings, Downloads. Each gives focus back to
-    # its tile; Settings opens on Theme settings' first box, so B is its rail first. Achievements opens the Guide and
+    # its tile; Settings opens on General's first box (Discord on Account's Discord), so B is its rail first. Achievements opens the Guide and
     # is not pressed here.
     Press Down 'Recent\(\d+\)'
     Press Down 'Wide\(\d\)'
     Walk Left 'Wide\(0\)' 4
     Press A 'Settings: Discord: Client ID Type; client id not set, secret not set, "Not connected"'
-    Press B 'Settings: Theme settings: Discord'
-    Press B 'Settings: Rail: Theme settings'
+    Press B 'Settings: Account: Discord'
+    Press B 'Settings: Rail: Account'
     Press B 'Wide\(0\)'
     Walk Right 'Wide\(1\)' 2
-    Press A 'Settings: Theme settings: Personalisation'
-    Press B 'Settings: Rail: Theme settings'
+    Press A 'Settings: General: Personalisation'
+    Press B 'Settings: Rail: General'
     Press B 'Wide\(1\)'
     Walk Right 'Wide\(3\)' 3
     Press A 'ManageQueue: (Cover\(0\) of .+|Nothing); 0 installing, \d+ recently installed'

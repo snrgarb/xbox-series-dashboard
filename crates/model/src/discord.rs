@@ -1,5 +1,5 @@
 //! Discord as the screens see it: the user's own application and the connection to the Discord running on this PC
-//! (docs/discord.md). The `discord` crate keeps it; Settings > Theme settings > Discord shows it and asks for
+//! (docs/discord.md). The `discord` crate keeps it; Settings > Account > Discord shows it and asks for
 //! changes with [`Ask`]; the Guide's Discord tab names why it can't show Discord with [`Discord::tab_line`], and shows
 //! the [`Call`] the user is in ([`Voice`]), asking Mute, Deafen and Leave of Discord with [`CallAsk`], the
 //! [`Shortcut`]s to the channels joined before, and the user's servers and their voice channels ([`Browse`]).

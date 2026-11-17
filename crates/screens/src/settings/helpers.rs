@@ -1,4 +1,4 @@
-//! Theme settings > Helpers (docs/spec/helpers.md, 2): the helper programs some stores install through, legendary for
+//! Games & apps > Helpers (docs/spec/helpers.md, 2): the helper programs some stores install through, legendary for
 //! Epic Games and gogdl for GOG. Each is a group, as About's are: its name and store, the version the Dashboard
 //! fetches with its licence and source, how it stands on this PC, and one button, Add or Remove. Add asks first,
 //! the licence and the source in the question, and only Yes fetches; Remove asks too.

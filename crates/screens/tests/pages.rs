@@ -85,7 +85,11 @@ fn settings_and_back(dashboard: &mut Dashboard, line: &str, levels: usize, back:
         press(dashboard, &[B]);
         assert_eq!(dashboard.page(), Some("Settings"), "B climbs a level at a time: {level} of {levels}");
     }
-    assert_eq!(dashboard.focus_line(), "Settings: Rail: Theme settings", "the last level is the rail");
+    assert!(
+        dashboard.focus_line().starts_with("Settings: Rail: "),
+        "the last level is the rail: {}",
+        dashboard.focus_line()
+    );
     press(dashboard, &[B]);
     assert_eq!((dashboard.page(), dashboard.home_focus()), (None, back));
     assert!(asked(dashboard).is_empty(), "nothing is asked of the shell");
@@ -107,7 +111,7 @@ fn the_top_bars_search_and_settings_buttons_open_their_pages_and_get_focus_back(
     press(&mut home, &[Right, Right, Up, Right]);
     there_and_back(&mut home, A, SEARCH, Focus::TopBar(TopButton::Search));
     press(&mut home, &[Right]);
-    settings_and_back(&mut home, "Settings: Rail: Theme settings", 1, Focus::TopBar(TopButton::Settings));
+    settings_and_back(&mut home, "Settings: Rail: General", 1, Focus::TopBar(TopButton::Settings));
     // Notifications has no page.
     press(&mut home, &[Right, A]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::TopBar(TopButton::Notifications)));
@@ -190,11 +194,11 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[Down]);
     assert_eq!(home.home_focus(), Focus::Wide(0));
     let at_rest = rests(&home);
-    // Discord, with no Discord tab in the Guide: Settings > Discord, on the Client ID's Type. B is Theme settings'
+    // Discord, with no Discord tab in the Guide: Settings > Discord, on the Client ID's Type. B is Account's
     // boxes, the rail, then the tile.
     settings_and_back(&mut home, DISCORD_PAGE, 3, Focus::Wide(0));
     press(&mut home, &[Right]);
-    settings_and_back(&mut home, "Settings: Theme settings: Personalisation", 2, Focus::Wide(1));
+    settings_and_back(&mut home, "Settings: General: Personalisation", 2, Focus::Wide(1));
     press(&mut home, &[Right, Right]);
     let queue = "ManageQueue: Cover(0) of Age of Empires IV; 0 installing, 8 recently installed";
     there_and_back(&mut home, A, queue, Focus::Wide(3));
@@ -243,7 +247,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     let mut home = guide_open();
     press(&mut home, &[RightBumper, Down, Down, A]);
     assert_eq!(asked(&mut home), [Effect::GuideClosed]);
-    assert_eq!(home.focus_line(), "Settings: Rail: Theme settings");
+    assert_eq!(home.focus_line(), "Settings: Rail: General");
     press(&mut home, &[B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
 
@@ -268,7 +272,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
 fn a_page_opened_from_the_guide_takes_the_place_of_the_one_that_was_up() {
     let mut home = home();
     press(&mut home, &[Up, Right, Right, Right, A]);
-    assert_eq!(home.focus_line(), "Settings: Rail: Theme settings");
+    assert_eq!(home.focus_line(), "Settings: Rail: General");
     // The Guide opens over the page, and its My games & apps closes Settings for it.
     press(&mut home, &[Guide, Down, A]);
     assert_eq!((home.focus_line().as_str(), home.pages_up()), ("MyGames: Games: Tile(0)", 1));
@@ -281,7 +285,7 @@ fn a_page_opened_from_the_guide_takes_the_place_of_the_one_that_was_up() {
 fn the_guides_home_closes_the_page_that_is_up() {
     let mut home = home();
     press(&mut home, &[Down, Right, A]);
-    assert_eq!(home.focus_line(), "Settings: Theme settings: Personalisation");
+    assert_eq!(home.focus_line(), "Settings: General: Personalisation");
     press(&mut home, &[Guide, A]);
     assert!(!home.guide_open());
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Wide(1)));

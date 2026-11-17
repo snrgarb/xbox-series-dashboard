@@ -85,12 +85,9 @@ const TIPS: [Tip; 8] = [
     Tip { text: "Press {Start} on a game tile to play it, favourite it or manage it.", buttons: &[Button::Menu] },
     Tip { text: "Press {Y} on Home to search your games and apps.", buttons: &[Button::Y] },
     Tip {
-        text: "Customise Home from a tile's menu, or Settings › Theme settings › Personalisation.",
-        buttons: &[Button::Menu],
+        text: "Customise Home from a tile's menu, or Settings › Games & apps › Groups.", buttons: &[Button::Menu]
     },
-    Tip {
-        text: "Choose the Groups Home shows in Settings › Theme settings › Personalisation › Groups.", buttons: &[]
-    },
+    Tip { text: "Choose the Groups Home shows in Settings › Games & apps › Groups.", buttons: &[] },
     Tip {
         text: "On the keyboard, {X} is backspace, {Y} is space, {Start} is Enter.",
         buttons: &[Button::X, Button::Y, Button::Menu],

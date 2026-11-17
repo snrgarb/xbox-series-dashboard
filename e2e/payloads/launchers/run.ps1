@@ -2,7 +2,7 @@
 # the virtual pad.
 #
 # What it does, in order:
-# - Opens Theme settings > Launchers with the pad: `focus: Settings: Launchers: Steam; on, <S> games; <S+E> games from
+# - Opens Games & apps > Launchers with the pad: `focus: Settings: Launchers: Steam; on, <S> games; <S+E> games from
 #   2 launchers; ready`.
 # - Notes Home's Recent row (each tile's game named by its Tile menu: `focus: TileMenu: Menu(<row>) of <name>`) and
 #   what Search finds for a played Steam game's whole name (`focus: Search: Key(..); "<name>|" ..., Games <n>`).
@@ -156,18 +156,17 @@ function Go-TopBar([string] $Button) {
 # From Home to Settings > Launchers, focus on its first Row, Steam.
 function Open-Launchers([string] $Steam) {
     Go-TopBar 'Settings'
-    Press A 'Settings: Rail: Theme settings' | Out-Null
-    Press Right 'Settings: Theme settings: Personalisation' | Out-Null
-    Press Down 'Settings: Theme settings: Guide' | Out-Null
-    Press Down 'Settings: Theme settings: Games & apps' | Out-Null
-    Press Right 'Settings: Theme settings: Launchers' | Out-Null
+    Press A 'Settings: Rail: General' | Out-Null
+    Press Down 'Settings: Rail: Account' | Out-Null
+    Press Down 'Settings: Rail: Games & apps' | Out-Null
+    Press Right 'Settings: Games & apps: Launchers' | Out-Null
     Press A "Settings: Launchers: Steam; $Steam" | Out-Null
 }
 
 # From the Launchers page to Home's Recent row, a level at a time.
 function Leave-Launchers {
-    Press B 'Settings: Theme settings: Launchers' | Out-Null
-    Press B 'Settings: Rail: Theme settings' | Out-Null
+    Press B 'Settings: Games & apps: Launchers' | Out-Null
+    Press B 'Settings: Rail: Games & apps' | Out-Null
     Press B 'TopBar\(Settings\)' | Out-Null
     Press Down '(Recent\(\d+\)|.+)' | Out-Null
 }
@@ -322,8 +321,8 @@ try {
     Expect-Focus "Settings: Launchers: Update now; $newCount; updated: nothing new" 'nothing new on the page' 30 | Out-Null
 
     # --- Both arrived: the game added found by Search; the game played heads the Recent row.
-    Press B 'Settings: Theme settings: Launchers' | Out-Null
-    Press B 'Settings: Rail: Theme settings' | Out-Null
+    Press B 'Settings: Games & apps: Launchers' | Out-Null
+    Press B 'Settings: Rail: Games & apps' | Out-Null
     Press B 'TopBar\(Settings\)' | Out-Null
     Press Down 'Recent\(\d+\)' | Out-Null
     $recentAfter = Recent-Games
