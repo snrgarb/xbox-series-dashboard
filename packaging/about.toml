@@ -1,0 +1,28 @@
+# cargo-about's settings for the package's THIRD-PARTY-LICENSES.txt (tools/package.sh, docs/release.md): the licences
+# of every crate the Windows executable is built from. A dependency under a licence not listed here fails the build
+# of the package, so a new licence is read and added on purpose, never let through.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "BSL-1.0",
+    "CC0-1.0",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+    "bzip2-1.0.6",
+]
+# What dashboard.exe is: the Windows build, not the Linux one the tests run.
+targets = ["x86_64-pc-windows-gnullvm"]
+ignore-build-dependencies = false
+ignore-dev-dependencies = true
+# The workspace's own crates (publish = false): they are this program, not third parties.
+private = { ignore = true }

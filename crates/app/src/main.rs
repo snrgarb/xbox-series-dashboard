@@ -21,6 +21,11 @@ use std::path::PathBuf;
 
 pub use shell::since_start;
 
+/// Which build this is: the workspace's version and the commit it was built from (build.rs), for Settings > About
+/// and `--version`.
+pub const BUILD: screens::settings::about::Build =
+    screens::settings::about::Build { version: env!("CARGO_PKG_VERSION"), commit: env!("DASHBOARD_COMMIT") };
+
 #[derive(Default)]
 pub struct Args {
     library: Option<PathBuf>,
@@ -139,16 +144,19 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--from-shell] [--dry-shell] [--log-file <file>]
        dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
        dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
+       dashboard --version: prints `dashboard <version> (<commit>)`
        dashboard --screenshot <out.png> [--size WxH] [--focus N] [--press right,down,a,lb,rb,...] [--guide]
                  [--launch-screen] [--bench] [--clock <text>] [--steam <steam root> | --library <file.json>]
                  [--data-dir <dir>] [--toast <text>] [--notify <text>]...
                  [--fake-media [--fake-media-art <picture>]]
-       either with [--page keyboard]: start on the page that opens text entry, until Full library and Settings do";
+       either with [--page keyboard | settings]: start on the page that opens text entry, until Full library and
+                 Settings do; or on Settings, focus on its rail";
 
 /// A page by its name, for `--page`.
 fn page(name: &str) -> Result<screens::pages::Open, String> {
     match name {
         "keyboard" => Ok(screens::pages::Open::KeyboardStandIn),
+        "settings" => Ok(screens::pages::Open::Settings(screens::settings::Entry::Rail)),
         _ => Err(format!("bad --page: no page {name}")),
     }
 }
@@ -248,6 +256,11 @@ fn main() {
     {
         shell_mode::dashboard::attach_parent_console();
     }
+    // What a script, the installer or a test asks to know which build this is: nothing else is set up.
+    if given == ["--version"] {
+        println!("dashboard {}", BUILD.says_short());
+        std::process::exit(0);
+    }
     // Shell mode's jobs come before anything of the Dashboard's: the --shell process never touches the GPU.
     if let Some(code) = shell_mode::run_job(&given, library::data_dir()) {
         std::process::exit(code);
@@ -270,6 +283,7 @@ fn main() {
         let own_log = args.from_shell && args.log_file.is_none();
         as_shell::AsShell::start(args.from_shell, own_log, args.dry_shell, args.data_dir.clone(), data.clone())
     });
+    eprintln!("dashboard {}", BUILD.says_short());
     let (library, mut store) = store::open(&args);
     if args.screenshot.is_some() {
         // Art for the games a store's files gave none for, before the picture is taken, where there is a data

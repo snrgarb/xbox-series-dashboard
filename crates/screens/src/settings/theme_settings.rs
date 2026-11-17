@@ -1,5 +1,6 @@
 //! Theme settings, the rail's one category, and Personalisation (docs/spec/settings.md, 6.1 and 6.2). Games & apps
 //! and Art are the port's own.
+use super::about::{self, About};
 use super::added::{self, Added};
 use super::art::Art;
 use super::boot_video::BootVideoPage;
@@ -30,11 +31,13 @@ pub fn theme_settings() -> Boxes {
     let launchers =
         Item::Opens { icon: '\u{E8F1}', name: launchers::TITLE, pane: |around| Box::new(Launchers::open(around)) };
     let art = Item::Opens { icon: '\u{EB9F}', name: "Art", pane: |_| Box::new(Art::default()) };
-    // Shell mode's page, the port's own, on a row of its own under Art (docs/spec/shell-mode.md, 2).
+    // Shell mode's page, the port's own, on a row of its own under Art (docs/spec/shell-mode.md, 2), and About beside
+    // it: which build this is (16.10).
     let system = Item::Opens { icon: '\u{E770}', name: system::TITLE, pane: |_| Box::new(system::System::default()) };
+    let about = Item::Opens { icon: '\u{E946}', name: about::TITLE, pane: |around| Box::new(About::open(around)) };
     Boxes::new(
         "Theme settings",
-        vec![vec![personalisation, idle], vec![guide, discord], vec![added, launchers], vec![art], vec![system]],
+        vec![vec![personalisation, idle], vec![guide, discord], vec![added, launchers], vec![art], vec![system, about]],
     )
 }
 

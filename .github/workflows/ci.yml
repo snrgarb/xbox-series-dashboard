@@ -6,12 +6,17 @@
 #             what it drew and where it differs.
 #   Windows   the release build for x86_64-pc-windows-gnullvm, cross-compiled with llvm-mingw as on the development
 #             box, uploaded as an artifact for the end-to-end tests to take.
+#   Package   only on a version tag (v0.1.0) or when run by hand (workflow_dispatch): that build packed as the portable
+#             zip and the per-user installer (tools/package.sh: NSIS and cargo-about, on this same Linux runner),
+#             uploaded as a workflow artifact. Nothing is published: no release is made here, ever (docs/release.md).
 name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -117,3 +122,95 @@ jobs:
           path: target/x86_64-pc-windows-gnullvm/release/*.exe
           if-no-files-found: error
           retention-days: 14
+
+  package:
+    name: Package
+    needs: [test, windows]
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: [self-hosted, Linux, X64]
+    env:
+      CARGO_ABOUT_VERSION: 0.9.3
+      CARGO_ABOUT_SHA256: 3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4
+      # Code signing (docs/release.md): a PFX certificate, base64, and its password. Not set, as now: the package is
+      # unsigned and the Signing step is skipped.
+      SIGNING_CERT: ${{ secrets.WINDOWS_SIGNING_CERT }}
+      SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+      - name: The runner
+        run: |
+          . /etc/os-release && echo "$PRETTY_NAME, $(nproc) cores, $(free -g | awk '/Mem:/ {print $2}') GB memory, $(df -h --output=avail . | tail -1 | tr -d ' ') free"
+          command -v rustup >/dev/null || curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Rust, for cargo-about's look at the dependencies
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: The tag names the workspace's version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(awk '/^\[workspace\.package\]/ { s = 1; next } /^\[/ { s = 0 } s && $1 == "version" { gsub(/"/, "", $3); print $3 }' Cargo.toml)"
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "the tag $GITHUB_REF_NAME is not v$version, the workspace's version" >&2; exit 1; }
+      - name: NSIS, unpacked from the distribution's own package once and kept on the runner (no root needed)
+        run: |
+          nsis="$HOME/nsis"
+          if [ ! -x "$nsis/usr/bin/makensis" ]; then
+            rm -rf "$RUNNER_TEMP/nsis-debs" && mkdir -p "$RUNNER_TEMP/nsis-debs" && cd "$RUNNER_TEMP/nsis-debs"
+            apt-get download nsis nsis-common
+            for deb in ./*.deb; do dpkg-deb -x "$deb" "$nsis"; done
+          fi
+          echo "MAKENSIS=$nsis/usr/bin/makensis" >> "$GITHUB_ENV"
+          echo "NSISDIR=$nsis/usr/share/nsis" >> "$GITHUB_ENV"
+          NSISDIR="$nsis/usr/share/nsis" "$nsis/usr/bin/makensis" -VERSION
+      - name: cargo-about, fetched once and kept on the runner
+        run: |
+          if ! cargo-about --version 2>/dev/null | grep -q "$CARGO_ABOUT_VERSION"; then
+            archive="cargo-about-$CARGO_ABOUT_VERSION-x86_64-unknown-linux-musl"
+            curl -fsSL -o "$RUNNER_TEMP/$archive.tar.gz" "https://github.com/EmbarkStudios/cargo-about/releases/download/$CARGO_ABOUT_VERSION/$archive.tar.gz"
+            echo "$CARGO_ABOUT_SHA256  $RUNNER_TEMP/$archive.tar.gz" | sha256sum -c
+            tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -C "$RUNNER_TEMP"
+            install -m 755 "$RUNNER_TEMP/$archive/cargo-about" "$HOME/.cargo/bin/cargo-about"
+          fi
+          cargo-about --version
+      - name: The Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: target/ci-windows
+      # Where signing plugs in. With the secrets set, a command that signs a file in place (osslsigncode: Authenticode,
+      # SHA-256, timestamped), which tools/package.sh runs on dashboard.exe, the installer and its uninstaller.
+      - name: Signing
+        if: env.SIGNING_CERT != ''
+        run: |
+          command -v osslsigncode >/dev/null || sudo -n apt-get install -y --no-install-recommends osslsigncode
+          umask 077
+          echo "$SIGNING_CERT" | base64 -d > "$RUNNER_TEMP/signing.pfx"
+          printf '%s' "$SIGNING_PASSWORD" > "$RUNNER_TEMP/signing.pass"
+          {
+            echo '#!/bin/sh'
+            echo 'set -e'
+            echo "osslsigncode sign -pkcs12 '$RUNNER_TEMP/signing.pfx' -readpass '$RUNNER_TEMP/signing.pass' -n 'Xbox Series Dashboard' -h sha256 -t http://timestamp.digicert.com -in \"\$1\" -out \"\$1.signed\""
+            echo 'mv "$1.signed" "$1"'
+          } > "$RUNNER_TEMP/sign.sh"
+          chmod 700 "$RUNNER_TEMP/sign.sh"
+          echo "SIGN_COMMAND=$RUNNER_TEMP/sign.sh" >> "$GITHUB_ENV"
+      - name: Package
+        id: package
+        run: |
+          rm -rf target/package
+          tools/package.sh target/ci-windows/dashboard.exe target/package
+          echo "name=$(cd target/package && ls *-setup.exe | sed 's/-setup\.exe$//')" >> "$GITHUB_OUTPUT"
+      - name: Forget the certificate
+        if: always() && env.SIGNING_CERT != ''
+        run: rm -f "$RUNNER_TEMP/signing.pfx" "$RUNNER_TEMP/signing.pass" "$RUNNER_TEMP/sign.sh"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            target/package/*-portable.zip
+            target/package/*-setup.exe
+            target/package/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30

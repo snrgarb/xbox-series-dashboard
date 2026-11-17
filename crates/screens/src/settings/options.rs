@@ -113,6 +113,8 @@ pub struct Options {
     /// Shell mode as the executable last found it (Settings > System, docs/spec/shell-mode.md): not an option kept
     /// in the settings table, but the PC's own, which the executable reads and changes.
     pub shell: model::shell_mode::ShellMode,
+    /// Which build this is (Settings > About): not an option, but the executable's own, which it says as it starts.
+    pub build: super::about::Build,
 }
 
 impl Default for Options {
@@ -131,6 +133,7 @@ impl Default for Options {
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),
             shell: model::shell_mode::ShellMode::Unknown,
+            build: super::about::Build::default(),
         }
     }
 }

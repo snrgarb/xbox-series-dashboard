@@ -8,6 +8,7 @@
 //!
 //! **Adding a page:** a struct that implements [`Pane`], and a box that opens it on the pane it belongs to
 //! ([`boxes::Item::Opens`]). Nothing here changes.
+pub mod about;
 mod add;
 mod added;
 mod art;

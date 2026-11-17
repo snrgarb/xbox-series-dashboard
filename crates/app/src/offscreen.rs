@@ -105,6 +105,10 @@ pub fn run(
     for text in &args.toasts {
         dashboard.notify(text);
     }
+    // Where the presses left focus, as the window's --log-focus says it.
+    if args.log_focus {
+        eprintln!("focus: {}", dashboard.focus_line());
+    }
     // Endless animations stand where they do at this moment, the same every run.
     host.store.set_time(10.0);
     let pixels = target.still(&gpu, &mut host, |ui| dashboard.draw_all(ui));

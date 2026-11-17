@@ -1,9 +1,9 @@
 [package]
 name = "overlay-spike"
-version = "0.0.0"
+version.workspace = true
+publish.workspace = true
 edition = "2021"
 description = "Spike for issue #2: a transparent, topmost Overlay window drawn by wgpu. Throwaway."
-publish = false
 
 [[bin]]
 name = "overlay-spike"

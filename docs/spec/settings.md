@@ -743,7 +743,7 @@ What `crates/screens/src/settings/` does that the sections above leave open, or 
 
 | Pane | Boxes |
 |---|---|
-| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art on a row of its own, then System (16.9) alone on the row under Art. |
+| Theme settings | Personalisation (0, 0), **Idle** (1, 0) (#128), Guide (0, 1), at the Bundle's places; Discord (M6) comes back to (1, 1) with its feature. Games & apps and Launchers (#163) on the row under them, then Art on a row of its own, then System (16.9) on the row under Art with About (16.10) beside it. |
 | Personalisation | **Boot video** (0, 0) (start-up.md 2) and **Profiles** (1, 0) (#125, profiles.md 4), at the Bundle's places; **Who's playing today?** (0, 1) (start-up.md 9), at the Bundle's place, and **Groups** (1, 1) (filters.md 6.1), in the Bundle's empty slot; then four checkbox boxes, a row each: Background delay (y 508), Reduce motion (657), Show Play history (806), Show battery percentages (955). |
 | Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
 | Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
@@ -850,3 +850,28 @@ row **Start with Windows as the shell**: A asks before turning it on (Turn on, C
 nothing while it is refused. The focus log: `Settings: System: Start with Windows as the shell`, and with the question
 up `Settings: System: Prompt(Turn on) of Start with Windows as the shell`; the executable's answer is
 `shell: Settings > System shows on` (`off`, `refused <why>`, `failed`, `unknown`).
+
+### 16.10 About (the port's own; #155)
+
+Theme settings' fifth row, beside System: **About** (icon U+E946) at (1, 4) (x 975..1412, y 806..937). The Bundle has
+no such page (Playnite's own About said Playnite's version). Right from System is About, Up from it is Art (the row
+above has one box). Its page is laid out as System's (shell-mode.md, 2), three groups of a label and its text, 40
+apart, from y 190:
+
+| Label | Text |
+|---|---|
+| "Xbox Series Dashboard" | "Version 0.1.0 (0123abc)": the workspace's one version (`Cargo.toml`, `[workspace.package]`) and the commit the executable was built from, seven characters; "Version 0.1.0" alone where the build had no commit (a source archive) |
+| "Third-party licences" | "The Dashboard is built from open-source parts. Their licences are in THIRD-PARTY-LICENSES.txt, beside dashboard.exe." |
+| "Sounds and boot videos" | "The console's sounds and boot videos don't come with the Dashboard. It plays them from the Xbox Series Theme for Playnite, where that is installed, or from the media folder in %LOCALAPPDATA%\XboxSeriesDashboard. The README beside dashboard.exe says how to fill it." |
+
+- **Nothing on it takes focus**: the page is the control. B or Left goes back to Theme settings' boxes on About; every
+  other button does nothing.
+- **Where the version comes from**: the executable's `BUILD` (`crates/app`: `CARGO_PKG_VERSION`, and the commit its
+  build script reads, `DASHBOARD_COMMIT` from the environment where CI gives one, else `git rev-parse --short=7
+  HEAD`), handed over in `Options::build`. The core's own default is the version with no commit; the screenshot test
+  gives a made-up `1.2.3 (0123abc)`, so its picture never changes with a release.
+- **The same anywhere else**: `dashboard --version` prints `dashboard 0.1.0 (0123abc)` and ends 0, and every start of
+  the Dashboard says `dashboard 0.1.0 (0123abc)` in its log before it reads the library.
+- **The focus log**: `Settings: About: Version 0.1.0 (0123abc)`, the line a test reads the version by (with
+  `--screenshot --page settings --press right,down,down,down,down,right,a --log-focus`, the offscreen frame logs where
+  its presses left focus).
