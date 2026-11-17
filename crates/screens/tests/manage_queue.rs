@@ -149,6 +149,17 @@ fn recently_installed_is_what_the_queue_saw_finish_then_the_rest_installed() {
             "Hollow Pines Motel and the Very Long Name of Its Second Season"
         ]
     );
+    // The rest by their install folders' dates where known, else by when they came into the library: one long in
+    // the library but installed lately comes first, as the Bundle's `InstalledAt ?? Added`.
+    let mut dated = crate::library();
+    fn at<'a>(library: &'a mut Library, name: &str) -> &'a mut Game {
+        library.games.iter_mut().find(|game| game.name == name).unwrap()
+    }
+    at(&mut dated, "Glasswing Atlas").added = ADDED + 5;
+    at(&mut dated, "Brass Meridian").installed_at = Some(ADDED + 10);
+    let names: Vec<&str> =
+        screens::manage_queue::recently_installed(&dated).iter().map(|game| game.name.as_str()).take(3).collect();
+    assert_eq!(names, ["Brass Meridian", "Glasswing Atlas", "Ashfall Courier"]);
     // One no longer installed, or hidden, is not there.
     let mut library = library_where(|name, installed| installed && name != "Glasswing Atlas");
     library.queue.installed = vec![Installed { game: id(&library, "Glasswing Atlas"), finished: 9 }];

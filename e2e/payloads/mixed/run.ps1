@@ -256,6 +256,8 @@ function Leave-Settings {
 }
 
 # The game and the row the Tile menu's line names: `focus: TileMenu: Menu(Install) of Quiet Orbit`.
+# A game in the Queue starts at Pause installation, or at its Favourites row where its store can neither pause nor
+# cancel it (#171).
 function Menu-Game([string] $Line) { if ($Line -match ' of (.+)$') { $Matches[1] } }
 function Menu-Row([string] $Line) { if ($Line -match '\((.+?)\) of ') { $Matches[1] } }
 
@@ -271,7 +273,7 @@ function Nav([string] $Item) { "MyGames: .+: Nav\($Item\)(; .*)?" }
 function Open-MenuOf([string] $Name) {
     Walk Left 'Recent\(0\)'
     foreach ($tile in 1..8) {
-        $line = Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
+        $line = Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+'
         if (-not $line) { return $null }
         if ((Menu-Game $line) -eq $Name) { return $line }
         Press B 'Recent\(\d+\)' | Out-Null

@@ -95,7 +95,11 @@ hub's Queue action, B back to the hub on Queue; the Guide button during a Queued
   edge, both `#FF8F8F8F`, and is 108 tall in place of 68 while the Queue holds something (E/MyGamesControl.xaml:515-528).
 - **The nav's foot** has the current download over the storage ring (my-games.md 2.6): left x 75, 301 wide, 34 above
   the ring; the game's name; its state with the speed right-aligned; "`{amount}, {percent}`" (no line with no whole known). Only while the Queue's
-  first entry is downloading.
+  first entry is downloading. Each line is one line cut with an ellipsis at the block's 301, as the Bundle's (its
+  `Text` style trims with `CharacterEllipsis`, E/MyGamesControl.xaml:38-42). Measured with Segoe UI's advance widths
+  at 26 (#121): "1.23 GB of 3.55 GB, 34.6%" is 294 wide and fits, "67.80 MB of 3.55 GB, 1.9%" 300, while
+  "0.00 MB of 0.00 MB, 50.0%" is 305, "512.40 MB of 12.75 GB, 3.9%" 328 and "10.50 GB of 120.75 GB, 48.7%" 337, and
+  end "..." in the Bundle as in the port. A meant match, not a fault: the amount line of a big game is cut.
 - **Manage's box** counts the Queue (my-games.md 9.1).
 
 ## 7. Decided in #79
@@ -107,17 +111,20 @@ hub's Queue action, B back to the hub on Queue; the Guide button during a Queued
    bits per second from the last two samples and smooths it (half the new, half the old). It is none until the bytes
    first move, and 0 once they have stood still 10 s, as the Bundle's. It travels with the Queue the follower sends;
    the database keeps none, so a library read in between keeps the speeds it had.
-3. **Recently installed** orders the rest of the installed games by when they came into the library, there being no
-   install date kept: a game installed outside the Dashboard and long in the library comes after one added lately.
-   Games finished while the Dashboard was up come first, as the Bundle's. A hidden game is left out.
+3. **Recently installed** orders the rest of the installed games as the Bundle does, by `InstalledAt ?? Added`: the
+   install date is when the game's install folder was made (its store makes it as the install begins), read from the
+   folder each time the library is read (`Game::installed_at`, #121; its last change where the file system keeps no
+   birth time); a game whose folder can't be read goes by when it came into the library. Games finished while the
+   Dashboard was up come first, as the Bundle's. A hidden game is left out.
 4. **What the focus log says.** `ManageQueue: <where>; <n> installing, <m> recently installed[; <state> <share>]`,
    where is `Cover(i) of <name>`, `Row(i) of <name>` or `Nothing`, and a row adds what it reads: `Installing...
    25.0%`, `Queued 0.0%`; `Installing...` alone with no whole known. The speed is left out: it changes every second. A change of the Queue that moves focus or
    changes the row's share logs a new line without a press.
 5. **A on a game** is Home's tile's, the hub at once (no double tap, the user's decision of 2026-11-17, departing from the Bundle); a row's game, not installed, has its hub
    on Installing or Queued.
-6. **Not drawn yet:** the Queued Toast, and the Guide button's way in during it (Toasts for the Queue are not
-   built). The storage ring under the foot's block is drawn since #179 (storage.md, section 6).
+6. **Toasts and the storage ring.** The Queued, Ready to play and Uninstalled Toasts are drawn (#134), and the
+   Guide button during a Queued Toast opens this page. The storage ring under the foot's block is drawn since #179,
+   with the drive's real figures since #215 (storage.md, section 6).
 7. **Home redraws** for a Queue change only when what it shows changed (order, state, finished games), not for bytes
    alone; with a page up every change is drawn.
 

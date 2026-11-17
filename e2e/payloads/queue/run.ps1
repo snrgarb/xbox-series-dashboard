@@ -15,7 +15,8 @@
 #   of <name>; 1 installing, <n> recently installed`), Down to the download's row (`... Row(0) of <name>; 1
 #   installing, <n> recently installed; Installing... 25.0%`), whose share follows the fake's bytes as they move
 #   with the page up; View on it opens the game's Tile menu, and B there comes back to the row.
-# - Install from the Tile menu of a game already queued asks nothing more.
+# - The Tile menu of a game already queued offers no Install (#171): the stand-in Steam here has no CEF debugger, so it
+#   can neither pause nor cancel, and the menu starts at its Favourites row.
 # - Paused (`queue: <name> paused, 50% of 100 bytes`); meanwhile an install started in Steam's own client, of a game
 #   the Dashboard was not asked for, joins as Steam reports it (`queue: <name> joined, from its store's client`),
 #   Downloads counts two, and it leaves as Steam drops it (`queue: <name> dropped`).
@@ -134,6 +135,8 @@ function Advance([string] $Appid, [string[]] $To) {
 }
 
 # The game and the row the Tile menu's line names: `focus: TileMenu: Menu(Install) of Quiet Orbit`.
+# A game in the Queue starts at Pause installation, or at its Favourites row where its store can neither pause nor
+# cancel it (#171).
 function Menu-Game([string] $Line) { if ($Line -match ' of (.+)$') { $Matches[1] } }
 function Menu-Row([string] $Line) { if ($Line -match '\((.+?)\) of ') { $Matches[1] } }
 
@@ -142,7 +145,8 @@ function Menu-Row([string] $Line) { if ($Line -match '\((.+?)\) of ') { $Matches
 function Open-MenuOf([string] $Name) {
     Walk Left 'Recent\(0\)'
     foreach ($tile in 1..8) {
-        $line = Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
+        # A queued game whose store can't pause or cancel it starts at its Favourites row (docs/spec/tile-menu.md).
+        $line = Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+'
         if (-not $line) { return $null }
         if ((Menu-Game $line) -eq $Name) { return $line }
         Press B 'Recent\(\d+\)' | Out-Null
@@ -234,7 +238,7 @@ try {
     Expect-Logged "^focus: $row; Installing\.\.\. 50\.0%$" $mark 'Manage Queue follows the bytes' | Out-Null
     Start-Sleep -Milliseconds 4500
     Save-Screen '06-manage-queue-from-the-hub'
-    Press Back "TileMenu: Menu\(Install\) of $firstName" | Out-Null
+    Press Back "TileMenu: Menu\((Add to|Remove from) Favourites\) of $firstName" | Out-Null
     Press B "$row; Installing\.\.\. 50\.0%" | Out-Null
     Press B "$hub Hub Queue" | Out-Null
     Press B $tilePattern | Out-Null
@@ -263,12 +267,13 @@ try {
     Press B 'MyGames: Manage: Queue' | Out-Null
     Press B 'Recent\(\d+\)' | Out-Null
 
-    # --- Install from the Tile menu of the game already queued: the menu closes and nothing more is asked.
+    # --- The Tile menu of the game already queued: no Install, and with a store that can neither pause nor cancel
+    # here, no Pause or Cancel either: it starts at the Favourites row (#171). B closes it and nothing is asked.
     $menu = Open-MenuOf $first.name
-    if ($menu -and (Menu-Row $menu) -ne 'Install') { $failures += "a queued game's menu starts with $(Menu-Row $menu), not Install" }
+    if ($menu -and (Menu-Row $menu) -notmatch '^(Add to|Remove from) Favourites$') { $failures += "a queued game's menu starts with $(Menu-Row $menu), not its Favourites row" }
     $mark = Get-DashboardLogLength
-    Press A 'Recent\(\d+\)' | Out-Null
-    Expect-NotLogged '^store: asking Steam' $mark 'Install of a queued game'
+    Press B 'Recent\(\d+\)' | Out-Null
+    Expect-NotLogged '^store: asking Steam' $mark 'The menu of a queued game'
 
     # --- Paused, then done: the game leaves the Queue installed, and its hub reads Play.
     $mark = Get-DashboardLogLength

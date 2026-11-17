@@ -65,6 +65,11 @@ pub struct Game {
     /// game that is in no database.
     #[serde(default)]
     pub added: u64,
+    /// Unix seconds: when the game was installed, as near as can be told, which is when its install folder was made
+    /// (its store makes it as the install begins), as the Bundle's `InstalledAt`. None when it is not installed, or
+    /// the folder can't be read; a source reads none, and a snapshot looks at the folder.
+    #[serde(default)]
+    pub installed_at: Option<u64>,
     pub installed: bool,
     /// Where the game is installed, if it is.
     #[serde(default)]

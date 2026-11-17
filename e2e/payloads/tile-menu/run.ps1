@@ -92,7 +92,7 @@ function Menu-Row([string] $Line) { if ($Line -match '\((.+?)\) of ') { $Matches
 # with B, which must give focus back to the tile.
 function Open-MenuWhoseFirstRowIs([string] $First) {
     foreach ($tile in 1..8) {
-        $line = Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
+        $line = Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+'
         if (-not $line) { return $null }
         if ((Menu-Row $line) -eq $First) { return $line }
         Press B 'Recent\(\d+\)' | Out-Null
@@ -223,14 +223,14 @@ try {
     # the menu and focus is on the card still, the page risen to the Group.
     Press Down 'Wide\(\d\)' | Out-Null
     Press Down 'Group \{ group: 0, card: 0 \}' '11-group-card-hint-bar' | Out-Null
-    Press Start 'TileMenu: Menu\((Play game|Install)\) of .+' '12-menu-on-a-group-card' | Out-Null
+    Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+' '12-menu-on-a-group-card' | Out-Null
     Press B 'Group \{ group: 0, card: 0 \}' '13-back-on-the-card' | Out-Null
     Press B 'Recent\(\d+\)' | Out-Null
 
     # --- Hide this game, on the row's first tile: the game leaves the Recent row, and the tile's menu is the next
     # game's.
     Walk Left 'Recent\(0\)' 10
-    $menu = Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
+    $menu = Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+'
     $hiddenGame = Menu-Game $menu
     $hidden = [regex]::Escape($hiddenGame)
     Walk Down "TileMenu: Menu\(More options\) of $hidden"
@@ -240,7 +240,7 @@ try {
     Expect-Logged "^library: $hidden is hidden" $mark 'Hide this game' | Out-Null
     Start-Sleep -Milliseconds 3500
     Save-Screen '14-hidden-game-gone-from-the-row'
-    $menu = Press Start 'TileMenu: Menu\((Play game|Install)\) of .+'
+    $menu = Press Start 'TileMenu: Menu\((Play game|Install|Pause installation|Resume installation|Add to Favourites|Remove from Favourites)\) of .+'
     if ($menu -and (Menu-Game $menu) -eq $hiddenGame) { $failures += "$hiddenGame is hidden and still on the Recent row's first tile" }
     Press B 'Recent\(0\)' | Out-Null
 
