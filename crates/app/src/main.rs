@@ -18,6 +18,7 @@ mod as_shell;
 mod backdrop;
 mod games;
 mod helper_programs;
+mod hub_open;
 mod media_folder;
 mod offscreen;
 mod sounds;

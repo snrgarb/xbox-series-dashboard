@@ -193,6 +193,8 @@ struct App {
     frames: Option<([u32; 3], Instant)>,
     /// With --log-frames: how long Home's frames and the Overlay's took, since they were last said.
     frame_times: [FrameTimes; 2],
+    /// A Game hub's opening, timed from A to its first frame and its last moving one, always (#214).
+    hub_open: crate::hub_open::HubOpen,
     /// The art lookup under way, if one is (docs/sources.md, "Art"): dropped, it stops.
     art: Option<library::art::Lookup>,
     /// It has been started once the sources were read: a new key starts it again, nothing else does.
@@ -441,6 +443,7 @@ pub fn run(
         toasts_to_post: Some(args.toasts.clone()),
         toasts_said: (0, Seen::Nothing),
         cpu_renderer: false,
+        hub_open: Default::default(),
         toast_posts: args.allow_toast_posts,
         home_took: Duration::ZERO,
         home_done: Instant::now(),
@@ -1428,6 +1431,7 @@ impl ApplicationHandler for App {
         let surface = instance.create_surface(window.clone()).expect("create surface");
         let gpu = gpu::init(instance, Some(&surface));
         self.cpu_renderer = gpu.adapter.get_info().device_type == wgpu::DeviceType::Cpu;
+        self.hub_open.set_processor(self.cpu_renderer);
         // A swap chain Windows refuses is never a panic: said, with what the window was, and tried once more on a
         // new window with nothing of shell mode's on it (topmost dropped for good); a second refusal ends it.
         let mut topmost = self.as_shell.topmost_start_up() && self.dashboard.starting_up();
@@ -1496,6 +1500,7 @@ impl ApplicationHandler for App {
         if self.state.is_none() {
             return;
         }
+        self.hub_open.turn();
         // Settings > System: where shell mode stands, as a thread found it. Under `shell:`, not `settings:`, which is
         // only ever an option set or saved.
         if let Some(shell) = self.as_shell.answer() {
@@ -1538,7 +1543,9 @@ impl ApplicationHandler for App {
         }
         // Toasts are timed by the time the Dashboard is told has passed: told first, so that one posted this turn
         // starts from its start.
+        let began = Instant::now();
         let mut toasts_changed = self.dashboard.advance(told(&mut self.told_time));
+        self.hub_open.spent(began.elapsed());
         // A slow renderer, by the Overlay's test or by its kind: Home gives way to a Toast on one.
         self.dashboard.set_slow_renderer(self.cpu_renderer || self.home_took > SLOW_FRAME);
         // After Home's first frame, and once Home has come to rest or a while has passed, so the Overlay costs
@@ -1689,14 +1696,21 @@ impl ApplicationHandler for App {
             self.overlay_stale = true;
         }
         let pressed = typed || !presses.is_empty() || !events.is_empty();
+        let began = Instant::now();
         for event in events {
+            if let ui::PadEvent::Press(press) = &event {
+                self.hub_open.pressed(*press, began);
+            }
             self.dashboard.pad_event(event);
         }
         // The keyboard's keys, in the order they were pressed. Text goes to a page that takes it; Backspace
         // deletes there, and is B where nothing does.
         for key in keys {
             match key {
-                KeyPress::Button(press) => self.dashboard.press(press),
+                KeyPress::Button(press) => {
+                    self.hub_open.pressed(press, began);
+                    self.dashboard.press(press)
+                }
                 KeyPress::Backspace { repeat } => {
                     if !self.dashboard.typed(Typed::Backspace) {
                         self.dashboard.press(Press { button: Button::B, repeat });
@@ -1708,8 +1722,10 @@ impl ApplicationHandler for App {
             }
         }
         for press in presses {
+            self.hub_open.pressed(press, began);
             self.dashboard.press(press);
         }
+        self.hub_open.spent(began.elapsed());
         // An Achievements page a press opened has its list before its focus is said.
         self.follow_achievement_list();
         // An art picker a press opened asks for its first page at once.
@@ -1730,7 +1746,18 @@ impl ApplicationHandler for App {
         }
         self.stale |= self.dashboard.focus_line() != focus;
         let said = (self.dashboard.focus_line(), self.dashboard.guide_line());
+        let began = Instant::now();
         self.carry_out(event_loop);
+        self.hub_open.spent(began.elapsed());
+        // A Game hub that this turn put up starts being timed (#214).
+        if let Some(state) = &self.state {
+            let px = ui::scale_for((state.config.width, state.config.height));
+            let hub = self
+                .dashboard
+                .game_hub_up()
+                .map(|(serial, game)| (serial, game.name.clone(), screens::game_hub::art_keys(game, px)));
+            self.hub_open.look(hub, &state.host.art, Instant::now());
+        }
         // What was carried out may have changed what the page says (a Group shown or not, from the snapshot after),
         // or the Guide (Discord asked: a Flyout loading, a Shortcut removed).
         if self.log_focus && self.dashboard.focus_line() != said.0 {
@@ -1991,6 +2018,8 @@ impl ApplicationHandler for App {
                     self.dashboard.toasts_presented(told(&mut self.told_time));
                 }
                 self.moving = state.host.animating();
+                let art = &state.host.art;
+                self.hub_open.frame(now, acquired, Instant::now(), state.host.cost, self.moving, art);
                 let (covered, showing) = (self.dashboard.home_covered(), self.dashboard.backdrop_showing());
                 self.backdrop.presented(covered, showing, self.moving, self.dashboard.backdrop_whole(), size);
                 if self.presented.is_none() {

@@ -56,6 +56,11 @@ impl Entry {
         self.find(library).is_some()
     }
 
+    /// The game, as `library` has it.
+    pub fn game<'a>(&self, library: &'a Library) -> Option<&'a Game> {
+        self.find(library).map(|(game, _)| game)
+    }
+
     /// The game, and its place in the library's games, which a hidden game has none in.
     fn find<'a>(&self, library: &'a Library) -> Option<(&'a Game, Option<usize>)> {
         let is = |game: &Game| game.is(&self.game);
@@ -111,6 +116,24 @@ fn facts(game: &Game) -> String {
         source,
     ];
     facts.into_iter().flatten().collect::<Vec<_>>().join(" \u{2022} ")
+}
+
+/// The pictures a hub of `game` shows as it opens, at `px` pixels a design unit, each with what it is in a log:
+/// the art behind the band (`hero`, or `cover, blurred` for want of one) and the cover card's. A hub's opening line
+/// says how each came to be ready (#214).
+pub fn art_keys(game: &Game, px: f32) -> Vec<(&'static str, ui::ArtKey)> {
+    let backdrop =
+        backdrop::art(game).map(|(key, _)| (if game.hero.is_some() { "hero" } else { "cover, blurred" }, key));
+    let cover = cards::cover_key(game, px).map(|key| ("cover", key));
+    backdrop.into_iter().chain(cover).collect()
+}
+
+/// Asks for the pictures a hub of `game` shows as it opens, so that they are read while the double tap's time is
+/// waited out (docs/spec/game-hub.md 9.1) and are there in the hub's first frame (#214).
+pub fn prefetch(ui: &mut Ui, game: &Game) {
+    for (_, key) in art_keys(game, ui.px()) {
+        ui.ask_art(&key);
+    }
 }
 
 /// How far the game has got with its achievements, if it has any: a game in no library database has none.
@@ -304,6 +327,10 @@ impl Page for GameHub {
 
     fn behind(&self) -> Option<u64> {
         Some(self.serial)
+    }
+
+    fn game_hub<'a>(&self, library: &'a Library) -> Option<(u64, &'a Game)> {
+        self.entry.find(library).map(|(game, _)| (self.serial, game))
     }
 }
 

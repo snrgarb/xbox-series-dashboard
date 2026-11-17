@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use image::imageops::FilterType;
 pub use image::RgbaImage;
@@ -72,12 +73,31 @@ struct Entry {
     art: Art,
     bytes: usize,
     used: u64,
+    timing: ArtTiming,
+}
+
+/// How a piece of art came to be ready, for a log that says what a screen waited on (the Game hub's, #214).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArtTiming {
+    /// When it was first asked for.
+    pub asked: Instant,
+    /// How long it waited for a decoding thread.
+    pub queued: Duration,
+    /// How long it took to read, decode and scale on that thread.
+    pub decoded: Duration,
+    /// How long its upload to the GPU took, on the thread that draws.
+    pub uploaded: Duration,
+    /// When it was ready to draw: None while it is still on its way.
+    pub ready: Option<Instant>,
 }
 
 struct Loaded {
     key: ArtKey,
     /// Mip chain, largest first; empty when the file couldn't be decoded.
     mips: Vec<RgbaImage>,
+    /// When a thread took it up, and how long it took there.
+    started: Instant,
+    took: Duration,
 }
 
 #[derive(Default)]
@@ -94,6 +114,8 @@ pub struct ArtCache {
     frame: u64,
     bytes: usize,
     budget: usize,
+    /// Pieces uploaded since [`ArtCache::take_uploads`] was last asked, and the time that took.
+    uploads: (u32, Duration),
 }
 
 impl ArtCache {
@@ -107,7 +129,16 @@ impl ArtCache {
             let (queue, tx, wake) = (queue.clone(), tx.clone(), wake.clone());
             std::thread::spawn(move || work(&queue, &tx, &*wake));
         }
-        Self { entries: HashMap::new(), queue, results, pending: 0, frame: 0, bytes: 0, budget: 384 << 20 }
+        Self {
+            entries: HashMap::new(),
+            queue,
+            results,
+            pending: 0,
+            frame: 0,
+            bytes: 0,
+            budget: 384 << 20,
+            uploads: Default::default(),
+        }
     }
 
     /// The art under `key`, asking for it to be decoded the first time. The newest asked for is decoded first, as
@@ -117,11 +148,34 @@ impl ArtCache {
             entry.used = self.frame;
             return entry.art;
         }
-        self.entries.insert(key.clone(), Entry { art: Art::Loading, bytes: 0, used: self.frame });
+        let timing = ArtTiming {
+            asked: Instant::now(),
+            queued: Duration::ZERO,
+            decoded: Duration::ZERO,
+            uploaded: Duration::ZERO,
+            ready: None,
+        };
+        self.entries.insert(key.clone(), Entry { art: Art::Loading, bytes: 0, used: self.frame, timing });
         self.pending += 1;
         self.queue.jobs.lock().unwrap().0.push_back(key.clone());
         self.queue.wake.notify_one();
         Art::Loading
+    }
+
+    /// How the art under `key` came to be ready, or how long it has been on its way: None if it was never asked
+    /// for, or has been freed since. Asking does not ask for it.
+    pub fn timing(&self, key: &ArtKey) -> Option<ArtTiming> {
+        self.entries.get(key).map(|entry| entry.timing)
+    }
+
+    /// Whether the art under `key` is ready to draw, without asking for it.
+    pub fn is_ready(&self, key: &ArtKey) -> bool {
+        self.entries.get(key).is_some_and(|entry| matches!(entry.art, Art::Ready { .. }))
+    }
+
+    /// How many pieces were uploaded since the last call, and the time that took.
+    pub fn take_uploads(&mut self) -> (u32, Duration) {
+        std::mem::take(&mut self.uploads)
     }
 
     /// How many pieces are still being decoded.
@@ -173,15 +227,24 @@ impl ArtCache {
     fn take(&mut self, gpu: &Gpu, renderer: &mut Renderer, loaded: Loaded) {
         self.pending = self.pending.saturating_sub(1);
         let Some(entry) = self.entries.get_mut(&loaded.key) else { return };
+        entry.timing.queued = loaded.started.saturating_duration_since(entry.timing.asked);
+        entry.timing.decoded = loaded.took;
         let Some(first) = loaded.mips.first() else {
             entry.art = Art::Failed;
+            entry.timing.ready = Some(Instant::now());
             return;
         };
         let (width, height) = first.dimensions();
         entry.bytes = loaded.mips.iter().map(|m| m.as_raw().len()).sum();
         self.bytes += entry.bytes;
+        let began = Instant::now();
         let tex = renderer.add_texture(&gpu.device, &gpu.queue, &loaded.mips);
         entry.art = Art::Ready { tex, width, height };
+        let now = Instant::now();
+        entry.timing.uploaded = now - began;
+        entry.timing.ready = Some(now);
+        self.uploads.0 += 1;
+        self.uploads.1 += now - began;
     }
 }
 
@@ -207,11 +270,12 @@ fn work(queue: &Queue, tx: &Sender<Loaded>, wake: &(dyn Fn() + Send + Sync)) {
                 jobs = queue.wake.wait(jobs).unwrap();
             }
         };
+        let started = Instant::now();
         let mips = decode(&key).unwrap_or_else(|e| {
             eprintln!("art: {}: {e}", key.path.display());
             Vec::new()
         });
-        if tx.send(Loaded { key, mips }).is_err() {
+        if tx.send(Loaded { key, mips, started, took: started.elapsed() }).is_err() {
             return;
         }
         wake();

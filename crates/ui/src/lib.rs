@@ -19,8 +19,8 @@ pub mod snap;
 use std::hash::Hash;
 
 pub use anim::{Ease, Store};
-pub use art::{Art, ArtCache, ArtKey, Kind, Painter};
-pub use host::Host;
+pub use art::{Art, ArtCache, ArtKey, ArtTiming, Kind, Painter};
+pub use host::{FrameCost, Host};
 pub use input::{Battery, Button, PadEvent, PadStatus, Press, Repeat};
 pub use render::{Font, Gradient, HAlign, Rect, TexId};
 use render::{Frame, Layer, Measured, Quad, Rgba, Text, TextKey, TextSys, WHITE};
@@ -376,6 +376,12 @@ impl<'a> Ui<'a> {
         let u0 = (1.0 - u) / 2.0;
         let v0 = if crop == Crop::Top { 0.0 } else { (1.0 - v) / 2.0 };
         self.push(Quad::image(rect, tex, [u0, v0, u0 + u, v0 + v], alpha * self.alpha, radius));
+    }
+
+    /// Asks for a piece of art without drawing it, as a screen does for what it is about to show; true when it is
+    /// ready to draw.
+    pub fn ask_art(&mut self, key: &ArtKey) -> bool {
+        matches!(self.art.get(key), Art::Ready { .. })
     }
 
     /// As `art`, under a black sheet: `light` of the picture's own colour is left, 1 for all of it. The darkening

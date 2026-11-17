@@ -70,6 +70,9 @@ pub struct TextSys {
     families: [Option<String>; 4],
     /// Buffers shaped since the last trim, to drop the ones a frame no longer uses.
     used: std::collections::HashSet<TextKey>,
+    /// Text shaped anew since [`TextSys::take_shaped`] was last asked, and the time it took: what a frame that shows
+    /// new text spends on it (the Game hub's opening line, #214).
+    shaped: (u32, std::time::Duration),
 }
 
 fn load(db: &mut Database, dir: &std::path::Path, files: &[&str]) -> Option<String> {
@@ -120,7 +123,13 @@ impl TextSys {
             buffers: HashMap::new(),
             families,
             used: Default::default(),
+            shaped: Default::default(),
         }
+    }
+
+    /// How many pieces of text were shaped anew since the last call, and the time that took.
+    pub fn take_shaped(&mut self) -> (u32, std::time::Duration) {
+        std::mem::take(&mut self.shaped)
     }
 
     /// Whether this font is here. Off Windows the icon and symbol fonts aren't, and a screen draws something plainer.
@@ -133,6 +142,7 @@ impl TextSys {
             self.used.insert(key.clone());
         }
         if !self.buffers.contains_key(key) {
+            let began = std::time::Instant::now();
             let size = key.size as f32 / 10.0;
             // Segoe UI's line is 1.33 of its size, Bahnschrift's 1.2.
             let line = if key.font == Font::Display { 1.2 } else { 1.33 };
@@ -182,6 +192,8 @@ impl TextSys {
                 }
             };
             self.buffers.insert(key.clone(), buffer);
+            self.shaped.0 += 1;
+            self.shaped.1 += began.elapsed();
         }
         &self.buffers[key]
     }

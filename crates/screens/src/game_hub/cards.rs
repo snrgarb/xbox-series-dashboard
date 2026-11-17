@@ -114,7 +114,7 @@ pub fn rects(cards: &[Card], focus: Option<Card>) -> Vec<Rect> {
 }
 
 /// The game's cover for a card: twice a tile's width, as the card is larger than one.
-fn cover_key(game: &Game, px: f32) -> Option<ArtKey> {
+pub(crate) fn cover_key(game: &Game, px: f32) -> Option<ArtKey> {
     let key = home::cover_art(game, px)?;
     Some(ArtKey { kind: Kind::Thumb(if px > 1.25 { 1200 } else { 600 }), ..key })
 }

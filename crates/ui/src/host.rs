@@ -1,5 +1,7 @@
 //! What a window, or an offscreen target, needs to show screens: the renderer, the art cache and the animated
 //! values, and the one call that declares a frame and draws it.
+use std::time::{Duration, Instant};
+
 use render::gpu::Gpu;
 use render::offscreen::{read_back, wait, FORMAT};
 use render::{Frame, Renderer};
@@ -10,6 +12,50 @@ pub struct Host {
     pub renderer: Renderer,
     pub art: ArtCache,
     pub store: Store,
+    /// What the last frame drawn spent its time on.
+    pub cost: FrameCost,
+}
+
+/// What a frame spent its time on, on the thread that draws, for a log that says why a frame was slow (the Game
+/// hub's opening line, #214). Kept for every frame: a few clock readings.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FrameCost {
+    /// Art decoded on the decoding threads, uploaded to the GPU: how many pieces, and the time.
+    pub uploads: u32,
+    pub upload: Duration,
+    /// The screens declaring the frame (text measured in it included).
+    pub declare: Duration,
+    /// Pictures of the screen taken (`Ui::snapshot`): how many, and the time, drawing what they show included.
+    pub snapshots: u32,
+    pub snapshot: Duration,
+    /// The frame drawn and submitted, text laid out included.
+    pub render: Duration,
+    /// Text shaped anew anywhere in the frame: how many pieces, and the time.
+    pub shaped: u32,
+    pub shaping: Duration,
+    /// Text laid out for the GPU, glyphs not drawn before rasterised, new text shaped there.
+    pub glyphs: Duration,
+}
+
+impl FrameCost {
+    /// The parts that took any time, in a few words: `declare 2.1 ms, snapshot 1 in 4.0 ms, render 1.2 ms`.
+    pub fn describe(&self) -> String {
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+        let mut parts = Vec::new();
+        if self.uploads > 0 {
+            parts.push(format!("{} art uploaded in {:.1} ms", self.uploads, ms(self.upload)));
+        }
+        parts.push(format!("declare {:.1} ms", ms(self.declare)));
+        if self.snapshots > 0 {
+            parts.push(format!("picture of the screen behind {:.1} ms", ms(self.snapshot)));
+        }
+        parts.push(format!("render {:.1} ms", ms(self.render)));
+        if self.shaped > 0 {
+            parts.push(format!("text: {} shaped in {:.1} ms", self.shaped, ms(self.shaping)));
+        }
+        parts.push(format!("glyphs {:.1} ms", ms(self.glyphs)));
+        parts.join(", ")
+    }
 }
 
 impl Host {
@@ -19,6 +65,7 @@ impl Host {
             renderer: Renderer::new(&gpu.device, &gpu.queue, format),
             art: ArtCache::new(wake),
             store: Store::default(),
+            cost: FrameCost::default(),
         }
     }
 
@@ -49,25 +96,38 @@ impl Host {
         declare: impl FnOnce(&mut Ui),
     ) -> wgpu::SubmissionIndex {
         let (whole, top) = part;
+        let mut cost = FrameCost::default();
         self.art.pump(gpu, &mut self.renderer);
+        (cost.uploads, cost.upload) = self.art.take_uploads();
         // A place for a picture the frame may ask to have taken (`Ui::snapshot`), ready before it is declared.
         if self.store.snaps.wants_spare() {
             self.store.snaps.set_spare(self.renderer.reserve_texture(&gpu.device, &gpu.queue));
         }
         self.store.begin(dt);
         let mut frame = Frame::default();
+        let began = Instant::now();
         declare(&mut Ui::part(&mut frame, &mut self.renderer.text, &mut self.store, &mut self.art, whole, top));
         self.store.end();
+        cost.declare = began.elapsed();
         // The pictures it asked for are taken before it is drawn, so it shows them in this very frame; those it no
         // longer asks for are let go.
+        let began = Instant::now();
         for job in self.store.snaps.take_jobs() {
             let (device, queue) = (&gpu.device, &gpu.queue);
             self.renderer.snapshot(device, queue, job.tex, &job.frame, job.output, job.shrink, job.blur);
+            cost.snapshots += 1;
         }
+        cost.snapshot = if cost.snapshots > 0 { began.elapsed() } else { Duration::ZERO };
         for tex in self.store.snaps.take_dropped() {
             self.renderer.remove_texture(tex);
         }
-        self.renderer.render(&gpu.device, &gpu.queue, target, output, &frame, clear)
+        let began = Instant::now();
+        let index = self.renderer.render(&gpu.device, &gpu.queue, target, output, &frame, clear);
+        cost.render = began.elapsed();
+        (cost.shaped, cost.shaping) = self.renderer.text.take_shaped();
+        cost.glyphs = self.renderer.take_glyph_time();
+        self.cost = cost;
+        index
     }
 
     /// Runs `body` with `store` in the place of the Host's own animated values: a frame for a second window. The

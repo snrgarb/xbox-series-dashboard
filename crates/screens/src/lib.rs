@@ -1438,6 +1438,12 @@ impl Dashboard {
 
     /// `--log-focus`'s line, which tests on the VM judge by: where focus is (`Recent(2)`, `Settings: Rail`), and
     /// after it what the page says of its state beyond focus, if it says any (`TextEntry: A; "Ha|" lower letters`).
+    /// The Game hub on top, if one is: its number, new each time a hub opens, and its game. The shell times a
+    /// hub's opening by it (#214).
+    pub fn game_hub_up(&self) -> Option<(u64, &model::Game)> {
+        self.pages.top()?.game_hub(&self.library)
+    }
+
     pub fn focus_line(&self) -> String {
         let place = self.focus_place();
         if self.startup.is_some() {
@@ -2054,6 +2060,10 @@ impl Dashboard {
         self.home.set_in_front(!self.guide.is_open() && !self.pages.hides_home() && !self.home_gives_way());
         if !self.pages.hides_home() {
             self.home.draw(ui, &self.library, &status);
+            // The hub a tile's A may open in the double tap's time has its pictures read meanwhile (#214).
+            if let Some(game) = self.home.chosen().and_then(|entry| entry.game(&self.library)) {
+                game_hub::prefetch(ui, game);
+            }
         }
         let around = pages::Around {
             library: &self.library,
