@@ -264,7 +264,11 @@ try {
     $squares = Get-StandInLines 'serve-art: /grids/game/.*dimensions=1024x1024,512x512.* \(the key\)$' $standinMark
     Say "SteamGridDB was asked for $($squares.Count) squares during the refresh"
     if (-not $squares.Count) { $failures += 'the refresh should have asked SteamGridDB for squares again' }
+    Wait-Greeting | Out-Null
     if ((Get-Foreground).Title -ne $dashboardTitle) { Say "note: put in front: $(Set-Foreground $dashboardTitle)" }
+    # A new start's log has no focus line yet: Home starts on the top bar's profile, which it does not log, and Up
+    # from there moves nothing. Down to the Recent row says where focus is, as at the first start.
+    if (-not (Focus-Now)) { Press Down 'Recent\(\d+\)' | Out-Null }
     Open-Art
     Press Down 'Settings: Art: Clear downloaded art; refreshed: \d+ pictures' | Out-Null
     Press Right 'Settings: Art: Refresh all art and details; refreshed: \d+ pictures' '6-refreshed' | Out-Null
