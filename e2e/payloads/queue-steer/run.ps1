@@ -12,9 +12,9 @@
 # What it walks:
 # - Install from a game's Tile menu (`queue: <name> joined, asked for`, then `queued`), its download moved to 25%
 #   by `standin steam-install`.
-# - Manage Queue from Home's Downloads tile, Down to the download's row (`Installing... 25.0%`), View on it: the
-#   queued game's menu, Install first and focus on it, then Pause installation (`focus: TileMenu: Menu(Pause
-#   installation) of <name>`) and Cancel installation.
+# - Manage Queue from Home's Downloads tile, Down to the download's row (`Installing... 25.0%`), View on it (`Back`
+#   on the virtual Xbox 360 pad, as Menu is `Start`): the queued game's menu, Install first and focus on it, then
+#   Pause installation (`focus: TileMenu: Menu(Pause installation) of <name>`) and Cancel installation.
 # - Pause: the menu closes on the row, Steam's installer asks the stand-in (`store: asking Steam to pause <name>:
 #   standin_pause <appid>`, the stand-in's `steam: asked to pause <appid>`), the Queue sees it paused (`queue: <name>
 #   paused, 25% of 100 bytes`) and the row reads Paused 25.0%.
@@ -162,7 +162,7 @@ try {
     Walk Down "$row; Installing\.\.\. 25\.0%" 2
 
     # --- The queued game's menu: Install first, then Pause installation and Cancel installation.
-    Press View "TileMenu: Menu\(Install\) of $name" | Out-Null
+    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
     Press Down "TileMenu: Menu\(Pause installation\) of $name" '01-menu-pause' | Out-Null
     Press Down "TileMenu: Menu\(Cancel installation\) of $name" | Out-Null
     Press Up "TileMenu: Menu\(Pause installation\) of $name" | Out-Null
@@ -180,7 +180,7 @@ try {
     Save-Screen '02-row-paused'
 
     # --- Resume, from the same menu.
-    Press View "TileMenu: Menu\(Install\) of $name" | Out-Null
+    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
     Press Down "TileMenu: Menu\(Resume installation\) of $name" '03-menu-resume' | Out-Null
     $mark = Get-DashboardLogLength
     $steamMark = Steam-LogLength
@@ -194,7 +194,7 @@ try {
     Expect-Logged "^focus: $row; Installing\.\.\. 60\.0%$" $mark 'Resumed, the bytes move on' | Out-Null
 
     # --- Cancel: its question, Keep installing first, then yes.
-    Press View "TileMenu: Menu\(Install\) of $name" | Out-Null
+    Press Back "TileMenu: Menu\(Install\) of $name" | Out-Null
     Walk Down "TileMenu: Menu\(Cancel installation\) of $name" 3
     Press A "TileMenu: Prompt\(Cancel installation\) of $name" '04-cancel-question' | Out-Null
     Press Down "TileMenu: Prompt\(Keep installing\) of $name" | Out-Null
