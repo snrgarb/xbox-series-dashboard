@@ -292,9 +292,21 @@ is under that folder (and the launcher and the payload's PowerShell), deletes th
 (`--keep` leaves the folder to look at). If a run is killed before it could clean up, the next refuses to start while
 the task is there: `ssh htpc-win schtasks /delete /tn XsdE2E /f`.
 
-**It does not start while the TV is in use** (exit 3, `refused.txt` saying why): when a full-screen window that is not
-the desktop's is in front (a game, a film, the lock screen), or the Dashboard or Playnite is running. The check runs on
-the TV's desktop, in the launcher.
+**It does not start while the TV is in use** (exit 3, `refused.txt` saying why): when a game Steam started is running,
+a full-screen window that is neither the desktop's nor the live Dashboard's is in front (a game, a film, the lock
+screen), the live Dashboard is in front of another program's full-screen window (its Guide over a game), the installed
+Dashboard runs but not as the shell, or another Dashboard or Playnite is running. The check runs on the TV's desktop,
+in the launcher, and `launcher.txt` logs each thing it looked at.
+
+**The live Dashboard as the shell is not the TV in use** (`e2e/htpc/shell.ps1`). The live shell is only what runs from
+the installed copy, `%LOCALAPPDATA%\Programs\XboxSeriesDashboard\dashboard.exe` (the watchdog `--shell` and its
+`--from-shell` Dashboard), judged by the program's path, so a payload's own Dashboard is never taken for it. With
+nothing else going on the launcher stops it, the watchdog first so it starts nothing again, and writes
+`shell-stopped.txt` in the test's folder; after the payload, whatever it did, it starts `dashboard.exe --shell` again in
+the signed-in session through a one-off task `XsdE2EShell` (deleted once the watchdog is seen running), and removes the
+file. If the launcher was ended first (a timeout, a run stopped from Linux), `cleanup.ps1` finds the file and starts
+the shell the same way; its lines (`shell: ...`) are in the runner's output. The Dashboard comes back through Start-up,
+as at sign-in.
 
 What safe mode never does:
 
