@@ -666,6 +666,7 @@ impl Dashboard {
         self.options = options;
         self.home.set_background_delay(options.background_delay);
         self.home.set_play_history(options.show_play_history, &self.library);
+        self.home.set_recent_launcher(options.show_recent_launcher);
     }
 
     /// Settings turned an option over: it is in force at once, and whoever keeps the settings is asked to save it.

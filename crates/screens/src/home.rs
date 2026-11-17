@@ -96,6 +96,8 @@ pub struct Home {
     last_wide: usize,
     /// Settings' Show Play history: whether the Recent row ends with the Play history tile.
     play_history: bool,
+    /// Settings' Show launcher icons: whether the Recent row's tiles carry their launcher's mark.
+    recent_launcher: bool,
     background: Background,
 }
 
@@ -108,6 +110,7 @@ impl Default for Home {
             left_recent: None,
             last_wide: 0,
             play_history: true,
+            recent_launcher: true,
             background: Background::default(),
         }
     }
@@ -133,6 +136,12 @@ impl Home {
             self.last_game = self.last_game_tile(&row);
             self.left_recent = self.left_recent.filter(|&tile| tile < row.tiles());
         }
+    }
+
+    /// Settings' Show launcher icons: on, as it starts, each Recent tile carries its launcher's mark at
+    /// its foot; off, none does. From the next frame.
+    pub fn set_recent_launcher(&mut self, on: bool) {
+        self.recent_launcher = on;
     }
 
     /// How many games the Recent row holds at most.
@@ -342,7 +351,7 @@ impl Home {
         ui.with_offset(0.0, -page, |ui| {
             if rows > 0.0 {
                 ui.with_alpha(rows, |ui| {
-                    recent::draw(ui, &row, &library.queue, on_recent);
+                    recent::draw(ui, &row, &library.queue, on_recent, self.recent_launcher);
                     let score = library.achievements.totals.map(|totals| totals.score);
                     wide::draw(ui, on_wide, library.queue.len(), score);
                 });

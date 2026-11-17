@@ -758,7 +758,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 | **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers, Set up this PC ([set-up.md](set-up.md), #178) | sections |
 | **System** | System (0, 0), About (1, 0) | rows |
 
-- **Personalisation** keeps its four checkbox boxes, a row each: Background delay (y 210), Reduce motion (359), Show Play history (508), Show battery percentages (657). Its boxes that opened pages went to their categories: Boot video to General, Profiles and Who's playing today? to Account, Groups to Games & apps.
+- **Personalisation** keeps its four checkbox boxes, a row each, and has a fifth of the port's own (#248): Background delay (y 210), Reduce motion (359), Show Play history (508), **Show launcher icons** (657), Show battery percentages (806). The new one is beside Show Play history, the other that changes the Recent row; its name says the user's word for the mark ("the game launcher icon"), "Show launcher on recent games" being cut short in the box, and its info says where: "Marks each of Home's recent games with the launcher it comes from, at the tile's foot. Turn it off to show the covers alone." Five rows fit the screen with every info text (the last, 806 + 8 + 172.9, ends at 987), so the pane does not scroll (16.2). Its boxes that opened pages went to their categories: Boot video to General, Profiles and Who's playing today? to Account, Groups to Games & apps.
 - **Choices #194 made where the ticket did not say**: Games & apps (the box, games added by hand and Apps: apps.md 4) in Library, under Launchers, the ticket's "Recently added" being taken for it; Helpers under Storage in Installs, being what some stores install through; the System box (shell mode, the ticket's "Start-up as the shell") and About (with Updates, updates.md 2) in System. The sections are Library (where games come from, how Home groups them and their art) and Installs (where installs go and what installs them).
 - **The focus log**: `Settings: Rail: General` (`Account`, `Games & apps`, `System`); on a category's boxes `Settings: General: Idle`, `Settings: Games & apps: Storage`; a page's lines are as they were (`Settings: Idle: Dim after`). The Games & apps box on its category reads `Settings: Games & apps: Games & apps`; its page's lines start `Settings: GamesAndApps:`, so they are never taken for the category's.
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
@@ -771,7 +771,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 
 ### 16.2 A pane that would run off the screen scrolls
 
-Open question 1. A pane of boxes in rows scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. Personalisation, four rows since #194, fits the screen with every info text; the test pane of seven rows (`a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box`) scrolls. A pane in sections does not scroll: its columns are four boxes at most.
+Open question 1. A pane of boxes in rows scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. Personalisation, four rows since #194 and five since #248, fits the screen with every info text; the test pane of seven rows (`a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box`) scrolls. A pane in sections does not scroll: its columns are four boxes at most.
 
 The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (x 520), which its picture 29 of Theme settings has not: a clipping accident of that pane's grid, not copied.
 
@@ -798,6 +798,7 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Background delay | `home.background_delay` | on |
 | Reduce motion | `motion.reduce` | off |
 | Show Play history | `home.play_history` | on |
+| Show launcher icons (#248) | `home.recent_launcher` | on |
 | Show battery percentages | `status.battery_percent` | on |
 | Use the Guide | `guide.enabled` | on |
 | Download art online (16.8) | `art.online` | on |
@@ -821,6 +822,7 @@ Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too
 | Background delay | Home's background waits 1.5 s or 150 ms on a Recent tile, from the next move of focus |
 | Reduce motion | `ui`'s rule (docs/ui.md): what slides is in place, fades stay, the swirl holds still. From the next frame, in Home's window and on the Overlay |
 | Show Play history | The Recent row is seven games and the Play history tile, or eight games, made again at once. Focus that was on the tile is on the game in its place, and the other way about. A library with no game keeps the tile, so the row is never empty |
+| Show launcher icons | The launcher's mark at the foot of each of the Recent row's tiles (home.md, 3.3.1), from the next frame. Off, none of them carries it; the Groups' cards, My games & apps, the Guide and Manage Queue keep theirs |
 | Show battery percentages | The figure beside the pad's battery and the PC's, on Home's top bar and in the Guide's Status area. Home's top bar draws a wireless pad's battery for it (home.md, 2.4): the cell, and the figure left of it |
 | Use the Guide | As 6.8: the Guide button and a hold of it do nothing, nor Home's profile and Achievements tile, and the Discord tile opens Settings. A Guide that is open stays open until it is closed |
 
@@ -828,7 +830,7 @@ Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too
 
 The Dashboard's one rule for every screen (docs/ui.md, "Sounds") holds here: focus landing on another control is the move sound, a level up or down included, as Playnite's navigation sound is in the Bundle; A that turns a checkbox over is the activation sound, where the Bundle's is unverified (open question 11); B out of Settings is silent.
 
-`--log-focus` says `focus: Settings: ` and then the rail (`Rail: General`) or the pane and its control (`General: Guide`, `Personalisation: Reduce motion`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3), a Profile's page the Profile and the Picture page `worn` (profiles.md 5).
+`--log-focus` says `focus: Settings: ` and then the rail (`Rail: General`) or the pane and its control (`General: Guide`, `Personalisation: Reduce motion`, `Personalisation: Show launcher icons`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3), a Profile's page the Profile and the Picture page `worn` (profiles.md 5).
 
 The Groups page's menu is a dialog the page shows over itself: while it is up `Page::dialog` says so, it has a dialog's sounds and the Guide puts it away (filters.md 6.2).
 

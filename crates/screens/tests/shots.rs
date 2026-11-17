@@ -285,6 +285,35 @@ fn home() {
     Stage::on_row(screens::fake_library(), HD).check("home");
 }
 
+/// Settings' Show launcher icons off (#248): the Recent row's tiles carry no launcher's mark at their foot;
+/// the Groups' cards keep theirs.
+#[test]
+fn home_recent_row_without_launcher_marks() {
+    // White in the second tile's mark, the first having focus: 10 in from its left and foot, 20 across.
+    let s = 1700.0 / 1526.0;
+    let (left, foot) = (105.0 + (245.0 + 30.0) * s + 10.0 * s, 533.0 + 245.0 * s - 10.0 * s);
+    let white = |image: &image::RgbaImage| {
+        let mark = image::imageops::crop_imm(
+            image,
+            left as u32,
+            (foot - 20.0 * s) as u32,
+            (20.0 * s) as u32,
+            (20.0 * s) as u32,
+        );
+        mark.to_image().pixels().filter(|pixel| pixel.0[..3].iter().all(|&channel| channel > 220)).count()
+    };
+    let mut stage = Stage::on_row(screens::fake_library(), HD);
+    let with = white(&stage.still());
+    stage.dashboard.set_options(screens::Options { show_recent_launcher: false, ..Default::default() });
+    let image = stage.still();
+    assert!(
+        with > 40 && white(&image) == 0,
+        "the mark went with the setting: {with} with it, {} without",
+        white(&image)
+    );
+    compare("home-recent-no-launcher", &image);
+}
+
 #[test]
 fn home_with_art() {
     let mut stage = Stage::on_row(library_with_art(), HD);

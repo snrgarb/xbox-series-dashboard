@@ -186,13 +186,14 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
 
     // Personalisation: a checkbox box a row.
     press(&mut dashboard, &[Up, Up, Up, Right, A]);
-    let boxes = ["Background delay", "Reduce motion", "Show Play history", "Show battery percentages"];
+    let boxes =
+        ["Background delay", "Reduce motion", "Show Play history", "Show launcher icons", "Show battery percentages"];
     for name in boxes {
         assert_eq!(dashboard.focus_line(), format!("Settings: Personalisation: {name}"));
         press(&mut dashboard, &[Right, Down]);
     }
     assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Show battery percentages", "the foot stops");
-    press(&mut dashboard, &[Up; 4]);
+    press(&mut dashboard, &[Up; 5]);
     assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Background delay", "the top stops");
     // Left steps back to General's boxes, focus on the box that opened the page.
     press(&mut dashboard, &[Left]);
@@ -351,6 +352,22 @@ fn show_play_history_off_gives_the_recent_row_a_game_in_the_tiles_place() {
     assert_eq!(dashboard.focus_line(), "MyGames: PlayHistory: Row(0)");
 }
 
+/// Show launcher icons (#248): on as it starts; turned over in place, saved, and read back on the next
+/// start. What it hides is `home_recent_row_without_launcher_marks`' picture.
+#[test]
+fn show_launcher_icons_is_turned_off_saved_and_read_back() {
+    let database = database();
+    let mut dashboard = personalisation(&database, 3);
+    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Show launcher icons");
+    assert!(dashboard.options().show_recent_launcher, "on until it is turned off");
+    press(&mut dashboard, &[A]);
+    assert!(!dashboard.options().show_recent_launcher);
+    assert_eq!(dashboard.focus_line(), "Settings: Personalisation: Show launcher icons", "focus stays");
+    assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::ShowRecentLauncher, on: false }]);
+    assert_eq!(database.setting("home.recent_launcher").unwrap().as_deref(), Some("false"));
+    assert!(!start(&database).options().show_recent_launcher, "kept across a restart");
+}
+
 #[test]
 fn use_the_guide_off_leaves_the_guide_button_and_homes_profile_alone() {
     let database = database();
@@ -430,15 +447,16 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
 
     // Every checkbox on Personalisation turned over, and Use the Guide.
     dashboard.open_page(Open::Settings(Entry::Tile));
-    press(&mut dashboard, &[A, A, Down, A, Down, A, Down, A, B, Down, A, A]);
+    press(&mut dashboard, &[A, A, Down, A, Down, A, Down, A, Down, A, B, Down, A, A]);
     // And Idle's Dim after, from 2 min to 10 min, which raises Show things after to 10 min with it.
     press(&mut dashboard, &[B, Up, Right, A, A, Down, Down, A]);
-    assert_eq!(save(&mut dashboard, &database).len(), 5);
+    assert_eq!(save(&mut dashboard, &database).len(), 6);
     let ten = Some(std::time::Duration::from_secs(600));
     let left = Options {
         background_delay: false,
         reduce_motion: true,
         show_play_history: false,
+        show_recent_launcher: false,
         show_battery_percent: false,
         use_guide: false,
         art_online: true,
@@ -984,7 +1002,7 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
     let with = white(&home);
 
     stage.dashboard.open_page(Open::Settings(Entry::Tile));
-    stage.press(&[A, Down, Down, Down, A, B, B, B]);
+    stage.press(&[A, Down, Down, Down, Down, A, B, B, B]);
     assert!(!stage.dashboard.options().show_battery_percent && stage.dashboard.page().is_none());
     let without = white(&stage.still());
     assert!(without > 100, "the battery's cell is still there: {without}");
