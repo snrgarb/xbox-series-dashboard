@@ -34,12 +34,19 @@ const BAR: f32 = 6.0;
 const QUEUE_LINE: f32 = 40.0;
 const QUEUE_FOOT: f32 = 10.0;
 /// The nav's foot: its left edge, and its bottom 66 off the screen's. The current download's block is 301 wide
-/// with 34 under it, where the storage ring would be; its lines 2 apart.
+/// with 34 under it, over the storage ring where there is one; its lines 2 apart.
 const FOOT_LEFT: f32 = 75.0;
 const FOOT_BOTTOM: f32 = 66.0;
 const BLOCK_WIDTH: f32 = 301.0;
 const BLOCK_UNDER: f32 = 34.0;
 const BLOCK_GAP: f32 = 2.0;
+/// The storage ring (docs/spec/my-games.md, 2.6): its texts in a column 206 wide, 3 apart; the ring 95 across
+/// right of them, its stroke 4, the track `#FF262626` and the used arc the accent.
+const RING_TEXT: f32 = 206.0;
+const RING: f32 = 95.0;
+const RING_STROKE: f32 = 4.0;
+const RING_TRACK: Color = Color::rgb(0x262626);
+const RING_LINES_GAP: f32 = 3.0;
 
 /// A nav item, and so what the page shows beside the nav.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -179,6 +186,8 @@ pub struct Face<'a> {
     /// The current download, at the nav's foot, while the Queue's first is downloading: its name, and what its
     /// row on Manage Queue says.
     pub download: Option<(&'a str, Figures)>,
+    /// The drive the storage ring shows, under the download's block: none, and there is no ring.
+    pub ring: Option<&'a model::Drive>,
 }
 
 /// Draws the nav and the divider beside it. On a screen wider than the canvas the items' fills and the nav's
@@ -220,13 +229,37 @@ pub fn draw(ui: &mut Ui, face: &Face) {
         ui.label_middle(LABEL, middle, "Queue", &TEXT_DIM);
         ui.label_right(COUNT_RIGHT, middle, &face.queued.to_string(), &TEXT_DIM);
     }
-    foot(ui, face.download.as_ref());
+    let ring = face.ring.filter(|drive| drive.used().is_some());
+    if let Some(drive) = ring {
+        storage_ring(ui, drive);
+    }
+    foot(ui, face.download.as_ref(), if ring.is_some() { RING } else { 0.0 });
 }
 
-/// The nav's foot, bottom left (x 75, its bottom 66 off the screen's): the current download's block, over where
-/// the storage ring goes (docs/spec/my-games.md, 2.6). **The storage ring's hook:** it needs the drives' free space,
-/// which nothing reads (open question 9), and is not drawn; the block keeps the 34 above it all the same.
-fn foot(ui: &mut Ui, download: Option<&(&str, Figures)>) {
+/// The storage ring, at the nav's foot (docs/spec/my-games.md, 2.6): "All storage" and the drive's free space, and
+/// the ring of how much of it is used, from 12 o'clock clockwise, the share inside it.
+fn storage_ring(ui: &mut Ui, drive: &model::Drive) {
+    let used = drive.used().unwrap_or(0.0);
+    let bottom = ui.screen().bottom() - FOOT_BOTTOM;
+    let ring = Rect::new(FOOT_LEFT + RING_TEXT, bottom - RING, RING, RING);
+    ui.ring(ring, RING_TRACK, RING / 2.0, RING_STROKE);
+    if used > 0.0 {
+        let to = (used as f32 * 360.0).min(360.0);
+        ui.arc_square(ring, 0.0, to, RING_STROKE, ACCENT);
+    }
+    let (cx, cy) = ring.center();
+    ui.label_centered(cx, cy, &model::storage::percent(used), &TEXT);
+    // The two lines, centred together against the ring.
+    let height = 2.0 * TEXT_LINE + RING_LINES_GAP;
+    let top = cy - height / 2.0;
+    let line = |at: f32| Rect::new(FOOT_LEFT, top + at * (TEXT_LINE + RING_LINES_GAP), RING_TEXT, TEXT_LINE);
+    ui.paragraph(line(0.0), "All storage", &TEXT, HAlign::Left, VAlign::Top, 1);
+    ui.paragraph(line(1.0), &drive.free_text(), &TEXT, HAlign::Left, VAlign::Top, 1);
+}
+
+/// The nav's foot, bottom left (x 75, its bottom 66 off the screen's): the current download's block, 34 over the
+/// storage ring (`ring`, its height: 0 with no ring).
+fn foot(ui: &mut Ui, download: Option<&(&str, Figures)>, ring: f32) {
     let Some((name, figures)) = download else { return };
     // Its name; its state with the speed at the right; then how much is down of the whole and the share, a line
     // that is not there while the client does not know the whole.
@@ -236,7 +269,7 @@ fn foot(ui: &mut Ui, download: Option<&(&str, Figures)>) {
     });
     let lines = if amount.is_some() { 3.0 } else { 2.0 };
     let height = lines * TEXT_LINE + (lines - 1.0) * BLOCK_GAP;
-    let top = ui.screen().bottom() - FOOT_BOTTOM - BLOCK_UNDER - height;
+    let top = ui.screen().bottom() - FOOT_BOTTOM - ring - BLOCK_UNDER - height;
     let line = |at: f32| Rect::new(FOOT_LEFT, top + at * (TEXT_LINE + BLOCK_GAP), BLOCK_WIDTH, TEXT_LINE);
     ui.paragraph(line(0.0), name, &TEXT, HAlign::Left, VAlign::Top, 1);
     let state = line(1.0);

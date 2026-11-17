@@ -116,8 +116,8 @@ hub's Queue action, B back to the hub on Queue; the Guide button during a Queued
    changes the row's share logs a new line without a press.
 5. **A on a game** is Home's tile's, the hub after the double tap's 300 ms; a row's game, not installed, has its hub
    on Installing or Queued.
-6. **Not drawn yet:** the storage ring under the foot's block (no drive space is read), the Queued Toast, and the
-   Guide button's way in during it (Toasts for the Queue are not built).
+6. **Not drawn yet:** the Queued Toast, and the Guide button's way in during it (Toasts for the Queue are not
+   built). The storage ring under the foot's block is drawn since #179 (storage.md, section 6).
 7. **Home redraws** for a Queue change only when what it shows changed (order, state, finished games), not for bytes
    alone; with a page up every change is drawn.
 
@@ -151,9 +151,10 @@ manner as remembered, the wording guessed where marked.
    over its CEF debugger ...`, a line a call, then `steam client: pause <appid>: Steam's client took it` or `not
    taken: <why>` (docs/sources.md, "Steam's own calls"); `store: Steam can't pause <game>'s install from here` where
    it cannot; then the Queue's own `queue: <game> paused, 50% of 100 bytes`.
-6. **Which folder.** An install goes to its store's default folder (`Installer::folders`, `default_folder`): the
-   question where there is more than one is Settings > Storage's, #179. Steam's default is the library Steam itself
-   marks default, asked of its client at the install.
+6. **Which folder.** Where the game's store has more than one folder and can be told which, Install asks "Where do
+   you want to install X?", focus on the default Settings > Storage gives (storage.md, section 5; #179); else the
+   install goes to that default. Steam's own default is the library Steam itself marks default, asked of its client
+   at the install.
 
 ## 9. Workshop content (decided in #188)
 

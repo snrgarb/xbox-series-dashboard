@@ -8,17 +8,22 @@ use std::sync::Arc;
 use model::{Library, Source};
 use shell::store::{self, Addresses, Ask};
 
-/// Asks the store of the game with this id, hidden or not, to install or uninstall it. A game that is in no
-/// database (id 0) or no longer in the library is said so and nothing is asked. Whether the store was asked.
+/// Asks the store of the game with this id, hidden or not, to install (into `folder`, where one was chosen) or
+/// uninstall it. A game that is in no database (id 0) or no longer in the library is said so and nothing is asked.
+/// Whether the store was asked.
 pub fn ask_store(
     library: &Library,
     sources: &[Arc<dyn Source>],
     game: i64,
     ask: Ask,
+    folder: Option<&std::path::Path>,
     addresses: &mut dyn Addresses,
 ) -> bool {
     match library.game(game).filter(|_| game != 0) {
-        Some(game) => store::ask(game, crate::sources::of(sources, game).map(|source| &**source), ask, addresses),
+        Some(game) => {
+            let source = crate::sources::of(sources, game).map(|source| &**source);
+            store::ask(game, source, ask, folder, addresses)
+        }
         None => {
             eprintln!("store: no game {game} in the library: nothing asked");
             false
@@ -85,8 +90,8 @@ mod tests {
     #[test]
     fn install_and_uninstall_open_steams_address_for_the_game() {
         let mut addresses = Recorded::default();
-        ask_store(&library(), &sources(), 3, Ask::Install, &mut addresses);
-        ask_store(&library(), &sources(), 1, Ask::Uninstall, &mut addresses);
+        ask_store(&library(), &sources(), 3, Ask::Install, None, &mut addresses);
+        ask_store(&library(), &sources(), 1, Ask::Uninstall, None, &mut addresses);
         assert_eq!(addresses.opened, ["steam://install/9100040", "steam://uninstall/9100010"]);
     }
 
@@ -135,18 +140,18 @@ mod tests {
         let mut addresses = Recorded::default();
         // No such game; a game in no database, which id 0 must never find; a game from no store; one from a store
         // the Dashboard does not have.
-        ask_store(&library(), &sources(), 9, Ask::Uninstall, &mut addresses);
+        ask_store(&library(), &sources(), 9, Ask::Uninstall, None, &mut addresses);
         let unsaved = Library {
             games: vec![Game { source_id: "5".into(), source: "steam".into(), ..Game::default() }],
             ..library()
         };
-        ask_store(&unsaved, &sources(), 0, Ask::Uninstall, &mut addresses);
-        ask_store(&library(), &sources(), 2, Ask::Install, &mut addresses);
+        ask_store(&unsaved, &sources(), 0, Ask::Uninstall, None, &mut addresses);
+        ask_store(&library(), &sources(), 2, Ask::Install, None, &mut addresses);
         let elsewhere = Library {
             games: vec![Game { id: 4, source_id: "5".into(), source: "nowhere".into(), ..Game::default() }],
             ..library()
         };
-        ask_store(&elsewhere, &sources(), 4, Ask::Install, &mut addresses);
+        ask_store(&elsewhere, &sources(), 4, Ask::Install, None, &mut addresses);
         assert!(addresses.opened.is_empty(), "{:?}", addresses.opened);
     }
 }

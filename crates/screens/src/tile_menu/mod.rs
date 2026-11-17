@@ -67,11 +67,16 @@ fn game_hub(game: &Game) -> Option<Open> {
 }
 
 /// Install, as the menu's row and the Game hub's main action both answer it: what asked closes, and the game's
-/// store is asked for it (it then joins the Queue, `library::queue`). A game that is installed by now, already in
-/// the Queue, or in no library database asks nothing, and what asked closes all the same.
+/// store is asked for it (it then joins the Queue, `library::queue`). Where its store has more than one folder and
+/// can be told which (`Library::storage`), "Where do you want to install X?" takes the place of what asked first
+/// (`install_where`). A game that is installed by now, already in the Queue, or in no library database asks
+/// nothing, and what asked closes all the same.
 pub fn install(game: &Game, library: &Library) -> PageAction {
     match game {
         game if !game.installed && game.id != 0 && library.queue.get(game.id).is_none() => {
+            if crate::install_where::asks(game, library).is_some() {
+                return crate::install_where::open(game);
+            }
             PageAction::CloseWith(Effect::Install(game.id))
         }
         _ => PageAction::Close,

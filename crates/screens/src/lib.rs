@@ -14,6 +14,7 @@ pub mod guide;
 pub mod hint_bar;
 pub mod home;
 pub mod idle;
+pub mod install_where;
 pub mod keyboard;
 pub mod launch;
 pub mod manage_queue;
@@ -98,6 +99,9 @@ pub enum Effect {
     Hidden { game: i64, on: bool },
     /// Ask its store to install the game with this id in the library database: the store's own window does it.
     Install(i64),
+    /// Ask its store to install the game with this id into this folder, one of its store's (`Library::storage`):
+    /// the answer to "Where do you want to install X?" (docs/spec/storage.md).
+    InstallTo { game: i64, folder: std::path::PathBuf },
     /// Ask its store to uninstall the game with this id. The player has said yes to "Uninstall X?".
     Uninstall(i64),
     /// Ask its store to pause, resume or cancel the install under way of the game with this id: a queued game's
@@ -126,6 +130,12 @@ pub enum Effect {
     /// Settings > Launchers switched the launcher with this key (`Game::source`) on or off (docs/spec/launchers.md).
     /// A new snapshot follows, in which its games are back, or in no list at all.
     Launcher { key: String, on: bool },
+    /// Settings > Storage chose the folder a store's installs go to unless the user says otherwise (the store by its
+    /// key, `Game::source`). A new snapshot follows with it as the store's default (`Library::storage`).
+    DefaultFolder { store: String, folder: std::path::PathBuf },
+    /// Read the drives and the stores' install folders again, off the UI thread: Settings > Storage has opened. A
+    /// new snapshot follows once they are read.
+    LookAtStorage,
     /// Settings > Launchers' Update now: read every launcher switched on again, and fetch what is missing or out of
     /// date. The snapshots that follow say how it goes (`Library::launchers`).
     UpdateLaunchers,

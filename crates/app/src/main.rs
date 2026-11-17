@@ -22,6 +22,7 @@ mod offscreen;
 mod sounds;
 mod sources;
 mod startup;
+mod storage;
 mod store;
 mod store_apps;
 mod updates;

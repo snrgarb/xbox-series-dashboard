@@ -53,6 +53,8 @@ pub enum Open {
     TileMenu(tile_menu::Entry),
     /// Manage Queue, over whatever asked for it (`manage_queue::open`).
     ManageQueue,
+    /// "Where do you want to install X?", in the place of the Install that asked (`install_where::open`).
+    InstallWhere(crate::install_where::Entry),
     /// A game's Achievements page, over its Game hub (`achievements`).
     Achievements(crate::achievements::Entry),
 }
@@ -74,6 +76,7 @@ impl Open {
             Open::KeyboardStandIn => Box::new(keyboard::stand_in::StandIn::open()),
             Open::TileMenu(entry) => Box::new(tile_menu::TileMenu::open(entry, around)?),
             Open::ManageQueue => Box::new(manage_queue::ManageQueue::open(around)),
+            Open::InstallWhere(entry) => Box::new(crate::install_where::InstallWhere::open(entry, around)?),
             Open::Achievements(entry) => Box::new(crate::achievements::Achievements::open(entry, around)?),
         })
     }

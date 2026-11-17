@@ -1021,15 +1021,27 @@ impl App {
                 },
                 Effect::StartApp(app) => crate::games::start_app(self.dashboard.library(), app, &mut *self.addresses),
                 // The store is asked, and the Queue told: the game joins it, or its uninstall is followed.
-                Effect::Install(game) => {
+                // Into the folder chosen in the question, else the store's default as Settings > Storage has it.
+                Effect::Install(game) | Effect::InstallTo { game, .. } => {
+                    let folder = match &effect {
+                        Effect::InstallTo { folder, .. } => Some(folder.clone()),
+                        _ => crate::storage::default_for(self.dashboard.library(), game),
+                    };
                     let (library, sources) = (self.dashboard.library(), self.store.sources());
-                    if crate::games::ask_store(library, sources, game, Ask::Install, &mut *self.addresses) {
+                    let addresses = &mut *self.addresses;
+                    if crate::games::ask_store(library, sources, game, Ask::Install, folder.as_deref(), addresses) {
                         self.store.tell_queue(::library::queue::Ask::Install(game));
                     }
                 }
+                Effect::DefaultFolder { store, folder } => {
+                    let changed = self.store.set_default_folder(&store, &folder);
+                    self.show(changed);
+                }
+                Effect::LookAtStorage => self.look_at_storage(),
                 Effect::Uninstall(game) => {
                     let (library, sources) = (self.dashboard.library(), self.store.sources());
-                    if crate::games::ask_store(library, sources, game, Ask::Uninstall, &mut *self.addresses) {
+                    let addresses = &mut *self.addresses;
+                    if crate::games::ask_store(library, sources, game, Ask::Uninstall, None, addresses) {
                         self.store.tell_queue(::library::queue::Ask::Uninstall(game));
                     }
                 }
@@ -1045,6 +1057,15 @@ impl App {
         }
         // A Profile signed in by the core itself (`Dashboard::sign_in`) changed before its effect was carried out.
         self.log_profile();
+    }
+
+    /// Reads the drives and the stores' install folders again off the frame's thread (Settings > Storage, the
+    /// storage ring): a new snapshot follows once they are read.
+    fn look_at_storage(&mut self) {
+        let proxy = self.proxy.clone();
+        self.store.look_at_storage(self.dashboard.library(), move || {
+            let _ = proxy.send_event(());
+        });
     }
 
     /// Asks for updates off the frame's thread (`why`, for the log), and keeps when.
@@ -1438,10 +1459,18 @@ impl ApplicationHandler for App {
             self.stale = true;
             self.overlay_stale = true;
         }
+        let read = self.store.sources_read();
         if let Some(library) = self.store.changed() {
             self.show(Some(library));
             // The sources have been read: an install started in a client meanwhile joins the Queue now.
             self.store.tell_queue(library::queue::Ask::Look);
+            // And their libraries' folders may have changed with them.
+            if !read && self.store.sources_read() {
+                self.look_at_storage();
+            }
+        }
+        if self.store.storage_wanted() {
+            self.look_at_storage();
         }
         // The Queue moved on: a new snapshot when a source read again changed the library, else the Queue alone.
         if let Some(update) = self.store.queue_update() {
@@ -1450,6 +1479,10 @@ impl ApplicationHandler for App {
             if self.dashboard.set_queue(update.queue) {
                 self.stale = true;
                 self.overlay_stale = true;
+            }
+            // A game installed or uninstalled has filled or freed its drive: the ring and Storage read again.
+            if update.tell.iter().any(|tell| !matches!(tell, library::queue::Tell::Queued(_))) {
+                self.look_at_storage();
             }
             // A game queued, ready to play, or uninstalled: a Toast each, with its cover (#132).
             for tell in update.tell {
@@ -1870,6 +1903,8 @@ impl ApplicationHandler for App {
                     self.store.list_store_apps(move || {
                         let _ = proxy.send_event(());
                     });
+                    // And the drives and the stores' install folders, for the storage ring and Settings > Storage.
+                    self.look_at_storage();
                     // And the Queue is followed from then on, waking the window as it changes.
                     let proxy = self.proxy.clone();
                     self.store.follow_queue(move || {

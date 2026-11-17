@@ -12,6 +12,7 @@ pub mod queue;
 pub mod shell_mode;
 pub mod sound;
 pub mod source;
+pub mod storage;
 pub mod update;
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,7 @@ pub use profile::{Picture, Profile, ProfileChange, Profiles};
 pub use queue::{Install, InstallState, Installed, Queue, Queued};
 pub use sound::Sound;
 pub use source::{Ask, Found, Source, Start};
+pub use storage::{Drive, Drives, Storage};
 
 /// What Power can do to the machine (`docs/spec/guide.md`, section 6.2). The Dashboard's core only ever asks for
 /// one; carrying it out is the shell's, behind `shell::Power`. Leaving to the desktop is not one of them: that is
@@ -418,6 +420,11 @@ pub struct Library {
     /// database's: the executable carries it in every snapshot, as it does the launchers' update.
     #[serde(default)]
     pub art_refresh: ArtRefresh,
+    /// Each store's install folders and the drives they are on, and the drive Manage's storage ring shows (Settings >
+    /// Storage, #179). Not the database's: the executable reads them off the UI thread and carries them in every
+    /// snapshot, as it does the Store apps.
+    #[serde(default)]
+    pub storage: Storage,
 }
 
 /// How a refresh of every game's art and details is going: everything downloaded forgotten, then fetched again in

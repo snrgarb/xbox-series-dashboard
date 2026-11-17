@@ -16,6 +16,7 @@ macro_rules! eprintln {
 pub mod account;
 pub mod audio;
 pub mod clipboard;
+pub mod drives;
 pub mod freeze;
 pub mod idle;
 mod launch;

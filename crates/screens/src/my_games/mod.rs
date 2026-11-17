@@ -456,7 +456,9 @@ impl MyGames {
             Some((game.name.as_str(), crate::manage_queue::figures::Figures::of(entry)))
         });
         let profile = crate::profile::signed_in(around.library);
-        let face = nav::Face { profile: &profile, showing, focused, count: &count, queued: queue.len(), download };
+        let ring = around.library.storage.ring.as_ref();
+        let face =
+            nav::Face { profile: &profile, showing, focused, count: &count, queued: queue.len(), download, ring };
         nav::draw(ui, &face);
 
         // The pane that came by the nav slides the 50 to its rest and fades in as it does; the grid of games
