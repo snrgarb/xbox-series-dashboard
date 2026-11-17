@@ -78,14 +78,64 @@ release.
 
 ## 4. The runner
 
-`shell::helper::Job::start(program, args, wake)` starts a helper in its own folder, with no window on Windows
+`shell::helper::Job::start(program, args, wake)` (`source_kit::helper`, so the stores' crates run their helper with it
+too; `Job::start_with` adds environment variables) starts a helper in its own folder, with no window on Windows
 (`CREATE_NO_WINDOW`), its standard output and error piped. A thread for each reads it a line at a time, a carriage
 return ending a line too (a progress line rewrites itself with one), and hands each over through a channel
 (`Said::Out`, `Said::Err`), calling `wake` so a sleeping UI thread looks; once the process has ended and both are read to their ends (or a
 second more, where a process it started still holds them open), `Said::Ended(code)`. Nothing is read on the UI thread. `Job::stop()` kills the process (both helpers resume from what
 they kept, so pause is a stop); its end is said as any end is, with no code. A job dropped is stopped.
 
-## 5. Tests
+`source_kit::downloads::Downloads` follows a store's installs through its helper on that runner: one run a game,
+each line of its output read by the store's own parser (`Line::Total`, `Done`, `Speed`, `Error`) into the Queue's
+`Install` (bytes, and the helper's own rate as bits a second), every line it says logged. Pause stops the run and
+keeps the bytes; Resume runs the same command again, the helper resuming from its own files, the bytes it says are
+left read against the whole; Cancel stops it and deletes what it fetched (the store says what). A run that ends 0 is
+checked against the helper's own record before it counts as done (legendary ends 0 on some failures).
+
+## 5. The stores through their helpers (#175, #176)
+
+The decisions recorded on #166: Pause, Resume and Cancel are in the Queue; a game a helper installed is the
+Dashboard's to look after; Windows' permission prompts are answered with the pad where they can be; the stores' terms
+risk is accepted. Wherever a helper is not added or not signed in, the store's own route is used as before (its
+launcher's install dialog), and the log says why (`epic: legendary: <AppName>: legendary is not signed in ...: asking
+the Epic Games Launcher instead`).
+
+**Epic Games through legendary 0.21.1** (`source_epic::legendary`; every fact from legendary's source at that tag,
+named beside it in the module's comments):
+
+- *Its records* stay where legendary keeps them (`LEGENDARY_CONFIG_PATH`, else `%USERPROFILE%\.config\legendary`), so a
+  sign-in made with legendary itself is the Dashboard's. `user.json` is the sign-in; `installed.json` what it
+  installed; `metadata\<AppName>.json` the account's library as it last listed it. Epic's source reads these beside
+  the launchers' files: owned games it lists (not DLC, not Unreal Engine content, only those with a Windows build) and
+  the games it installed (`epic: 4 games from ... (..., legendary 1 installed, 1 owned) in 6 ms`).
+- *The library* is listed again at start, and whenever a helper is added, with `legendary status --json` (which also
+  checks legendary's own site for a newer legendary, as it always does), off the window's thread; Epic is then read
+  again (`Installer::refresh`).
+- *Install* is `legendary -y install <AppName> --base-path <folder> --skip-sdl --skip-dlcs`: into `<folder>\<the game's
+  FolderName>`, the folder the user's `Games` (one folder, so no question; naming folders with the pad is #174's).
+  `-y` answers legendary's questions; prerequisites (`prereq_info`, a game's redistributables) are not run, and DLC is
+  not installed. Progress is legendary's own lines on its standard error: `[cli] INFO: Download size: <MiB> MiB`, then
+  `[DLManager] INFO:  - Downloaded: <MiB> MiB, Written: ...` and ` + Download\t- <MiB> MiB/s (raw) / ...` once a
+  second. Once it ends, `-y egl-sync --export-only --one-shot --egl-manifest-path <...\Data\Manifests>` writes the old
+  launcher's record where that folder is there. The current Epic Games Launcher does not read those records
+  (installs.md P1), so a game legendary installed is not in Epic's launcher; Uninstall removes the record again.
+- *Pause* stops legendary (it keeps `tmp\<AppName>.resume`), *Resume* runs the install again into the same folder,
+  *Cancel* stops it and deletes the game's folder and the resume file. A pause lasts as long as the Dashboard runs:
+  after a restart the next Install resumes from legendary's resume file.
+- *Uninstall* is `legendary -y uninstall <AppName>`, no question but the Dashboard's own.
+- *Play* for a game legendary installed is `legendary launch <AppName>`, which signs the game in with Epic; any other
+  game starts through the launcher's link as before.
+- *Signing in* is not the Dashboard's: Epic's sign-in is a web page, and the Dashboard shows none, asks for no password
+  and keeps none. Settings > Helpers says how legendary stands (`Signed in to Epic Games as <name>.`, or `Not signed
+  in to Epic Games: ...` with how to do it): today, `legendary auth` run once on the PC, which shows Epic's page in a
+  window of its own (keyboard and mouse). A sign-in page driven by the pad (a web view, or a code shown as a QR code
+  for a phone) is the user's decision, not made here; the log says `helpers: legendary: signed in as <name>` or `not
+  signed in` at start.
+- *What it cannot do* is refused through `Installer::can`, not faked: no folder to choose, nothing while not signed
+  in.
+
+## 6. Tests
 
 - `helpers`: the table's shape; a wrong SHA-256 refused with nothing kept; a right one kept and removed whole; no
   SHA-256, nothing asked; only the plain request sent (`helpers::fake`).
@@ -96,3 +146,8 @@ they kept, so pause is a stop); its end is said as any end is, with no code. A j
 - The payload `e2e/payloads/helpers`: Add legendary from `standin serve-helpers` (standin.exe, which runs as the
   stand-in helper when named `legendary.exe`), its `--version` run and logged; gogdl's address serving other bytes,
   refused; legendary removed.
+- `source_kit::downloads`: a run's lines into bytes and rate; pause, resume from what is left, cancel's cleanup.
+- `source_epic::legendary`: legendary's lines (its format strings, made-up numbers), its records read.
+- `crates/standin/tests/helpers.rs`: Epic's installer driving the stand-in legendary (standin.exe copied as
+  `legendary`): sign-in, library, install, pause, resume, cancel, install to the end, egl-sync, start, uninstall.
+- The payload `e2e/payloads/epic-legendary`: the same with the pad, against the stand-in legendary.

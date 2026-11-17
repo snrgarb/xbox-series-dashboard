@@ -1,11 +1,56 @@
 //! What the store sources other than Steam share (docs/sources.md): the Windows registry behind a seam that a file
 //! can stand in for ([`registry`]), the few bytes of protobuf two stores keep their lists in ([`proto`]), and an
-//! uninstaller's command line taken apart into a program to run ([`command`]).
+//! uninstaller's command line taken apart into a program to run ([`command`]); and the helper programs some stores
+//! install through: running one ([`helper`]), a store's downloads through one ([`downloads`]), and where a store's
+//! helper is ([`HelperRoute`]).
+// Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
+// (crates/log-line). Defined before the modules, so they all take it rather than std's.
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        log_line::eprintln!($($arg)*)
+    };
+}
+
 pub mod command;
+pub mod downloads;
+pub mod helper;
 pub mod proto;
 pub mod registry;
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+/// Where a store's helper program is and keeps its records, as the executable gives it to the store's source
+/// (docs/spec/helpers.md 5): legendary for Epic Games, gogdl for GOG.
+#[derive(Clone)]
+pub struct HelperRoute {
+    /// The helper's program where the Dashboard keeps it, while it is added (kept, at the table's version); None
+    /// while it is not, and the store is asked as before.
+    pub program: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
+    /// The folder its sign-in and its records are in.
+    pub home: PathBuf,
+    /// What every run of it is given on top of the Dashboard's environment: a test's folder for its records, else
+    /// nothing, and the helper keeps them where it always does.
+    pub env: Vec<(String, OsString)>,
+    /// Where a game goes with no folder chosen: a folder of the user's own (legendary's own default, `~\Games`), so
+    /// no install asks Windows for an administrator.
+    pub games: PathBuf,
+}
+
+impl HelperRoute {
+    /// A route to a program that is always there: for the tests.
+    pub fn fixed(program: PathBuf, home: PathBuf, env: Vec<(String, OsString)>, games: PathBuf) -> Self {
+        Self { program: Arc::new(move || Some(program.clone()).filter(|p| p.is_file())), home, env, games }
+    }
+}
+
+impl std::fmt::Debug for HelperRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HelperRoute").field("home", &self.home).field("games", &self.games).finish_non_exhaustive()
+    }
+}
 
 /// A path as a store writes it, with forward slashes or back, as this system writes paths: on Windows with back
 /// slashes, elsewhere (the tests) as it is.

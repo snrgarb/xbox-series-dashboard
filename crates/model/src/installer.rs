@@ -133,6 +133,14 @@ pub trait Installer: Send + Sync {
     fn steer(&self, _game: &Game, _steer: Steer, _open: &mut dyn Opener) -> Result<(), Refusal> {
         Err(Refusal::Unsupported)
     }
+
+    /// Brings the store's list of the games the account owns up to date where only the network has it (a helper's
+    /// own listing, legendary's `status`), so that reading the source, which reads only files, finds it: blocking,
+    /// and never on the window's thread. Whether it did, and the source is to be read again. False (the default):
+    /// nothing to do.
+    fn refresh(&self) -> bool {
+        false
+    }
 }
 
 /// The folder an install goes to while the Dashboard asks nothing: the default among `folders`, none when the

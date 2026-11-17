@@ -1,8 +1,10 @@
 //! The sources the Dashboard reads its games from, in order (docs/sources.md). Adding a store is its own crate,
 //! which implements `model::Source`, and one line here.
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use model::{Game, Source};
+use source_kit::HelperRoute;
 
 use crate::Args;
 
@@ -12,7 +14,11 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         // `--steam` names the install; else the registry does.
         Arc::new(source_steam::Steam::at(args.steam.clone())),
         // `--epic` names a folder standing for the launcher's; else `%ProgramData%\Epic` and the new launcher's.
-        Arc::new(source_epic::Epic::at(args.epic.clone())),
+        // legendary too, where there is a data folder to keep it in (#175).
+        Arc::new(match legendary_route(args) {
+            Some(route) => source_epic::Epic::at(args.epic.clone()).with_legendary(route),
+            None => source_epic::Epic::at(args.epic.clone()),
+        }),
         // `--gog` names a folder standing for GOG's; else the registry and `%ProgramData%\GOG.com`.
         Arc::new(source_gog::Gog::at(args.gog.clone())),
         // `--ea`, `--ubisoft` and `--battlenet` name a fake store; else this machine's are read.
@@ -24,6 +30,40 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         // The games added by hand, which are the database's own (docs/spec/apps.md).
         Arc::new(library::by_hand::Manual),
     ]
+}
+
+/// The data folder helpers are kept in: `--data-dir`, else, with a window, the user's.
+fn data(args: &Args) -> Option<PathBuf> {
+    args.data_dir.clone().or_else(|| args.screenshot.is_none().then(library::data_dir).flatten())
+}
+
+/// legendary's own folder for its records: `--helper-home`'s `legendary` (a test's), else legendary's own default,
+/// so that a sign-in made with legendary itself is the Dashboard's (`source_epic::legendary::default_home`).
+pub fn legendary_home(args: &Args) -> Option<PathBuf> {
+    match &args.helper_home {
+        Some(dir) => Some(dir.join("legendary")),
+        None => source_epic::legendary::default_home(),
+    }
+}
+
+/// Where legendary is run from (the data folder's `helpers\legendary`, while it is added at the table's version),
+/// where its records are, and where it installs: `--helper-home`'s `games`, else the user's `Games`.
+fn legendary_route(args: &Args) -> Option<HelperRoute> {
+    let data = data(args)?;
+    let helper = crate::helper_programs::table(args).into_iter().find(|helper| helper.key == "legendary")?;
+    let home = legendary_home(args)?;
+    let games = match &args.helper_home {
+        Some(dir) => dir.join("games"),
+        None => source_epic::legendary::default_games()?,
+    };
+    let program = move || {
+        let kept = helpers::kept(&data, &helper).filter(|kept| kept.version == helper.version);
+        kept.map(|_| helpers::program(&data, &helper))
+    };
+    // A test's folder is legendary's for every run of it, `launch` too (`main`): legendary reads it from there.
+    let env = vec![("LEGENDARY_CONFIG_PATH".to_string(), home.clone().into_os_string())];
+    let env = if args.helper_home.is_some() { env } else { Vec::new() };
+    Some(HelperRoute { program: Arc::new(program), home, env, games })
 }
 
 /// Every store's achievements (docs/achievements.md): Steam's alone, from its own files.

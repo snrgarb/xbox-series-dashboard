@@ -147,7 +147,11 @@
 //!   legendary.exe | gogdl.exe [--version | <args>...]
 //!       The stand-in helper, when this program is named as one (as `serve-helpers` serves it, kept in the
 //!       Dashboard's data folder): with --version says `<name> <version> (stand-in)` on standard output and a line on
-//!       standard error, and exits 0; with anything else says each argument a line, then `done`.
+//!       standard error, and exits 0. As legendary, the commands the Epic source runs (`auth --code`, `status`,
+//!       `install`, `uninstall`, `launch`, `egl-sync`), answered in legendary's own lines and records in the folder
+//!       `LEGENDARY_CONFIG_PATH` names, and only there (`source_epic::legendary::standin`: one game, Zinnia Gate,
+//!       its bytes counted out `STANDIN_HELPER_STEP_MS` apart). With anything else says each argument a line, then
+//!       `done`.
 //!   standin discord --pipe <name> [--port <n>]
 //!       A fake Discord (`discord::fake`), for `dashboard --discord-pipe <name> --discord-token-url
 //!       http://127.0.0.1:<n>/api/oauth2/token --discord-cdn-url http://127.0.0.1:<n>`: listens on the named pipe
@@ -1307,6 +1311,10 @@ fn helper(args: &[String]) -> i32 {
         println!("{name} {version} (stand-in)");
         eprintln!("[cli] INFO: stand-in {name}, nothing downloaded");
         return 0;
+    }
+    // What the Epic source runs legendary for (#175): its own lines and records.
+    if name == "legendary" {
+        return source_epic::legendary::standin::run(args);
     }
     for arg in args {
         println!("{arg}");

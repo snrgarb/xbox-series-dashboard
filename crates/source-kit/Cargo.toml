@@ -3,15 +3,16 @@ name = "source-kit"
 version.workspace = true
 publish.workspace = true
 edition = "2021"
-description = "What the store sources share: the registry or a file standing in for it, protobuf, command lines."
+description = "What the store sources share: the registry or a file standing in for it, protobuf, command lines, and running the helper programs some stores install through."
 
 [dependencies]
+log-line = { path = "../log-line" }
 model = { path = "../model" }
 anyhow = "1"
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

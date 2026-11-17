@@ -409,7 +409,8 @@ pub fn run(
     let current = model::update::Version::parse(crate::build().version).unwrap_or_default();
     let last_check = store.setting(screens::settings::LAST_UPDATE_CHECK);
     let updater = crate::updates::Updater::new(args.update_source.clone(), current, started_with, last_check);
-    let helpers = crate::helper_programs::Helpers::new(crate::helper_programs::table(args), data_dir.clone());
+    let helpers = crate::helper_programs::Helpers::for_args(args, data_dir.clone());
+    helpers.refresh(store.sources(), crate::helper_programs::wake(event_loop.create_proxy()));
     store.set_helpers(helpers.shown());
     dashboard.set_helpers(helpers.shown());
     let mut app = App {
@@ -1628,6 +1629,11 @@ impl ApplicationHandler for App {
         }
         if self.helpers.take() {
             self.show_helpers();
+            self.helpers.refresh(self.store.sources(), crate::helper_programs::wake(self.proxy.clone()));
+        }
+        let refreshed = self.helpers.refreshed();
+        if !refreshed.is_empty() {
+            self.update_launchers(Some(refreshed));
         }
         if self.take_art() {
             toasts_changed = true;

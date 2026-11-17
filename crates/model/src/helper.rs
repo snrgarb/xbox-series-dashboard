@@ -17,6 +17,21 @@ pub struct Helper {
     /// Its source: the project's own page.
     pub source: String,
     pub state: HelperState,
+    /// Its sign-in to the store, as its own records keep it (#175, #176).
+    #[serde(default)]
+    pub account: Account,
+}
+
+/// A helper's sign-in to its store, as its own records keep it. The Dashboard asks for no password and keeps none.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Account {
+    /// Not read: the helper is not added, or nothing reads its sign-in.
+    #[default]
+    Unknown,
+    /// Signed in, as this display name (empty where its records name none).
+    SignedIn(String),
+    /// No sign-in kept: what signing in takes, in words for the user.
+    SignedOut(String),
 }
 
 /// How a helper stands on this PC.

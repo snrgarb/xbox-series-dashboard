@@ -209,6 +209,7 @@ pub fn shown(helper: &Helper, state: model::helper::HelperState) -> model::helpe
         licence: helper.licence.clone(),
         source: helper.source.clone(),
         state,
+        account: Default::default(),
     }
 }
 

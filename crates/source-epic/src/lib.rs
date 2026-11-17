@@ -21,7 +21,12 @@
 //! history either: Epic keeps it on its servers.
 //!
 //! [`Epic`] is the source the library reads (`model::Source`): it starts a game, and asks for one to be installed,
-//! through the launcher's `com.epicgames.launcher://` links, the launcher checking the game is the user's.
+//! through the launcher's `com.epicgames.launcher://` links, the launcher checking the game is the user's. Where the
+//! user has added legendary and signed it in (#175, [`legendary`]), it installs, pauses, resumes, cancels and
+//! uninstalls through legendary instead, with no window, its progress in the Queue; legendary's records are one
+//! more of the files read (the account's library as legendary last listed it, and what it installed), and a game
+//! legendary installed starts through legendary. The launcher's link stays the way wherever legendary cannot be
+//! asked.
 // Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
 // (crates/log-line). Defined before the modules, so they all take it rather than std's.
 #[allow(unused_macros)]
@@ -33,6 +38,7 @@ macro_rules! eprintln {
 
 pub mod fixture;
 pub mod install_helper;
+pub mod legendary;
 mod modern;
 
 use std::collections::HashMap;
@@ -40,7 +46,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use model::{Ask, Found, Game, Library, OnlineArt, Source, Start};
+use model::{
+    Ask, Can, Folder, Found, Game, Install, Installer, Library, OnlineArt, Opener, Refusal, Source, Start, Steer,
+};
 use serde_json::Value;
 
 /// Epic, as a game's `source` names it.
@@ -54,13 +62,28 @@ const SCHEME: &str = "com.epicgames.launcher://";
 pub struct Epic {
     /// A folder standing for the launcher's (`--epic`, `Places::under`); with none, the machine's own.
     root: Option<PathBuf>,
+    /// legendary, where the executable gives its route (#175).
+    legendary: Option<legendary::Legendary>,
 }
 
 impl Epic {
     /// The launcher's files under `root` (`--epic` on the command line, `Places::under`), or with none the
     /// machine's own.
     pub fn at(root: Option<PathBuf>) -> Self {
-        Self { root }
+        Self { root, legendary: None }
+    }
+
+    /// With legendary at `route`: read, and asked to install and steer installs, while it is added and signed in.
+    /// Its `egl-sync` writes the old launcher's record into these files' `Data\Manifests`, where that is there.
+    pub fn with_legendary(mut self, route: source_kit::HelperRoute) -> Self {
+        let manifests = self.places().map(|places| places.manifests());
+        self.legendary = Some(legendary::Legendary::new(route, manifests));
+        self
+    }
+
+    /// legendary, where it can be asked now: added and signed in.
+    fn usable_legendary(&self) -> Option<&legendary::Legendary> {
+        self.legendary.as_ref().filter(|legendary| legendary.usable())
     }
 
     fn places(&self) -> Option<Places> {
@@ -147,10 +170,19 @@ impl Source for Epic {
         if self.root.is_some() && !places.data.is_dir() {
             bail!("{}: no such folder", places.data.display());
         }
-        if !places.any() {
+        let home = self.legendary.as_ref().map(|legendary| legendary.home().to_path_buf());
+        let with_legendary = home.as_deref().is_some_and(legendary::any);
+        if !places.any() && !with_legendary {
             return Ok(None);
         }
-        let reading = reading(&places).with_context(|| places.data.display().to_string())?;
+        let mut reading = match places.any() {
+            true => reading(&places).with_context(|| places.data.display().to_string())?,
+            false => Reading { items: Vec::new(), parts: Vec::new() },
+        };
+        if let Some(home) = home.filter(|_| with_legendary) {
+            let (installed, owned) = legendary::merge(&mut reading.items, &home);
+            reading.parts.push(format!("legendary {installed} installed, {owned} owned"));
+        }
         let from = match reading.parts.is_empty() {
             true => places.data.display().to_string(),
             false => format!("{} ({})", places.data.display(), reading.parts.join(", ")),
@@ -158,10 +190,14 @@ impl Source for Epic {
         Ok(Some(Found { library: library(reading.items), from }))
     }
 
-    /// The launcher's link, `com.epicgames.launcher://apps/<namespace>%3A<item>%3A<app>?action=launch&silent=true`:
-    /// the launcher starts if it is not running, checks the game is the user's, and starts it.
+    /// A game legendary installed: `legendary launch <AppName>`, while legendary is added. Any other: the launcher's
+    /// link, `com.epicgames.launcher://apps/<namespace>%3A<item>%3A<app>?action=launch&silent=true`: the launcher
+    /// starts if it is not running, checks the game is the user's, and starts it.
     fn start(&self, game: &Game) -> Option<Start> {
         let app = app_name(game)?;
+        if let Some(start) = self.legendary.as_ref().and_then(|legendary| legendary.start(app)) {
+            return Some(start);
+        }
         let item = self.item(game).unwrap_or_else(|| Item { app_name: app.to_string(), ..Item::default() });
         Some(Start::Address(link(&item, "launch")))
     }
@@ -177,6 +213,54 @@ impl Source for Epic {
             }
             Ask::Uninstall => None,
         }
+    }
+
+    /// legendary's downloads, while it is added and signed in (or has one paused): nothing else of Epic's says how
+    /// far an install has got.
+    fn installs(&self) -> Option<Vec<Install>> {
+        let legendary = self.legendary.as_ref()?;
+        let installs = legendary.installs();
+        (legendary.usable() || !installs.is_empty()).then_some(installs)
+    }
+
+    /// Through legendary, asking is all an uninstall takes.
+    fn uninstalls_by_itself(&self) -> bool {
+        self.usable_legendary().is_some()
+    }
+
+    fn installer(&self) -> Option<&dyn Installer> {
+        self.legendary.as_ref().map(|_| self as &dyn Installer)
+    }
+}
+
+/// Epic's installer: legendary, where it is added and signed in. Where it is not, every call is `Unsupported`, and
+/// the launcher is asked as before: its install dialog for Install, nothing for Uninstall.
+impl Installer for Epic {
+    fn can(&self) -> Can {
+        self.legendary.as_ref().map_or(Can::NOTHING, legendary::Legendary::can)
+    }
+
+    fn folders(&self) -> Vec<Folder> {
+        self.usable_legendary().map(legendary::Legendary::folders).unwrap_or_default()
+    }
+
+    fn install(&self, game: &Game, folder: Option<&Folder>, _open: &mut dyn Opener) -> Result<(), Refusal> {
+        let (Some(app), Some(legendary)) = (app_name(game), &self.legendary) else { return Err(Refusal::Unsupported) };
+        legendary.install(app, folder)
+    }
+
+    fn uninstall(&self, game: &Game, _open: &mut dyn Opener) -> Result<(), Refusal> {
+        let (Some(app), Some(legendary)) = (app_name(game), &self.legendary) else { return Err(Refusal::Unsupported) };
+        legendary.uninstall(app)
+    }
+
+    fn steer(&self, game: &Game, steer: Steer, _open: &mut dyn Opener) -> Result<(), Refusal> {
+        let (Some(app), Some(legendary)) = (app_name(game), &self.legendary) else { return Err(Refusal::Unsupported) };
+        legendary.steer(app, steer)
+    }
+
+    fn refresh(&self) -> bool {
+        self.usable_legendary().is_some_and(legendary::Legendary::refresh)
     }
 }
 
@@ -949,5 +1033,59 @@ mod tests {
         if cfg!(not(windows)) {
             assert_eq!(Epic::at(None).read().unwrap(), None);
         }
+    }
+
+    /// legendary's records under a test's folder, its program a file that is never run.
+    fn with_legendary(dir: &Path) -> (Epic, PathBuf) {
+        let (home, program) = (dir.join("legendary"), dir.join("helpers").join("legendary.exe"));
+        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        std::fs::write(&program, "").unwrap();
+        let route = source_kit::HelperRoute::fixed(program.clone(), home.clone(), Vec::new(), dir.join("games"));
+        std::fs::create_dir_all(dir.join("epic")).unwrap();
+        (Epic::at(Some(dir.join("epic"))).with_legendary(route), home)
+    }
+
+    #[test]
+    fn legendarys_library_and_installs_are_read_and_its_games_start_through_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (epic, home) = with_legendary(dir.path());
+        // Not signed in and nothing listed: no Epic, and nothing it can do but ask the launcher.
+        assert_eq!(epic.read().unwrap(), None);
+        assert_eq!(epic.installer().unwrap().can(), Can::NOTHING);
+        assert_eq!(epic.installs(), None);
+        assert!(!epic.uninstalls_by_itself());
+
+        legendary::standin::write_signed_in(&home).unwrap();
+        legendary::standin::write_library(&home).unwrap();
+        let found = epic.read().unwrap().expect("legendary's records");
+        assert!(found.from.ends_with("(legendary 0 installed, 1 owned)"), "{}", found.from);
+        let game = &found.library.games[0];
+        assert_eq!((game.name.as_str(), game.installed), (legendary::standin::TITLE, false));
+        assert!(game.online.cover.is_some() && game.developers == ["Stand-in Studio"]);
+        let can = epic.installer().unwrap().can();
+        assert!(can.pause && can.cancel && can.quiet_uninstall && !can.choose_folder);
+        assert_eq!(epic.installs(), Some(Vec::new()));
+        assert_eq!(epic.installer().unwrap().folders()[0].path, dir.path().join("games"));
+        // Not legendary's: the launcher's link.
+        assert!(matches!(epic.start(game), Some(Start::Address(_))));
+
+        // Installed by legendary: read installed, and started by it.
+        let folder = dir.path().join("games").join(legendary::standin::TITLE);
+        std::fs::create_dir_all(&folder).unwrap();
+        let record = serde_json::json!({ legendary::standin::APP_NAME: {
+            "app_name": legendary::standin::APP_NAME, "title": legendary::standin::TITLE,
+            "install_path": folder.display().to_string(), "executable": "game.exe", "install_size": 42 }});
+        std::fs::write(home.join("installed.json"), record.to_string()).unwrap();
+        let found = epic.read().unwrap().unwrap();
+        let game = &found.library.games[0];
+        assert!(game.installed && game.install_dir.as_deref() == Some(folder.as_path()) && game.size_on_disk == 42);
+        let program = dir.path().join("helpers").join("legendary.exe");
+        let start = Start::Program {
+            path: program.clone(),
+            args: vec!["launch".into(), legendary::standin::APP_NAME.into()],
+            dir: program.parent().map(Path::to_path_buf),
+        };
+        assert_eq!(epic.start(game), Some(start));
+        assert!(epic.uninstalls_by_itself());
     }
 }

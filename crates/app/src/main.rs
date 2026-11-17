@@ -144,6 +144,8 @@ pub struct Args {
     /// The helpers' table, in place of the `helpers` crate's: a test's, whose addresses are a stand-in's
     /// (`standin serve-helpers`). Never the real one in a test.
     helper_table: Option<PathBuf>,
+    /// A test's folder for the helpers' records and installs (`legendary`, `games`), in place of the user's own.
+    helper_home: Option<PathBuf>,
     /// The version this Dashboard takes itself for, in place of its own: a test's, older than the one it serves.
     pretend_version: Option<model::update::Version>,
     /// An update's new Dashboard, started by the one with this pid (docs/spec/updates.md): it takes the
@@ -181,6 +183,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
                  [--from-shell] [--dry-shell] [--log-file <file>]
                  [--update-source <url>] [--pretend-version <x.y.z>] [--helper-table <file>]
+                 [--helper-home <dir>]
        dashboard --shell-on | --shell-off [--dry-shell [--as-installed]] [--data-dir <dir>]
        dashboard --shell | --sentinel | --shell-probe: shell mode's own, which Windows starts
        dashboard --version: prints `dashboard <version> (<commit>)`
@@ -278,6 +281,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--log-file" => args.log_file = Some(value()?.into()),
             "--update-source" => args.update_source = Some(value()?),
             "--helper-table" => args.helper_table = Some(value()?.into()),
+            "--helper-home" => args.helper_home = Some(value()?.into()),
             "--pretend-version" => {
                 let value = value()?;
                 args.pretend_version =
@@ -322,6 +326,10 @@ fn main() {
     let args = parse_args(given.clone()).unwrap_or_else(|e| fail(&format!("{e}\n{USAGE}")));
     if let Some(version) = args.pretend_version {
         let _ = PRETEND.set(Box::leak(version.to_string().into_boxed_str()));
+    }
+    // A test's legendary folder, for every run of legendary, the game started through it too (#175).
+    if let Some(dir) = &args.helper_home {
+        std::env::set_var("LEGENDARY_CONFIG_PATH", dir.join("legendary"));
     }
     // A log for every start: --log-file's; under shell mode its own place (as_shell); otherwise, where its lines
     // would go nowhere, the data folder's logs\.
