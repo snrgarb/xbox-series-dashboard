@@ -225,7 +225,7 @@ try {
     Save-Screen '04-second-agreement'
     Press Left "Agreement: Accept of $agreedName; agreement 2 of 2, page 1( of \d+)?" | Out-Null
     Press A 'Recent\(\d+\)' | Out-Null
-    Expect-Steam "steam: CEF: licence agreement `"${agreedId}_eula_2`" version 3 of $agreedId marked accepted" $steamMark 'Accept, the second marked accepted'
+    Expect-Steam "steam: CEF: licence agreement `"${agreedId}_eula_1`" version 3 of $agreedId marked accepted" $steamMark 'Accept, the second marked accepted'
     if ((Count-Steam 'marked accepted' $steamMark) -ne 2) { Fail "Accept: the stand-in marked $(Count-Steam 'marked accepted' $steamMark) agreements accepted, not 2" }
     Expect-Logged "^steam client: ${install}: Steam's client took it$" $mark 'Accept, Steam''s client took it' | Out-Null
     Expect-Steam "steam: CEF: asked to ${install}: $agreedId queued in" $steamMark 'Accept, queued'
