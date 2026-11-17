@@ -123,7 +123,7 @@ function Scroll-On([string] $Button, [string] $Expect, [int] $Page, [int] $Most 
             return $got
         }
     }
-    Fail "$Button $Most times never brought '$Expect' to page $Page: '$(Focus-Now)'"
+    Fail "$Button $Most times never brought '$Expect' to page ${Page}: '$(Focus-Now)'"
 }
 
 function Menu-Game([string] $Line) { if ($Line -match ' of (.+)$') { $Matches[1] } }
