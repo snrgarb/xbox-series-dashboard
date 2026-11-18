@@ -523,6 +523,22 @@ impl Host {
         let _ = unsafe { self.controller.SetBounds(rect) };
     }
 
+    /// Tells the controller it is (or is not) visible; whether it now says so.
+    pub fn set_visible(&self, visible: bool) -> bool {
+        let mut now = BOOL(0);
+        unsafe {
+            let _ = self.controller.SetIsVisible(visible);
+            let _ = self.controller.IsVisible(&mut now);
+        }
+        now.as_bool() == visible
+    }
+
+    pub fn is_visible(&self) -> bool {
+        let mut now = BOOL(0);
+        let _ = unsafe { self.controller.IsVisible(&mut now) };
+        now.as_bool()
+    }
+
     pub fn focus(&self) {
         let _ = unsafe { self.controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) };
     }

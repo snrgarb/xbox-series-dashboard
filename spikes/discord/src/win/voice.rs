@@ -89,7 +89,92 @@ fn outside(host: &Host, last_clock: &mut f64) -> String {
 const SAMPLE: &str = include_str!("../js/voice_sample.js");
 const MARK: &str = include_str!("../js/mark.js");
 pub const SERVERS: &str = include_str!("../js/servers.js");
-pub const CHANNELS: &str = include_str!("../js/channels.js");
+const CHANNELS: &str = include_str!("../js/channels.js");
+
+/// One step of `js/channels.js`.
+fn channels_op(host: &Host, op: &str, target: Option<&str>) -> Result<Value, String> {
+    host.evaluate(&with2(("OP", &json!(op)), ("TARGET", &json!(target)), CHANNELS))
+}
+
+/// The open server's channel list read whole, a page at a time: a trusted mouse wheel over the list's centre, then
+/// (if the list did not move) its scrollTop, each page waited for and logged; it stops at the end
+/// (scrollTop + clientHeight >= scrollHeight), when the list moves no further, or after 60 pages. A hidden controller
+/// may not render the virtual list's new rows: if a page moved but showed nothing new, the controller is told it is
+/// visible for the rest (the window stays unshown) and told back after. With `until`, it stops once that channel's
+/// row is shown (to bring it into view before a press). Collapsed categories are left as they are.
+pub fn read_channels(host: &Host, target: Option<&str>, until: Option<&str>) -> Result<Value, String> {
+    let shown = |cid: &str| {
+        host.eval(&with("CID", &json!(cid), "!!document.querySelector(`[data-list-item-id=\"channels___${CID}\"]`)"))
+            .map(|v| v == true)
+            .unwrap_or(false)
+    };
+    let page_line = |n: u32, m: &Value, how: &str| {
+        say!(
+            "channels page {n}{how}: scrollTop {} + clientHeight {} of scrollHeight {} (at the end {}); rows seen {}, shown now {}; collapsed categories {}; scroller {} ({})",
+            m["top"],
+            m["client"],
+            m["height"],
+            yes(m["atEnd"] == true),
+            m["seen"],
+            m["shown"],
+            m["collapsed"],
+            yes(m["scroller"] == true),
+            m["scrollerClass"].as_str().unwrap_or("")
+        )
+    };
+    let mut m = channels_op(host, "start", target)?;
+    page_line(1, &m, "");
+    let was_visible = host.is_visible();
+    let mut made_visible = false;
+    for page in 2..=60 {
+        if until.is_some_and(shown) || m["atEnd"] == true || m["scroller"] != true {
+            break;
+        }
+        let (top, seen) = (m["top"].as_i64().unwrap_or(0), m["seen"].as_u64().unwrap_or(0));
+        let delta = (m["client"].as_f64().unwrap_or(400.0) * 0.8).max(100.0);
+        let (x, y) = (m["x"].as_f64().unwrap_or(0.0), m["y"].as_f64().unwrap_or(0.0));
+        let _ = host.cdp("Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y }));
+        let _ = host.cdp(
+            "Input.dispatchMouseEvent",
+            json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": delta }),
+        );
+        pump(Duration::from_millis(500));
+        m = channels_op(host, "look", target)?;
+        let mut how = " (wheel)";
+        if m["top"].as_i64().unwrap_or(0) == top {
+            channels_op(host, "nudge", target)?;
+            pump(Duration::from_millis(500));
+            m = channels_op(host, "look", target)?;
+            how = " (the wheel did not move it: scrollTop set)";
+        }
+        let moved = m["top"].as_i64().unwrap_or(0) != top;
+        if moved && m["seen"].as_u64().unwrap_or(0) == seen {
+            // Rows render a moment after the scroll; then, if still nothing, the controller told it is visible.
+            pump(Duration::from_millis(800));
+            m = channels_op(host, "look", target)?;
+            if m["seen"].as_u64().unwrap_or(0) == seen && !host.is_visible() && !made_visible {
+                made_visible = host.set_visible(true);
+                say!(
+                    "channels: the list moved but showed no new rows: the controller told it is visible ({})",
+                    yes(made_visible)
+                );
+                pump(Duration::from_millis(800));
+                m = channels_op(host, "look", target)?;
+                how = " (after the controller was told it is visible)";
+            }
+        }
+        page_line(page, &m, how);
+        if !moved {
+            say!("channels: the list does not scroll further");
+            break;
+        }
+    }
+    if made_visible && !was_visible {
+        host.set_visible(false);
+        say!("channels: the controller told it is hidden again");
+    }
+    channels_op(host, "result", target)
+}
 const FIND: &str = include_str!("../js/find.js");
 /// The page's router follows the history: a new entry, and the event it listens for (#196's lesson).
 pub const PUSH: &str =
@@ -632,7 +717,7 @@ pub fn join(options: &Options, loader: &Loader) -> i32 {
         host.close();
         return 4;
     };
-    let found = match host.evaluate(&with("TARGET", &json!(channel), CHANNELS)) {
+    let found = match read_channels(&host, Some(&channel), None) {
         Ok(v) => v,
         Err(e) => {
             say!("voice-join: reading the channels failed: {e}: nothing joined");
@@ -641,6 +726,7 @@ pub fn join(options: &Options, loader: &Loader) -> i32 {
         }
     };
     log_channels(&found);
+    write_channel_names(options, &found);
     if found["found"] != 1 || found["stage"] == true {
         say!(
             "voice-join: {} channels of that name ({} kind){}: nothing joined",
@@ -664,6 +750,13 @@ pub fn join(options: &Options, loader: &Loader) -> i32 {
         },
         yes(in_call(&sample(&host, cid)))
     );
+    // The list was read to its end: its row may be out of the virtual list now. Paged to again from the top.
+    match read_channels(&host, None, cid) {
+        Ok(_) => {
+            say!("voice-join: the channel's row shown again: {}", yes(mark(&host, "channel", cid)["found"] == true))
+        }
+        Err(e) => say!("voice-join: paging back to the channel failed: {e}"),
+    }
     let pressed = Instant::now();
     // Each way only if the one before showed no voice panel at all: never the same press twice.
     let ways: &[Way] = match options.way {
@@ -797,10 +890,8 @@ pub fn log_servers(v: &Value) {
 pub fn log_channels(v: &Value) {
     let c = &v["counts"];
     say!(
-        "channels: {} rows read over {} pages (scroller found {}): with any aria-label {}, links {}, voice by label {}, stage by label {}, with users {} ({} users), name_ class {}",
+        "channels: {} rows read: with any aria-label {}, links {}, voice by label {}, stage by label {}, with users {} ({} users), name_ class {}",
         c["rows"],
-        v["pages"],
-        yes(v["scroller"] == true),
         c["labelled"],
         c["links"],
         c["voice_by_label"],
@@ -809,6 +900,32 @@ pub fn log_channels(v: &Value) {
         c["voice_users"],
         c["name_class"]
     );
+}
+
+/// The channel rows read, to `--voice-names` for the lead's eyes (never the log): name, users shown, voice or not,
+/// a link or not.
+pub fn channel_names(v: &Value) -> String {
+    let mut text = String::from(
+        "# that server's channel rows: name, users shown in it, told as voice (voice/-), a link (link/-)\n",
+    );
+    for c in v["rows"].as_array().into_iter().flatten() {
+        text.push_str(&format!(
+            "channel\t{}\t{}\t{}\t{}\n",
+            c["name"].as_str().unwrap_or("").replace(['\t', '\n', '\r'], " "),
+            c["users"],
+            if c["voice"] == true { "voice" } else { "-" },
+            if c["link"] == true { "link" } else { "-" }
+        ));
+    }
+    text
+}
+
+fn write_channel_names(options: &Options, v: &Value) {
+    let text = format!("# discord-spike --voice-join. PRIVATE: keep it out of the repository.\n{}", channel_names(v));
+    match std::fs::write(&options.voice_names, text) {
+        Ok(()) => say!("voice-join: the rows' names written to {} (not to this log)", options.voice_names.display()),
+        Err(e) => say!("voice-join: the names could not be written to {}: {e}", options.voice_names.display()),
+    }
 }
 
 /// `--dump-shape [--server-file f]`: the signed-in page (that server open, if given) written as its shape.
@@ -831,8 +948,23 @@ pub fn shape(options: &Options, loader: &Loader) -> i32 {
     let mut code = 0;
     if let Some(server) = server {
         if open_server(&host, &server).is_some() {
-            // The list fills in a moment after the route.
-            pump(Duration::from_secs(2));
+            // The list read to its end; then a voice row brought into view if one was told, else the end stays shown
+            // (where a server's voice channels usually are).
+            match read_channels(&host, None, None) {
+                Ok(v) => {
+                    log_channels(&v);
+                    if let Some(id) = v["firstVoice"].as_str() {
+                        let _ = read_channels(&host, None, Some(id));
+                        say!(
+                            "dump-shape: a voice row in view: {}",
+                            yes(mark(&host, "channel", Some(id))["found"] == true)
+                        );
+                    } else {
+                        say!("dump-shape: no row told as voice: the list's end is shown");
+                    }
+                }
+                Err(e) => say!("dump-shape: reading the channels failed: {e}"),
+            }
         } else {
             code = 4;
         }

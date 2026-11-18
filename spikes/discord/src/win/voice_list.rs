@@ -4,10 +4,10 @@
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::host::Loader;
-use super::voice::{self, with, CHANNELS, SERVERS};
+use super::voice::{self, with, SERVERS};
 use crate::args::Options;
 use crate::say;
 
@@ -44,7 +44,7 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
     if let Some(server) = server {
         say!("voice-list: a server named in {} characters", server.chars().count());
         if voice::open_server(&host, &server).is_some() {
-            match host.evaluate(&with("TARGET", &json!(null), CHANNELS)) {
+            match voice::read_channels(&host, None, None) {
                 Ok(v) => {
                     voice::log_channels(&v);
                     let list = v["voice"].as_array().cloned().unwrap_or_default();
@@ -53,18 +53,7 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
                         list.len(),
                         list.iter().filter(|c| c["stage"] == true).count()
                     );
-                    text.push_str(
-                        "# that server's channel rows: name, users shown in it, told as voice (yes/no), a link (yes/no)\n",
-                    );
-                    for c in v["rows"].as_array().into_iter().flatten() {
-                        text.push_str(&format!(
-                            "channel\t{}\t{}\t{}\t{}\n",
-                            clean(&c["name"]),
-                            c["users"],
-                            if c["voice"] == true { "voice" } else { "-" },
-                            if c["link"] == true { "link" } else { "-" }
-                        ));
-                    }
+                    text.push_str(&voice::channel_names(&v));
                 }
                 Err(e) => {
                     say!("voice-list: reading the channels failed: {e}");
