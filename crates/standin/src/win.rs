@@ -187,7 +187,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
                 note(&format!("game: stood still for {since} ms, until beat {beats}"));
             }
             // A line a second while it runs, so a test can see it counting under a Guide that does not freeze it.
-            if beats % BEATS_SAID_EVERY == 0 {
+            if beats.is_multiple_of(BEATS_SAID_EVERY) {
                 note(&format!("game: beat {beats}"));
             }
             let mut client: RECT = std::mem::zeroed();
