@@ -17,6 +17,14 @@
       !/^\/(login|register)/.test(path) &&
       !q('input[type="password"]') &&
       !!q('[data-list-id="guildsnav"], nav[class*="guilds" i]'),
+    // Discord's QR login panel is on the page and laid out with a size (a narrow page hides it): whether it is shown,
+    // never what it holds. The signs are the spike's (#196).
+    qr: (() => {
+      try {
+        return [...document.querySelectorAll('[class*="qrCode" i], [class*="qr-code" i], [aria-label*="QR" i]')]
+          .some((el) => el.getBoundingClientRect().width > 0);
+      } catch (e) { return false; }
+    })(),
     field: editable ? (active.type === "password" ? "password" : "text") : "",
     ready: document.readyState === "complete",
   };

@@ -4,11 +4,16 @@
 # used. The data folder is the test's own.
 #
 # Settings > Account > Discord messages is opened from the top bar's Settings; the switch is turned on (the session
-# starts, finds it is signed out); Sign in shows the stand-in's form over the Dashboard. Down steps to the e-mail
-# field, A opens the Console keyboard, one letter is typed and kept with Menu; the same for the password (typed as
-# dots); Down to the form's button and A presses it. The stand-in signs the session in and moves it to /app; the
-# sign-in page closes by itself and Settings says Signed in. The Dashboard is closed and started again: the session,
-# kept in <data>\discord-web\profile-<id>, is still signed in. Sign out then removes that folder: nothing is left.
+# starts, finds it is signed out); Sign in shows the stand-in's page over the Dashboard. **The QR code first**: the
+# page opens with its QR block shown (`discord web: QR code shown yes`), no field focused though the stand-in's e-mail
+# field takes focus by itself as Discord's does, and no keyboard; the test plays the phone (`POST
+# /standin/qr-confirm`, "scanned and confirmed") and, with no input at all, the session is signed in, the sign-in
+# page closes by itself and Settings says Signed in. The Dashboard is closed and started again: the session, kept in
+# <data>\discord-web\profile-<id>, is still signed in. Sign out then removes that folder: nothing is left.
+#
+# **Typing second**: Sign in again; Down steps to the e-mail field, A opens the Console keyboard, one letter is typed
+# and kept with Menu; the same for the password (typed as dots); Down to the form's button and A presses it. Signed in
+# again, then signed out again.
 #
 # Judged by the Dashboard's log: the focus log (`focus: Settings: Discord messages: Use Discord messages; on, signed
 # in, kept`, `focus: DiscordSignIn: Tab`) and the session's own lines (`discord web: signed out`, `discord web: focus
@@ -154,7 +159,7 @@ try {
     if (-not $listening) { throw 'the stand-in discord.com never said it was listening' }
     Say "stand-in: $listening"
 
-    # --- First run: the switch on, signed out; signed in on the stand-in's form with the pad and the Console keyboard.
+    # --- First run: the switch on, signed out; signed in by the QR code, with no input on the page at all.
     $script:startMark = 0
     Start-Test-Dashboard
     Open-DiscordMessages 'off, off'
@@ -167,30 +172,28 @@ try {
     Save-Screen '1-switched-on'
     Press Down 'Settings: Discord messages: Sign in; on, signed out' | Out-Null
     $mark = Get-DashboardLogLength
+    $focusMark = @(Focus-Lines).Count
     Press A "DiscordSignIn: Discord's page" | Out-Null
     Expect-Log '^discord web: WebView2 runtime ' 15 $mark 'the runtime' | Out-Null
     Expect-Log '^discord web: the sign-in page is shown' 20 $mark 'the sign-in page' | Out-Null
+    Expect-Log '^discord web: page zoom ' 5 $mark 'the zoom' | Out-Null
+    Expect-Log '^discord web: QR code shown yes$' 20 $mark 'the QR code' | Out-Null
     Start-Sleep -Seconds 2
-    Save-Screen '2-sign-in-page'
+    Save-Screen '2-qr-code'
+    $focused = @(Get-DashboardLog | Select-Object -Skip $mark | Where-Object { $_ -match '^discord web: focus on a (text|password) field$' })
+    if ($focused.Count -gt 0) { $failures += "the page should open with no field focused: $($focused[0])" }
 
-    $mark = Get-DashboardLogLength
-    Press Down 'DiscordSignIn: Tab' | Out-Null
-    Expect-Log '^discord web: focus on a text field$' 10 $mark 'the e-mail field' | Out-Null
-    Type-Letter 'e-mail'
-    $mark = Get-DashboardLogLength
-    Press Down 'DiscordSignIn: Tab' | Out-Null
-    Expect-Log '^discord web: focus on a password field$' 10 $mark 'the password field' | Out-Null
-    Type-Letter 'password'
-    Save-Screen '3-filled'
-    $mark = Get-DashboardLogLength
-    Press Down 'DiscordSignIn: Tab' | Out-Null
-    Expect-Log '^discord web: focus on no field$' 10 $mark 'the button' | Out-Null
-    Tap A
-    Expect-Log '^discord web: signed in$' 20 $mark 'signed in' | Out-Null
+    # The phone: scanned and confirmed. Nothing is pressed.
+    $phone = Invoke-WebRequest -Uri "$base/standin/qr-confirm" -Method Post -UseBasicParsing
+    Say "the phone: $($phone.Content)"
+    Expect-Log '^discord web: signed in$' 20 $mark 'signed in by the QR code' | Out-Null
     $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Discord messages: .*; on, signed in, kept$' } | Select-Object -Last 1 } 10
     if ($back) { Say "back on Settings: $back" } else { $failures += "the sign-in page should have closed on Settings, signed in: $(Focus-Now)" }
+    $lines = @(Focus-Lines)
+    $keyboard = @($lines[$focusMark..($lines.Count - 1)] | Where-Object { $_ -match '^focus: (TextEntry|DiscordSignIn: keyboard)' })
+    if ($keyboard.Count -gt 0) { $failures += "the QR way should need no keyboard: $($keyboard[0])" }
     Start-Sleep -Milliseconds 1500
-    Save-Screen '4-signed-in'
+    Save-Screen '3-signed-in-by-qr'
     $kept = @(Get-ChildItem (Join-Path $data 'discord-web') -Directory -ErrorAction SilentlyContinue)
     if ($kept.Count -ne 1 -or $kept[0].Name -notmatch '^profile-\d+$') { $failures += "one session folder, profile-<id>, should be kept: $($kept.Name -join ', ')" }
 
@@ -200,8 +203,6 @@ try {
     $script:startMark = 0
     Start-Test-Dashboard
     Expect-Log '^discord web: signed in$' 40 $script:startMark 'still signed in after a restart' | Out-Null
-    $asked = @(Get-Content $standinLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '^.*serve-discord-web: POST /login' })
-    if ($asked.Count -ne 1) { $failures += "the form should have been sent once, not $($asked.Count) times" }
 
     # --- Sign out: nothing is left.
     Open-DiscordMessages 'on, signed in, kept'
@@ -211,11 +212,47 @@ try {
     Tap A
     Expect-Log '^discord web: signed out: nothing is left, .* is gone$' 30 $mark 'signed out' | Out-Null
     Start-Sleep -Milliseconds 1500
-    Save-Screen '5-signed-out'
+    Save-Screen '4-signed-out'
     $left = @(Get-ChildItem (Join-Path $data 'discord-web') -Recurse -Force -ErrorAction SilentlyContinue)
     if ($left.Count -gt 0) { $failures += "nothing of the session should be left: $($left.Count) files and folders under discord-web" }
     $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Discord messages: .*; on, signed out$' } | Select-Object -Last 1 } 10
     if (-not $back) { $failures += "Settings should say signed out, nothing kept: $(Focus-Now)" }
+
+    # --- Typing second: signed in on the stand-in's form with the pad and the Console keyboard.
+    Walk Left 'Settings: Discord messages: Sign in; on, signed out' 2
+    $mark = Get-DashboardLogLength
+    Press A "DiscordSignIn: Discord's page" | Out-Null
+    Expect-Log '^discord web: the sign-in page is shown' 20 $mark 'the sign-in page again' | Out-Null
+    Expect-Log '^discord web: QR code shown yes$' 20 $mark 'the QR code again' | Out-Null
+    Start-Sleep -Seconds 1
+    $mark = Get-DashboardLogLength
+    Press Down 'DiscordSignIn: Tab' | Out-Null
+    Expect-Log '^discord web: focus on a text field$' 10 $mark 'the e-mail field' | Out-Null
+    Type-Letter 'e-mail'
+    $mark = Get-DashboardLogLength
+    Press Down 'DiscordSignIn: Tab' | Out-Null
+    Expect-Log '^discord web: focus on a password field$' 10 $mark 'the password field' | Out-Null
+    Type-Letter 'password'
+    Save-Screen '5-filled'
+    $mark = Get-DashboardLogLength
+    Press Down 'DiscordSignIn: Tab' | Out-Null
+    Expect-Log '^discord web: focus on no field$' 10 $mark 'the button' | Out-Null
+    Tap A
+    Expect-Log '^discord web: signed in$' 20 $mark 'signed in by typing' | Out-Null
+    $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Discord messages: .*; on, signed in, kept$' } | Select-Object -Last 1 } 10
+    if ($back) { Say "back on Settings: $back" } else { $failures += "the sign-in page should have closed on Settings, signed in: $(Focus-Now)" }
+    $asked = @(Get-Content $standinLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '^.*serve-discord-web: POST /login' })
+    if ($asked.Count -ne 1) { $failures += "the form should have been sent once, not $($asked.Count) times" }
+    Start-Sleep -Milliseconds 1500
+    Save-Screen '6-signed-in-by-typing'
+
+    # And signed out again: nothing left.
+    Press Right 'Settings: Discord messages: Sign out; .*' | Out-Null
+    $mark = Get-DashboardLogLength
+    Tap A
+    Expect-Log '^discord web: signed out: nothing is left, .* is gone$' 30 $mark 'signed out again' | Out-Null
+    $left = @(Get-ChildItem (Join-Path $data 'discord-web') -Recurse -Force -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) { $failures += "nothing of the session should be left the second time: $($left.Count) under discord-web" }
 
     # Nothing typed in the log.
     $logged = @(Get-DashboardLog) + @(Get-Content $standinLog -ErrorAction SilentlyContinue)

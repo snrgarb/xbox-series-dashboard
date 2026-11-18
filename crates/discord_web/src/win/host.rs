@@ -285,9 +285,21 @@ impl Host {
         }
     }
 
-    /// Over `area` of the screen, on top, never activated.
+    /// Over `area` of the screen, on top, never activated; the page zoomed so Discord's QR code is large and its QR
+    /// panel kept (`crate::zoom`). Only the zoom is changed: nothing of Discord's page is cropped or restyled.
     pub fn show(&self, area: Area) {
         unsafe {
+            let mut raster = 1.0f64;
+            if let Ok(c3) = self.controller.cast::<ICoreWebView2Controller3>() {
+                let _ = c3.RasterizationScale(&mut raster);
+            }
+            let zoom = crate::zoom(area, raster);
+            let _ = self.controller.SetZoomFactor(zoom);
+            say(&format!(
+                "discord web: page zoom {zoom:.2} at scale {raster:.2}, {:.0}x{:.0} CSS pixels",
+                area.width as f64 / (zoom * raster),
+                area.height as f64 / (zoom * raster)
+            ));
             let _ = SetWindowPos(
                 self.hwnd,
                 Some(HWND_TOPMOST),
@@ -310,6 +322,8 @@ impl Host {
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_HIDE);
             let _ = self.controller.SetIsVisible(false);
+            // Hidden, the page is looked at as Discord lays it out unzoomed.
+            let _ = self.controller.SetZoomFactor(1.0);
         }
         say("discord web: the sign-in page is put away");
     }
@@ -386,6 +400,23 @@ impl Host {
         } else {
             self.cdp_send("Input.insertText", json!({ "text": text }));
         }
+    }
+
+    /// Takes focus off the field the page put it in by itself (Discord focuses the e-mail field), so the sign-in page
+    /// opens on the QR code with no field waiting for the keyboard.
+    pub fn unfocus(&self) {
+        self.cdp_send(
+            "Runtime.evaluate",
+            json!({ "expression": "{ const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); }" }),
+        );
+    }
+
+    /// The pad's first step into the form, after `unfocus`: the form's first field, where Tab would have begun.
+    pub fn first_field(&self) {
+        self.cdp_send(
+            "Runtime.evaluate",
+            json!({ "expression": "{ const f = document.querySelector('form input:not([type=hidden]), input:not([type=hidden])'); if (f) f.focus(); }" }),
+        );
     }
 
     pub fn close(self) {

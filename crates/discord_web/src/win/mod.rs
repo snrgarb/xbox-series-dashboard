@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use model::discord_web::{WebField, WebState};
+use model::discord_web::{WebField, WebKey, WebState};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_APP};
 
@@ -84,6 +84,10 @@ fn run(
     let mut state = WebState::Checking;
     let mut field: Option<WebField> = None;
     let mut shown = false;
+    // The QR code first: until the pad sends a key, a field the page focused by itself is let go, so the page opens
+    // with no field waiting for the keyboard. The first Tab then goes to the form's first field.
+    let mut hands_off = true;
+    let mut qr: Option<bool> = None;
     let mut next_look = Instant::now() + Duration::from_millis(500);
     loop {
         host::pump(Duration::from_millis(if shown { 100 } else { 500 }));
@@ -108,6 +112,7 @@ fn run(
                     // the login page is asked for.
                     if state == WebState::Checking {
                         host.navigate(&format!("{base}/login"));
+                        hands_off = true;
                     }
                     next_look = Instant::now();
                 }
@@ -118,8 +123,19 @@ fn run(
                         tell(Report::Field(None));
                     }
                 }
-                Command::Key(key) => host.key(key),
-                Command::Text(text) => host.insert(&text),
+                Command::Key(key) if hands_off && key == WebKey::Tab => {
+                    hands_off = false;
+                    host.first_field();
+                    next_look = Instant::now();
+                }
+                Command::Key(key) => {
+                    hands_off = false;
+                    host.key(key);
+                }
+                Command::Text(text) => {
+                    hands_off = false;
+                    host.insert(&text);
+                }
                 Command::Stop => {
                     host.close();
                     say("discord web: the web view is closed; the session is kept");
@@ -148,6 +164,21 @@ fn run(
         if now != state {
             state = now;
             tell(Report::State(state));
+        }
+        let login = page["login"].as_bool() == Some(true);
+        if shown && login {
+            // Whether Discord shows its QR code: presence only, never what it holds.
+            let now = page["qr"].as_bool() == Some(true);
+            if qr != Some(now) {
+                qr = Some(now);
+                say(&format!("discord web: QR code shown {}", if now { "yes" } else { "no" }));
+            }
+        }
+        let focused = !page["field"].as_str().unwrap_or("").is_empty();
+        if shown && login && hands_off && focused {
+            host.unfocus();
+            next_look = Instant::now() + Duration::from_millis(50);
+            continue;
         }
         let seen = match page["field"].as_str() {
             Some("password") if shown => Some(WebField::Password),

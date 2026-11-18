@@ -4,10 +4,13 @@
 //! away; the executable shows the web view while this page has the pad and nothing is over it
 //! (`Dashboard::discord_sign_in_shown`).
 //!
-//! The pad drives Discord's page by keys (`WebAsk::Key`): Up and Down step through its fields and buttons as Shift+Tab
+//! **The QR code first**: the page opens on Discord's QR code, zoomed so it can be scanned from a sofa, with no field
+//! focused and no keyboard up (the session lets go of the field Discord focuses by itself, `crates/discord_web`); the
+//! band's first line says to scan it with the Discord mobile app. Typing is the second way:
+//! the pad drives Discord's page by keys (`WebAsk::Key`): Up and Down step through its fields and buttons as Shift+Tab
 //! and Tab do, A on a text field opens the Dashboard's own Console keyboard (a password field's typed as dots), and on
 //! anything else presses Enter. What the keyboard keeps goes into the field (`WebAsk::Text`) and nowhere else: never
-//! logged, never kept. The QR code Discord shows beside the form is left as it is, for a phone to scan.
+//! logged, never kept. The QR code is Discord's own and left to Discord (it refreshes itself): never read.
 //!
 //! The page closes by itself once the session is signed in (`Dashboard::discord_signed_in`); B closes it before.
 use model::discord_web::{WebAsk, WebField, WebKey};
@@ -26,7 +29,11 @@ pub const BAND: f32 = 110.0;
 const BACK: Color = Color::rgb(0x0E0E10);
 const PAGE: Color = Color::rgb(0x000000);
 
-/// What the band says the pad does.
+/// The band's first line: the QR code first, in Discord's words ("Scan this with the Discord mobile app to log in
+/// instantly."), then the typed way.
+pub const HINT: &str =
+    "Scan the QR code with the Discord mobile app to log in instantly. To type instead, move to a field and press A.";
+/// The band's second line: what the pad does.
 pub const LEGEND: &str = "Up/Down  Move     A  Select or type     X  Tick     View  Esc     B  Back";
 const TITLE: &str = "Sign in to Discord";
 const WAITING: &str = "Discord's page shows here. If it doesn't, press B and look at Settings > Account > Discord \
@@ -126,7 +133,8 @@ impl Page for DiscordSignIn {
         ui.paragraph(Rect::new(140.0, 180.0, 1100.0, 400.0), WAITING, &style, HAlign::Left, VAlign::Top, 0);
         let band = Rect::new(screen.x, screen.bottom() - BAND, screen.w, BAND);
         ui.fill(band, BACK, 0.0);
-        ui.label_middle(140.0, band.center().1, LEGEND, &BODY);
+        ui.label_middle(140.0, band.y + 36.0, HINT, &BODY);
+        ui.label_middle(140.0, band.y + 76.0, LEGEND, &BODY.color(TEXT_DIM));
     }
 }
 

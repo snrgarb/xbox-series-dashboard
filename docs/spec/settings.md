@@ -981,14 +981,20 @@ with the Devices line under them once a session is kept.
 - **The status line**: Off, Not signed in, Signing in..., Checking..., Signed in, no runtime, and "Discord's page
   couldn't be opened." when the web view failed (the log says why).
 - **Sign in** (while signed out) opens the **sign-in page**: Discord's own discord.com/login over the whole screen,
-  but a band 110 high at its foot where the Dashboard says what the pad does. Up and Down step through the page's
-  fields and buttons (Shift+Tab, Tab); A on a text field opens the Console keyboard (9.6), as dots on a password
-  field, and what it keeps takes the field's place; A elsewhere and Menu press Enter; X is Space; View is Escape; B
-  closes the page. The QR code Discord shows is left as Discord shows it, for a phone. Signed in, the page closes by
-  itself, back on Discord messages. Closed before signing in, nothing is kept.
+  but a band 110 high at its foot that is the Dashboard's: two lines at x 140, BodyText, centred at 36 and 76 into the
+  band, "Scan the QR code with the Discord mobile app to log in instantly. To type instead, move to a field and press
+  A." and, dimmed, what the pad does. **The QR code is the first way**: the page opens with no field focused and no
+  keyboard, zoomed (never cropped or restyled) so Discord's QR panel is shown and large, about 390 at 1080
+  (docs/discord-web.md, "The QR code first"); scanned with the Discord mobile app and confirmed on the phone, the
+  page signs in by itself. **Typing is the second**: Up and Down step through the page's fields and buttons
+  (Shift+Tab, Tab; the first Down goes to the form's first field); A on a text field opens the Console keyboard
+  (9.6), as dots on a password field, and what it keeps takes the field's place; A elsewhere and Menu press Enter; X
+  is Space; View is Escape; B closes the page. Signed in either way, the page closes by itself, back on Discord
+  messages. Closed before signing in, nothing is kept.
 - **Sign out** removes the Profile's session folder (`<data>\discord-web\profile-<id>`), and with it everything the
   web view kept: nothing of it is left on the PC. Discord's own record of the session stays under its Devices.
 - **Focus**: the switch, then (Down, while on) Sign in and (Right) Sign out. B, or Left from the switch or Sign in,
   goes back to Account's boxes. The focus log: `Settings: Discord messages: Use Discord messages; on, signed in, kept`
-  (the switch, the session's word, `kept` while a session is on the PC); on the sign-in page `DiscordSignIn: Tab`,
-  the last key sent, and `DiscordSignIn: keyboard` as text entry opens. The session's own lines start `discord web:`.
+  (the switch, the session's word, `kept` while a session is on the PC); on the sign-in page `DiscordSignIn:
+  Discord's page`, then `DiscordSignIn: Tab`, the last key sent, and `DiscordSignIn: keyboard` as text entry opens.
+  The session's own lines start `discord web:`; `discord web: QR code shown yes` says the QR code is on the page.

@@ -180,7 +180,8 @@
 //!   standin serve-discord-web [--port <n>]
 //!       A stand-in discord.com (`discord_web::Web`, #197) on 127.0.0.1 at <n>, for the Dashboard's
 //!       `--discord-web-url http://127.0.0.1:<n>`: a made-up sign-in form at /login that takes any e-mail and password,
-//!       a session cookie, and an app page in Discord's DOM shape at /app. Says `serve-discord-web: listening on
+//!       a session cookie, and an app page in Discord's DOM shape at /app; beside the form a made-up QR block, and
+//!       `POST /standin/qr-confirm` to play the phone that scanned it and confirmed. Says `serve-discord-web: listening on
 //!       http://127.0.0.1:<n>` and then a line a request (its method, path and whether it came signed in; never what
 //!       was typed), until it is killed.
 //!   standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...

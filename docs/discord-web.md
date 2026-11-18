@@ -89,7 +89,33 @@ there, which Settings says.
 ## The sign-in page, and which keyboard
 
 Discord's own discord.com/login, over the whole screen but a band 110 high at its foot that is the Dashboard's
-(`discord_sign_in::BAND`), saying what the pad does. The pad drives the page by DevTools key events, which reach it
+(`discord_sign_in::BAND`): its first line says to scan the QR code, the second what the pad does.
+
+### The QR code first
+
+Scanning Discord's QR code with the Discord mobile app is the first way to sign in; typing is the second.
+
+- The page opens with **no field focused and no keyboard up**. Discord focuses the e-mail field by itself; until the
+  pad sends a key, the session lets go of any field focused (`blur()`, looked at four times a second), and the first
+  Down puts focus in the form's first field, where Tab would have begun.
+- The page is **zoomed, never cropped or restyled** (WebView2's `ZoomFactor`, kept across navigations, set back to 1
+  when the page is put away): as far as leaves the page 860 x 440 CSS pixels at least (`discord_web::VIEW_MIN`,
+  `zoom`). Discord drops its QR panel from a narrow login page, so the width is kept above that; within it the QR
+  code is as large as it goes: 2.2 times on a 1080-line screen at any DPI scale, so Discord's QR panel (176 CSS pixels
+  across, as the panel is laid out) is about 390 pixels at the 1080 scale. The breakpoint and the panel's size are
+  Discord's as seen in its stylesheet and UNVERIFIED against today's discord.com; the log line `discord web: page zoom
+  2.20 at scale 2.00, 873x441 CSS pixels` and `discord web: QR code shown yes` say what the TV got.
+- The band's first line, in Discord's words where it has them: "Scan the QR code with the Discord mobile app to log
+  in instantly. To type instead, move to a field and press A."
+- The QR code is Discord's: it expires and refreshes itself, and nothing of ours reads it or the page's token. After
+  the scan the phone asks to confirm; then Discord's page goes to the app by itself, which the session's usual look at
+  the page (`app`: the server bar, no login route) takes as signed in: no input on our side.
+- The log says only whether the code is shown, each time that changes while the page is up: `discord web: QR code
+  shown yes` or `no` (the `qr` flag of `js/state.js`: a QR panel laid out with a size).
+
+### Typing
+
+The pad drives the page by DevTools key events, which reach it
 whether or not its window has the foreground (the spike's lesson, with focus emulation on): Up and Down are
 Shift+Tab and Tab, A presses Enter (the full rawKeyDown, char, keyUp sequence a form needs), X is Space, View is
 Escape, B closes the page.
@@ -97,8 +123,7 @@ Escape, B closes the page.
 **The Dashboard's own Console keyboard is given to the page**, not the spike's pad keyboard: A on a text field puts
 the web view away and opens text entry (docs/spec/settings.md 9.6) over the sign-in page, as dots for a password
 field; what it keeps goes into the field. So typing on the sign-in page is the same as everywhere else in the
-Dashboard. The QR code Discord shows beside the form is left as Discord shows it, for the phone app to scan: no code
-of ours touches it.
+Dashboard.
 
 ## The loader: WebView2Loader.dll beside dashboard.exe
 
@@ -130,8 +155,11 @@ signs in to discord.com as you and reads the page for you."
 
 - Unit: `crates/discord_web` (the folder per Profile, nothing made while off, sign-out leaves nothing, another
   Profile's folder untouched), the model (`WebAsk` never shows text), the screens (Settings' state line; text entry's
-  text goes to the session and nowhere else), the stand-in (a filled form signs in; the app page has Discord's shape).
+  text goes to the session and nowhere else), the stand-in (a filled form signs in; the app page has Discord's shape;
+  the phone's scan signs the page in, once), the zoom (`VIEW_MIN` kept at every scale).
 - Screenshots: Settings > Account with the new box, Discord messages off and signed in, the sign-in page's band.
-- `e2e/payloads/discord-web` on the TV PC, against `standin serve-discord-web`: the switch on, signed in on the
-  stand-in's form with the pad and the Console keyboard, closed and started again still signed in, signed out with
-  nothing left.
+- `e2e/payloads/discord-web` on the TV PC, against `standin serve-discord-web`, whose login page has a made-up QR
+  block (hidden under 830 CSS pixels, as Discord's) and an e-mail field that focuses itself: the switch on; **signed
+  in by the QR code with no input at all** (the page opens with the QR shown and no field focused, the test plays the
+  phone with `POST /standin/qr-confirm`); closed and started again still signed in; signed out with nothing left;
+  then signed in again by typing on the stand-in's form with the pad and the Console keyboard, and signed out again.

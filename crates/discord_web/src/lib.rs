@@ -68,6 +68,20 @@ pub struct Area {
     pub height: i32,
 }
 
+/// The smallest page, in CSS pixels, the sign-in page is zoomed to: wide enough that Discord keeps its QR panel beside
+/// the form (it drops the panel on a narrow page), tall enough for the form. Within that, the page is zoomed as far as
+/// it goes, so the QR code is as large as it can be from a sofa: on a 1080-line screen (970 lines above the band),
+/// 2.2 times, Discord's QR panel about 390 pixels across. docs/discord-web.md, "The QR code first".
+pub const VIEW_MIN: (f64, f64) = (860.0, 440.0);
+
+/// The page zoom (WebView2's `ZoomFactor`) for `area` at the window's rasterization scale `raster` (its DPI scale):
+/// the largest that leaves the page `VIEW_MIN` CSS pixels at least, never less than 1.
+pub fn zoom(area: Area, raster: f64) -> f64 {
+    let raster = if raster > 0.0 { raster } else { 1.0 };
+    let fit = (area.width as f64 / VIEW_MIN.0).min(area.height as f64 / VIEW_MIN.1) / raster;
+    (fit * 100.0).floor().max(100.0) / 100.0
+}
+
 /// What the Dashboard's thread asks of the host thread.
 #[allow(dead_code)]
 pub(crate) enum Command {
@@ -541,6 +555,20 @@ pub(crate) fn say(line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sign_in_page_is_zoomed_as_far_as_keeps_the_qr_panel() {
+        let tv = Area { x: 0, y: 0, width: 3840, height: 1940 };
+        assert_eq!(zoom(tv, 2.0), 2.2, "a 4K TV at 200%");
+        assert_eq!(zoom(Area { width: 1920, height: 970, ..tv }, 1.0), 2.2, "1080 at 100%: the same");
+        assert_eq!(zoom(Area { width: 1920, height: 970, ..tv }, 1.5), 1.46);
+        assert_eq!(zoom(Area { width: 800, height: 400, ..tv }, 1.0), 1.0, "never below 1");
+        assert_eq!(zoom(tv, 0.0), 4.4, "no scale known: 1");
+        for (area, raster) in [(tv, 2.0), (Area { width: 1920, height: 970, ..tv }, 1.25)] {
+            let z = zoom(area, raster) * raster;
+            assert!(area.width as f64 / z >= VIEW_MIN.0 && area.height as f64 / z >= VIEW_MIN.1);
+        }
+    }
 
     fn session(data: &Path) -> Session {
         let mut session = Session::new(None, Some(data), || {});
