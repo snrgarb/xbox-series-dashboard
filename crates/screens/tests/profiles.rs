@@ -151,12 +151,15 @@ fn profiles_is_accounts_first_box_and_lists_every_profile_then_add_profile() {
     shell.dashboard.open_page(Open::Settings(Entry::Rail));
     shell.press(&[Down]);
     assert_eq!(shell.focus(), "Settings: Rail: Account");
-    // Profiles is Account's first box, Who's playing today? beside it, Discord under Profiles.
+    // Profiles is Account's first box, Who's playing today? beside it, Discord under Profiles and Discord messages
+    // under Who's playing today? (#197).
     shell.press(&[Right]);
     assert_eq!(shell.focus(), "Settings: Account: Profiles");
     shell.press(&[Right]);
     assert_eq!(shell.focus(), "Settings: Account: Who's playing today?");
     shell.press(&[Down]);
+    assert_eq!(shell.focus(), "Settings: Account: Discord messages");
+    shell.press(&[Left]);
     assert_eq!(shell.focus(), "Settings: Account: Discord");
     shell.press(&[Up, A]);
     assert_eq!(shell.focus(), "Settings: Profiles: Tester");

@@ -35,10 +35,13 @@ pub enum Setting {
     DailyUpdateCheck,
     /// Settings > Launchers' Show Game Pass games (#277): the PC Game Pass catalogue's games are listed with Xbox's.
     ShowGamePass,
+    /// Settings > Account > Discord messages (#197, docs/discord-web.md): the Dashboard's own discord.com session.
+    /// Off by default: nothing of it starts until the user turns it on, beside the terms said plainly.
+    DiscordMessages,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 11] = [
+    pub const ALL: [Setting; 12] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
@@ -50,6 +53,7 @@ impl Setting {
         Setting::AskWhosPlaying,
         Setting::DailyUpdateCheck,
         Setting::ShowGamePass,
+        Setting::DiscordMessages,
     ];
 
     /// The option's key in the settings table. Never changed: a database has it.
@@ -67,12 +71,13 @@ impl Setting {
             Setting::AskWhosPlaying => "startup.ask_whos_playing",
             Setting::DailyUpdateCheck => "updates.daily_check",
             Setting::ShowGamePass => model::game_pass::SHOWN_KEY,
+            Setting::DiscordMessages => "discord.messages",
         }
     }
 
     /// What the option is until it is set.
     pub fn default(self) -> bool {
-        !matches!(self, Setting::ReduceMotion | Setting::DailyUpdateCheck)
+        !matches!(self, Setting::ReduceMotion | Setting::DailyUpdateCheck | Setting::DiscordMessages)
     }
 }
 
@@ -136,6 +141,8 @@ pub struct Options {
     pub daily_update_check: bool,
     /// The PC Game Pass catalogue's games are listed (Settings > Launchers, #277): on by default.
     pub show_game_pass: bool,
+    /// The Dashboard's own Discord session may run (Settings > Account > Discord messages, #197): off by default.
+    pub discord_messages: bool,
     /// The region whose PC Game Pass catalogue is listed, as chosen (`model::game_pass::REGION_KEY`); None is
     /// Windows' own.
     pub game_pass_region: Option<model::game_pass::Region>,
@@ -145,6 +152,9 @@ pub struct Options {
     /// Whether the account has PC Game Pass, as the executable judged it as it started (#173 follow-up): not an
     /// option, but Settings > Launchers' status line.
     pub game_pass_subscription: model::game_pass::Subscription,
+    /// Discord's web session as the executable last found it (Settings > Account > Discord messages, #197): not an
+    /// option, but how the session stands, and the kind of field focus is on in its sign-in page.
+    pub discord_web: model::discord_web::Web,
     /// The Boot video chosen (docs/spec/start-up.md), which plays as the Dashboard starts if it is found.
     pub boot_video: BootVideo,
     /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
@@ -178,9 +188,11 @@ impl Default for Options {
             ask_whos_playing: of(Setting::AskWhosPlaying),
             daily_update_check: of(Setting::DailyUpdateCheck),
             show_game_pass: of(Setting::ShowGamePass),
+            discord_messages: of(Setting::DiscordMessages),
             game_pass_region: None,
             windows_region: None,
             game_pass_subscription: model::game_pass::Subscription::Unknown,
+            discord_web: model::discord_web::Web::default(),
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),
@@ -225,6 +237,7 @@ impl Options {
             Setting::AskWhosPlaying => self.ask_whos_playing,
             Setting::DailyUpdateCheck => self.daily_update_check,
             Setting::ShowGamePass => self.show_game_pass,
+            Setting::DiscordMessages => self.discord_messages,
         }
     }
 
@@ -241,6 +254,7 @@ impl Options {
             Setting::AskWhosPlaying => &mut self.ask_whos_playing,
             Setting::DailyUpdateCheck => &mut self.daily_update_check,
             Setting::ShowGamePass => &mut self.show_game_pass,
+            Setting::DiscordMessages => &mut self.discord_messages,
         } = on;
     }
 }
@@ -274,6 +288,8 @@ mod tests {
         assert!(!options.daily_update_check);
         // The port's own (#277): the Game Pass catalogue's games listed, for Windows' own region.
         assert!(options.show_game_pass && options.game_pass_region.is_none());
+        // The port's own (#197): Discord's web session never starts until it is turned on.
+        assert!(!options.discord_messages);
     }
 
     #[test]

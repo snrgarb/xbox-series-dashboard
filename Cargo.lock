@@ -90,6 +90,7 @@ dependencies = [
  "anyhow",
  "audio",
  "discord",
+ "discord_web",
  "helpers",
  "image",
  "input",
@@ -503,6 +504,19 @@ name = "discord-spike"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "webview2-com",
+ "windows",
+ "windows-core",
+]
+
+[[package]]
+name = "discord_web"
+version = "0.1.0"
+dependencies = [
+ "log-line",
+ "model",
+ "serde_json",
+ "tempfile",
  "webview2-com",
  "windows",
  "windows-core",

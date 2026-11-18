@@ -14,7 +14,7 @@
 # where either is there already: that is a real install's, which it would replace and then remove.
 #
 # Passes when:
-#   - `setup.exe /S /D=<test folder>` ends 0 having written dashboard.exe, README.txt, THIRD-PARTY-LICENSES.txt and
+#   - `setup.exe /S /D=<test folder>` ends 0 having written dashboard.exe, README.txt, THIRD-PARTY-LICENSES.txt, WebView2Loader.dll and
 #     uninstall.exe there and nothing else (no font, sound, video or picture), the uninstall entry (DisplayVersion
 #     the installer's version, InstallLocation the folder, UninstallString its uninstall.exe, NoModify, NoRepair),
 #     and the Start menu shortcut to the installed dashboard.exe;
@@ -136,7 +136,7 @@ try {
     Expect ($code -eq 0) "setup /S /D=<test folder> ends 0 (got $code)"
     $files = @(Get-ChildItem $installed -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName.Substring($installed.Length + 1) } | Sort-Object)
     Say "installed: $($files -join ', ')"
-    Expect (($files -join ',') -eq 'dashboard.exe,README.txt,THIRD-PARTY-LICENSES.txt,uninstall.exe') 'the folder holds dashboard.exe, README.txt, THIRD-PARTY-LICENSES.txt and uninstall.exe, and nothing else'
+    Expect (($files -join ',') -eq 'dashboard.exe,README.txt,THIRD-PARTY-LICENSES.txt,uninstall.exe,WebView2Loader.dll') 'the folder holds dashboard.exe, README.txt, THIRD-PARTY-LICENSES.txt, uninstall.exe and WebView2Loader.dll, and nothing else'
     Expect (Test-UninstallEntry) 'the uninstall entry is written'
     $entry = @{}
     foreach ($name in 'DisplayName', 'DisplayVersion', 'InstallLocation', 'UninstallString', 'NoModify', 'NoRepair') {

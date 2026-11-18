@@ -1,7 +1,7 @@
 ; The Dashboard's per-user installer (docs/release.md; docs/research/shell.md, section 8). Built by tools/package.sh
 ; with makensis, on Linux as on Windows:
 ;
-;   makensis -DVERSION=0.1.0 -DSTAGE=<folder with dashboard.exe, README.txt, THIRD-PARTY-LICENSES.txt>
+;   makensis -DVERSION=0.1.0 -DSTAGE=<folder with dashboard.exe, WebView2Loader.dll, README.txt, THIRD-PARTY-LICENSES.txt>
 ;            -DOUTFILE=<setup.exe> [-DSIGN_COMMAND=<command that signs the file named after it>] installer.nsi
 ;
 ; Install: no admin. The files to %LOCALAPPDATA%\Programs\XboxSeriesDashboard, a path that never changes between
@@ -113,6 +113,16 @@ Section "${NAME}" SecProgram
     ${EndIf}
   ${EndIf}
   File "${STAGE}/dashboard.exe"
+  ; Discord messages' WebView2 loader (#197). A running copy holds it: renamed aside as dashboard.exe is.
+  ${If} ${FileExists} "$INSTDIR\WebView2Loader.dll"
+    ClearErrors
+    Delete "$INSTDIR\WebView2Loader.dll"
+    ${If} ${Errors}
+      Delete "$INSTDIR\WebView2Loader.dll.old"
+      Rename "$INSTDIR\WebView2Loader.dll" "$INSTDIR\WebView2Loader.dll.old"
+    ${EndIf}
+  ${EndIf}
+  File "${STAGE}/WebView2Loader.dll"
   File "${STAGE}/README.txt"
   File "${STAGE}/THIRD-PARTY-LICENSES.txt"
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -161,6 +171,8 @@ Section "un.${NAME}" SecUnProgram
   Delete "$INSTDIR\README.txt"
   Delete "$INSTDIR\THIRD-PARTY-LICENSES.txt"
   Delete "$INSTDIR\dashboard.*.old"
+  Delete "$INSTDIR\WebView2Loader.dll.old"
+  Delete "$INSTDIR\WebView2Loader.dll"
   ClearErrors
   Delete "$INSTDIR\dashboard.exe"
   ${If} ${Errors}

@@ -18,6 +18,7 @@ pub mod boxes;
 pub mod categories;
 pub mod controls;
 mod discord;
+pub mod discord_web;
 mod group;
 pub mod groups;
 mod guide;
@@ -131,6 +132,10 @@ pub trait Pane {
     fn asks(&mut self) -> Vec<Effect> {
         Vec::new()
     }
+
+    /// Asked after each press and as the options change under it (`Dashboard::set_options`): for a pane whose focus
+    /// log says how something the executable tells stands (Discord messages' session).
+    fn tick(&mut self, _around: Around) {}
 
     /// Whether what text entry had to say finished the pane, which then steps back as B would: the Picture page,
     /// once a picture's path is kept.
@@ -271,6 +276,10 @@ impl Settings {
 impl Page for Settings {
     fn name(&self) -> &'static str {
         "Settings"
+    }
+
+    fn tick(&mut self, around: Around) {
+        self.pane_mut().tick(around);
     }
 
     fn focus(&self) -> String {

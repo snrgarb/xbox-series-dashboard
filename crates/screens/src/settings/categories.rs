@@ -7,6 +7,7 @@ use super::art::Art;
 use super::boot_video::BootVideoPage;
 use super::boxes::{Boxes, Item};
 use super::discord::Discord;
+use super::discord_web::DiscordWeb;
 use super::groups::Groups;
 use super::guide::Guide;
 use super::helpers::{self, Helpers};
@@ -81,7 +82,7 @@ fn general() -> Boxes {
     Boxes::new(Category::General.name(), vec![vec![personalisation, idle], vec![guide, boot_video]])
 }
 
-/// Account: Profiles and Who's playing today?, then Discord under Profiles.
+/// Account: Profiles and Who's playing today?, then Discord under Profiles and Discord messages beside it (#197).
 fn account() -> Boxes {
     let profiles = Item::Opens { icon: '\u{E716}', name: "Profiles", pane: |around| Box::new(Profiles::open(around)) };
     let whos_playing = Item::Opens {
@@ -90,7 +91,9 @@ fn account() -> Boxes {
         pane: |around| Box::new(WhosPlayingPage::open(around)),
     };
     let discord = Item::Opens { icon: '\u{E8F2}', name: "Discord", pane: |_| Box::new(Discord::default()) };
-    Boxes::new(Category::Account.name(), vec![vec![profiles, whos_playing], vec![discord]])
+    let messages =
+        Item::Opens { icon: '\u{E8BD}', name: super::discord_web::TITLE, pane: |_| Box::new(DiscordWeb::default()) };
+    Boxes::new(Category::Account.name(), vec![vec![profiles, whos_playing], vec![discord, messages]])
 }
 
 /// Games & apps: more than a handful of boxes, so in two columns under section titles, as the console's pages with

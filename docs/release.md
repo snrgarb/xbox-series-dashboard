@@ -31,7 +31,7 @@ else `git rev-parse --short=7 HEAD`):
 3. CI (`.github/workflows/ci.yml`) runs on the tag: Test, Windows (the release build), then **Package**, which fails
    unless the tag is `v` and the workspace's version. Its artifact, `XboxSeriesDashboard-<version>`, holds:
    - `XboxSeriesDashboard-<version>-setup.exe`, the per-user installer;
-   - `XboxSeriesDashboard-<version>-portable.zip`, a folder of the same three files;
+   - `XboxSeriesDashboard-<version>-portable.zip`, a folder of the same four files;
    - `SHA256SUMS.txt`.
 4. Try it: on the TV PC, `e2e/payloads/install` installs, starts and uninstalls it in a folder of its own (below).
 5. **Publishing is the user's.** A published release is what the Dashboard's updates find (docs/spec/updates.md): its
@@ -55,11 +55,12 @@ and `$CARGO_ABOUT`.
 
 ## What ships, and what does not
 
-Exactly three files; `tools/package.sh` fails if the folder holds anything else.
+Exactly four files; `tools/package.sh` fails if the folder holds anything else.
 
 | File | What |
 |---|---|
 | `dashboard.exe` | The Dashboard: one exe, which is also shell mode's (`--shell`, `--sentinel`, `--shell-on`, `--shell-off`) |
+| `WebView2Loader.dll` | Microsoft's redistributable WebView2 loader, which Discord messages (#197, docs/discord-web.md) loads at run time from beside `dashboard.exe`. Taken from beside the exe given to `tools/package.sh`, where the Windows build puts it from webview2-com-sys's build; never committed. Without it the Dashboard runs and Discord messages says there is no runtime |
 | `README.txt` | `packaging/README.txt`: installed or portable, where data lives, and how to fill the media folder from a Bundle the user already has |
 | `THIRD-PARTY-LICENSES.txt` | Every crate `dashboard.exe` is built from for Windows and its licence, gathered by cargo-about (`packaging/about.toml`, `packaging/about.hbs`). A dependency under a licence not in `about.toml`'s `accepted` list fails the package |
 
@@ -88,7 +89,7 @@ What it does (docs/research/shell.md, section 8, is the reasoning):
 - **Per user, no admin.** `RequestExecutionLevel user`; into `%LOCALAPPDATA%\Programs\XboxSeriesDashboard`, a path
   that never changes between versions, because shell mode names it in `Winlogon\Shell` and the sentinel's Run entry.
   No folder page: `/D=<folder>` on the command line is the only other place (for a test).
-- **Writes**: the three files and `uninstall.exe`; the Start menu shortcut `Xbox Series Dashboard.lnk` (the user's
+- **Writes**: the four files and `uninstall.exe`; the Start menu shortcut `Xbox Series Dashboard.lnk` (the user's
   own Programs folder); `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\XboxSeriesDashboard`
   (`DisplayName`, `DisplayVersion`, `Publisher`, `InstallLocation`, `DisplayIcon`, `UninstallString`,
   `QuietUninstallString`, `NoModify`, `NoRepair`, `EstimatedSize`). Nothing of Winlogon, Run or Task Scheduler: those
@@ -106,7 +107,7 @@ What it does (docs/research/shell.md, section 8, is the reasoning):
   [/DATADIR=<folder>] [/DRYSHELL]`. The last two are for the test: the data folder named in place of the user's,
   and `--shell-off --dry-shell`, which writes nothing, its lines kept in `<data>\uninstall-shell-off.log`.
 
-The portable zip is the same three files in a folder `XboxSeriesDashboard-<version>`. It runs from anywhere, and
+The portable zip is the same four files in a folder `XboxSeriesDashboard-<version>`. It runs from anywhere, and
 keeps its data in the same data folder; it can't be the shell (shell mode refuses a copy that is not at the installed
 path).
 
