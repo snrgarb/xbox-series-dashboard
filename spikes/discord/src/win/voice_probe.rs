@@ -61,6 +61,14 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
         t["noiseSuppression"],
         t["autoGainControl"]
     );
+    say!(
+        "probe: the input getUserMedia chose: its label {} chars, Windows' default input {}",
+        t["labelLength"],
+        match t["isDefault"].as_bool() {
+            Some(b) => yes(b),
+            None => "unknown",
+        }
+    );
     say!("{}", devices_line("after getUserMedia", &d["after"]));
     say!(
         "probe: an output device can be chosen by the page: setSinkId on media elements {}, on AudioContext {}",
@@ -95,6 +103,8 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
     let (mut clock, mut wall) = (first["time"].as_f64().unwrap_or(0.0), first["wall"].as_f64().unwrap_or(0.0));
     let (clock0, wall0) = (clock, wall);
     let (mut samples, mut running, mut ticks, mut gap, mut loudest) = (0u32, 0u32, 0u64, 0u64, 0f64);
+    let (mut hooked, mut nonzero, mut peak) = (0u32, 0u64, 0f64);
+    say!("probe: the hooks (and their 1 s timer) in the page: {}", yes(first["hooks"] == true));
     let mut costs = Costs::start(&host);
     let started = Instant::now();
     let mut ten = 0;
@@ -116,17 +126,26 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
         ticks += s["timer"]["ticks"].as_u64().unwrap_or(0);
         gap = gap.max(s["timer"]["maxGap"].as_u64().unwrap_or(0));
         loudest = loudest.max(s["level"].as_f64().unwrap_or(0.0));
+        if s["hooks"] == true {
+            hooked += 1;
+        }
+        nonzero += s["nonzero"].as_u64().unwrap_or(0);
+        peak = peak.max(s["peak"].as_f64().unwrap_or(0.0));
         say!(
-            "probe {} s: AudioContext {}, its clock +{:.2} s over {:.2} s; timer ticks {} (max gap {} ms); mic track {} muted {}, level now {:.4}; page {} focus {}",
+            "probe {} s: AudioContext {}, its clock +{:.2} s over {:.2} s; timer {} ticks {} (max gap {} ms); mic track {} muted {}, level now {:.4}, analyser {} of {} samples non-zero (peak {:.4}); page {} focus {}",
             started.elapsed().as_secs(),
             s["state"].as_str().unwrap_or("?"),
             c - clock,
             w - wall,
+            if s["hooks"] == true { "(hooks in)" } else { "(HOOKS MISSING)" },
             s["timer"]["ticks"],
             s["timer"]["maxGap"],
             s["track"].as_str().unwrap_or("?"),
             s["muted"],
             s["level"].as_f64().unwrap_or(0.0),
+            s["nonzero"],
+            s["size"],
+            s["peak"].as_f64().unwrap_or(0.0),
             s["visibility"].as_str().unwrap_or("?"),
             s["focus"]
         );
@@ -137,18 +156,40 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
     let expected = wall_span.floor() as u64;
     let kept_running = samples > 0 && running == samples;
     let clock_kept = clock_span / wall_span >= 0.95;
+    // A slowed timer still ticks (once a second, or once a minute when throttled hard): no tick at all and no gap
+    // is a timer that never ran, the spike's fault, and says nothing about throttling.
+    let timer_ran = hooked > 0 && (ticks > 0 || gap > 0);
     let timer_kept = ticks as f64 >= 0.9 * expected as f64 && gap <= 1500;
+    let timer = if !timer_ran {
+        "NEVER STARTED (the spike's fault, not throttling)"
+    } else if timer_kept {
+        "on time"
+    } else {
+        "slowed"
+    };
+    let mic = if nonzero == 0 {
+        "the analyser saw only zeros: no signal at all (the input off or silent hardware, or the analyser not fed)"
+    } else if loudest < 0.001 {
+        "the analyser saw low noise: the input is open, nobody spoke"
+    } else {
+        "the analyser saw sound"
+    };
+    let verdict = match (kept_running && clock_kept, timer_ran, timer_kept) {
+        (false, _, _) => "FAIL",
+        (true, false, _) => "INCOMPLETE (audio passed; the timer was not measured)",
+        (true, true, true) => "PASS",
+        (true, true, false) => "FAIL",
+    };
     say!(
-        "probe verdict (hide {}, switches {}): AudioContext running {} ({running} of {samples} samples); its clock {:.1} s over {:.1} s ({}); timer {ticks} ticks of {expected} expected, max gap {gap} ms ({}); loudest mic level {:.4}: {}",
+        "probe verdict (hide {}, switches {}): AudioContext running {} ({running} of {samples} samples); its clock {:.1} s over {:.1} s ({}); timer {ticks} ticks of {expected} expected, max gap {gap} ms ({timer}); loudest mic level {:.4}, peak sample {:.4}, {mic}: {verdict}",
         options.hide.name(),
         if options.args_set_b { "b" } else { "a" },
         yes(kept_running),
         clock_span,
         wall_span,
         if clock_kept { "kept pace" } else { "fell behind" },
-        if timer_kept { "on time" } else { "slowed" },
         loudest,
-        if kept_running && clock_kept && timer_kept { "PASS" } else { "FAIL" }
+        peak,
     );
     let end = audio("end", false);
     say!(
@@ -158,9 +199,9 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
     );
     say!("voice: notifications taken this run: {}", super::host::notifications());
     host.close();
-    if kept_running && clock_kept && timer_kept {
-        0
-    } else {
-        11
+    match verdict {
+        "PASS" => 0,
+        "FAIL" => 11,
+        _ => 12,
     }
 }

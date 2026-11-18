@@ -12,11 +12,12 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
-    CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR, CoreWebView2EnvironmentOptions,
-    CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    ExecuteScriptCompletedHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
-    NewWindowRequestedEventHandler, NotificationReceivedEventHandler, PermissionRequestedEventHandler,
-    ProcessFailedEventHandler, SetPermissionStateCompletedHandler, SourceChangedEventHandler,
+    AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR,
+    CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, ExecuteScriptCompletedHandler, NavigationCompletedEventHandler,
+    NavigationStartingEventHandler, NewWindowRequestedEventHandler, NotificationReceivedEventHandler,
+    PermissionRequestedEventHandler, ProcessFailedEventHandler, SetPermissionStateCompletedHandler,
+    SourceChangedEventHandler,
 };
 use windows::core::{s, w, Interface, BOOL, HRESULT, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -543,6 +544,25 @@ impl Host {
         .map_err(|e| format!("ExecuteScript: {e:?}"))?;
         let json = rx.recv().map_err(|e| e.to_string())?.map_err(|e| format!("ExecuteScript: {e}"))?;
         serde_json::from_str(&json).map_err(|e| format!("ExecuteScript's answer: {e}"))
+    }
+
+    /// WebView2's own `AddScriptToExecuteOnDocumentCreated`: the script runs in every new document of the main
+    /// world before the page's scripts. Waited for.
+    pub fn add_script(&self, js: &str) -> Result<(), String> {
+        let webview = self.webview.clone();
+        let js = HSTRING::from(js);
+        let (tx, rx) = mpsc::channel();
+        AddScriptToExecuteOnDocumentCreatedCompletedHandler::wait_for_async_operation(
+            Box::new(move |handler| unsafe {
+                webview.AddScriptToExecuteOnDocumentCreated(&js, &handler).map_err(webview2_com::Error::WindowsError)
+            }),
+            Box::new(move |result, _id| {
+                let _ = tx.send(result);
+                Ok(())
+            }),
+        )
+        .map_err(|e| format!("AddScriptToExecuteOnDocumentCreated: {e:?}"))?;
+        rx.recv().map_err(|e| e.to_string())?.map_err(|e| format!("AddScriptToExecuteOnDocumentCreated: {e}"))
     }
 
     /// A DevTools protocol method, waited for: its answer.

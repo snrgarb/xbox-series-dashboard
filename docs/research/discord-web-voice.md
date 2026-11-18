@@ -13,8 +13,24 @@ app's shell (the server bar), not a route. How the Discord Bridge's Web mode doe
 [`discord-bridge.md`](discord-bridge.md), sections 2.3 and 2.5: it grants the microphone in `PermissionRequested`,
 presses Discord's own buttons, reads `usernameSpeaking_` for who speaks and waits for the "Voice Connected" panel.
 
-**Written on Linux on 18 November 2026; nothing here has run on Windows yet.** The "TV result" column of section 5
-is for the lead to fill from the logs.
+**Written on Linux on 18 November 2026.** The "TV result" column of section 5 is for the lead to fill from the logs.
+
+**First TV run, 18 November 2026** (PR #293's first build, `--hide controller`, set `a`): signed in by QR. The probe:
+3 inputs and 4 outputs, labels shown; the microphone granted; `getUserMedia` hidden in 43 ms (48 kHz, live, not
+muted); `setSinkId` on both; the AudioContext was born running and its clock kept 60.0 s over 60.0 s, 6 of 6
+samples. The timer read 0 ticks with a 0 ms gap every time: **the hooks never ran** (DevTools
+`Page.addScriptToEvaluateOnNewDocument` answered ok but its script did not run in Discord's page), the spike's
+fault, not throttling, so the run said FAIL wrongly. Fixed in the next build: the hooks go in by WebView2's own
+`AddScriptToExecuteOnDocumentCreated`, are checked after the app shows (and put in late if missing), and the verdict
+says `NEVER STARTED` and `INCOMPLETE` (exit 12) for a timer that never ran. The mic level was 0.0000 throughout
+(the default input is a wireless headset that may have been off): the next build says whether the analyser saw any
+non-zero sample. Cost during the probe: 585-730 MB private, 3-8% of one core. `--voice-list`: 7 servers (names from
+`data-dnd-name` 7), 2 folders, 19 DM rows on the first screen.
+
+**The page believes it is visible.** With focus emulation on, Discord's page reports `visibility visible`,
+`document.hidden false`, `focus true` even with the controller told it is not visible (the first spike, without
+focus emulation, read `hidden`). That is likely why nothing throttles; it also means the product's session, which
+turns focus emulation on (#197), runs as a visible page would.
 
 ## 1. What the spike adds
 
@@ -50,8 +66,8 @@ marked handled so Windows shows nothing.
   (so they reach `NotificationReceived`); the camera and everything else is refused (D5, no video). Each answer is
   `SavesInProfile = false`, so every run's log shows the request again. The same kinds are also allowed ahead for
   `https://discord.com` through `ICoreWebView2Profile4::SetPermissionState`, so the page never waits on a prompt.
-- **Watching the audio.** Before Discord's scripts run, `js/voice_hooks.js` (DevTools
-  `Page.addScriptToEvaluateOnNewDocument`) keeps a reference to each `RTCPeerConnection`, `AudioContext`,
+- **Watching the audio.** Before Discord's scripts run, `js/voice_hooks.js` (WebView2's
+  `AddScriptToExecuteOnDocumentCreated`; checked once the app shows, and put in late if it is missing) keeps a reference to each `RTCPeerConnection`, `AudioContext`,
   microphone track and played media element Discord makes, each made and returned unchanged, and runs a 1 s
   `setInterval`. Once a second `js/voice_sample.js` reads them: the peer connections' `getStats()` (inbound and
   outbound audio bytes, the remote level and energy, the microphone's level), the contexts' state and clock, the
@@ -126,8 +142,10 @@ yes/no`.
 | `notifications: NotificationReceived taken: ...` / `this runtime has no NotificationReceived` | Whether Discord's web notifications can be taken (WebView2 1.0.2739.15 and later) |
 | `permissions: microphone allowed ahead for https://discord.com` | Set on the profile before the page loads (also `notifications`, `autoplay`) |
 | `permission: kind 1 (microphone) granted, asked by a user gesture no` | The page asked (getUserMedia); the spike answered. 4 notifications, 9 autoplay, 2 camera (always refused) |
-| `voice: the page's peer connections, audio contexts, microphone tracks and a 1 s timer are noted from its start` | The hooks are in; without them audio flow reads as none |
-| `voice: the page says visibility hidden, document.hidden true, focus true` | What Discord believes. `focus true` is focus emulation |
+| `voice: the hooks are set to run at the page's start (AddScriptToExecuteOnDocumentCreated)` | Asked for |
+| `voice: the hooks are in the page from its start: timer ticks so far n, peer connections p, audio contexts c` | **The hooks ran**: ticks above 0 |
+| `voice: the hooks were NOT in the page at its start; put in now: in yes` | They did not: put in late, so only what Discord makes from then on is seen. A hold line with `[HOOKS MISSING ...]` reads audio, contexts and the timer as none |
+| `voice: the page says visibility visible, document.hidden false, focus true` | What Discord believes. With focus emulation on, the TV's page said `visible` though hidden |
 | `notification: n (title a chars, body b chars, tag t chars, requires interaction yes/no, silent yes/no): handled, Windows shows nothing` | **A Discord web notification** (a message, a call) taken; nothing was shown by Windows |
 | `cost at n s: web view k processes, x% of one core over 10 s, private m MB, working set w MB; playing audio (Chromium) yes/no; in front: another program's window, full screen yes` | Every 10 s: **the processor and memory cost**, whether Chromium itself says the page is making sound (`IsDocumentPlayingAudio`), and **whether a full-screen program (the game) is in front** |
 | `voice: notifications taken this run: n` | The count at the end |
@@ -143,8 +161,10 @@ yes/no`.
 | `probe: an output device can be chosen by the page: setSinkId on media elements yes, on AudioContext yes` | Whether Discord's output-device setting can work here |
 | `probe: AudioContext made hidden: born suspended/running, resume() ok, now running; ...` | **Whether audio starts without a gesture** (set `b`'s autoplay switch, or the autoplay permission) |
 | `probe: resume() again as a user gesture (DevTools userGesture): ok, now running` | Only if it did not: whether a trusted gesture starts it |
-| `probe n s: AudioContext running, its clock +10.00 s over 10.00 s; timer ticks 10 (max gap 1003 ms); mic track live muted false, level now 0.0123; page hidden focus true` | Every 10 s: **whether audio's clock and timers keep pace hidden** |
-| `probe verdict (hide h, switches s): AudioContext running yes (6 of 6 samples); its clock 60.0 s over 60.0 s (kept pace); timer 60 ticks of 60 expected, max gap 1010 ms (on time); loudest mic level 0.0300: PASS` | **This combination's answer.** PASS: running at every sample, its clock at least 95% of wall time, at least 90% of the timer's ticks and no gap over 1.5 s. Exit 0 for PASS, 11 for FAIL |
+| `probe: the input getUserMedia chose: its label n chars, Windows' default input yes/no/unknown` | Which input, without its name (0 chars: no label) |
+| `probe: the hooks (and their 1 s timer) in the page: yes` | No: the timer cannot be measured |
+| `probe n s: AudioContext running, its clock +10.00 s over 10.00 s; timer (hooks in) ticks 10 (max gap 1003 ms); mic track live muted false, level now 0.0123, analyser 2048 of 2048 samples non-zero (peak 0.0400); page visible focus true` | Every 10 s: **whether audio's clock and timers keep pace hidden**, and whether the analyser gets any signal (all zeros: none at all; small non-zero: an open, quiet input) |
+| `probe verdict (hide h, switches s): AudioContext running yes (6 of 6 samples); its clock 60.0 s over 60.0 s (kept pace); timer 60 ticks of 60 expected, max gap 1010 ms (on time); loudest mic level 0.0300, peak sample 0.0800, the analyser saw sound: PASS` | **This combination's answer.** PASS: running at every sample, its clock at least 95% of wall time, at least 90% of the timer's ticks and no gap over 1.5 s. A timer with no tick and no gap is `NEVER STARTED` (the spike's fault: a throttled timer still ticks once a second or once a minute) and the verdict `INCOMPLETE`. Exit 0 PASS, 11 FAIL, 12 INCOMPLETE |
 | `probe: the microphone stopped, the AudioContext closed: ok` | Cleaned up |
 
 ### `--voice-list`
@@ -182,7 +202,7 @@ yes/no`.
 
 0 done; 3 not signed in (run `--sign-in`); 4 the server, channel or conversation not found as exactly one; 5 no
 way showed a voice panel or call; 6 a panel but never connected in 20 s; 7 a script failed; 8 no web view or the app
-did not show; 9 the watchdog; 10 a name file missing or not one line; 11 `--voice-probe`'s verdict FAIL; 13 leave not
+did not show; 9 the watchdog; 10 a name file missing or not one line; 11 `--voice-probe`'s verdict FAIL; 12 its verdict INCOMPLETE (the timer never ran); 13 leave not
 confirmed.
 
 ## 5. The questions of #292

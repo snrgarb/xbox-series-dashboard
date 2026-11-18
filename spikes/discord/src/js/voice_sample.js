@@ -71,6 +71,7 @@
   const decline = buttons.filter((b) => /decline|ignore|reject/i.test(b.getAttribute("aria-label") || b.textContent || ""));
 
   return {
+    hooks: !!window.__xsdVoice,
     visibility: document.visibilityState,
     focus: document.hasFocus(),
     panel: !!status,

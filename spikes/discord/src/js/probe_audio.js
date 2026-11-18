@@ -30,11 +30,16 @@
     return { resumed, state: P.ctx.state };
   }
   if (STAGE === "sample") {
-    let level = 0;
+    // The analyser's last window: its level, how many of its samples are not exactly zero, and the largest. A
+    // working analyser on a silent but open microphone shows small non-zero noise; all zeros is no signal at all
+    // (the device off, or the analyser not fed).
+    let level = 0, nonzero = 0, peak = 0, size = 0;
     if (P.analyser) {
       const buf = new Float32Array(P.analyser.fftSize);
       P.analyser.getFloatTimeDomainData(buf);
+      size = buf.length;
       level = Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length);
+      for (const v of buf) { if (v !== 0) nonzero++; peak = Math.max(peak, Math.abs(v)); }
     }
     const track = P.stream && P.stream.getAudioTracks()[0];
     const timer = { ticks: R.ticks, maxGap: Math.round(R.maxGap) };
@@ -45,6 +50,10 @@
       time: P.ctx.currentTime,
       wall: performance.now() / 1000,
       level,
+      nonzero,
+      peak,
+      size,
+      hooks: !!window.__xsdVoice,
       track: track ? track.readyState : "none",
       muted: track ? track.muted : null,
       visibility: document.visibilityState,

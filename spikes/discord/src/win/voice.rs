@@ -79,14 +79,33 @@ pub fn open(options: &Options, loader: &Loader) -> Result<Host, i32> {
             return Err(8);
         }
     };
-    match host.cdp("Page.addScriptToEvaluateOnNewDocument", json!({ "source": HOOKS })) {
-        Ok(_) => say!("voice: the page's peer connections, audio contexts, microphone tracks and a 1 s timer are noted from its start"),
-        Err(e) => say!("voice: the hooks could not be put in ({e}): audio flow will read as none"),
+    // WebView2's own document-created script (the first TV run's DevTools Page.addScriptToEvaluateOnNewDocument
+    // answered ok but never ran in Discord's page: the timer read 0 ticks).
+    match host.add_script(HOOKS) {
+        Ok(()) => say!("voice: the hooks are set to run at the page's start (AddScriptToExecuteOnDocumentCreated)"),
+        Err(e) => say!("voice: the hooks could not be set to run at the start ({e})"),
     }
     host.navigate("https://discord.com/channels/@me");
     if let Err(code) = host.wait_for_app(Duration::from_secs(90)) {
         host.close();
         return Err(code);
+    }
+    // Are they in the page? If not, put them in now: only what Discord makes from here on is then seen.
+    let check = "(() => { const R = window.__xsdVoice; return R ? { in: true, ticks: R.ticks, pcs: R.pcs.length, contexts: R.contexts.length } : { in: false }; })()";
+    let found = host.eval(check).unwrap_or(Value::Null);
+    if found["in"] == true {
+        say!(
+            "voice: the hooks are in the page from its start: timer ticks so far {}, peer connections {}, audio contexts {}",
+            found["ticks"],
+            found["pcs"],
+            found["contexts"]
+        );
+    } else {
+        let late = host.eval(HOOKS).and_then(|_| host.eval(check)).unwrap_or(Value::Null);
+        say!(
+            "voice: the hooks were NOT in the page at its start; put in now: in {} (only what Discord makes from now is seen)",
+            yes(late["in"] == true)
+        );
     }
     match host.cdp("Emulation.setFocusEmulationEnabled", json!({ "enabled": true })) {
         Ok(_) => say!("voice: focus emulation on"),
@@ -405,7 +424,8 @@ fn line(t: u64, s: &Value, last: &Last) -> String {
         .max(s["speakingAvatars"].as_u64().unwrap_or(0))
         .max(s["speakingTiles"].as_u64().unwrap_or(0));
     format!(
-        "hold {t} s: rtc {} \"{}\", disconnect {}; participants {participants} (channel users {}, page users {}, call tiles {}), speaking {speaking} (names {}, avatars {}, tiles {}); audio in +{:.1} kB over {} streams, level {:.3}, energy +{:.4}; out +{:.1} kB, mic level {:.3}; peer connections {} (connected {}); mic tracks {} (enabled {}, muted {}); audio contexts {} (running {}), clock +{:.2} s; media elements {} (with a stream {}, playing {}), time +{:.2} s; timer ticks {} (max gap {} ms); page {} focus {}",
+        "hold {t} s{}: rtc {} \"{}\", disconnect {}; participants {participants} (channel users {}, page users {}, call tiles {}), speaking {speaking} (names {}, avatars {}, tiles {}); audio in +{:.1} kB over {} streams, level {:.3}, energy +{:.4}; out +{:.1} kB, mic level {:.3}; peer connections {} (connected {}); mic tracks {} (enabled {}, muted {}); audio contexts {} (running {}), clock +{:.2} s; media elements {} (with a stream {}, playing {}), time +{:.2} s; timer ticks {} (max gap {} ms); page {} focus {}",
+        if s["hooks"] == true { "" } else { " [HOOKS MISSING: audio, contexts and timer read as none]" },
         s["statusClass"].as_str().unwrap_or("?"),
         s["status"].as_str().unwrap_or(""),
         yes(s["disconnect"] == true),

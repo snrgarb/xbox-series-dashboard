@@ -43,7 +43,15 @@
         echoCancellation: s.echoCancellation,
         noiseSuppression: s.noiseSuppression,
         autoGainControl: s.autoGainControl,
+        // Which input it is, without its name: the label's length, and whether it is Windows' default input
+        // (the same group as Chromium's "default" entry).
+        labelLength: track ? track.label.length : 0,
       };
+      try {
+        const list = await within(5000, navigator.mediaDevices.enumerateDevices());
+        const def = Array.isArray(list) && list.find((d) => d.kind === "audioinput" && d.deviceId === "default");
+        out.track.isDefault = def && s.groupId ? def.groupId === s.groupId : null;
+      } catch (e) { out.track.isDefault = null; }
       window.__xsdProbe = { stream };
     }
   } catch (e) {
