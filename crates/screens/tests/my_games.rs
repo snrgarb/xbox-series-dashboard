@@ -736,7 +736,7 @@ fn two_launchers() -> library::Database {
 
 #[test]
 fn each_launcher_has_a_tab_of_its_whole_library_from_which_a_game_not_installed_is_installed() {
-    let mut database = two_launchers();
+    let database = two_launchers();
     let mut page = page_on(database.snapshot_at(now()).unwrap(), Entry::FullLibrary { filter: None });
     let line =
         |tab: usize, name: &str, games: usize| format!("tab {tab}/4 {name:?}, sort Name, name \"\", {games} games");
