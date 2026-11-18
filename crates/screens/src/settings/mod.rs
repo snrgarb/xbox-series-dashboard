@@ -37,7 +37,10 @@ use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 pub use self::boot_video::NONE_FOUND as NO_BOOT_VIDEOS;
 use self::boxes::Boxes;
 pub use self::categories::Category;
-pub use self::options::{BootVideo, Change, Found, Options, Setting, ART_KEY, BOOT_VIDEO, LAST_UPDATE_CHECK};
+pub use self::options::{
+    BootVideo, Change, Found, Options, Setting, WhilePlaying, ART_KEY, BOOT_VIDEO, DISCORD_WHILE_PLAYING,
+    LAST_UPDATE_CHECK,
+};
 use crate::hint_bar::{self, Hint};
 use crate::keyboard;
 use crate::pages::{Around, Dialog, Page, PageAction};
@@ -58,6 +61,8 @@ pub enum Entry {
     /// Home's Discord tile while there is no Discord tab in the Guide: Account > Discord, focus on the Client ID's
     /// Type; B goes back to Account's boxes with focus on Discord.
     Discord,
+    /// The Guide's "Sign in to Discord in Settings > Account > Direct Messages": that page, focus on Sign in.
+    DirectMessages,
     /// Manage Queue's row of a game stopped for want of space (#230): Games & apps > Storage; B goes straight back
     /// to the row, as the page was opened from there (`Settings::returns_at`); a page opened from Storage, closed,
     /// comes back to Storage first.
@@ -196,6 +201,13 @@ impl Settings {
                 let mut settings = Self::on(Category::Account);
                 settings.categories[Category::Account.index()] = Category::Account.boxes().with_focus(row, column);
                 settings.pages.push(Box::new(discord::Discord::default()));
+                settings
+            }
+            // The Guide's sign-in line (Sign in to Discord in Settings): that page, focus on Sign in.
+            Entry::DirectMessages => {
+                let mut settings = Self::on(Category::Account);
+                settings.categories[Category::Account.index()] = Category::Account.boxes().with_focus(1, 1);
+                settings.pages.push(Box::new(discord_web::DiscordWeb::at_sign_in()));
                 settings
             }
             // Groups, the box that customises Home (docs/spec/settings.md, 16.3).

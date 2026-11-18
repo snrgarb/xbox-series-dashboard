@@ -7,9 +7,11 @@
 //! `ExtensionCore.DiscordCall.cs`, `ExtensionCore.DiscordShortcuts.cs` and `ExtensionCore.DiscordServers.cs`:
 //! there is no picture of the tab among the Bundle's reference pictures.
 use model::discord::{Ask, BrowseAsk, CallAsk, Discord, Person, Shortcut, NOT_IN_A_CALL, SERVERS};
+use model::discord_dms::{Direct, DirectState, Dm, Picture};
 use ui::{ArtKey, Button, Color, Crop, HAlign, Kind as ArtKind, Rect, TextStyle, Ui, VAlign};
 
 use super::entries::{Entry, Kind};
+use super::panel::PANEL;
 use super::{focus_ring, marks, GuideAction};
 use crate::theme::{glyph, ACCENT_LIGHT, BODY, TEXT_DIM};
 
@@ -42,6 +44,13 @@ pub const TILE: f32 = 160.0;
 pub const TILE_COLUMN: f32 = 178.0;
 pub const TILE_BELOW: f32 = 18.0;
 pub const PER_ROW: usize = 3;
+/// The Direct Messages row (docs/spec/party-chats.md, 3.2): up to five discs 64 across, 80 apart from x 106, then the
+/// sixth circle.
+pub const DISCS: usize = 5;
+pub const DISC_SIZE: f32 = 64.0;
+pub const DISC_PITCH: f32 = 80.0;
+/// A DM's avatar is decoded at 128.
+const DM_DECODED: u32 = 128;
 
 /// One of the tab's entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +72,67 @@ pub enum Item {
     Shortcut(usize),
     /// The tab's last entry: it opens the Servers Flyout.
     Servers,
+    /// A DM call is ringing: Answer, over the Call (docs/spec/party-chats.md, 3.1).
+    Answer,
+    /// Why the Direct Messages section has no row of discs (3.5).
+    #[allow(clippy::upper_case_acronyms)]
+    DMsState(Note),
+    /// One of the first five DMs, by its place in Discord's list.
+    #[allow(clippy::upper_case_acronyms)]
+    DM(usize),
+    /// The sixth circle: All Direct Messages.
+    #[allow(clippy::upper_case_acronyms)]
+    AllDMs,
+}
+
+/// What the Direct Messages section says in the row's place (3.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Note {
+    Loading,
+    SignedOut,
+    NoRuntime,
+    Unreachable,
+    PageChanged,
+    Empty,
+}
+
+impl Note {
+    /// The state's line, in the "can't show it" entry's form.
+    pub fn text(self) -> &'static str {
+        match self {
+            Note::Loading => "Loading Direct Messages",
+            Note::SignedOut => "Sign in to Discord in Settings > Account > Direct Messages",
+            Note::NoRuntime => "Messages need Microsoft Edge WebView2, which isn't on this PC",
+            Note::Unreachable => "Can't reach Discord. Trying again",
+            Note::PageChanged => {
+                "Discord has changed its page, so Direct Messages can't be read until the Dashboard is updated"
+            }
+            Note::Empty => "No Direct Messages yet",
+        }
+    }
+
+    fn glyph(self) -> char {
+        match self {
+            Note::Loading => ' ',
+            Note::SignedOut => '\u{E77B}',
+            Note::Empty => '\u{E8BD}',
+            Note::NoRuntime | Note::Unreachable | Note::PageChanged => '\u{E7BA}',
+        }
+    }
+
+    /// The note for this state of the section, None while it shows a list (or is off).
+    pub fn of(direct: &Direct) -> Option<Note> {
+        Some(match direct.state {
+            DirectState::Off => return None,
+            DirectState::Loading => Note::Loading,
+            DirectState::SignedOut => Note::SignedOut,
+            DirectState::NoRuntime => Note::NoRuntime,
+            DirectState::Unreachable => Note::Unreachable,
+            DirectState::PageChanged => Note::PageChanged,
+            DirectState::Ready if direct.dms.is_empty() => Note::Empty,
+            DirectState::Ready => return None,
+        })
+    }
 }
 
 /// What the Discord tab asks of Discord, by the places of what it names in what Discord last said: the Dashboard
@@ -108,24 +178,56 @@ impl DiscordAsk {
 }
 
 /// The tab's entries, top to bottom.
-pub fn entries(discord: &Discord) -> Vec<Entry> {
+pub fn entries(discord: &Discord, direct: &Direct) -> Vec<Entry> {
     let entry = |item: Item, title: &str| Entry::new(Kind::Discord(item), title);
-    if let Some(why) = discord.tab_line() {
-        return vec![entry(Item::Unavailable, why)];
-    }
+    let messages = direct.state != DirectState::Off;
+    let voice = discord.tab_line().is_none();
     let mut entries = Vec::new();
+    if messages && !direct.rings.is_empty() {
+        entries.push(entry(Item::Answer, "Answer"));
+    }
+    if !voice {
+        // With Direct Messages on, the voice connection says so only when it has been set up; the rest of the tab
+        // is Direct Messages' own.
+        if !messages {
+            return vec![entry(Item::Unavailable, discord.tab_line().unwrap_or_default())];
+        }
+        if discord.has_tab() {
+            entries.push(entry(Item::Unavailable, discord.tab_line().unwrap_or_default()));
+        }
+    }
     match &discord.voice.call {
-        None => {
+        None if voice && !messages => {
             entries.push(entry(Item::Account, discord.user.as_deref().unwrap_or_default()));
             entries.push(entry(Item::Idle, NOT_IN_A_CALL));
         }
-        Some(call) => {
+        None => {}
+        Some(call) if voice => {
             entries.push(entry(Item::Channel, &call.title));
             entries.extend(call.people.iter().enumerate().map(|(at, person)| entry(Item::Person(at), &person.name)));
             entries.push(entry(Item::Mute, "Mute").under_a_divider());
             entries.push(entry(Item::Deafen, "Deafen"));
             entries.push(entry(Item::Leave, "Leave"));
         }
+        Some(_) => {}
+    }
+    if messages {
+        let above = !entries.is_empty();
+        let start = entries.len();
+        match Note::of(direct) {
+            Some(note) => entries.push(entry(Item::DMsState(note), note.text())),
+            None => {
+                let shown = direct.dms.len().min(DISCS);
+                entries.extend((0..shown).map(|at| entry(Item::DM(at), &direct.dms[at].name)));
+                entries.push(entry(Item::AllDMs, "All Direct Messages"));
+            }
+        }
+        if above {
+            entries[start] = entries[start].clone().under_a_divider();
+        }
+    }
+    if !voice {
+        return entries;
     }
     // The Shortcuts, the first under a divider across the row; then Servers under one of its own.
     for (at, shortcut) in discord.shortcuts.iter().enumerate() {
@@ -143,11 +245,15 @@ pub(super) fn item(entry: &Entry) -> Option<Item> {
     }
 }
 
-/// The tab's first focus: the first entry A does something on: Mute in a Call (the Bundle's Answer, while a Call
-/// rings, is not built), else the first Shortcut, else Servers; else the first entry.
+/// The tab's first focus: the first entry A does something on: Answer while a DM call rings, Mute in a Call, else
+/// the first DM (the sixth circle with none), else the first Shortcut, else Servers; else the first entry.
 pub fn first_focus(entries: &[Entry]) -> usize {
     let at = |wanted: fn(Item) -> bool| entries.iter().position(|entry| item(entry).is_some_and(wanted));
-    at(|item| item == Item::Mute)
+    at(|item| item == Item::Answer)
+        .or_else(|| at(|item| item == Item::Mute))
+        .or_else(|| at(|item| matches!(item, Item::DM(_))))
+        .or_else(|| at(|item| item == Item::AllDMs))
+        .or_else(|| at(|item| matches!(item, Item::DMsState(_))))
         .or_else(|| at(|item| matches!(item, Item::Shortcut(_))))
         .or_else(|| at(|item| item == Item::Servers))
         .unwrap_or(0)
@@ -155,11 +261,25 @@ pub fn first_focus(entries: &[Entry]) -> usize {
 
 /// Where focus goes as the tab's entries are made again from Discord as it is now: into a Call or out of one,
 /// afresh; otherwise the same entry, the same person or the same Shortcut, else the entry now at the same place.
-pub fn focus_after(before: (&[Entry], &Discord), after: (&[Entry], &Discord), focus: usize) -> usize {
+pub fn focus_after(before: (&[Entry], &Discord, &Direct), after: (&[Entry], &Discord, &Direct), focus: usize) -> usize {
     let in_call = |entries: &[Entry]| entries.iter().any(|entry| item(entry) == Some(Item::Channel));
     if in_call(before.0) != in_call(after.0) || after.0.is_empty() {
         return first_focus(after.0);
     }
+    // A DM stays the same conversation, by its channel, as the list changes: along the row, or off it onto the
+    // sixth circle (docs/spec/party-chats.md, 3.3). It never jumps because a message came.
+    if let Some(Item::DM(was)) = before.0.get(focus).and_then(item) {
+        let id = before.2.dms.get(was).map(|dm| &dm.id);
+        let now = after.2.dms.iter().position(|dm| Some(&dm.id) == id);
+        let place = |wanted: Item| after.0.iter().position(|entry| item(entry) == Some(wanted));
+        return match now {
+            Some(now) if now < DISCS => place(Item::DM(now)),
+            _ => place(Item::AllDMs),
+        }
+        .or_else(|| place(Item::AllDMs))
+        .unwrap_or_else(|| first_focus(after.0));
+    }
+    let (before, after) = ((before.0, before.1), (after.0, after.1));
     /// Who a Person entry is, or which channel a Shortcut is: what it stands for beyond its place.
     fn id(discord: &Discord, item: Item) -> Option<&str> {
         match item {
@@ -188,7 +308,15 @@ pub fn select(item: Item) -> Option<GuideAction> {
         Item::Leave => DiscordAsk::Call(CallAsk::Leave),
         Item::Shortcut(at) => DiscordAsk::Join(at),
         Item::Servers => DiscordAsk::Servers,
-        Item::Unavailable | Item::Account | Item::Idle | Item::Channel | Item::Person(_) => return None,
+        Item::Unavailable
+        | Item::Account
+        | Item::Idle
+        | Item::Channel
+        | Item::Person(_)
+        | Item::Answer
+        | Item::DMsState(_)
+        | Item::DM(_)
+        | Item::AllDMs => return None,
     };
     Some(GuideAction::Discord(ask))
 }
@@ -198,7 +326,10 @@ pub fn select(item: Item) -> Option<GuideAction> {
 /// of a shorter row below, else on past the tiles; up goes a row up, else to the entry above them. Up onto the
 /// tiles from the entry under them lands on the last row's first. Down onto them from above lands on the first, as
 /// the list's own move does.
-pub fn grid_move(entries: &[Entry], at: usize, button: Button) -> Option<usize> {
+pub fn grid_move(entries: &[Entry], at: usize, button: Button, remembered: usize) -> Option<usize> {
+    if let Some(moved) = row_move(entries, at, button, remembered) {
+        return moved;
+    }
     let first = entries.iter().position(|entry| matches!(item(entry), Some(Item::Shortcut(_))))?;
     let count = entries[first..].iter().take_while(|entry| matches!(item(entry), Some(Item::Shortcut(_)))).count();
     let after = first + count;
@@ -222,10 +353,43 @@ pub fn grid_move(entries: &[Entry], at: usize, button: Button) -> Option<usize> 
     })
 }
 
+/// Where the Direct Messages row is among the entries: its first and its length (the discs and the sixth circle).
+pub fn dm_row(entries: &[Entry]) -> Option<(usize, usize)> {
+    let is_row = |entry: &Entry| matches!(item(entry), Some(Item::DM(_) | Item::AllDMs));
+    let first = entries.iter().position(is_row)?;
+    Some((first, entries[first..].iter().take_while(|entry| is_row(entry)).count()))
+}
+
+/// A press on or just under the Direct Messages row: Some(Some(to)) a move, Some(None) held where it is, None for
+/// a press that is not the row's. Left and right go along the row, held at its ends; down goes to the entry under
+/// the section; up from there lands on the disc focus last left (`remembered`); up from the row is the entry above.
+fn row_move(entries: &[Entry], at: usize, button: Button, remembered: usize) -> Option<Option<usize>> {
+    let (first, count) = dm_row(entries)?;
+    let after = first + count;
+    if at == after && button == Button::Up {
+        return Some(Some(first + remembered.min(count - 1)));
+    }
+    if !(first..after).contains(&at) {
+        return None;
+    }
+    Some(match button {
+        Button::Left => Some(at.saturating_sub(1).max(first)),
+        Button::Right => Some((at + 1).min(after - 1)),
+        Button::Down if after < entries.len() => Some(after),
+        Button::Up if first > 0 => Some(first - 1),
+        Button::Down | Button::Up => Some(at),
+        _ => return None,
+    })
+}
+
 /// An entry's box height, and the room under it.
 pub fn height(item: Item) -> (f32, f32) {
     let height = match item {
         Item::Account => 105.0,
+        Item::Answer => 96.0,
+        Item::DMsState(_) => 75.0,
+        // The discs are placed by their row (`entries::layout`).
+        Item::DM(_) | Item::AllDMs => DISC_SIZE,
         Item::Channel => 60.0,
         Item::Person(_) => 72.0,
         Item::Shortcut(_) => return (TILE, TILE_BELOW),
@@ -237,8 +401,17 @@ pub fn height(item: Item) -> (f32, f32) {
 /// What `--log-focus`'s Guide line says of the tab after its focus: the entry focus is on, then what Discord says,
 /// `Mute; in "General" with E2E Tester, Ana (speaking), Bo (muted, deafened); mute off, deafen off`, or
 /// `Shortcut "Late night" (Stand-in Server); not in a call; mute off, deafen off`.
-pub fn line(entries: &[Entry], focus: Option<usize>, discord: &Discord) -> String {
-    let focused = match focus.and_then(|at| entries.get(at)).and_then(item) {
+pub fn line(entries: &[Entry], focus: Option<usize>, discord: &Discord, direct: &Direct) -> String {
+    let at = focus.and_then(|at| entries.get(at)).and_then(item);
+    // Places and counts, never names (docs/spec/party-chats.md, 10).
+    match at {
+        Some(Item::DMsState(note)) => return format!(" DMsState({note:?})"),
+        Some(Item::Answer) => return " Answer; ringing".into(),
+        _ => {}
+    }
+    let messages = direct.state != DirectState::Off;
+    let counts = if messages { format!("; {}", direct.counts()) } else { String::new() };
+    let focused = match at {
         Some(Item::Person(at)) => {
             let name = discord.voice.call.as_ref().and_then(|call| call.people.get(at)).map(|p| p.name.as_str());
             format!(" Person {}", name.unwrap_or_default())
@@ -248,15 +421,22 @@ pub fn line(entries: &[Entry], focus: Option<usize>, discord: &Discord) -> Strin
             Some(Shortcut { name, .. }) => format!(" Shortcut {name:?}"),
             None => " Shortcut".into(),
         },
+        Some(Item::DM(at)) => {
+            let unread = direct.dms.get(at).map_or(0, |dm| dm.unread);
+            let unread = if unread > 0 { format!(", unread {unread}") } else { String::new() };
+            format!(" DM({at}) of {}{unread}", direct.dms.len())
+        }
         Some(item) => format!(" {item:?}"),
         None => String::new(),
     };
-    if let Some(why) = discord.tab_line() {
-        return format!("{focused}; {why:?}");
+    // Direct Messages on and the voice connection never set up: the voice part says nothing of why.
+    let voice_unset = messages && !discord.has_tab();
+    if let Some(why) = discord.tab_line().filter(|_| !voice_unset) {
+        return format!("{focused}; {why:?}{counts}");
     }
     let on = |on: bool| if on { "on" } else { "off" };
     let settings = format!("mute {}, deafen {}", on(discord.voice.mute), on(discord.voice.deaf));
-    let Some(call) = &discord.voice.call else { return format!("{focused}; not in a call; {settings}") };
+    let Some(call) = &discord.voice.call else { return format!("{focused}; not in a call; {settings}{counts}") };
     let person = |p: &Person| {
         let marks: Vec<&str> = [(p.speaking, "speaking"), (p.muted, "muted"), (p.deafened, "deafened")]
             .iter()
@@ -269,7 +449,7 @@ pub fn line(entries: &[Entry], focus: Option<usize>, discord: &Discord) -> Strin
         }
     };
     let people: Vec<String> = call.people.iter().map(person).collect();
-    format!("{focused}; in {:?} with {}; {settings}", call.title, people.join(", "))
+    format!("{focused}; in {:?} with {}; {settings}{counts}", call.title, people.join(", "))
 }
 
 /// Draws one of the tab's entries in `rect`: its fill and ring with focus, what stands at its left, its text, and
@@ -329,7 +509,7 @@ pub fn draw(ui: &mut Ui, item: Item, entry: &Entry, rect: Rect, focused: bool, d
         }
         Item::Leave => glyph_at(ui, icon::HANG_UP, 26.0, RED),
         Item::Servers => glyph_at(ui, icon::SERVERS, 26.0, Color::WHITE),
-        Item::Shortcut(_) => {}
+        Item::Shortcut(_) | Item::Answer | Item::DMsState(_) | Item::DM(_) | Item::AllDMs => {}
     }
     if focused {
         focus_ring(ui, rect);
@@ -354,6 +534,174 @@ fn tile(ui: &mut Ui, rect: Rect, shortcut: &Shortcut) {
         let below = Rect::new(name.x, name.bottom(), width, line);
         ui.paragraph(below, server, &BODY.color(TEXT_DIM), HAlign::Center, VAlign::Top, 1);
     }
+}
+
+/// What the Direct Messages parts of the tab need to be drawn.
+pub struct DirectFace<'a> {
+    pub direct: &'a Direct,
+    /// The entry focus is on, for the name line.
+    pub focus: Option<Item>,
+    /// How long the section has said Loading, in seconds: its spinner shows after one.
+    pub loading_for: Option<f32>,
+}
+
+/// The "Direct Messages" line's height, its gap to the row, and the gap under the discs to the name line.
+pub const HEADING_LINE: f32 = 34.58;
+pub const HEADING_GAP: f32 = 12.0;
+pub const NAME_GAP: f32 = 20.0;
+/// How far the row's discs start under the "Direct Messages" line's top.
+pub const DISCS_DOWN: f32 = HEADING_LINE + HEADING_GAP;
+/// The accent dot of an unread DM, 16 across, ringed 3 in the panel's colour; its centre 27 right of and above the
+/// disc's centre.
+const DOT: f32 = 16.0;
+const PANEL_COLOUR: Color = Color::rgb(0x1F1F1F);
+
+/// A person's picture on a disc: the avatar cut round over `#4A4A4A`; without one yet, the first letter of the name,
+/// or for a Group DM the people glyph.
+pub(super) fn dm_picture(ui: &mut Ui, rect: Rect, name: &str, group: bool, picture: Option<&Picture>, decoded: u32) {
+    let (cx, cy) = rect.center();
+    ui.fill(rect, DISC, rect.w / 2.0);
+    let size = rect.w * 26.0 / DISC_SIZE;
+    // The stand-in is text, which a layer draws over its pictures: so it is drawn only where there is no picture.
+    if picture.is_none() {
+        if group {
+            ui.icon(cx, cy, icon::SERVERS, size, TEXT_DIM);
+        } else if let Some(first) = name.chars().next() {
+            let style = crate::theme::BODY_SEMIBOLD.color(Color::WHITE);
+            ui.label_centered(cx, cy, &first.to_uppercase().collect::<String>(), &TextStyle { size, ..style });
+        }
+    }
+    if let Some(picture) = picture {
+        let key = ui::memory_art::key(&picture.0, decoded);
+        ui.art(rect, &key, Crop::Center, 1.0, rect.w / 2.0);
+    }
+}
+
+/// A Direct Messages part of the tab: Answer, a disc of the row, the sixth circle, or the section's state, with, on
+/// the first of the section, its "Direct Messages" line over it and the name line under it.
+pub fn draw_direct(
+    ui: &mut Ui,
+    item: Item,
+    entry: &Entry,
+    rect: Rect,
+    focused: bool,
+    heading: bool,
+    face: &DirectFace,
+) {
+    let direct = face.direct;
+    let (cx, cy) = rect.center();
+    if heading {
+        let top = rect.y - DISCS_DOWN;
+        ui.label(rect.x + if matches!(item, Item::DMsState(_)) { 19.0 } else { 0.0 }, top, "Direct Messages", &BODY);
+        if !matches!(item, Item::DMsState(_)) {
+            name_line(ui, rect.x, rect.bottom() + NAME_GAP, face);
+        }
+    }
+    match item {
+        Item::DM(at) => {
+            if let Some(dm) = direct.dms.get(at) {
+                dm_picture(ui, rect, &dm.name, dm.group, dm.picture.as_ref(), DM_DECODED);
+                if dm.unread > 0 {
+                    let dot = Rect::new(cx + 27.0 - DOT / 2.0, cy - 27.0 - DOT / 2.0, DOT, DOT);
+                    ui.fill(dot.grow(3.0), PANEL_COLOUR, DOT / 2.0 + 3.0);
+                    ui.fill(dot, ACCENT_LIGHT, DOT / 2.0);
+                }
+            }
+            if focused {
+                disc_ring(ui, rect);
+            }
+        }
+        Item::AllDMs => {
+            ui.ring(rect, Color::argb(0x80FFFFFF), rect.w / 2.0, 2.0);
+            let more = direct.dms.len().saturating_sub(DISCS);
+            if more > 0 {
+                ui.label_centered(cx, cy, &format!("+{more}"), &BODY);
+            } else {
+                ui.icon(cx, cy, '\u{E8BD}', 26.0, Color::WHITE);
+            }
+            if focused {
+                disc_ring(ui, rect);
+            }
+        }
+        Item::Answer => {
+            if focused {
+                ui.fill(rect, Color::argb(0x26FFFFFF), 4.0);
+            }
+            let ring = direct.rings.first();
+            let picture = Rect::new(rect.x + 18.0, cy - 30.0, 60.0, 60.0);
+            let caller = ring.map_or("", |ring| ring.caller.as_str());
+            dm_picture(ui, picture, caller, false, ring.and_then(|ring| ring.picture.as_ref()), DM_DECODED);
+            if focused {
+                focus_ring(ui, rect);
+            }
+            let line = ui.measure(&BODY, "Ag").height;
+            let top = cy - line;
+            let width = rect.right() - 16.0 - (rect.x + 96.0);
+            ui.with_clip(rect, |ui| {
+                ui.paragraph(Rect::new(rect.x + 96.0, top, width, line), "Answer", &BODY, HAlign::Left, VAlign::Top, 1);
+                let calling = format!("{caller} is calling");
+                let below = Rect::new(rect.x + 96.0, top + line, width, line);
+                ui.paragraph(below, &calling, &BODY.color(TEXT_DIM), HAlign::Left, VAlign::Top, 1);
+            });
+        }
+        Item::DMsState(note) => {
+            if focused {
+                ui.fill(rect, Color::argb(0x26FFFFFF), 4.0);
+            }
+            if note == Note::Loading {
+                if face.loading_for.is_some_and(|seconds| seconds >= 1.0) {
+                    crate::spinner::spinner(ui, rect.x + 36.0, cy, 36.0);
+                }
+            } else {
+                ui.icon(rect.x + 36.0, cy, note.glyph(), 26.0, TEXT_DIM);
+            }
+            if focused {
+                focus_ring(ui, rect);
+            }
+            title(
+                ui,
+                Rect::new(rect.x + 69.0, rect.y, rect.right() - 16.0 - (rect.x + 69.0), rect.h),
+                &entry.title,
+                &BODY.color(TEXT_DIM),
+                2,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// The Guide's ring round a disc: 4 thick, 4 clear, so its outer edge is 8 outside, with the glow; no fill.
+fn disc_ring(ui: &mut Ui, rect: Rect) {
+    ui.glow(rect.grow(11.5), ACCENT_LIGHT.fade(0.5), rect.w / 2.0 + 11.5, 11.0, 17.0);
+    ui.ring(rect.grow(8.0), ACCENT_LIGHT, rect.w / 2.0 + 8.0, 4.0);
+}
+
+/// The name line under the row, from `x`: with focus on a DM its name, white, then dim " · {n} unread"; on the sixth
+/// circle "All Direct Messages" then dim " · {n} unread in {m}"; elsewhere dim "{n} unread" over all the DMs, or
+/// nothing.
+fn name_line(ui: &mut Ui, x: f32, top: f32, face: &DirectFace) {
+    let direct = face.direct;
+    let (unread, in_dms) = direct.unread();
+    let width = PANEL.right() - 28.0 - x;
+    let (name, suffix): (String, String) = match face.focus {
+        Some(Item::DM(at)) => match direct.dms.get(at) {
+            Some(Dm { name, unread, .. }) => {
+                (name.to_string(), if *unread > 0 { format!(" \u{B7} {unread} unread") } else { String::new() })
+            }
+            None => return,
+        },
+        Some(Item::AllDMs) => (
+            "All Direct Messages".into(),
+            if unread > 0 { format!(" \u{B7} {unread} unread in {in_dms}") } else { String::new() },
+        ),
+        _ if unread > 0 => (String::new(), format!("{unread} unread")),
+        _ => return,
+    };
+    let dim = BODY.color(TEXT_DIM);
+    let rest = if suffix.is_empty() { 0.0 } else { ui.measure(&dim, &suffix).width };
+    let line = Rect::new(x, top, (width - rest).max(0.0), 34.58);
+    let used = if name.is_empty() { 0.0 } else { ui.paragraph(line, &name, &BODY, HAlign::Left, VAlign::Top, 1).width };
+    ui.label(x + used, top, &suffix, &dim);
 }
 
 /// A picture in `rect`: a disc when `round`, else a square rounded by 16 (a server's icon, at 60 or 72); grey with
@@ -425,6 +773,16 @@ fn call_marks(ui: &mut Ui, right: f32, cy: f32, person: &Person) {
 mod tests {
     use super::*;
     use model::discord::{Call, Voice};
+
+    /// The tab with Direct Messages off, as these tests have it.
+    fn entries(discord: &Discord) -> Vec<Entry> {
+        super::entries(discord, &Direct::default())
+    }
+
+    fn focus_after(before: (&[Entry], &Discord), after: (&[Entry], &Discord), focus: usize) -> usize {
+        let none = Direct::default();
+        super::focus_after((before.0, before.1, &none), (after.0, after.1, &none), focus)
+    }
 
     fn person(id: &str, name: &str) -> Person {
         Person {
@@ -522,7 +880,7 @@ mod tests {
         // Account, Idle, five tiles in rows of three and two, Servers.
         let discord = with_shortcuts(idle(), 5);
         let e = entries(&discord);
-        let go = |at: usize, button: Button| grid_move(&e, at, button);
+        let go = |at: usize, button: Button| grid_move(&e, at, button, 0);
         assert_eq!(go(2, Button::Left), Some(2), "held at the row's start");
         assert_eq!(go(2, Button::Right), Some(3));
         assert_eq!(go(4, Button::Right), Some(4), "held at the row's end");
@@ -560,11 +918,11 @@ mod tests {
             call.people[1].muted = true;
         }
         discord.voice.mute = true;
-        let line = line(&entries(&discord), Some(2), &discord);
+        let line = line(&entries(&discord), Some(2), &discord, &Direct::default());
         assert_eq!(line, " Person ana; in \"Late night\" with gabe, ana (speaking, muted); mute on, deafen off");
 
         let discord = with_shortcuts(idle(), 1);
-        let line = super::line(&entries(&discord), Some(2), &discord);
+        let line = super::line(&entries(&discord), Some(2), &discord, &Direct::default());
         assert_eq!(line, " Shortcut \"Ch0\" (The Lads); not in a call; mute off, deafen off");
     }
 }

@@ -150,7 +150,7 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
 
     // Account: Profiles and Who's playing today?, Discord under Profiles and Discord messages beside it (#197).
     press(&mut dashboard, &[Down, Right, Right, Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Account: Discord messages");
+    assert_eq!(dashboard.focus_line(), "Settings: Account: Direct Messages");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Account: Discord");
     press(&mut dashboard, &[Left]);
@@ -509,6 +509,12 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         show_game_pass: true,
         discord_messages: false,
         discord_web: model::discord_web::Web::default(),
+        direct_state: model::discord_dms::DirectState::Off,
+        notify_messages: true,
+        notify_text: true,
+        notify_mentions: true,
+        notify_calls: true,
+        while_playing: screens::WhilePlaying::ShowAll,
         game_pass_region: None,
         windows_region: None,
         game_pass_subscription: model::game_pass::Subscription::Unknown,
@@ -1443,22 +1449,30 @@ fn settings_discord() {
 }
 
 /// What the Dashboard asked of the shell since last time, but its sounds.
-/// Account > Discord messages (#197; docs/spec/settings.md 16.12, docs/discord-web.md): off by default with the terms
+/// Account > Direct Messages (#197, #200; docs/spec/settings.md 16.12, docs/discord-web.md): off by default with the terms
 /// said under the switch; on, Sign in opens Discord's sign-in page, where the pad sends keys and A on a field opens
 /// the Console keyboard, whose text goes to the session alone; signed in, the page closes itself; Sign out asks the
 /// session.
 #[test]
-fn settings_discord_messages() {
+fn settings_direct_messages() {
     use model::discord_web::{Web, WebAsk, WebField, WebKey, WebState};
     let mut stage = settings_stage();
     stage.press(&[Down, Right, Right, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord messages");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Direct Messages");
     stage.press(&[A]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Use Discord messages; off, off");
-    stage.check("settings-discord-messages-off");
-    // Off, there is nothing under the switch to go to.
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: Direct Messages: Direct Messages from discord.com; dms off, off"
+    );
+    stage.check("settings-direct-messages-off");
+    // Off, Sign in and Sign out are dimmed and take no focus: Down is the first Notification, Up the switch.
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Use Discord messages; off, off");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Direct Messages; dms off, off");
+    stage.press(&[Up]);
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: Direct Messages: Direct Messages from discord.com; dms off, off"
+    );
 
     // On: saved, and the session tells how it stands.
     stage.press(&[A]);
@@ -1469,8 +1483,8 @@ fn settings_discord_messages() {
     };
     set(&mut stage, Web { state: WebState::SignedOut, ..Web::default() });
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Sign in; on, signed out");
-    stage.check("settings-discord-messages-signed-out");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Sign in; dms on, signed out");
+    stage.check("settings-direct-messages-signed-out");
 
     // Sign in: the sign-in page over Settings, shown while it has the pad.
     stage.press(&[A]);
@@ -1497,13 +1511,54 @@ fn settings_discord_messages() {
     set(&mut stage, Web { state: WebState::SignedIn, field: None, kept: true });
     stage.dashboard.discord_signed_in();
     assert!(!stage.dashboard.discord_sign_in_open());
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Sign in; on, signed in, kept");
-    stage.check("settings-discord-messages-signed-in");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Sign in; dms on, signed in");
+    stage.check("settings-direct-messages-signed-in");
     // Sign in does nothing now; Sign out asks the session.
     stage.press(&[A]);
     assert_eq!(stage.dashboard.page(), Some("Settings"));
     stage.press(&[Right, A]);
     assert_eq!(asked(&mut stage), [Effect::DiscordWeb(WebAsk::SignOut)]);
+}
+
+/// Account > Direct Messages > Notifications and While playing (docs/spec/party-chats.md 8.2): four checkboxes that
+/// are on until turned off, and a dropdown of what shows while a game runs; each is an option the Toasts read, kept.
+#[test]
+fn settings_direct_messages_notifications() {
+    use screens::settings::{Change, Setting, WhilePlaying, DISCORD_WHILE_PLAYING};
+    let mut stage = settings_stage();
+    stage.press(&[Down, Right, Right, Down, A]);
+    assert_eq!(
+        stage.dashboard.focus_line(),
+        "Settings: Direct Messages: Direct Messages from discord.com; dms off, off"
+    );
+    // They take focus with the switch off: Down is the first, then each of the four, then While playing.
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Direct Messages; dms off, off");
+    stage.press(&[A]);
+    let off = Change { setting: Setting::NotifyDirectMessages, on: false };
+    assert_eq!(asked(&mut stage), [Effect::Set(off)]);
+    assert!(!stage.dashboard.options().notify_messages && stage.dashboard.options().notify_text);
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Show what they say; dms off, off");
+    stage.press(&[Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Incoming Calls; dms off, off");
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: While playing; dms off, off");
+    stage.check("settings-direct-messages-notifications");
+    // The list opens on Show all; None is chosen, in force at once and asked to be kept.
+    stage.press(&[A, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: While playing: None; dms off, off");
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::DiscordWhilePlaying(WhilePlaying::None)]);
+    assert_eq!(stage.dashboard.options().while_playing, WhilePlaying::None);
+    // As a settings table has them, they are read again.
+    let read = screens::Options::read(|key| match key {
+        "discord.notify.while_playing" => Some("calls".to_string()),
+        "discord.notify.text" => Some("false".to_string()),
+        _ => None,
+    });
+    assert_eq!(DISCORD_WHILE_PLAYING, "discord.notify.while_playing");
+    assert_eq!((read.while_playing, read.notify_text, read.notify_calls), (WhilePlaying::CallsOnly, false, true));
 }
 
 fn asked(stage: &mut Stage) -> Vec<Effect> {

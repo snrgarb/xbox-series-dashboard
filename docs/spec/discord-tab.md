@@ -1,5 +1,8 @@
 # The Discord tab
 
+> With **Direct Messages** on, the tab gains a section and the account entry and idle line give way to it: [party-chats.md](party-chats.md) 3 (built in #200).
+
+
 The Guide's tab in the console's Parties & chats slot, between the landing tab and Profile & system: Discord's
 account, the Call the user is in, and Mute, Deafen and Leave (#144); the Shortcuts to the channels joined before, and
 Servers, a Flyout of the user's servers and their voice channels (#145). How it connects to Discord, and what the

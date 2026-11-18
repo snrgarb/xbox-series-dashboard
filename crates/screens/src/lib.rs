@@ -45,11 +45,25 @@ use model::{Audio, Flow, Library, Media, MediaCommand, Profile};
 pub use model::{FilterChange, PowerCommand, ProfileChange, Sound};
 use ui::{Battery, Button, PadEvent, PadStatus, Press, Repeat, Ui};
 
+/// The world a page is told of, made from fields so that a field of the Dashboard can be borrowed mutably beside it.
+macro_rules! around_of {
+    ($s:expr) => {
+        pages::Around {
+            library: &$s.library,
+            playing: $s.playing,
+            options: $s.options,
+            now: $s.now,
+            now_playing: &$s.now_playing,
+            discord: &$s.discord,
+        }
+    };
+}
+
 use crate::guide::{Around, DialogFocus, Face, Flyout, FlyoutFocus, Guide, GuideAction, PowerChoice, Status, Tab};
 use crate::home::{Focus, Home, HomeAction, TopButton};
 use crate::launch::{Backdrop, LaunchScreen};
 use crate::pages::{Open, PageAction};
-pub use crate::settings::{Options, Setting};
+pub use crate::settings::{Options, Setting, WhilePlaying};
 use crate::startup::Startup;
 pub use crate::startup::{BootVideo, Found, Phase};
 pub use crate::toasts::Notification;
@@ -174,6 +188,13 @@ pub enum Effect {
     /// Discord's sign-in page, a key from the pad, text the Console keyboard kept, Sign out. The session answers with
     /// how it stands (`Options::discord_web`). Its `Debug` never shows the text.
     DiscordWeb(model::discord_web::WebAsk),
+    /// What the Guide's Direct Messages ask of the web session (docs/spec/party-chats.md): open a conversation, older
+    /// messages, send, react, mark read. Each is shown done only once the session's stores say so; the session does
+    /// one at a time, paced. Its `Debug` never shows a name, an id or a message.
+    Direct(model::discord_dms::DirectAsk),
+    /// Settings > Account > Direct Messages > While playing chose this: the Dashboard has it already
+    /// (`Options::while_playing`); whoever keeps the settings saves it as `settings::DISCORD_WHILE_PLAYING`.
+    DiscordWhilePlaying(settings::WhilePlaying),
     /// Settings > System: turn shell mode on (the user has said yes) or off (docs/spec/shell-mode.md). The
     /// executable answers with how it is then, in `Options::shell`.
     ShellMode(bool),
@@ -300,6 +321,11 @@ pub struct Dashboard {
     now_playing_second: Option<u64>,
     /// The Discord connection as the shell last told it (docs/discord.md): what Settings > Discord shows.
     discord: model::discord::Discord,
+    /// Discord's Direct Messages as the web session last said (docs/spec/party-chats.md).
+    direct: model::discord_dms::Direct,
+    /// Text entry over a conversation's reply box: the keyboard, and the conversation it is for (the Guide is not a
+    /// page, so text entry is kept here and drawn over it).
+    writing: Option<(keyboard::TextEntry, model::discord_dms::Id)>,
     /// The Dashboard's clock: where the time it is told (`advance`, `toasts_presented`) has brought it. Nothing in
     /// the Dashboard reads the system's.
     now: Instant,
@@ -358,6 +384,8 @@ impl Dashboard {
             now_playing: now_playing::NowPlaying::default(),
             now_playing_second: None,
             discord: model::discord::Discord::default(),
+            direct: model::discord_dms::Direct::default(),
+            writing: None,
             now,
             startup: None,
             idle: idle::Idle::new(now),
@@ -584,12 +612,116 @@ impl Dashboard {
     /// The Discord connection as it is now (docs/discord.md): Settings > Discord shows it, the Guide has its
     /// Discord tab while it has one (docs/spec/discord-tab.md), and Home's Discord tile opens that tab then.
     pub fn set_discord(&mut self, discord: &model::discord::Discord) {
-        if self.discord != *discord || self.status.discord != discord.has_tab() {
+        let tab = discord.has_tab() || self.direct.state != model::discord_dms::DirectState::Off;
+        if self.discord != *discord || self.status.discord != tab {
             self.discord = discord.clone();
-            self.status.discord = discord.has_tab();
+            self.status.discord = tab;
             self.guide.set_discord(discord);
             self.refresh_guide();
         }
+    }
+
+    /// Discord's Direct Messages as the web session now says (docs/spec/party-chats.md): the Discord tab has them
+    /// as its section, the tab is there while Direct Messages are on whether or not the voice connection is, and an
+    /// open All Direct Messages or conversation follows. Whatever the Guide asks of the session in answer is in
+    /// `take_effects` as `Effect::Direct`.
+    pub fn set_direct(&mut self, direct: &model::discord_dms::Direct) {
+        if self.direct == *direct {
+            return;
+        }
+        self.direct = direct.clone();
+        // Settings' status line and focus log follow it.
+        self.options.direct_state = direct.state;
+        self.tick_page();
+        self.status.discord = self.discord.has_tab() || direct.state != model::discord_dms::DirectState::Off;
+        self.guide.set_direct(direct);
+        self.refresh_guide();
+        self.take_direct();
+    }
+
+    /// Direct Messages as the Dashboard was last told them.
+    pub fn direct(&self) -> &model::discord_dms::Direct {
+        &self.direct
+    }
+
+    /// Something the web session tells once, as it happens. A captcha or a refusal is a prompt over the Guide, which
+    /// opens for it; the Toasts for a message, a mention and a ring are ticket #202's, and are not built yet.
+    pub fn direct_event(&mut self, event: &model::discord_dms::DirectEvent) {
+        use model::discord_dms::DirectEvent;
+        match event {
+            DirectEvent::Captcha | DirectEvent::Refused(_) => {
+                self.guide.fail_pending();
+                if !self.open_guide_for_a_prompt() {
+                    return;
+                }
+                match event {
+                    DirectEvent::Refused(reason) => self.guide.ask_refused(reason.as_str()),
+                    _ => self.guide.ask_captcha(),
+                }
+                self.effects.push(Effect::Sound(Sound::PromptOpen));
+            }
+            // Toasts (#202): the hook is here.
+            DirectEvent::Message { .. }
+            | DirectEvent::Mention { .. }
+            | DirectEvent::Ring(_)
+            | DirectEvent::RingEnded(_) => {}
+        }
+    }
+
+    /// What time it is for the times of messages: the Unix milliseconds and the zone's offset east of UTC in
+    /// seconds, or None for the machine's own. A test's, so a picture is of one moment.
+    pub fn set_time(&mut self, time: Option<(i64, i32)>) {
+        let when = time.map_or(guide::When::default(), |(now, offset)| guide::When::at(now, offset));
+        self.guide.set_when(when);
+    }
+
+    /// What the Guide asked of the web session, and the text entry it wants, as effects.
+    fn take_direct(&mut self) {
+        for ask in self.guide.take_asks() {
+            self.effects.push(Effect::Direct(ask));
+        }
+        if let Some(write) = self.guide.take_write() {
+            let entry = keyboard::Entry::new("Message").private().limit(model::discord_dms::MESSAGE_LIMIT);
+            let text = keyboard::TextEntry::open(entry, write.text).captioned(write.caption);
+            self.writing = Some((text, write.channel));
+            self.guide.set_writing(true);
+        }
+    }
+
+    /// A press while text entry is up over a conversation: the keyboard has every button. What it types is the
+    /// draft at once; Menu or Enter sends it; B leaves it as typed.
+    fn write_press(&mut self, press: Press) {
+        let around = around_of!(self);
+        let Some((entry, channel)) = &mut self.writing else { return };
+        let channel = channel.clone();
+        let action = pages::Page::press(entry, press, around);
+        self.write_heard(&channel, action);
+    }
+
+    fn write_heard(&mut self, channel: &model::discord_dms::Id, action: Option<PageAction>) {
+        let Some((entry, _)) = &mut self.writing else { return };
+        let mut says = Vec::new();
+        while let Some(event) = pages::Page::says(entry) {
+            says.push(event);
+        }
+        // What is typed so far, before anything it says is acted on.
+        let typed = entry.text();
+        for event in says {
+            match event {
+                keyboard::Event::Typed(text) => self.guide.set_draft(channel, &text),
+                keyboard::Event::Kept(text) => {
+                    self.guide.set_draft(channel, &text);
+                    self.guide.send_draft(channel);
+                }
+                // B: the draft is kept as typed, not put back (decision 6).
+                keyboard::Event::Dropped(_) => self.guide.set_draft(channel, &typed),
+            }
+        }
+        if action.is_some() {
+            self.writing = None;
+            self.guide.set_writing(false);
+        }
+        self.take_direct();
     }
 
     /// The Discord connection as the Dashboard was last told it.
@@ -750,6 +882,18 @@ impl Dashboard {
         if self.idle.typed(self.now) {
             return true;
         }
+        if self.writing.is_some() && self.guide.is_open() {
+            let around = around_of!(self);
+            let channel = self.writing.as_ref().map(|(_, channel)| channel.clone());
+            let taken = match &mut self.writing {
+                Some((entry, _)) => pages::Page::typed(entry, typed, around),
+                None => false,
+            };
+            if let Some(channel) = channel {
+                self.write_heard(&channel, None);
+            }
+            return taken;
+        }
         if !self.page_has_pad() {
             return false;
         }
@@ -799,6 +943,11 @@ impl Dashboard {
                 if !press.repeat && page == Some(self.pages.depth()) {
                     self.pages.pad(press.button, true);
                 }
+                if let Some((entry, _)) = &mut self.writing {
+                    if !press.repeat {
+                        pages::Page::pad(entry, press.button, true);
+                    }
+                }
                 // Closed by this press: the Overlay keeps the foreground until the button is up again.
                 if was_open && !self.guide.is_open() && self.guide_overlaid {
                     self.release_awaited = Some(press.button);
@@ -813,6 +962,9 @@ impl Dashboard {
             }
             PadEvent::Release(button) => {
                 self.pages.pad(button, false);
+                if let Some((entry, _)) = &mut self.writing {
+                    pages::Page::pad(entry, button, false);
+                }
                 self.held.retain(|&held| held != button);
                 if self.release_awaited == Some(button) {
                     self.release_awaited = None;
@@ -862,6 +1014,14 @@ impl Dashboard {
             self.end_startup();
         }
         self.timed |= self.idle_tick();
+        // Messages going out that are not seen sent become Not sent; the Direct Messages section's spinner comes
+        // after a second.
+        if self.guide.is_open() {
+            self.guide.pass(seconds);
+            self.timed = true;
+        } else {
+            self.guide.pass(seconds);
+        }
         // The Now Playing card's time turned a second: it is drawn again.
         let second = self.now_playing_second();
         if second != self.now_playing_second {
@@ -902,7 +1062,8 @@ impl Dashboard {
         // Signing you in's three seconds.
         let signing_in = self.startup.as_ref().and_then(Startup::timer);
         let unlocks = self.unlocks.timer();
-        [quit, self.close_in, second, signing_in, unlocks]
+        let direct = self.guide.timer();
+        [quit, self.close_in, second, signing_in, unlocks, direct]
             .into_iter()
             .flatten()
             .reduce(f32::min)
@@ -1064,6 +1225,10 @@ impl Dashboard {
         if self.idle_press(press) {
             return;
         }
+        if self.writing.is_some() && self.guide.is_open() {
+            self.write_press(press);
+            return;
+        }
         let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
         // opening or closing is no move: B is silent, and so is Y.
@@ -1072,6 +1237,7 @@ impl Dashboard {
         let page_dialog = self.pages.dialog();
         let asked = self.effects.len();
         let activated = self.steer(press);
+        self.take_direct();
         self.settle_quit();
         let select = activated.then_some(Sound::GuideSelect);
         // A dialog a page shows over itself (Settings' menu of a Group) coming up or going is no move either.
@@ -1156,6 +1322,11 @@ impl Dashboard {
                 self.options.game_pass_region = region;
                 self.effects.push(Effect::GamePassRegion(region));
             }
+            // Discord's Toasts while a game runs: in force at once, and saved.
+            PageAction::Effect(Effect::DiscordWhilePlaying(choice)) => {
+                self.options.while_playing = choice;
+                self.effects.push(Effect::DiscordWhilePlaying(choice));
+            }
             // The art sources' order: shown at once, and saved.
             PageAction::Effect(Effect::ArtOrder(order)) => {
                 self.options.art_order = order;
@@ -1189,8 +1360,8 @@ impl Dashboard {
     }
 
     /// Where the Guide's focus is, and the volume: a press that changed any of it moved something.
-    fn guide_place(&self) -> ((Tab, guide::Focus), Option<(Flyout, FlyoutFocus)>, u8) {
-        (self.guide.focus(), self.guide.flyout(self.guide_around()), self.audio.volume)
+    fn guide_place(&self) -> ((Tab, guide::Focus), Option<(Flyout, FlyoutFocus)>, u8, Option<String>) {
+        (self.guide.focus(), self.guide.flyout(self.guide_around()), self.audio.volume, self.guide.direct_flyout_line())
     }
 
     /// Power, by a hold of the Guide button (docs/spec/guide.md, 7.1): over the dim alone, wherever the Dashboard
@@ -1510,11 +1681,14 @@ impl Dashboard {
         };
         // On the Discord tab, the entry focus is on and what Discord says (`Entry(4) Mute; in "General" with ...`).
         let discord = self.guide.discord_line().unwrap_or_default();
+        // An open All Direct Messages or conversation (`, flyout Conversation ReplyBox; draft 12 chars`).
+        let direct = self.guide.direct_flyout_line().unwrap_or_default();
+        let tag = self.guide.dialog_tag().map(|tag| format!(" ({tag})")).unwrap_or_default();
         // On Profile & system, the entry by name (`Entry(6) Power`): its place moves with the achievements.
         let named = self.guide.profile_line().unwrap_or_default();
         match self.guide.dialog() {
-            Some(dialog) => format!("{tab:?} {focus:?}{named}{panel}, dialog {dialog:?}{title}{quitting}"),
-            None => format!("{tab:?} {focus:?}{named}{discord}{panel}{flyout}{quitting}"),
+            Some(dialog) => format!("{tab:?} {focus:?}{named}{panel}, dialog {dialog:?}{title}{tag}{quitting}"),
+            None => format!("{tab:?} {focus:?}{named}{discord}{panel}{flyout}{direct}{quitting}"),
         }
     }
 
@@ -1527,6 +1701,11 @@ impl Dashboard {
     }
 
     pub fn focus_line(&self) -> String {
+        // Text entry over a conversation: its state says how long the message is, and nothing of what it says.
+        if let (Some((entry, _)), true) = (&self.writing, self.guide.is_open()) {
+            let state = pages::Page::state(entry);
+            return format!("{}: {}; {state}", pages::Page::name(entry), pages::Page::focus(entry));
+        }
         let place = self.focus_place();
         if self.startup.is_some() {
             return place;
@@ -1598,6 +1777,8 @@ impl Dashboard {
             // With a game running the Guide stays, under the question.
             GuideAction::Launch(game) => self.play(game),
             GuideAction::Asked => {}
+            // "Sign in to Discord in Settings > Account > Direct Messages": the Guide closes onto that page.
+            GuideAction::DirectSettings => self.guide_opens(Open::Settings(settings::Entry::DirectMessages)),
             // Asked of Discord: the tab shows it done once Discord says so.
             GuideAction::Discord(ask) => {
                 if let Some(ask) = ask.ask(&self.discord) {
@@ -1916,6 +2097,8 @@ impl Dashboard {
     pub fn close_guide(&mut self) {
         if self.guide.is_open() {
             self.guide.close();
+            self.writing = None;
+            self.take_direct();
             self.close_in = None;
             self.effects.push(Effect::GuideClosed);
         }
@@ -2102,6 +2285,13 @@ impl Dashboard {
         let profile = self.profile();
         let face = Face { profile: &profile, clock: &clock, pad: self.pad.connected, status: &status };
         self.guide.draw(ui, around, &face);
+        if self.guide.is_open() {
+            let around = around_of!(self);
+            if let Some((entry, _)) = &mut self.writing {
+                ui.layer();
+                pages::Page::draw(entry, ui, around);
+            }
+        }
     }
 
     /// Home's window: Home or the page over it, and the hint bar; the Guide over them where there is no Overlay to

@@ -158,7 +158,7 @@ fn profiles_is_accounts_first_box_and_lists_every_profile_then_add_profile() {
     shell.press(&[Right]);
     assert_eq!(shell.focus(), "Settings: Account: Who's playing today?");
     shell.press(&[Down]);
-    assert_eq!(shell.focus(), "Settings: Account: Discord messages");
+    assert_eq!(shell.focus(), "Settings: Account: Direct Messages");
     shell.press(&[Left]);
     assert_eq!(shell.focus(), "Settings: Account: Discord");
     shell.press(&[Up, A]);

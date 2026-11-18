@@ -759,7 +759,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 | Category | Boxes | Layout |
 |---|---|---|
 | **General** | Personalisation (0, 0), Idle (1, 0), Guide (0, 1), **Boot video** (1, 1) | rows; the Bundle's Theme settings' first three at their places, Boot video in Discord's |
-| **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1), **Discord messages** (1, 1; #197, 16.12) | rows |
+| **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1), **Direct Messages** (1, 1; #197 and #200, 16.12; was Discord messages) | rows |
 | **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers, Set up this PC ([set-up.md](set-up.md), #178) | sections |
 | **System** | System (0, 0), About (1, 0) | rows |
 
@@ -962,24 +962,30 @@ The user, 2026-11-18: "remove all the text paragraphs underneath setting heading
 | Add an app | "The Microsoft Store apps on this PC show up here once Windows has listed them."; "There are no Microsoft Store apps on this PC." | how things stand |
 | Picture (a Profile's) | "Add images to the Gamerpics folder to choose from more." with at most one picture | how things stand, and what to do |
 | Discord | the four numbered steps, the portal's address under its code, the values ("Not set", "Saved") and the status line | what the user cannot connect without, and how things stand |
-| Discord messages | "Discord's terms don't allow other programs to use your account, and Discord says it can close an account for it. With this on, the Dashboard signs in to discord.com as you and reads the page for you." under the switch; the status line; once a session is kept, "Signing out here removes the session from this PC. Discord lists it under Devices until you log it out there." | the risk the user takes by turning it on, which they must know first (#192, D1; docs/research/discord-bridge.md, 4); how things stand; what Sign out does not do |
+| Direct Messages | "This signs in to discord.com as you, then reads and sends your messages for you. Discord's terms don't allow programs to do that with a user account, and Discord could close your account for it." under the switch (#200, party-chats.md 8.2); the status line; once a session is kept, "Signing out here removes the session from this PC. Discord lists it under Devices until you log it out there." | the risk the user takes by turning it on, which they must know first (#192, D1; docs/research/discord-bridge.md, 4); how things stand; what Sign out does not do |
 | System | the line under the checkbox (Off, On, refused, failed); "Getting to the desktop" and "If the Dashboard won't start" with their text | how things stand; the way out of shell mode, which no control on the page does |
 | About | the version; where updates stand once checked; "Third-party licences" and "Sounds and boot videos" with their text | how things stand; where the licences are, and where the media files go |
 
-### 16.12 Discord messages (the port's own; #197)
+### 16.12 Direct Messages (the port's own; #197, #200)
 
-Account's fourth box, beside Discord at (1, 1): **Discord messages** (icon U+E8BD), the Dashboard's own discord.com
-session that the Guide's Party reads DMs and notifications through (#198 on; docs/discord-web.md). Voice stays on
-Discord's page (6.9), whose connection this page never touches. Laid out as System's (16.9): the label "Discord
-messages", the checkbox row **Use Discord messages** 14 under it, the terms line under the row (kept, 16.11), then
-"Status" and the session's line, and, while the switch is on, the buttons **Sign in** and **Sign out** side by side,
-with the Devices line under them once a session is kept.
+Account's fourth box, beside Discord at (1, 1): **Direct Messages** (icon U+E8BD; named Discord messages until #200, which
+brought it to [party-chats.md](party-chats.md) 8.2), the Dashboard's own discord.com session that the Guide's Direct
+Messages are read through (docs/discord-web.md). Voice stays on Discord's page (6.9), whose connection this page never
+touches. The rows are party-chats.md 8.2's, from y 190 at x 520: the checkbox row **Direct Messages from discord.com**
+(the switch), the risk said plainly 14 under it (kept, 16.11), **Sign in** and **Sign out** side by side 20 apart
+(dimmed, and out of focus, while the switch is off), the status line, then **Notifications** (Bahnschrift 30) with the
+checkboxes **Direct Messages**, **Show what they say**, **Mentions** and **Incoming Calls**, and the dropdown **While
+playing** (Show all, Calls only, None). The Notifications are kept (`discord.notify.messages`, `.text`, `.mentions`,
+`.calls`, all on by default; `discord.notify.while_playing`, `all`, `calls` or `none`) for the Toasts (#202) to read, and
+take focus whether or not the switch is on.
 
 - **The switch** is off until the user turns it on (`discord.messages` in the settings table, default false). Off,
   nothing of the session runs. On with no session kept, nothing runs either: the status says Not signed in, or "This
   PC doesn't have Microsoft Edge WebView2, which Discord's page needs." where the loader or the runtime is missing.
-- **The status line**: Off, Not signed in, Signing in..., Checking..., Signed in, no runtime, and "Discord's page
-  couldn't be opened." when the web view failed (the log says why).
+- **The status line** (party-chats.md 8.2's words): Off, Not signed in, Discord signed you out (a session was kept and
+  Discord ended it), Starting..., Signing in..., Signed in (the name, "Signed in as {name}", once the web session
+  gives one), Microsoft Edge WebView2 isn't on this PC, Can't reach Discord, Discord has changed its page, and "Discord's
+  page couldn't be opened." when the web view failed (the log says why).
 - **Sign in** (while signed out) opens the **sign-in page**: Discord's own discord.com/login over the whole screen,
   but a band 110 high at its foot that is the Dashboard's: two lines at x 140, BodyText, centred at 36 and 76 into the
   band, "Scan the QR code with the Discord mobile app to log in instantly. To type instead, move to a field and press
@@ -989,12 +995,13 @@ with the Devices line under them once a session is kept.
   page signs in by itself. **Typing is the second**: Up and Down step through the page's fields and buttons
   (Shift+Tab, Tab; the first Down goes to the form's first field); A on a text field opens the Console keyboard
   (9.6), as dots on a password field, and what it keeps takes the field's place; A elsewhere and Menu press Enter; X
-  is Space; View is Escape; B closes the page. Signed in either way, the page closes by itself, back on Discord
-  messages. Closed before signing in, nothing is kept.
+  is Space; View is Escape; B closes the page. Signed in either way, the page closes by itself, back on Direct
+  Messages. Closed before signing in, nothing is kept.
 - **Sign out** removes the Profile's session folder (`<data>\discord-web\profile-<id>`), and with it everything the
   web view kept: nothing of it is left on the PC. Discord's own record of the session stays under its Devices.
-- **Focus**: the switch, then (Down, while on) Sign in and (Right) Sign out. B, or Left from the switch or Sign in,
-  goes back to Account's boxes. The focus log: `Settings: Discord messages: Use Discord messages; on, signed in, kept`
-  (the switch, the session's word, `kept` while a session is on the PC); on the sign-in page `DiscordSignIn:
+- **Focus**: the switch, then (Down, while on) Sign in and (Right) Sign out, then the four Notifications and While
+  playing. B, or Left from any but Sign out, goes back to Account's boxes. The focus log: `Settings: Direct Messages:
+  Direct Messages from discord.com; dms on, signed in` (the row, the switch, and how the session and the list stand:
+  `signed in`, `signed out`, `starting`, `no runtime`, `unreachable` or `page changed`; no name); on the sign-in page `DiscordSignIn:
   Discord's page`, then `DiscordSignIn: Tab`, the last key sent, and `DiscordSignIn: keyboard` as text entry opens.
   The session's own lines start `discord web:`; `discord web: QR code shown yes` says the QR code is on the page.

@@ -62,7 +62,7 @@ pub fn background(ui: &mut Ui) {
 
 /// The tabs' icons, and the green bar under the one showing. Tabs take no focus: the bumpers change them, and the
 /// bar moves at once.
-pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture) {
+pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture, unread: bool) {
     const UNSELECTED: Color = Color::rgb(0x8C8C8C);
     for (i, &tab) in tabs.iter().enumerate() {
         let bounds = Rect::new(FIRST_TAB + i as f32 * TAB.0, PANEL.y, TAB.0, TAB.1);
@@ -73,7 +73,15 @@ pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture) {
         match tab {
             // The picture's size, where the Bundle's Xbox mark is 33: the user's (#269).
             Tab::Landing => marks::xbox(ui, square(PICTURE), colour),
-            Tab::Discord => marks::discord_mark(ui, square(36.0), colour),
+            Tab::Discord => {
+                marks::discord_mark(ui, square(36.0), colour);
+                // With any unread DM, a dot 12 across in the accent at the mark's top right.
+                if unread {
+                    let dot = Rect::new(cx + 20.0 - 6.0, cy - 20.0 - 6.0, 12.0, 12.0);
+                    ui.fill(dot.grow(2.0), Color::rgb(0x1F1F1F), 8.0);
+                    ui.fill(dot, ACCENT_LIGHT, 6.0);
+                }
+            }
             Tab::ProfileAndSystem => {
                 // The disc shows where there is no picture; the picture is the same selected or not.
                 ui.fill(square(PICTURE), Color::rgb(0x4A4A4A), 999.0);

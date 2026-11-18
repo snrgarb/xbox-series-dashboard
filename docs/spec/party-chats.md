@@ -1,6 +1,6 @@
 # Direct Messages in the Guide, in the manner of the console's Parties & chats
 
-**Approved by the user on 2026-11-18 (#199, M9 Full Discord); section 12.** How Discord's Direct Messages show in the Guide, in the
+**Approved by the user on 2026-11-18 (#199, M9 Full Discord); section 12. Built in #200 (section 15 says what was decided there).** How Discord's Direct Messages show in the Guide, in the
 manner of the console's Parties & chats tab, drawn with the Guide's own measures and parts. The decisions it rests
 on are #192's (D1 opt-in with RPC kept for voice; D2 our own web session; D3 our own screens under Party in the
 Guide; D4 DMs and notifications first; D5 no video; D6 memory only; D7 our own code). What the web session can do is
@@ -727,3 +727,62 @@ entry lies over all of it.)
 - **What Discord's page gives** (a last message or a time per DM, read marks when hidden, Do Not Disturb's effect,
   what its local storage keeps): for #197, #198 and #201 to establish; the spec says what shows when it does not.
 - Discord's self-bot article refused an automated fetch (discord-bridge.md 4); its wording is from its indexed copies.
+
+---
+
+## 15. Decided in #200
+
+The screens for sections 2 to 6 and 8 are built (`crates/screens/src/guide/direct.rs`, `chat.rs`, `when.rs`,
+`discord.rs`; Settings' `discord_web.rs`), from fake data (`crates/screens/tests/direct.rs`). Two things changed after
+this spec was approved, and a few things it left open were decided:
+
+**Changed after approval**
+
+- **Voice is moving to the web session too** (the user, 2026-11-18): the spec's RPC wording for the DM's **Call** (3.6)
+  and the Answer entry's **A** (7.3) will change in another ticket. For now they emit `DirectAsk::Call(id)` and
+  `DirectAsk::Answer(id)`, and Call is offered whenever Direct Messages are `Ready` (not "signed in to the voice
+  connection"); Answer asks nothing about being in another Call.
+- **Data comes from Discord's in-page stores**, so `DirectState::PageChanged` is "a store no longer answers"; the text
+  for that state (3.5) stays as written.
+
+**Decisions**
+
+1. **"Loading more" (4) is not built.** The stores give the whole list at once, so a row that appears while more are
+   fetched has nothing to wait for; the list is exactly `Direct::dms`.
+2. **The log keeps the tab's `Entry(n)`** (discord-tab.md 7): `guide: Discord Entry(0) DM(0) of 7, unread 3; not in a
+   call; mute off, deafen off; dms 7, unread 4 in 2`, so the payloads written for the tab stand. `DM(k)` and `Message(k)`
+   are places from 0: a DM from the list's start, a message (10) from the newest. With the voice connection never set
+   up and Direct Messages on, the voice part says only `not in a call`, not why.
+3. **Times** are written as the Guide's clock writes them, "9:40 PM" (`%-I:%M %p`, the machine's local time), not
+   "21:40"; days as 5.3 and 4 say, the short date as the Game hub's. "Now" and the zone can be set
+   (`Dashboard::set_time`) so a picture is of one moment.
+4. **All Direct Messages starts** on the DM that had focus last on the tab's row (the sixth circle is reached from the
+   last disc, so that is usually the fifth), else the first row; B from a conversation opened there comes back to it.
+5. **The unread dot on the tab's mark** counts DMs with unread messages (`Direct::unread().1 > 0`); it has a 2 ring in
+   the panel's colour, as the DMs' dots.
+6. **Several rings**: the Answer entry is for the first; the others are asked of by `DirectAsk::Answer` after it ends.
+7. **The spinner** of the section's Loading state comes after one second of the Dashboard's own time
+   (`Dashboard::advance`), never from the machine's clock. The conversation's loading state shows its spinner at once.
+8. **Where a conversation opens** is decided by the first frame after it has come (spec 5.4 needs the bubbles'
+   heights): with the unread all in view the reply box, else the first unread message with the line 12 under the top.
+   The unread line stays where it was at that moment while the conversation is open.
+9. **Groups**: the start-of-history line has no "@" for a Group DM ("...with {group}."); a reply to one's own message
+   reads "Replying to yourself".
+10. **"{n} new messages"** counts others' messages only; the user's own going out never raise it. LT and RT move by the
+    number of bubbles the last frame showed whole.
+11. **Your own message going out** is kept in the screens, keyed by the nonce it was sent under (`DirectAsk::Send`),
+    and drawn Sending until the session reports it: a message with the nonce as its id (`Delivery::Sending`, then
+    `Sent` or `Failed`), or, once Discord has given it an id, an own message with the same text (trimmed) that the
+    conversation did not have when it was sent. Focus follows it to the real id. After 15 s of the Dashboard's time
+    unmatched it is Not sent; a captcha or a refusal (`DirectEvent::Captcha`, `Refused`) marks everything still going out
+    Not sent too. Retry sends the text again under a new nonce and asks `DirectAsk::Forget` for the old one; Delete
+    asks `Forget`.
+12. **Text entry for a message** is `keyboard::Entry::private()`: the focus log says `TextEntry: Q; 12 chars, lower
+    letters`. The caption is made when it opens ("Message @Ana", "Replying to Ana").
+13. **Closing the Guide** drops the conversation (`DirectAsk::Close`) and keeps the drafts; turning Direct Messages off
+    (`DirectState::Off`) forgets drafts, messages going out and every view.
+14. **A menu's log**: `dialog Menu { prompt: false, row: 0 } (dm)` (`(message)`, `(reaction)`), never its title.
+15. **Settings** (8): the page's focus log is `Settings: Direct Messages: <row>; dms on, signed in`; the status line
+    says "Signed in" until the web session gives a name; Sign out's "Signed out. Discord lists this PC under Devices..."
+    stays the Devices line under the status line while a session is kept. The Notifications and While playing are
+    options (`Options::notify_*`, `Options::while_playing`) for the Toasts (#202).

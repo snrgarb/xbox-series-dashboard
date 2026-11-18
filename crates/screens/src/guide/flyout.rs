@@ -22,15 +22,15 @@ use crate::Notification;
 /// The Flyout: x 155..691, from y 33 to the screen's foot. Drawn a corner's worth past the foot, so that only its
 /// top corners are round.
 pub(super) const FLYOUT: Rect = Rect::new(155.0, 33.0, 536.0, 1047.0 + RADIUS);
-const RADIUS: f32 = 12.0;
-const BACK: Color = Color::rgb(0x1F1F1F);
+pub(super) const RADIUS: f32 = 12.0;
+pub(super) const BACK: Color = Color::rgb(0x1F1F1F);
 /// The dim over the Guide's own panel while a Flyout is over it.
-const PANEL_DIM: Color = Color::argb(0x73000000);
+pub(super) const PANEL_DIM: Color = Color::argb(0x73000000);
 /// It comes in from this far to the left, fading in, over this long.
-const TRAVEL: f32 = -48.0;
-const OPEN_SECONDS: f32 = 0.12;
+pub(super) const TRAVEL: f32 = -48.0;
+pub(super) const OPEN_SECONDS: f32 = 0.12;
 /// The title's top, and the entries' under it: the title's line and 24.
-const TITLE_TOP: f32 = FLYOUT.y + 36.0;
+pub(super) const TITLE_TOP: f32 = FLYOUT.y + 36.0;
 pub(super) const FIRST_TOP: f32 = TITLE_TOP + 39.6 + 24.0;
 /// The entries end 24 above the screen's foot.
 pub(super) const FOOT: f32 = 1080.0 - 24.0;

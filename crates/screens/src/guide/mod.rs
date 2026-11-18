@@ -8,6 +8,8 @@
 //!
 //! This file is where focus is and where it goes, and how the Guide comes and goes; each part draws itself in its
 //! own module.
+mod chat;
+mod direct;
 mod discord;
 mod entries;
 mod flyout;
@@ -17,17 +19,21 @@ mod panel;
 mod servers;
 mod status;
 mod utilities;
+mod when;
 
 use model::discord::{Discord, REMOVE_SHORTCUT};
+use model::discord_dms::{Direct, DirectAsk, DirectState, Id, REACTIONS};
 use model::{Audio, Flow, Library, MediaCommand, PowerCommand};
 use ui::{Button, Color, Ease, Gradient, Press, Rect, TextStyle, Ui};
 
-pub use self::discord::{DiscordAsk, Item as DiscordItem};
+pub use self::direct::{All, Back, Chat, Dms, Draft, Place, View};
+pub use self::discord::{DiscordAsk, Item as DiscordItem, Note as DirectNote};
 pub use self::entries::{Entry, Kind};
 pub use self::flyout::{AudioItem, Flyout, FlyoutFocus, MediaControl};
 pub(crate) use self::status::{call_mark, pad_battery};
 pub use self::status::{PcBattery, Status};
 pub use self::utilities::Utility;
+pub use self::when::When;
 use crate::menu_panel::{self, Answer, MenuPanel, Row};
 use crate::theme::ACCENT_LIGHT;
 use crate::wide_dialog::{self, Tile, WideDialog};
@@ -110,6 +116,8 @@ pub enum GuideAction {
     Power(PowerChoice),
     /// What the Discord tab or its Flyout asks of Discord: shown done only once Discord says so.
     Discord(DiscordAsk),
+    /// A on "Sign in to Discord in Settings > Account > Direct Messages": the Guide closes onto that page.
+    DirectSettings,
 }
 
 /// Power's options.
@@ -132,6 +140,21 @@ enum MenuChoice {
     Cancel,
     /// A Shortcut's menu's one option: the Shortcut the menu is on (`Guide::shortcut_menu`) forgotten.
     RemoveShortcut,
+    /// A row of a Direct Messages menu (`Guide::direct_menu` says what it is about).
+    Dm(DmRow),
+}
+
+/// The rows of the DM's menu, a message's menu and the Add Reaction panel (docs/spec/party-chats.md, 3.6 and 6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DmRow {
+    MarkRead,
+    Call,
+    Reply,
+    AddReaction,
+    Retry,
+    Delete,
+    /// One of the six reactions, by its place in `REACTIONS`.
+    React(usize),
 }
 
 /// A dialog over the Guide. It takes every press but the Guide button's.
@@ -218,6 +241,18 @@ pub struct Guide {
     listed_discord: Discord,
     /// The channel of the Shortcut whose menu is up: the menu stays while that Shortcut does.
     shortcut_menu: Option<String>,
+    /// Direct Messages: what the session said, the views over the panel, drafts and messages going out.
+    dms: Dms,
+    /// What Direct Messages was when the lists were last made.
+    listed_direct: Direct,
+    /// What the DM or message menu (or Add Reaction) up over the Guide is about.
+    direct_menu: Option<direct::Target>,
+    /// The disc of the Direct Messages row focus was last on: where Up from the entry under it lands.
+    row_memory: usize,
+    /// Text entry is up over a conversation: its view ends at y 556.
+    writing: bool,
+    /// The DM focus was last on in the row, by its conversation: where All Direct Messages starts.
+    last_dm: Option<Id>,
 }
 
 impl Default for Guide {
@@ -241,6 +276,12 @@ impl Default for Guide {
             discord: Discord::default(),
             listed_discord: Discord::default(),
             shortcut_menu: None,
+            dms: Dms::default(),
+            listed_direct: Direct::default(),
+            direct_menu: None,
+            row_memory: 0,
+            writing: false,
+            last_dm: None,
         }
     }
 }
@@ -257,6 +298,8 @@ impl Guide {
         self.panel = true;
         self.dialog = None;
         self.flyout = None;
+        self.direct_menu = None;
+        self.dms.close_all();
         self.turns = (0, 0.0);
         self.show(tab, around);
     }
@@ -285,6 +328,9 @@ impl Guide {
         self.open = false;
         self.dialog = None;
         self.flyout = None;
+        self.direct_menu = None;
+        self.writing = false;
+        self.dms.close_all();
     }
 
     /// Closes at once, with no slide away: Start-up is coming over everything (the Bundle's `DismissAtOnce`).
@@ -332,9 +378,20 @@ impl Guide {
     /// The title of the menu or prompt up over the Guide.
     pub fn dialog_title(&self) -> Option<&str> {
         match self.dialog.as_ref()? {
+            // A name or the first words of a message: never in the log.
+            Dialog::Menu(_) if self.direct_menu.is_some() => None,
             Dialog::Menu(menu) => Some(menu.title()),
             Dialog::Power(_) => None,
         }
+    }
+
+    /// What a Direct Messages menu up over the Guide is, for `--log-focus`: `dm`, `message` or `reaction`.
+    pub fn dialog_tag(&self) -> Option<&'static str> {
+        Some(match self.direct_menu.as_ref()? {
+            direct::Target::Dm(_) => "dm",
+            direct::Target::Message(_) => "message",
+            direct::Target::Reaction(_) => "reaction",
+        })
     }
 
     /// Whether the panel shows: not when Power came by a hold, nor under a prompt that came with the Guide off.
@@ -370,6 +427,7 @@ impl Guide {
     fn ask(&mut self, menu: MenuPanel<MenuChoice>) {
         self.flyout = None;
         self.shortcut_menu = None;
+        self.direct_menu = None;
         self.dialog = Some(Dialog::Menu(menu));
         self.asked += 1;
     }
@@ -420,6 +478,8 @@ impl Guide {
         self.scroll = 0.0;
         let first = if self.tab == Tab::Discord { discord::first_focus(&self.entries) } else { 0 };
         self.focus = Focus::Entry(first);
+        (self.row_memory, self.last_dm) = (0, None);
+        self.remember_row();
         self.scroll_to_focus();
     }
 
@@ -428,13 +488,120 @@ impl Guide {
         self.discord = discord.clone();
     }
 
+    /// Direct Messages as the web session says now (docs/spec/party-chats.md). The tab, a Flyout and a conversation
+    /// follow it as `refresh` makes the lists again; the Dashboard calls that.
+    pub fn set_direct(&mut self, direct: &Direct) {
+        self.dms.set(direct);
+        // What a menu is about may be gone.
+        if self.dialog.is_some() && !self.direct_menu_alive() {
+            self.dialog = None;
+            self.direct_menu = None;
+        }
+    }
+
+    /// Direct Messages as last said.
+    pub fn direct(&self) -> &Direct {
+        &self.dms.direct
+    }
+
+    /// What the Guide keeps of Direct Messages: what is open, the drafts, what is going out.
+    pub fn dms(&self) -> &Dms {
+        &self.dms
+    }
+
+    /// What has been asked of the web session since this was last called.
+    pub fn take_asks(&mut self) -> Vec<DirectAsk> {
+        std::mem::take(&mut self.dms.asks)
+    }
+
+    /// Text entry the Guide wants over a conversation's reply box, once.
+    pub fn take_write(&mut self) -> Option<direct::Write> {
+        self.dms.write.take()
+    }
+
+    /// A captcha or a refusal: what was going out is Not sent.
+    pub fn fail_pending(&mut self) {
+        self.dms.fail_pending();
+    }
+
+    /// Text entry is up (or gone) over the conversation.
+    pub fn set_writing(&mut self, writing: bool) {
+        self.writing = writing;
+    }
+
+    /// The text typed so far is the reply box's draft.
+    pub fn set_draft(&mut self, channel: &Id, text: &str) {
+        self.dms.set_draft(channel, text);
+    }
+
+    /// Menu or Enter on text entry: the draft goes out.
+    pub fn send_draft(&mut self, channel: &Id) {
+        self.dms.send(channel);
+    }
+
+    /// Time passes: messages going out that are not seen sent become Not sent.
+    pub fn pass(&mut self, seconds: f32) {
+        self.dms.pass(seconds);
+    }
+
+    /// How soon something here has to be looked at again, in seconds.
+    pub fn timer(&self) -> Option<f32> {
+        let loading =
+            self.dms.loading_since.map(|since| (1.0 - (self.dms.age - since)).max(0.0)).filter(|&left| left > 0.0);
+        [self.dms.timer(), loading].into_iter().flatten().reduce(f32::min)
+    }
+
+    /// What time it is, for the times of messages: the machine's unless told.
+    pub fn set_when(&mut self, when: When) {
+        self.dms.when = when;
+    }
+
+    /// "Discord wants to check it's you": a prompt over the Guide (docs/spec/party-chats.md, 6.4).
+    pub fn ask_captcha(&mut self) {
+        let message = "Sign in again in Settings > Account > Direct Messages to carry on.";
+        self.ask_ok("Discord wants to check it's you", message);
+    }
+
+    /// "Discord didn't send it", with Discord's own reason as its page gives it.
+    pub fn ask_refused(&mut self, reason: &str) {
+        self.ask_ok("Discord didn't send it", reason);
+    }
+
+    fn ask_ok(&mut self, title: &str, message: &str) {
+        let rows = vec![Row::new(menu_panel::icon::CANCEL, "OK", MenuChoice::Cancel)];
+        self.ask(MenuPanel::prompt(title, Some(message), rows));
+    }
+
+    /// Whether what the open Direct Messages menu is about is still there.
+    fn direct_menu_alive(&self) -> bool {
+        match &self.direct_menu {
+            None => true,
+            Some(direct::Target::Dm(id)) => self.dms.direct.dm(id).is_some(),
+            Some(direct::Target::Message(id) | direct::Target::Reaction(id)) => match self.dms.chat() {
+                Some(chat) => self.dms.message(&chat.id, id).is_some(),
+                None => false,
+            },
+        }
+    }
+
     /// The Discord tab's part of `--log-focus`'s Guide line: the entry focus is on, and what Discord says.
     pub fn discord_line(&self) -> Option<String> {
         let focus = match self.focus {
             Focus::Entry(at) => Some(at),
             Focus::Utility(_) => None,
         };
-        (self.tab == Tab::Discord).then(|| discord::line(&self.entries, focus, &self.discord))
+        (self.tab == Tab::Discord).then(|| discord::line(&self.entries, focus, &self.discord, &self.listed_direct))
+    }
+
+    /// What `--log-focus` says of an open All Direct Messages or conversation (`, flyout Conversation ReplyBox;
+    /// draft 12 chars`): places and counts only.
+    pub fn direct_flyout_line(&self) -> Option<String> {
+        self.dms.line()
+    }
+
+    /// Whether All Direct Messages or a conversation is open over the panel.
+    pub fn direct_open(&self) -> bool {
+        self.dms.view.is_some()
     }
 
     /// On Profile & system, the entry focus is on by name, after its place: ` Power`, ` SwitchProfile`, ` Achievement
@@ -458,8 +625,9 @@ impl Guide {
         if !self.tabs.contains(&self.tab) {
             self.tab = Tab::Landing;
         }
-        self.entries = entries::of(self.tab, around, &self.discord);
+        self.entries = entries::of(self.tab, around, &self.discord, &self.dms.direct);
         self.listed_discord = self.discord.clone();
+        self.listed_direct = self.dms.direct.clone();
         // Only the landing tab has Utilities.
         self.utilities = if self.tab == Tab::Landing { Utility::LANDING.to_vec() } else { Vec::new() };
     }
@@ -468,23 +636,38 @@ impl Guide {
     /// the lists are made again, and focus stays at the same place in them.
     /// On the Discord tab focus follows its entry through Discord's changes (`discord::focus_after`).
     pub fn refresh(&mut self, around: Around) {
-        let before = (self.tab, std::mem::take(&mut self.entries), std::mem::take(&mut self.listed_discord));
+        let before = (
+            self.tab,
+            std::mem::take(&mut self.entries),
+            std::mem::take(&mut self.listed_discord),
+            std::mem::take(&mut self.listed_direct),
+        );
         self.list(around);
         if let Focus::Entry(at) = self.focus {
             self.focus = Focus::Entry(if before.0 == Tab::Discord && self.tab == Tab::Discord {
-                discord::focus_after((&before.1, &before.2), (&self.entries, &self.discord), at)
+                discord::focus_after(
+                    (&before.1, &before.2, &before.3),
+                    (&self.entries, &self.discord, &self.listed_direct),
+                    at,
+                )
             } else {
                 at.min(self.entries.len().saturating_sub(1))
             });
         }
 
+        self.remember_row();
         // A menu or a prompt is about the running game: when that has stopped it goes, in silence; a Shortcut's,
         // when the Shortcut has. Power is about the PC, and stays.
         let gone = match &self.shortcut_menu {
             Some(id) => self.tab != Tab::Discord || !self.discord.shortcuts.iter().any(|s| s.id == *id),
             None => around.playing.is_none(),
         };
-        if matches!(self.dialog, Some(Dialog::Menu(_))) && gone {
+        if self.direct_menu.is_some() {
+            if !self.direct_menu_alive() {
+                self.dialog = None;
+                self.direct_menu = None;
+            }
+        } else if matches!(self.dialog, Some(Dialog::Menu(_))) && gone {
             self.dialog = None;
             self.shortcut_menu = None;
         }
@@ -509,6 +692,20 @@ impl Guide {
         if self.dialog.is_some() {
             return if press.button == Button::Guide { Some(GuideAction::Close) } else { self.answer(press) };
         }
+        // All Direct Messages or a conversation takes the pad: B goes back to where it was opened from.
+        if self.dms.view.is_some() {
+            if press.button == Button::Guide {
+                return Some(GuideAction::Close);
+            }
+            return match self.dms.press(press) {
+                direct::Step::Menu(target) => {
+                    self.open_direct_menu(target);
+                    Some(GuideAction::Asked)
+                }
+                direct::Step::Chose => Some(GuideAction::Asked),
+                direct::Step::Moved | direct::Step::Left | direct::Step::Nothing => None,
+            };
+        }
         // An open Flyout takes the pad: B closes a dropdown's list, then the Flyout, focus back on its Utility.
         // The bumpers do nothing meanwhile.
         if let Some(flyout) = &mut self.flyout {
@@ -530,8 +727,9 @@ impl Guide {
         }
         // On the Discord tab the Shortcuts' tiles stand in rows.
         if let (Tab::Discord, Focus::Entry(at)) = (self.tab, self.focus) {
-            if let Some(to) = discord::grid_move(&self.entries, at, press.button) {
+            if let Some(to) = discord::grid_move(&self.entries, at, press.button, self.row_memory) {
                 self.focus = Focus::Entry(to);
+                self.remember_row();
                 self.scroll_to_focus();
                 return None;
             }
@@ -554,6 +752,7 @@ impl Guide {
             }
             (Button::LeftBumper, _) => self.turn(-1, around),
             (Button::RightBumper, _) => self.turn(1, around),
+            (Button::A, Focus::Entry(at)) if self.direct_item(at).is_some() => return self.select_direct(at),
             (Button::A, Focus::Entry(at)) => {
                 let action = self.entries.get(at).and_then(select);
                 if action == Some(GuideAction::Asked) {
@@ -582,7 +781,11 @@ impl Guide {
             }
             // A Shortcut's menu: its name, and Remove shortcut.
             (Button::Menu, Focus::Entry(at)) if self.entries.get(at).is_some_and(Entry::has_menu) => {
-                if let Kind::Discord(DiscordItem::Shortcut(shortcut)) = self.entries[at].kind {
+                if let Kind::Discord(DiscordItem::DM(place)) = self.entries[at].kind {
+                    if let Some(dm) = self.dms.direct.dms.get(place) {
+                        self.open_direct_menu(direct::Target::Dm(dm.id.clone()));
+                    }
+                } else if let Kind::Discord(DiscordItem::Shortcut(shortcut)) = self.entries[at].kind {
                     let rows = vec![Row::new(crate::theme::glyph::DELETE, REMOVE_SHORTCUT, MenuChoice::RemoveShortcut)];
                     self.ask(MenuPanel::menu(&self.entries[at].title, rows));
                     self.shortcut_menu = self.discord.shortcuts.get(shortcut).map(|s| s.id.clone());
@@ -603,6 +806,9 @@ impl Guide {
     /// B, and Close in Power, close it onto the Guide where it was, or close the Guide with it when there is no
     /// panel to go back to.
     fn answer(&mut self, press: Press) -> Option<GuideAction> {
+        if self.direct_menu.is_some() {
+            return self.answer_direct(press);
+        }
         let action = match self.dialog.as_mut()? {
             Dialog::Power(power) => match power.press(press) {
                 Answer::Chose(Some(choice)) => Some(GuideAction::Power(choice)),
@@ -618,6 +824,7 @@ impl Guide {
                     let at = self.discord.shortcuts.iter().position(|s| Some(s.id.as_str()) == id);
                     at.map(|at| GuideAction::Discord(DiscordAsk::RemoveShortcut(at)))
                 }
+                Answer::Chose(MenuChoice::Dm(_)) => None,
                 Answer::Chose(MenuChoice::Cancel) | Answer::Declined => (!self.panel).then_some(GuideAction::Close),
                 Answer::Moved | Answer::Nothing => return None,
             },
@@ -689,7 +896,7 @@ impl Guide {
             if self.panel {
                 top_shade(ui, screen);
                 // The hints hide for a Flyout.
-                if self.flyout.is_none() {
+                if self.flyout.is_none() && self.dms.view.is_none() {
                     ui.with_offset(screen.x, 0.0, |ui| hints::draw(ui, focused.is_some_and(Entry::has_menu)));
                 }
                 status::draw(ui, face.status, face.clock, face.pad);
@@ -702,11 +909,19 @@ impl Guide {
                 if self.dialog.is_some() {
                     let bounds = panel::PANEL.grow(BEHIND_BLUR);
                     ui.group(bounds, BEHIND_BLUR, 1.0, |ui| self.panel(ui, behind, around, face));
+                    // A conversation or All Direct Messages stays under its menu, out of focus with the panel.
+                    if self.dms.view.is_some() {
+                        let flyout = flyout::FLYOUT.grow(BEHIND_BLUR);
+                        let bounds =
+                            Rect::new(bounds.x, bounds.y, flyout.right() - bounds.x, flyout.bottom() - bounds.y);
+                        ui.group(bounds, BEHIND_BLUR, 1.0, |ui| self.dms.draw(ui, self.writing, true));
+                    }
                 } else {
                     self.panel(ui, behind, around, face);
                     if let Some(flyout) = &mut self.flyout {
                         flyout.draw(ui, around, &self.discord);
                     }
+                    self.dms.draw(ui, self.writing, false);
                 }
             });
         }
@@ -724,11 +939,171 @@ impl Guide {
         }
     }
 
+    /// The Direct Messages item the entry at `at` is, if it is one A has its own use for.
+    fn direct_item(&self, at: usize) -> Option<DiscordItem> {
+        match self.entries.get(at)?.kind {
+            Kind::Discord(
+                item @ (DiscordItem::DM(_) | DiscordItem::AllDMs | DiscordItem::Answer | DiscordItem::DMsState(_)),
+            ) => Some(item),
+            _ => None,
+        }
+    }
+
+    /// A on a disc, the sixth circle, Answer or the section's state.
+    fn select_direct(&mut self, at: usize) -> Option<GuideAction> {
+        match self.direct_item(at)? {
+            DiscordItem::DM(place) => {
+                let id = self.dms.direct.dms.get(place)?.id.clone();
+                self.dms.open_chat(id, Back::Tab);
+                Some(GuideAction::Asked)
+            }
+            DiscordItem::AllDMs => {
+                let focused = self.last_dm.clone();
+                self.dms.open_all(focused.as_ref());
+                Some(GuideAction::Asked)
+            }
+            DiscordItem::Answer => {
+                let channel = self.dms.direct.rings.first()?.channel.clone();
+                self.dms.asks.push(DirectAsk::Answer(channel));
+                Some(GuideAction::Asked)
+            }
+            DiscordItem::DMsState(DirectNote::SignedOut) => Some(GuideAction::DirectSettings),
+            _ => None,
+        }
+    }
+
+    /// Remembers the disc focus is on, for Up from the entry under the row.
+    fn remember_row(&mut self) {
+        let (Focus::Entry(at), Some((first, count))) = (self.focus, discord::dm_row(&self.entries)) else { return };
+        if (first..first + count).contains(&at) {
+            self.row_memory = at - first;
+            if let Kind::Discord(DiscordItem::DM(place)) = self.entries[at].kind {
+                self.last_dm = self.dms.direct.dms.get(place).map(|dm| dm.id.clone());
+            }
+        }
+    }
+
+    /// A DM's, a message's or Add Reaction's menu over the Guide (docs/spec/party-chats.md, 3.6 and 6.3).
+    fn open_direct_menu(&mut self, target: direct::Target) {
+        let menu = match &target {
+            direct::Target::Dm(id) => {
+                let Some(dm) = self.dms.direct.dm(id) else { return };
+                let mut rows = Vec::new();
+                if dm.unread > 0 {
+                    rows.push(Row::new('\u{E8FB}', "Mark As Read", MenuChoice::Dm(DmRow::MarkRead)));
+                }
+                if self.dms.direct.state == DirectState::Ready {
+                    rows.push(Row::new('\u{E717}', "Call", MenuChoice::Dm(DmRow::Call)));
+                }
+                rows.push(Row::new(menu_panel::icon::CANCEL, "Cancel", MenuChoice::Cancel));
+                MenuPanel::menu(dm.name.as_str(), rows)
+            }
+            direct::Target::Message(id) => {
+                let Some(chat) = self.dms.chat() else { return };
+                let Some(message) = self.dms.message(&chat.id, id) else { return };
+                let mut rows = vec![
+                    Row::new('\u{E97A}', "Reply", MenuChoice::Dm(DmRow::Reply)),
+                    Row::new('\u{E76E}', "Add Reaction", MenuChoice::Dm(DmRow::AddReaction)),
+                ];
+                if message.own && message.delivery == model::discord_dms::Delivery::Failed {
+                    rows.push(Row::new('\u{E72C}', "Retry", MenuChoice::Dm(DmRow::Retry)));
+                    rows.push(Row::new('\u{E74D}', "Delete", MenuChoice::Dm(DmRow::Delete)));
+                }
+                rows.push(Row::new(menu_panel::icon::CANCEL, "Cancel", MenuChoice::Cancel));
+                MenuPanel::menu(&direct::menu_title(&Dms::text_of(&message)), rows)
+            }
+            direct::Target::Reaction(id) => {
+                let Some(chat) = self.dms.chat() else { return };
+                let Some(message) = self.dms.message(&chat.id, id) else { return };
+                let mine = |emoji: &str| match &message.body {
+                    model::discord_dms::Body::Said { reactions, .. } => reactions.iter().any(|reaction| {
+                        reaction.mine
+                            && matches!(&reaction.emoji, model::discord_dms::Emoji::Unicode(e) if e.as_str() == emoji)
+                    }),
+                    _ => false,
+                };
+                let rows = REACTIONS
+                    .iter()
+                    .enumerate()
+                    .map(|(at, (emoji, name))| {
+                        let icon = emoji.chars().next().unwrap_or(' ');
+                        let label = if mine(emoji) { format!("Remove {name}") } else { (*name).to_string() };
+                        Row::new(icon, &label, MenuChoice::Dm(DmRow::React(at)))
+                    })
+                    .collect();
+                MenuPanel::menu("Add Reaction", rows)
+            }
+        };
+        self.ask(menu);
+        self.direct_menu = Some(target);
+    }
+
+    /// A press while a Direct Messages menu is up. Add Reaction takes the message's menu's place, and B on it goes
+    /// back there.
+    fn answer_direct(&mut self, press: Press) -> Option<GuideAction> {
+        let Some(Dialog::Menu(menu)) = self.dialog.as_mut() else { return None };
+        let target = self.direct_menu.clone()?;
+        let channel = self.dms.chat().map(|chat| chat.id.clone());
+        let row = match menu.press(press) {
+            Answer::Moved | Answer::Nothing => return None,
+            Answer::Chose(MenuChoice::Dm(row)) => Some(row),
+            Answer::Chose(_) | Answer::Declined => None,
+        };
+        let done = |me: &mut Self| {
+            me.dialog = None;
+            me.direct_menu = None;
+        };
+        let Some(row) = row else {
+            // Cancel or B: Add Reaction goes back to the message's menu; the others close.
+            return match target {
+                direct::Target::Reaction(id) => {
+                    self.open_direct_menu(direct::Target::Message(id));
+                    None
+                }
+                _ => {
+                    done(self);
+                    None
+                }
+            };
+        };
+        match (row, target) {
+            (DmRow::MarkRead, direct::Target::Dm(id)) => self.dms.asks.push(DirectAsk::MarkRead(id)),
+            (DmRow::Call, direct::Target::Dm(id)) => self.dms.asks.push(DirectAsk::Call(id)),
+            (DmRow::Reply, direct::Target::Message(id)) => {
+                if let Some(channel) = &channel {
+                    self.dms.reply_to(channel, &id);
+                }
+            }
+            (DmRow::AddReaction, direct::Target::Message(id)) => {
+                self.open_direct_menu(direct::Target::Reaction(id));
+                return None;
+            }
+            (DmRow::Retry, direct::Target::Message(id)) => {
+                if let Some(channel) = &channel {
+                    self.dms.retry(channel, &id);
+                }
+            }
+            (DmRow::Delete, direct::Target::Message(id)) => {
+                if let Some(channel) = &channel {
+                    self.dms.forget(channel, &id);
+                }
+            }
+            (DmRow::React(which), direct::Target::Reaction(id)) => {
+                if let Some(channel) = &channel {
+                    self.dms.react(channel, &id, which);
+                }
+            }
+            _ => {}
+        }
+        done(self);
+        Some(GuideAction::Asked)
+    }
+
     /// The panel and what is on it, which is `behind` to its left while it comes in.
     fn panel(&self, ui: &mut Ui, behind: f32, around: Around, face: &Face) {
         panel::background(ui);
         ui.with_offset(behind, 0.0, |ui| {
-            panel::tabs(ui, &self.tabs, self.tab, &face.profile.picture);
+            panel::tabs(ui, &self.tabs, self.tab, &face.profile.picture, self.listed_direct.unread().1 > 0);
             self.content(ui, around, face);
         });
     }
@@ -764,8 +1139,20 @@ impl Guide {
                     Focus::Entry(at) => Some(at),
                     Focus::Utility(_) => None,
                 };
-                let faces =
-                    entries::Faces { library: around.library, profile: face.profile, discord: &self.listed_discord };
+                let focused_item = match focus.and_then(|at| self.entries.get(at)) {
+                    Some(Entry { kind: Kind::Discord(item), .. }) => Some(item.to_owned()),
+                    _ => None,
+                };
+                let faces = entries::Faces {
+                    library: around.library,
+                    profile: face.profile,
+                    discord: &self.listed_discord,
+                    direct: discord::DirectFace {
+                        direct: &self.listed_direct,
+                        focus: focused_item,
+                        loading_for: self.dms.loading_since.map(|since| self.dms.age - since),
+                    },
+                };
                 ui.with_clip(viewport, |ui| {
                     ui.with_offset(0.0, -self.scroll, |ui| {
                         let unfocused = (0..placed.len()).filter(|&at| Some(at) != focus);
