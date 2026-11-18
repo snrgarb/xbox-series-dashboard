@@ -105,6 +105,23 @@ impl Fixture {
         });
         Fixture { games: games.collect(), game_exe: None }
     }
+
+    /// The same, with a game of this name the account owns and has not installed after the others: in the catalogue
+    /// cache only, its ids the next free ones. For a test that needs the same game in two launchers ("Install
+    /// from", #249: Steam's Quiet Orbit owned on Epic too).
+    pub fn owning(mut self, name: &str) -> Fixture {
+        let n = self.games.len() as u64;
+        self.games.push(FixtureGame {
+            app_name: hex(n * 3 + 1),
+            namespace: hex(n * 3 + 2),
+            item_id: hex(n * 3 + 3),
+            name: name.to_string(),
+            kind: Kind::Game,
+            installed: false,
+            record: Record::Manifest,
+        });
+        self
+    }
 }
 
 /// Thirty-two hex digits, as Epic's ids are: not real ones, only different for every `n`.
@@ -270,8 +287,19 @@ mod tests {
     }
 
     #[test]
+    fn a_game_owned_besides_reads_back_owned_and_not_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("epic");
+        write(&root, &Fixture::standard().owning("Quiet Orbit")).unwrap();
+        let library = crate::load(&Places::under(&root)).unwrap();
+        assert_eq!(library.games.len(), 4);
+        let quiet = library.games.iter().find(|g| g.name == "Quiet Orbit").expect("Quiet Orbit read back");
+        assert!(!quiet.installed && quiet.install_dir.is_none());
+    }
+
+    #[test]
     fn ids_are_thirty_two_hex_digits_and_all_different() {
-        let spec = Fixture::standard();
+        let spec = Fixture::standard().owning("Quiet Orbit");
         let ids: Vec<&String> = spec.games.iter().flat_map(|g| [&g.app_name, &g.namespace, &g.item_id]).collect();
         assert!(ids.iter().all(|id| id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())));
         let mut unique = ids.clone();

@@ -453,8 +453,9 @@ impl Store {
         let sources = self.sources.clone();
         let chosen = crate::storage::chosen(&sources, |key| self.setting(key));
         let installed: Vec<Game> = library.games.iter().filter(|game| game.installed).cloned().collect();
+        let twins = crate::storage::twins(library);
         std::thread::spawn(move || {
-            let storage = crate::storage::read(&sources, &shell::drives::SystemDrives, &chosen, &installed);
+            let storage = crate::storage::read(&sources, &shell::drives::SystemDrives, &chosen, &installed, &twins);
             let _ = looked.send(storage);
             wake();
         });

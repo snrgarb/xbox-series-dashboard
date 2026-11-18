@@ -11,6 +11,7 @@ use std::hash::Hash;
 use model::Sound;
 use ui::{Button, Color, Ease, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
+use crate::drawn::{self, Drawing};
 use crate::theme::{self, BODY, TEXT_DIM};
 
 /// The panel is this wide, whatever is in it; it is as tall as its title and rows.
@@ -37,6 +38,8 @@ const FILL: f32 = 56.0;
 const FOCUSED: Color = Color::rgb(0x404040);
 /// The room over a row that starts a group of its own (the Tile menu's Customise).
 const GAP: f32 = 21.0;
+/// A row's mark in its icon's place (a launcher's, in "Install from"): this square, on the icon's centre.
+const MARK: f32 = 26.0;
 
 /// The dim under a panel that stands in the middle of the screen: black at 60%, there at once and gone at once.
 pub const DIM: Color = Color::argb(0x99000000);
@@ -100,11 +103,18 @@ pub struct Row<T> {
     pub value: T,
     /// The row starts a group of its own, 21 further down with no line drawn: the Tile menu's Customise.
     pub gap: bool,
+    /// A drawing in the icon's place: a launcher's placeholder mark ("Install from", #249).
+    pub mark: Option<Drawing>,
 }
 
 impl<T> Row<T> {
     pub fn new(icon: char, label: &str, value: T) -> Self {
-        Self { icon, label: label.into(), value, gap: false }
+        Self { icon, label: label.into(), value, gap: false, mark: None }
+    }
+
+    /// A row with a mark in its icon's place.
+    pub fn marked(mark: Drawing, label: &str, value: T) -> Self {
+        Self { mark: Some(mark), ..Self::new(' ', label, value) }
     }
 
     pub fn after_a_gap(self) -> Self {
@@ -283,7 +293,19 @@ impl<T: Copy> MenuPanel<T> {
         }
         for (row, top) in self.rows.iter().zip(&tops) {
             let middle = top + ROW / 2.0;
-            ui.icon(x + 44.0, middle, row.icon, 22.0, Color::WHITE);
+            match row.mark {
+                Some(mark) => {
+                    drawn::draw(
+                        ui,
+                        Rect::new(x + 44.0 - MARK / 2.0, middle - MARK / 2.0, MARK, MARK),
+                        mark,
+                        Color::WHITE,
+                    );
+                }
+                None => {
+                    ui.icon(x + 44.0, middle, row.icon, 22.0, Color::WHITE);
+                }
+            }
             ui.label_middle(x + 88.0, middle, &row.label, &BODY);
         }
         if let Some(fill) = fill {

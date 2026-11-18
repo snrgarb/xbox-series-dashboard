@@ -55,6 +55,9 @@ pub enum Open {
     ManageQueue,
     /// "Where do you want to install X?", in the place of the Install that asked (`install_where::open`).
     InstallWhere(crate::install_where::Entry),
+    /// "Install from", in the place of the Install that asked, for a game owned in several launchers
+    /// (`install_from::open`; #249).
+    InstallFrom(crate::install_from::Entry),
     /// A game's Achievements page, over its Game hub (`achievements`).
     Achievements(crate::achievements::Entry),
     /// A game's art picker, over whatever asked for it (`art_picker::open`).
@@ -82,6 +85,7 @@ impl Open {
             Open::TileMenu(entry) => Box::new(tile_menu::TileMenu::open(entry, around)?),
             Open::ManageQueue => Box::new(manage_queue::ManageQueue::open(around)),
             Open::InstallWhere(entry) => Box::new(crate::install_where::InstallWhere::open(entry, around)?),
+            Open::InstallFrom(entry) => Box::new(crate::install_from::InstallFrom::open(entry, around)?),
             Open::Achievements(entry) => Box::new(crate::achievements::Achievements::open(entry, around)?),
             Open::ArtPicker(entry) => Box::new(art_picker::ArtPicker::open(entry, around)?),
             Open::Agreement(entry) => Box::new(crate::agreement::AgreementPrompt::open(entry)),

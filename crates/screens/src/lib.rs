@@ -18,6 +18,7 @@ pub mod guide;
 pub mod hint_bar;
 pub mod home;
 pub mod idle;
+pub mod install_from;
 pub mod install_where;
 pub mod keyboard;
 pub mod launch;

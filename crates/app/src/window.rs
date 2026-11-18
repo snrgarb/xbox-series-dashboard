@@ -1292,6 +1292,8 @@ impl App {
         let Some(snapshot) = self.store.launchers_updated() else { return };
         self.show(Some(snapshot));
         self.store.tell_queue(library::queue::Ask::Look);
+        // Games a launcher brought in may be owned in another too: which stores can install them is read again.
+        self.look_at_storage();
         self.store.ask_achievements(library::achievements::Ask::ReadAll);
         if self.art_started {
             self.art = None;

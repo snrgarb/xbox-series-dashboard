@@ -8,6 +8,7 @@ pub mod helper;
 pub mod installer;
 pub mod launcher;
 pub mod media;
+pub mod names;
 pub mod post;
 pub mod profile;
 pub mod queue;
@@ -473,6 +474,12 @@ impl Library {
     /// The game with this id, hidden or not: how a filter's games are found.
     pub fn game(&self, id: i64) -> Option<&Game> {
         self.games.iter().chain(&self.hidden).find(|g| g.id == id)
+    }
+
+    /// The same game in the other launchers (`names::same_game_elsewhere`): every game of the lists, not hidden,
+    /// another store's and of the same name, normalised. A game owned in three stores has two here.
+    pub fn same_game_elsewhere<'a>(&'a self, game: &'a Game) -> impl Iterator<Item = &'a Game> + 'a {
+        self.games.iter().filter(move |other| names::same_game_elsewhere(game, other))
     }
 
     /// The filters that are a Group on Home and a tab on Full library, in order: those shown that have a game.

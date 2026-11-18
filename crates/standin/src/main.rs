@@ -43,11 +43,13 @@
 //!       while the Dashboard runs (`fixture::change`): add-game makes Paper Lighthouse (9100800) the user's,
 //!       installed; played adds <minutes> to the game's play time and makes it last played now. Each is written over
 //!       the standard fixture with the changes made before it, which `fixture-changes.txt` in <dir> keeps.
-//!   standin make-epic <dir> [--json <file>]
+//!   standin make-epic <dir> [--json <file>] [--owning <name>]
 //!   standin make-gog <dir> [--json <file>]
 //!       As make-steam, for a fake Epic Games Launcher (`source_epic::fixture`) or a fake GOG (`source_gog::fixture`):
 //!       the Dashboard reads them with `--epic <dir>` and `--gog <dir>`. A GOG game is started as its own program;
 //!       an Epic one through the launcher's link, which the stand-in launcher, epic-url, takes on a test machine.
+//!       With --owning, Epic's account also owns a game of that name, not installed (`Fixture::owning`): the same
+//!       game in two launchers, for "Install from" (#249).
 //!   standin epic-url <dir> com.epicgames.launcher://apps/...?action=launch
 //!       The stand-in Epic launcher, registered as the `com.epicgames.launcher://` handler with the fake's <dir>:
 //!       starts the installed game the link names, as the launcher does, and waits for it. Exits 1, having done
@@ -212,7 +214,7 @@ use std::path::{Path, PathBuf};
 use source_steam::fixture::{self, Fixture};
 
 const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-shelf]
-       standin make-epic <dir> [--json <file>]
+       standin make-epic <dir> [--json <file>] [--owning <name>]
        standin make-gog <dir> [--json <file>]
        standin epic-url <dir> com.epicgames.launcher://apps/...
        standin make-tones <dir>
@@ -670,10 +672,10 @@ fn read_back(
 
 /// Writes Epic's standard fixture at `dir` with this program as every installed game's, and reads it back with the
 /// Dashboard's reader.
-fn make_epic(dir: &Path, json: Option<&Path>) -> Result<(), String> {
+fn make_epic(dir: &Path, json: Option<&Path>, owning: Option<&str>) -> Result<(), String> {
     use source_epic::fixture::{self, Fixture, Kind};
     let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let mut spec = Fixture::standard();
+    let mut spec = owning.into_iter().fold(Fixture::standard(), Fixture::owning);
     spec.game_exe = Some(std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?);
     fixture::write(&dir, &spec).map_err(|e| format!("writing {}: {e}", dir.display()))?;
     let games: Vec<_> = spec.games.iter().filter(|game| game.kind == Kind::Game).collect();
@@ -922,11 +924,17 @@ fn run(args: &[String]) -> i32 {
             made("make-steam", dir, make_steam(dir, json, spec))
         }
         Some(what @ ("make-epic" | "make-gog")) => {
-            let Some((dir, json)) = dir_and_json(&args[1..]) else {
+            // Epic's --owning <name>, last.
+            let rest = &args[1..];
+            let (rest, owning) = match rest {
+                [before @ .., flag, name] if what == "make-epic" && flag == "--owning" => (before, Some(name.as_str())),
+                _ => (rest, None),
+            };
+            let Some((dir, json)) = dir_and_json(rest) else {
                 note(USAGE);
                 return 2;
             };
-            let result = if what == "make-epic" { make_epic(dir, json) } else { make_gog(dir, json) };
+            let result = if what == "make-epic" { make_epic(dir, json, owning) } else { make_gog(dir, json) };
             made(what, dir, result)
         }
         Some("epic-url") => match &args[1..] {
@@ -1754,6 +1762,15 @@ mod tests {
         assert_eq!(title(&juniper), "Juniper Signal");
         assert_eq!(run(&strings(&["make-gog"])), 2);
         assert_eq!(run(&strings(&["make-epic", "a", "--yaml", "b"])), 2);
+
+        // Owning a game besides, not installed: the same game in two launchers.
+        let (owning, json) = (dir.path().join("epic-owning"), dir.path().join("epic-owning.json"));
+        let args = ["make-epic", owning.to_str().unwrap(), "--json", json.to_str().unwrap(), "--owning", "Quiet Orbit"];
+        assert_eq!(run(&strings(&args)), 0);
+        let library: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+        let games = library["games"].as_array().unwrap();
+        let quiet = games.iter().find(|game| game["name"] == "Quiet Orbit").expect("Quiet Orbit owned");
+        assert_eq!((games.len(), quiet["installed"].as_bool()), (4, Some(false)));
     }
 
     #[test]
