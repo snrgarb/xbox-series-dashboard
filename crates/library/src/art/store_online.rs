@@ -27,7 +27,7 @@ use model::ArtSource;
 
 use super::cache::{Kind, Online};
 use super::lookup::Want;
-use super::names::{pick, plain_name, search_name};
+use super::names::{more_searches, pick, plain_name, search_name};
 use super::steamgriddb::{self, retry_after, segment, transport, Error};
 
 /// Where each store's art is asked for: its own services, or a test's stand-in (`--store-art-service`).
@@ -180,11 +180,21 @@ impl StoreArt {
 
     /// The store's search for the game by its name, for a game that is not the store's own. Only the name is sent.
     pub fn search(&self, store: Store, want: &Want) -> Option<Ask> {
-        let name = search_name(&want.name);
-        if plain_name(&name).is_empty() {
+        self.search_for(store, &search_name(&want.name))
+    }
+
+    /// The store's searches for the game by its name, in the order they are asked until one finds it: its name, then
+    /// [`more_searches`] (its words alone, then without the last word).
+    pub fn searches(&self, store: Store, want: &Want) -> Vec<Ask> {
+        let more = more_searches(&want.name).into_iter().filter_map(|terms| self.search_for(store, &terms));
+        self.search(store, want).into_iter().chain(more).collect()
+    }
+
+    fn search_for(&self, store: Store, name: &str) -> Option<Ask> {
+        if plain_name(name).is_empty() {
             return None;
         }
-        let term = segment(&name);
+        let term = segment(name);
         match store {
             Store::Own => None,
             Store::Steam => Some(Ask {
@@ -211,7 +221,13 @@ impl StoreArt {
     /// Of a search's answer, the game that is the one wanted by the matching rule (`names::pick`); None when none
     /// is.
     pub fn matched(&self, store: Store, want: &Want, answer: &Value) -> Option<Found> {
-        let results: Vec<(String, Found, u8)> = match store {
+        pick(&want.name, &self.candidates(store, answer)).cloned()
+    }
+
+    /// A search's answer's games, as the matching rule weighs them: each one's name there, what it is, and its rank
+    /// (the store's preference, lower first). What is not a game (an add-on, a package) is not among them.
+    pub fn candidates(&self, store: Store, answer: &Value) -> Vec<(String, Found, u8)> {
+        match store {
             Store::Own => Vec::new(),
             // `items[]`: `{type, name, id}`; apps alone, not bundles or packages.
             Store::Steam => list(answer.get("items"))
@@ -247,8 +263,7 @@ impl StoreArt {
                     Some((text(link, "name")?, found, rank))
                 })
                 .collect(),
-        };
-        pick(&want.name, &results).cloned()
+        }
     }
 
     /// The request to the store that gives the game's pictures' addresses, by its id there; none where the client
@@ -486,6 +501,13 @@ mod tests {
              ?suggested_size=10&mode=game"
         );
         assert!(stores.search(Store::Own, &game).is_none());
+        // Then, while none finds the game: its words alone, then without the last word.
+        let searches: Vec<String> = stores.searches(Store::Steam, &game).into_iter().map(|ask| ask.url).collect();
+        assert_eq!(searches.len(), 3);
+        assert!(searches[1].contains("term=Oda%20the%20Orchard&"), "{searches:?}");
+        assert!(searches[2].contains("term=Oda%20the&"), "{searches:?}");
+        let one = Want { name: "Hades".into(), ..want("epic", "H") };
+        assert_eq!(stores.searches(Store::Steam, &one).len(), 1);
     }
 
     #[test]

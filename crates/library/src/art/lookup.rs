@@ -457,24 +457,39 @@ impl Run {
         let mut id = stores.own_id(store, want);
         let mut item = None;
         if id.is_none() && store != Store::Own {
-            let Some(search) = stores.search(store, want) else { return missed(&kinds) };
-            match self.ask(search.name, || stores.get(&search)) {
-                Ok(Some(answer)) => match stores.matched(store, want, &answer) {
-                    Some(found) => {
-                        id = Some(found.id);
-                        item = found.item;
+            // Each search in turn until one finds the game: its name's words, then without the last.
+            let searches = stores.searches(store, want);
+            let mut seen = 0;
+            for search in &searches {
+                match self.ask(search.name, || stores.get(search)) {
+                    Ok(Some(answer)) => {
+                        seen += stores.candidates(store, &answer).len();
+                        if let Some(found) = stores.matched(store, want, &answer) {
+                            id = Some(found.id);
+                            item = found.item;
+                            break;
+                        }
                     }
-                    None => return missed(&kinds),
-                },
-                Ok(None) => return missed(&kinds),
-                Err(Halt::Stop) => {
-                    out.stopped = true;
-                    return;
+                    Ok(None) => {}
+                    Err(Halt::Stop) => {
+                        out.stopped = true;
+                        return;
+                    }
+                    Err(Halt::Failed) => {
+                        out.failed = true;
+                        return;
+                    }
                 }
-                Err(Halt::Failed) => {
-                    out.failed = true;
-                    return;
-                }
+            }
+            if id.is_none() {
+                // Where a game falls through, by its id: never its name.
+                (self.log)(&format!(
+                    "art: {} {}: {}: {seen} candidates, none the same name",
+                    want.source,
+                    want.source_id,
+                    store.name()
+                ));
+                return missed(&kinds);
             }
         }
         let answer = match (item, stores.ask(store, want, id.as_deref(), &kinds)) {

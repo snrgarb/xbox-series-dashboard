@@ -632,6 +632,39 @@ mod tests {
     }
 
     #[test]
+    fn a_name_the_stores_search_misses_whole_is_found_by_its_start_and_a_miss_is_said_without_the_name() {
+        let library = Library {
+            games: vec![game("steam", "6", "Made-up Field™ 6 Enhanced"), game("steam", "7", "Made-up Nowhere")],
+            ..Library::default()
+        };
+        let fake = with_named(
+            vec![],
+            vec![
+                // Its search finds nothing for "Made up Field 6 Enhanced"; for "Made up Field 6", the game and a
+                // near name.
+                ("xbox", "Made-up Field 6 Season Pass", "9ZZZMADEUP60", &Kind::ALL),
+                ("xbox", "MADE-UP FIELD™ 6", "9ZZZMADEUP61", &Kind::ALL),
+                ("xbox", "Made-up Nowhere 2", "9ZZZMADEUP70", &Kind::ALL),
+            ],
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        let ran = run_with(&art, &fake, None, &library);
+        assert_eq!(whose(&art, "steam", "6", Kind::Square), "store xbox 9ZZZMADEUP61 square");
+        assert_eq!(whose(&art, "steam", "7", Kind::Square), "none", "a near name is never taken");
+        let asked: Vec<String> = fake.requests().into_iter().map(|r| r.path).collect();
+        assert!(!asked.iter().any(|path| path.contains("9ZZZMADEUP60") || path.contains("9ZZZMADEUP70")), "{asked:?}");
+        // Asked twice ("Made up Nowhere", then "Made up"), the near names counted, none taken: said by the id.
+        let said = |line: &&String| {
+            line.starts_with("art: steam 7: Xbox: ") && line.ends_with(" candidates, none the same name")
+        };
+        assert!(ran.log.iter().any(|line| said(&line) && !line.contains(": 0 candidates")), "{:?}", ran.log);
+        for line in &ran.log {
+            assert!(!line.contains("Made-up") && !line.contains("Nowhere"), "no game's name: {line}");
+        }
+    }
+
+    #[test]
     fn the_users_order_is_followed_and_a_source_turned_off_is_never_asked() {
         use model::ArtSource::*;
         let library = Library { games: vec![game("steam", "5", "Made-up Lantern")], ..Library::default() };
