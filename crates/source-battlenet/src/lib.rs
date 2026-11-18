@@ -10,9 +10,14 @@
 //!   Install for a game that is there and will not start it. Which it is: `catalogue` and [`resolve`]; a game
 //!   `product.db` has under another uid is re-registered under the client's while Battle.net is closed
 //!   (`BattleNet::reregister`), and until then Play says what to do instead of opening Battle.net (`cant_start`).
-//! - **Not installed:** the products of the catalogue (`catalogue`, a built-in table; a fake's `catalogue.json`),
-//!   while the client is installed, as available to install. Whether the account owns one is not known until the
-//!   Agent answers an install of it (#172).
+//! - **Not installed:** the games the account owns (#276), worked out from the client's own cache (`cache`: the
+//!   licences `CachedData.db` keeps, run through the rules of the catalogue the client keeps in its `Cache`), free to
+//!   play ones among them, and kept as the data folder's `owned\battlenet.json` (`source_kit::owned`), refreshed at
+//!   start and on Update now; the catalogue's other games are then not listed. With no owned list (no cache, signed
+//!   out), as before: the products of the catalogue (`catalogue`, a built-in table; a fake's `catalogue.json`),
+//!   while the client is installed, as available to install, and whether the account owns one is not known until
+//!   the Agent answers an install of it (#172). The cache also gives the client's own uid, code, launch code and name
+//!   of each game owned, which go over the table's: such a uid is verified, and installs through the Agent.
 //! - **The client:** the Uninstall key whose `UninstallString` has `-uid=battle.net` in it: its `InstallLocation`
 //!   holds `Battle.net.exe`. With neither it nor `product.db`, Battle.net is not installed.
 //! - **Start:** `Battle.net.exe --exec="launch <code>"`, the catalogue's launch code (`Pro`, `Fen`) where it has
@@ -40,6 +45,7 @@ macro_rules! eprintln {
 }
 
 pub mod agent;
+pub mod cache;
 pub mod catalogue;
 pub mod client;
 pub mod fixture;
@@ -94,6 +100,8 @@ pub struct BattleNet {
     looker: launching::Looker,
     /// Its waits.
     times: launching::Times,
+    /// Where the owned list is kept (the data folder's `owned`); None, and it is worked out at each read.
+    owned: Option<PathBuf>,
 }
 
 impl BattleNet {
@@ -107,7 +115,14 @@ impl BattleNet {
             launching: launching::Launching::default(),
             looker: launching::Looker::default(),
             times: launching::Times::default(),
+            owned: None,
         }
+    }
+
+    /// Keeping the owned list in `dir` (`source_kit::owned`, #276), where there is one.
+    pub fn with_owned(mut self, dir: Option<PathBuf>) -> Self {
+        self.owned = dir;
+        self
     }
 
     /// Looking at the client and the game as it starts with `looker`, waiting `times`: a test's.
@@ -158,11 +173,90 @@ impl BattleNet {
         products_in(self.agent().as_deref())
     }
 
-    /// The products the Dashboard can ask for: a fake's own, else the built-in table.
+    /// The products the Dashboard can ask for: a fake's own, else the built-in table; with the games the account
+    /// owns over them, as the client's cache has them (their uid verified), and those the table does not know.
     fn catalogue(&self) -> Vec<catalogue::Product> {
-        match &self.fake {
+        self.catalogue_with(self.owned_list().as_ref())
+    }
+
+    fn catalogue_with(&self, owned: Option<&source_kit::owned::List>) -> Vec<catalogue::Product> {
+        let mut table = match &self.fake {
             Some(dir) => catalogue::of_fake(dir),
             None => catalogue::built_in(),
+        };
+        for game in owned.map_or(&[][..], |list| list.games.as_slice()) {
+            let Some(uid) = game.detail("uid") else { continue };
+            let row = catalogue::Product {
+                code: game.id.clone(),
+                uid: uid.to_string(),
+                launch: game.detail("launch").map(str::to_string),
+                name: game.name.clone(),
+                verified: Some(catalogue::CACHE_SEEN.into()),
+            };
+            match table.iter_mut().find(|p| p.code.eq_ignore_ascii_case(&row.code)) {
+                Some(listed) => *listed = row,
+                None => table.push(row),
+            }
+        }
+        table
+    }
+
+    /// The client's cache, `CachedData.db`: a fake's in its folder, else `%LOCALAPPDATA%\Battle.net\CachedData.db`.
+    fn cache_path(&self) -> Option<PathBuf> {
+        match &self.fake {
+            Some(dir) => Some(dir.join(fixture::CACHE)),
+            None => Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("Battle.net").join("CachedData.db")),
+        }
+    }
+
+    /// The games the account owns, worked out from the client's cache now (`cache`): None where it has no cache, or
+    /// one with no licences (signed out), which is said once.
+    fn take_owned(&self) -> Result<Option<source_kit::owned::List>> {
+        let Some(path) = self.cache_path() else { return Ok(None) };
+        let Some(read) = cache::read(&path).with_context(|| path.display().to_string())? else { return Ok(None) };
+        let Some(owned) = read.owned else {
+            once(&format!("owned: not known: {} names no licences (signed out?)", path.display()));
+            return Ok(None);
+        };
+        let games = owned
+            .iter()
+            .map(|owned| {
+                let details = [("uid", &owned.game.uid), ("launch", &owned.game.launch)];
+                source_kit::owned::Owned {
+                    id: owned.game.code.clone(),
+                    name: owned.game.name.clone(),
+                    free: owned.free,
+                    details: details.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        let list = source_kit::owned::List {
+            store: SOURCE.into(),
+            taken: read.written,
+            from: fixture::CACHE.into(),
+            account: None,
+            of: Some(read.catalogue.len()),
+            games,
+        };
+        Ok(Some(list))
+    }
+
+    /// The owned list: the one kept in the data folder, else worked out now; None where it is not known.
+    fn owned_list(&self) -> Option<source_kit::owned::List> {
+        if let Some(dir) = &self.owned {
+            match source_kit::owned::read(dir, SOURCE) {
+                Ok(Some(list)) => return Some(list),
+                Ok(None) => {}
+                Err(e) => once(&format!("owned: the kept list not read ({e:#}): worked out again")),
+            }
+        }
+        match self.take_owned() {
+            Ok(list) => list.inspect(say_owned),
+            Err(e) => {
+                once(&format!("owned: not known ({e:#})"));
+                None
+            }
         }
     }
 
@@ -182,12 +276,7 @@ impl BattleNet {
     /// The account's country from the client's cache, a fake's in its folder, else `%LOCALAPPDATA%\Battle.net\
     /// CachedData.db`; why not, as the log says it.
     fn country(&self) -> Result<client::Country, String> {
-        let path = match &self.fake {
-            Some(dir) => dir.join(fixture::CACHE),
-            None => PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("no LOCALAPPDATA")?)
-                .join("Battle.net")
-                .join("CachedData.db"),
-        };
+        let path = self.cache_path().ok_or("no LOCALAPPDATA")?;
         match client::country(&path) {
             Ok(Some(country)) => Ok(country),
             Ok(None) => Err(format!("{} has none", path.display())),
@@ -378,6 +467,21 @@ fn rewrite(agent: &Path, code: &str, from: &str, to: &str) -> Result<PathBuf> {
     Ok(backup)
 }
 
+/// The owned list as the log says it, once for each list: `battlenet: owned: 3 of 5 catalogue games (from
+/// CachedData.db, 2026-11-18 09:30 UTC)`. Never a licence.
+fn say_owned(list: &source_kit::owned::List) {
+    once(&owned_line(list));
+}
+
+/// `owned: 3 of 5 catalogue games (from CachedData.db, 2026-11-18 09:30 UTC), 1 of them free to play`.
+fn owned_line(list: &source_kit::owned::List) -> String {
+    let of = list.of.map_or(String::new(), |of| format!(" of {of} catalogue games"));
+    let free = list.games.iter().filter(|g| g.free).count();
+    let free = if free > 0 { format!(", {free} of them free to play") } else { String::new() };
+    let when = source_kit::owned::when(list.taken);
+    format!("owned: {}{of} (from {}, {when}){free}", list.games.len(), list.from)
+}
+
 /// A line of the log said once while the Dashboard runs: a state that holds until something else changes.
 fn once(line: &str) {
     static SAID: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -471,7 +575,8 @@ impl Source for BattleNet {
         let products = self.products()?;
         let names = agent.as_deref().map(names).unwrap_or_default();
         let keys = uninstall_keys(&registry);
-        let catalogue = self.catalogue();
+        let owned = self.owned_list();
+        let catalogue = self.catalogue_with(owned.as_ref());
         let mut games: Vec<Game> = Vec::new();
         for product in products.iter().filter(|p| p.installed && !product::clients_own(&p.uid)) {
             let folder = source_kit::native(product.install_path.trim());
@@ -495,9 +600,13 @@ impl Source for BattleNet {
                 ..Game::default()
             });
         }
-        // The catalogue's other products, while the client is there to install them with: available to install.
+        // The catalogue's other products, while the client is there to install them with: available to install;
+        // once the games the account owns are known, those alone (#276).
+        let owns = |product: &&catalogue::Product| {
+            owned.as_ref().is_none_or(|list| list.games.iter().any(|g| g.id.eq_ignore_ascii_case(&product.code)))
+        };
         if client.is_some() || self.fake.is_some() {
-            for product in &catalogue {
+            for product in catalogue.iter().filter(owns) {
                 let same = |game: &Game| {
                     game.source_id.eq_ignore_ascii_case(&product.code)
                         || products.iter().any(|p| {
@@ -614,6 +723,23 @@ impl Source for BattleNet {
 
     fn installer(&self) -> Option<&dyn Installer> {
         Some(self)
+    }
+
+    /// The owned list worked out from the client's cache again and kept (#276): said in the log whenever it is
+    /// taken; a cache that can't be read leaves the last list, said too (`source_kit::owned::refresh`).
+    fn refresh_owned(&self) -> bool {
+        let Some(dir) = &self.owned else { return false };
+        if self.fake.as_deref().is_some_and(source_kit::empty_folder) {
+            return false;
+        }
+        let taken = source_kit::owned::refresh(dir, SOURCE, || {
+            let list = self.take_owned()?;
+            if let Some(list) = &list {
+                log(&owned_line(list));
+            }
+            Ok(list)
+        });
+        taken.is_some()
     }
 }
 
@@ -1450,6 +1576,88 @@ mod tests {
         battlenet.installer().unwrap().install(&quarry, None, &mut open).unwrap();
         wait("the client asked", || !open.opened().is_empty());
         assert_eq!(open.opened(), [format!("{} --game=quarrybell", root.join(CLIENT_EXE).display())]);
+    }
+
+    /// #276: the games the account owns, from the client's own cache (made up, in the real files' shapes), listed
+    /// not installed, the others hidden; their uids the cache's, verified, so installed through the Agent; the list
+    /// kept as a file, which a cache that can't be read leaves as it was.
+    #[test]
+    fn the_clients_cache_lists_the_games_owned_and_verifies_their_uids() {
+        let dir = tempfile::tempdir().unwrap();
+        let (root, kept) = (dir.path().join("battlenet"), dir.path().join("owned"));
+        // The table's uid for Larkspur Hollow is stale, and Battle.net.config names none of the games offered: only
+        // the cache says what the client knows it by.
+        let mut spec = Fixture::owned();
+        spec.available[0].uid = "larkspur_old".into();
+        spec.available[0].client_uid = Some("larkspur".into());
+        fixture::write(&root, &spec).unwrap();
+        let battlenet = BattleNet::at(Some(root.clone())).with_owned(Some(kept.clone())).with_steer(false);
+        // Before any refresh, worked out at the read: Quarry Bell, not owned, is not listed; Thistle Arena (free to
+        // play) and Moorlight Saga (the cache's alone) are.
+        let games = battlenet.read().unwrap().unwrap().library.games;
+        let seen: Vec<(&str, bool)> = games.iter().map(|g| (g.source_id.as_str(), g.installed)).collect();
+        assert_eq!(
+            seen,
+            [("emb", true), ("glm", false), ("jnv", true), ("lkh", false), ("mrl", false), ("ths", false)]
+        );
+        assert_eq!(spec.expected(), games.iter().map(|g| g.name.as_str()).collect::<Vec<_>>());
+
+        // The refresh keeps it, news the first time only.
+        assert!(battlenet.refresh_owned());
+        assert!(!battlenet.refresh_owned());
+        let list = source_kit::owned::read(&kept, SOURCE).unwrap().unwrap();
+        let ids: Vec<(&str, bool)> = list.games.iter().map(|g| (g.id.as_str(), g.free)).collect();
+        let want = [("emb", false), ("glm", false), ("jnv", false), ("lkh", false), ("mrl", false), ("ths", true)];
+        assert_eq!(ids, want);
+        assert_eq!((list.of, list.from.as_str()), (Some(7), "CachedData.db"));
+        assert!(owned_line(&list).starts_with("owned: 6 of 7 catalogue games (from CachedData.db, "), "{list:?}");
+        // No licence is kept or said.
+        let text = std::fs::read_to_string(source_kit::owned::path(&kept, SOURCE)).unwrap();
+        assert!(!text.contains("80000") && !owned_line(&list).contains("80000"), "{text}");
+
+        // The cache's uid, launch code and name go over the table's.
+        let larkspur = game(&battlenet, "lkh");
+        let target = battlenet.target(&larkspur).unwrap();
+        assert_eq!(target.uid, "larkspur");
+        assert_eq!(target.verified.as_deref(), Some(catalogue::CACHE_SEEN));
+        let moorlight = game(&battlenet, "mrl");
+        assert_eq!(moorlight.name, "Moorlight Saga");
+        let start = battlenet.start(&moorlight).unwrap();
+        assert_eq!(start.parameters().as_deref(), Some("\"--exec=launch MRL\""));
+
+        // So it installs through the Agent, under the client's uid.
+        let said = Arc::new(Mutex::new(Vec::<String>::new()));
+        let heard = said.clone();
+        let _served =
+            standin::serve(&root, Duration::from_millis(300), move |line| heard.lock().unwrap().push(line.into()))
+                .unwrap();
+        let mut open = Kept::default();
+        battlenet.installer().unwrap().install(&larkspur, None, &mut open).unwrap();
+        wait("installed", || battlenet.installs().unwrap().is_empty());
+        assert!(game(&battlenet, "lkh").installed);
+        let lines = said.lock().unwrap().clone();
+        assert!(lines.iter().any(|l| l.contains("POST /install/larkspur {")), "{lines:?}");
+        assert!(open.opened().is_empty() && open.stops().is_empty());
+
+        // A cache that can't be read: the kept list stands, and the refresh says why and changes nothing.
+        std::fs::write(root.join(fixture::CACHE), b"not sqlite").unwrap();
+        assert!(!battlenet.refresh_owned());
+        assert_eq!(source_kit::owned::read(&kept, SOURCE).unwrap().unwrap().games, list.games);
+        assert!(battlenet.read().unwrap().unwrap().library.games.iter().any(|g| g.source_id == "mrl"));
+
+        // No list kept and no licences in the cache (signed out): the table's games, as before.
+        let other = tempfile::tempdir().unwrap();
+        let root = other.path().join("battlenet");
+        fixture::write(&root, &spec).unwrap();
+        let points = serde_json::json!({"account_country": "NZL", "geoip_country": "NZ"});
+        let db = rusqlite::Connection::open(root.join(fixture::CACHE)).unwrap();
+        db.execute("UPDATE key_value_store SET value = ?1 WHERE key = ?2", [points.to_string(), client::POINTS.into()])
+            .unwrap();
+        let battlenet = BattleNet::at(Some(root.clone())).with_owned(Some(other.path().join("owned")));
+        assert!(!battlenet.refresh_owned());
+        let games = battlenet.read().unwrap().unwrap().library.games;
+        let ids: Vec<&str> = games.iter().map(|g| g.source_id.as_str()).collect();
+        assert_eq!(ids, ["emb", "jnv", "lkh", "qbl", "ths"]);
     }
 
     /// The TV PC as the first install left it (#172): the game's files there, `product.db` naming it under the

@@ -87,14 +87,19 @@ impl Helpers {
         helpers
     }
 
-    /// Brings each store's list of owned games up to date through its helper (`Installer::refresh`), on a thread
-    /// of its own; `wake` is called when it is over, and `refreshed` then names those to be read again.
+    /// Brings each store's list of owned games up to date through its helper (`Installer::refresh`) and its own
+    /// owned-list file (`Source::refresh_owned`, #276), on a thread of its own; `wake` is called when it is over,
+    /// and `refreshed` then names those to be read again.
     pub fn refresh(&self, sources: &[Arc<dyn Source>], wake: impl Fn() + Send + 'static) {
         let (tell, sources) = (self.refreshed.0.clone(), sources.to_vec());
         std::thread::spawn(move || {
             let keys: Vec<String> = sources
                 .iter()
-                .filter(|source| source.installer().is_some_and(|installer| installer.refresh()))
+                .filter(|source| {
+                    let helper = source.installer().is_some_and(|installer| installer.refresh());
+                    let owned = source.refresh_owned();
+                    helper || owned
+                })
                 .map(|source| source.key().to_string())
                 .collect();
             if !keys.is_empty() {

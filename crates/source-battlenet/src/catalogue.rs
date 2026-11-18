@@ -1,8 +1,9 @@
-//! The Battle.net products the Dashboard knows how to ask the Agent for (#172; docs/sources.md "Battle.net"). No
-//! file on the PC lists the games the account owns without Blizzard's servers: `Battle.net.config`'s `Games` names
-//! only those installed or played (galaxy_blizzard_plugin's README), and the client's `CachedData.db` licences map to
-//! products only through cached catalogue fragments it keeps in part (unifideck's notes): docs/research/installs.md
-//! 7. So, as Lutris does, a table: each product's NGDP code (its `product.db` code, and what the patch server knows it
+//! The Battle.net products the Dashboard knows how to ask the Agent for (#172; docs/sources.md "Battle.net"), where
+//! the client's own cache does not say (#276: `crate::cache` reads the client's catalogue and the account's
+//! licences, and the games owned go over this table's rows with the client's own uid, code, launch code and name,
+//! verified; this table is the fallback for a PC whose client has no such cache, or is signed out).
+//! `Battle.net.config`'s `Games` names only those installed or played (galaxy_blizzard_plugin's README). So, as
+//! Lutris does, a table: each product's NGDP code (its `product.db` code, and what the patch server knows it
 //! by), the Agent's uid for it, the code `--exec="launch ..."` takes, and its name. **Ownership is not known**: a
 //! game of the table is "available to install" while the client is installed, and only the Agent's answer to an
 //! install says whether the account may have it (a refusal is said, and the client is opened on the game instead).
@@ -47,6 +48,10 @@ const LBRA_SEEN: &str = "the TV PC's Battle.net client, 2026-11-18: its Battle.n
                          state are lbra";
 /// What confirmed Hearthstone's.
 const HSB_SEEN: &str = "Blizzard's product configuration for hsb: valid_uids [hs_beta]";
+
+/// What confirms a uid the client's own cache gives (#276; `crate::cache`): its catalogue's retail type's uid,
+/// installed as the game's code. Each such uid on the TV PC was one its client's log names (36 of 36).
+pub const CACHE_SEEN: &str = "the client's own catalogue in its cache (CachedData.db's catalog_cache)";
 
 /// (NGDP code, Agent uid, launch code, name). The uid verified where [`verified`] says so.
 const BUILT_IN: &[(&str, &str, &str, &str)] = &[

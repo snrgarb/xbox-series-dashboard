@@ -2,7 +2,7 @@
 //! can stand in for ([`registry`]), the few bytes of protobuf two stores keep their lists in ([`proto`]), and an
 //! uninstaller's command line taken apart into a program to run ([`command`]); and the helper programs some stores
 //! install through: running one ([`helper`]), a store's downloads through one ([`downloads`]), and where a store's
-//! helper is ([`HelperRoute`]).
+//! helper is ([`HelperRoute`]); and a store's list of owned games kept as a file ([`owned`]).
 // Every log line reaches stderr in one write, so two Dashboards appending to one log never tear each other's lines
 // (crates/log-line). Defined before the modules, so they all take it rather than std's.
 #[allow(unused_macros)]
@@ -15,6 +15,7 @@ macro_rules! eprintln {
 pub mod command;
 pub mod downloads;
 pub mod helper;
+pub mod owned;
 pub mod proto;
 pub mod registry;
 

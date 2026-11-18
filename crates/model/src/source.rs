@@ -179,6 +179,16 @@ pub trait Source: Send + Sync {
     fn can_install(&self, game: &Game) -> bool {
         self.installer().is_some() || self.ask(game, Ask::Install).is_some()
     }
+
+    /// Brings the store's list of the games the account owns, kept as a file in the data folder
+    /// (`source_kit::owned`, #276), up to date from where the store has it (its client's cache worked out, its
+    /// service online behind a helper's sign-in), so that `read`, which reads only files, finds it: blocking, and
+    /// never on the window's thread; at start and on Update now. A failure leaves the last list and says why in one
+    /// line of the log. Whether the list changed, and the source is to be read again. False (the default): nothing
+    /// to do.
+    fn refresh_owned(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

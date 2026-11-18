@@ -27,7 +27,8 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         // `--ea`, `--ubisoft` and `--battlenet` name a fake store; else this machine's are read.
         Arc::new(source_ea::Ea::at(args.ea.clone())),
         Arc::new(source_ubisoft::Ubisoft::at(args.ubisoft.clone())),
-        Arc::new(source_battlenet::BattleNet::at(args.battlenet.clone())),
+        // Its owned games, worked out from the client's cache, kept in the data folder's `owned` (#276).
+        Arc::new(source_battlenet::BattleNet::at(args.battlenet.clone()).with_owned(owned(args))),
         // `--xbox` names a fake drive of Xbox games; else this machine's drives and the user's packages. With the PC
         // Game Pass catalogue of the region Settings names (#277).
         Arc::new(source_xbox::Xbox::at(args.xbox.clone()).with_game_pass({
@@ -42,6 +43,11 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
 /// The data folder helpers are kept in: `--data-dir`, else, with a window, the user's.
 fn data(args: &Args) -> Option<PathBuf> {
     args.data_dir.clone().or_else(|| args.screenshot.is_none().then(library::data_dir).flatten())
+}
+
+/// Where the stores' lists of owned games are kept (`source_kit::owned`, #276): the data folder's `owned`.
+pub fn owned(args: &Args) -> Option<PathBuf> {
+    data(args).map(|data| data.join(source_kit::owned::DIR))
 }
 
 /// legendary's own folder for its records: `--helper-home`'s `legendary` (a test's), else legendary's own default,

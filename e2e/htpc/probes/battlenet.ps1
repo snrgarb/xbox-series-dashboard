@@ -212,6 +212,49 @@ foreach ($b in $builds) {
     }
 }
 
+# --- B-O1 (#276, docs/research/owned-games.md 13). The account's licences and the client's catalogue in its cache,
+# as source_battlenet::cache reads them: COUNTS ONLY, never a licence, an id or a name. The licences are the JSON of
+# CachedData.db's features_cached_data_points, read from the file's bytes (no SQLite here); the catalogue's root is
+# the cached JSON with a "fragments" list, each fragment a file of Cache named by its MD5.
+$cachedData = Join-Path $env:LOCALAPPDATA 'Battle.net\CachedData.db'
+if (Test-Path $cachedData) {
+    $bytes = [IO.File]::ReadAllBytes($cachedData)
+    $text = [Text.Encoding]::UTF8.GetString($bytes)
+    $licences = @()
+    if ($text -match '"licenses":\[([\d,\s]*)\]') { $licences = @($Matches[1] -split ',' | Where-Object { $_.Trim() } | ForEach-Object { [int64]$_.Trim() }) }
+    Say "-- B-O1: CachedData.db: $($bytes.Length) bytes; licences in features_cached_data_points: $($licences.Count); catalog_cache named: $($text -match 'catalog_cache')"
+    if (Test-Path $cache) {
+        $roots = @(Get-ChildItem $cache -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Length -lt 4MB } |
+            Where-Object { Select-String -Path $_.FullName -Pattern '"fragments":\[' -Quiet -ErrorAction SilentlyContinue } |
+            Sort-Object LastWriteTime)
+        Say "   catalogue roots cached: $($roots.Count)"
+        $root = $roots | Select-Object -Last 1
+        if ($root) {
+            $fragments = @((Get-Content $root.FullName -Raw | ConvertFrom-Json).fragments)
+            $products = 0; $retail = 0; $named = @{}; $cachedCount = 0
+            foreach ($f in $fragments) {
+                $h = [string]$f.hash
+                $path = Join-Path $cache (Join-Path $h.Substring(0, 2) (Join-Path $h.Substring(2, 2) $h))
+                if (-not (Test-Path $path)) { continue }
+                $cachedCount++
+                $raw = Get-Content $path -Raw
+                $json = $null
+                try { $json = $raw | ConvertFrom-Json } catch { continue }
+                foreach ($p in @($json.products)) {
+                    if ($p.base.program_id) { $products++; if ($p.base.types.retail) { $retail++ } }
+                }
+                foreach ($m in [regex]::Matches($raw, '"license_id":\s*\[?([\d,\s]+)')) {
+                    foreach ($n in ($m.Groups[1].Value -split ',')) { if ($n.Trim()) { $named[[int64]$n.Trim()] = $true } }
+                }
+            }
+            $known = @($licences | Where-Object { $named.ContainsKey($_) }).Count
+            Say "   newest root: $($fragments.Count) fragments, $cachedCount cached; products with a program: $products, with a retail type: $retail"
+            Say "   licences named by some rule of the catalogue: $known of $($licences.Count)"
+        }
+    }
+    Say '   (the Dashboard says what it made of them: battlenet: owned: <n> of <m> catalogue games (from CachedData.db, <when>))'
+} else { Say '-- B-O1: no CachedData.db' }
+
 # --- B2. Installed games as the registry has them: the Uninstall keys with --uid= (the Dashboard's fallback
 # uninstall; after an Agent install, whether the key is written as the client's own install writes it).
 Say '-- B2: Uninstall keys naming a Battle.net uid:'
