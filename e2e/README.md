@@ -240,7 +240,7 @@ now bringing both in with its summary line), `gamepass` (#277: the fake Xbox dri
 `standin make-gamepass`, with `--gamepass` and `DASHBOARD_WINDOWS_REGION=US`: its games listed, the installed one once;
 the region changed to the United Kingdom by pad in Settings > Launchers and its catalogue read; Show Game Pass games off
 and on; a catalogue game's Game hub Install asking the stand-in for `ms-windows-store://pdp/?ProductId=9ZZZGPASS101`.
-Every run is given an empty `--gamepass` by `Start-Dashboard`, so no test asks Microsoft's real catalogue), `refresh-art` (#190, on the fake Steam and `standin serve-art`: with no
+Every run is given an empty `--gamepass` by `Start-Dashboard`, so no test asks Microsoft's real catalogue), `xbox-install` (#173: the same fakes, installs taken by the Store queue's stand-in: Saltmarsh Run installed from its Game hub with its bytes in the Queue, paused, resumed and cancelled from Manage Queue, installed to the end and written onto the fake drive, uninstalled from its Tile menu; Ember Orchard refused and the Store's page opened instead; the subscription judged `can't tell`. With `gamepass`: one build, then `for t in gamepass xbox-install; do e2e/htpc/run.sh $t --exe ... --standin ...; done`), `refresh-art` (#190, on the fake Steam and `standin serve-art`: with no
 square anywhere a Recent tile shows its cover whole, never cropped; a key typed in and SteamGridDB's yellow squares on
 the Recent row; Settings > Art's Refresh all art and details asked and confirmed, the cache emptied, the page saying how
 far it has got, the Dashboard killed part way and the refresh going on at the next start until the cache is full again
