@@ -29,6 +29,10 @@ impl Backend for Fake {
             while let Ok(command) = commands.try_recv() {
                 let (said, ends) = match command {
                     Command::Page(op) => (format!("{op:?}"), false),
+                    Command::Act(op) => (format!("{op:?}"), false),
+                    Command::Type { text, clear } => {
+                        (format!("Type({} chars{})", text.chars().count(), if clear { ", clear" } else { "" }), false)
+                    }
                     Command::Stop | Command::SignOut => ("other".to_string(), true),
                     _ => ("other".to_string(), false),
                 };
@@ -256,20 +260,12 @@ fn the_asks_not_built_yet_say_so_once_by_kind() {
     capturing();
     fake.asked();
     for _ in 0..2 {
-        s.ask_direct(DirectAsk::Send { channel: ANA.into(), text: "secret".into(), reply: None, nonce: 1 });
-        s.ask_direct(DirectAsk::Forget { channel: ANA.into(), message: "1".into() });
-        s.ask_direct(DirectAsk::React { channel: ANA.into(), message: "1".into(), emoji: "x".into(), on: true });
-        s.ask_direct(DirectAsk::MarkRead(ANA.into()));
         s.ask_direct(DirectAsk::Call(ANA.into()));
         s.ask_direct(DirectAsk::Answer(ANA.into()));
         s.ask_direct(DirectAsk::Decline(ANA.into()));
     }
     let lines: Vec<String> = captured().into_iter().filter(|l| l.contains("not built yet")).collect();
-    assert_eq!(
-        lines,
-        ["send", "forget", "react", "mark-read", "call", "answer", "decline"]
-            .map(|k| format!("discord web: {k} not built yet"))
-    );
+    assert_eq!(lines, ["call", "answer", "decline"].map(|k| format!("discord web: {k} not built yet")));
     assert!(fake.asked().is_empty(), "none of them reaches the page");
 }
 
@@ -425,4 +421,250 @@ fn the_log_has_no_name_id_text_or_address() {
 
 fn one_with_pic() -> String {
     dm_json(ANA, "Ana Example", 0)
+}
+
+// ---- acting (#201)
+
+/// A signed-in session with the list read and `ANA` open (its conversation loaded with three messages).
+fn open_ana(data: &Path) -> (Session, Fake) {
+    let (mut s, fake) = signed_in(data);
+    fake.page(OK);
+    fake.page(&list(&[dm_json(ANA, "Ana Example", 0), dm_json(BO, "Bo Example", 0)]));
+    s.ask_direct(DirectAsk::Open(ANA.into()));
+    fake.page(&conv(ANA, 3, false, false));
+    s.pump();
+    fake.asked();
+    (s, fake)
+}
+
+/// The open conversation of three messages with the user's own, `id`, last, in `state`.
+fn conv_with(id: &str, state: &str) -> String {
+    let base = conv(ANA, 3, false, false);
+    let mine = format!(
+        r#"{{"id":"{id}","author":{{"id":"99","name":"Me Myself"}},"own":true,"at":1700000009000,"text":"secret hello","state":"{state}"}}"#
+    );
+    base.replace("]}", &format!(",{mine}]}}"))
+}
+
+fn act(json: &str) -> String {
+    format!(r#"{{"k":"act",{json}}}"#)
+}
+
+fn last(s: &Session) -> (String, Delivery) {
+    let m = s.direct().open.as_ref().unwrap().messages.last().unwrap().clone();
+    (m.id.as_str().to_string(), m.delivery)
+}
+
+fn send(nonce: u64, text: &str) -> DirectAsk {
+    DirectAsk::Send { channel: ANA.into(), text: text.into(), reply: None, nonce }
+}
+
+#[test]
+fn a_send_is_shown_sending_at_once_typed_when_the_page_asks_and_done_when_the_store_shows_it() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = open_ana(data.path());
+    s.ask_direct(send(5, "secret hello"));
+    assert_eq!(fake.asked(), vec!["Send(#1, 12 chars)".to_string()]);
+    assert_eq!(last(&s), ("5".into(), Delivery::Sending), "shown at once, under the nonce");
+    // The page focused the box: the text goes to the host.
+    fake.page(&act(r#""seq":1,"stage":"typing","draft":true"#));
+    s.pump();
+    assert_eq!(fake.asked(), vec!["Type(12 chars, clear)".to_string()]);
+    // Discord's own optimistic message is in the store: it is the one shown, under the nonce.
+    fake.page(&act(r#""seq":1,"stage":"sending","mid":"5000""#));
+    fake.page(&conv_with("5000", "SENDING"));
+    s.pump();
+    let messages = &s.direct().open.as_ref().unwrap().messages;
+    assert_eq!(messages.len(), 4, "not shown twice");
+    assert_eq!(last(&s), ("5".into(), Delivery::Sending));
+    // Sent: a real id; the nonce becomes it, once.
+    fake.page(&conv_with("5001", "SENT"));
+    fake.page(&act(r#""seq":1,"stage":"sent","mid":"5001""#));
+    capturing();
+    s.pump();
+    assert_eq!(last(&s), ("5001".into(), Delivery::Sent));
+    assert_eq!(s.direct().open.as_ref().unwrap().messages.len(), 4);
+    assert_eq!(s.take_events(), vec![DirectEvent::Sent { channel: ANA.into(), nonce: 5, message: "5001".into() }]);
+    assert!(
+        captured().iter().any(|l| l.starts_with("discord web: sent in ") && l.ends_with(" ms")),
+        "{:?}",
+        captured()
+    );
+    assert!(s.take_events().is_empty(), "once");
+}
+
+#[test]
+fn sends_wait_their_turn_one_at_a_time_and_at_most_one_every_seven_tenths_of_a_second() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = open_ana(data.path());
+    s.ask_direct(send(1, "one"));
+    s.ask_direct(send(2, "two"));
+    s.ask_direct(DirectAsk::React { channel: ANA.into(), message: "900".into(), emoji: "x".into(), on: true });
+    s.ask_direct(DirectAsk::MarkRead(ANA.into()));
+    assert_eq!(fake.asked(), vec!["Send(#1, 3 chars)".to_string()], "one at a time");
+    let both = s.direct().open.as_ref().unwrap().messages.iter().rev().take(2).map(|m| m.delivery).collect::<Vec<_>>();
+    assert_eq!(both, vec![Delivery::Sending, Delivery::Sending], "each shown Sending");
+    s.pump();
+    assert!(fake.asked().is_empty(), "the first has not finished");
+    fake.page(&act(r#""seq":1,"stage":"sent","mid":"777""#));
+    s.pump();
+    assert!(fake.asked().is_empty(), "paced");
+    std::thread::sleep(std::time::Duration::from_millis(750));
+    s.pump();
+    assert_eq!(fake.asked(), vec!["Send(#2, 3 chars)".to_string()]);
+    fake.page(&act(r#""seq":2,"stage":"sent","mid":"778""#));
+    s.pump();
+    std::thread::sleep(std::time::Duration::from_millis(750));
+    s.pump();
+    assert_eq!(fake.asked(), vec!["React(#3, on)".to_string()]);
+    fake.page(&act(r#""seq":3,"stage":"done""#));
+    s.pump();
+    std::thread::sleep(std::time::Duration::from_millis(750));
+    s.pump();
+    assert_eq!(fake.asked(), vec!["Ack(#4)".to_string()]);
+}
+
+#[test]
+fn a_captcha_a_refusal_and_a_failure_are_told_and_the_bubble_stays_until_forgotten() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = open_ana(data.path());
+    capturing();
+    s.ask_direct(send(1, "first"));
+    fake.page(&act(r#""seq":1,"stage":"captcha""#));
+    s.pump();
+    assert!(matches!(&s.take_events()[..], [DirectEvent::Captcha, DirectEvent::NotSent { nonce: 1, .. }]));
+    assert_eq!(last(&s), ("1".into(), Delivery::Failed));
+    std::thread::sleep(std::time::Duration::from_millis(750));
+    s.ask_direct(send(2, "second"));
+    s.pump();
+    fake.asked();
+    fake.page(&act(r#""seq":2,"stage":"sending","mid":"6000""#));
+    fake.page(&act(
+        r#""seq":2,"stage":"failed","why":"send refused","mid":"6000","reason":"Cannot send messages to this user""#,
+    ));
+    s.pump();
+    let events = s.take_events();
+    assert!(matches!(&events[0], DirectEvent::Refused(r) if r.as_str() == "Cannot send messages to this user"));
+    assert!(matches!(events[1], DirectEvent::NotSent { nonce: 2, .. }));
+    let kinds: Vec<_> = s
+        .direct()
+        .open
+        .as_ref()
+        .unwrap()
+        .messages
+        .iter()
+        .rev()
+        .take(2)
+        .map(|m| (m.id.as_str().to_string(), m.delivery))
+        .collect();
+    assert_eq!(kinds, vec![("2".to_string(), Delivery::Failed), ("1".to_string(), Delivery::Failed)]);
+    // Forget the second: gone from the view, and the page drops Discord's own failed one.
+    s.ask_direct(DirectAsk::Forget { channel: ANA.into(), message: "2".into() });
+    assert_eq!(fake.asked(), vec!["Forget".to_string()]);
+    assert_eq!(last(&s), ("1".into(), Delivery::Failed));
+    s.ask_direct(DirectAsk::Forget { channel: ANA.into(), message: "1".into() });
+    assert_eq!(s.direct().open.as_ref().unwrap().messages.len(), 3);
+    let lines = captured();
+    assert!(lines.contains(&"discord web: not sent: captcha".to_string()), "{lines:?}");
+    assert!(lines.contains(&"discord web: not sent: refused".to_string()), "{lines:?}");
+}
+
+#[test]
+fn switching_off_or_signing_out_empties_the_queue_and_each_pending_send_is_not_sent() {
+    for how in ["off", "signed out", "reset"] {
+        let data = tempfile::tempdir().unwrap();
+        let (mut s, fake) = open_ana(data.path());
+        s.ask_direct(send(1, "one"));
+        s.ask_direct(send(2, "two"));
+        s.ask_direct(DirectAsk::MarkRead(ANA.into()));
+        match how {
+            "off" => s.set_on(false),
+            "signed out" => {
+                fake.say(Report::State(WebState::SignedOut));
+                s.pump();
+            }
+            _ => {
+                fake.page(r#"{"k":"reset"}"#);
+                s.pump();
+            }
+        }
+        let nonces: Vec<u64> = s
+            .take_events()
+            .into_iter()
+            .filter_map(|e| if let DirectEvent::NotSent { nonce, .. } = e { Some(nonce) } else { None })
+            .collect();
+        assert_eq!(nonces, vec![1, 2], "{how}");
+        assert!(s.acts.idle(), "{how}");
+        assert!(s.direct().open.is_none(), "{how}");
+    }
+}
+
+#[test]
+fn an_ask_while_the_session_is_not_up_is_not_sent_at_once() {
+    let data = tempfile::tempdir().unwrap();
+    let mut s = Session::new(None, Some(data.path()), || {});
+    capturing();
+    s.ask_direct(send(4, "secret"));
+    assert!(matches!(&s.take_events()[..], [DirectEvent::NotSent { nonce: 4, .. }]));
+    assert!(captured().contains(&"discord web: not sent: not signed in".to_string()));
+    s.ask_direct(DirectAsk::MarkRead(ANA.into()));
+    s.ask_direct(DirectAsk::Call(ANA.into()));
+    assert!(captured().contains(&"discord web: call not built yet".to_string()));
+}
+
+#[test]
+fn whether_the_page_read_a_conversation_by_itself_is_said_by_yes_or_no() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = open_ana(data.path());
+    capturing();
+    fake.page(r#"{"k":"opened","read":true,"acked":false}"#);
+    fake.page(r#"{"k":"opened","read":false,"acked":true}"#);
+    s.pump();
+    let lines: Vec<_> = captured().into_iter().filter(|l| l.contains("read by the page")).collect();
+    assert_eq!(
+        lines,
+        vec![
+            "discord web: conversation open, read by the page yes".to_string(),
+            "discord web: conversation open, read by the page no".to_string()
+        ]
+    );
+}
+
+/// The log of a session that acts has no text, id, emoji or reason of Discord's.
+#[test]
+fn the_log_of_acting_has_no_text_id_emoji_or_reason() {
+    let data = tempfile::tempdir().unwrap();
+    capturing();
+    let (mut s, fake) = open_ana(data.path());
+    s.ask_direct(DirectAsk::Send {
+        channel: ANA.into(),
+        text: "secret hello".into(),
+        reply: Some("900".into()),
+        nonce: 1,
+    });
+    fake.page(&act(r#""seq":1,"stage":"typing""#));
+    fake.page(&act(r#""seq":1,"stage":"failed","why":"reply action not found""#));
+    s.pump();
+    std::thread::sleep(std::time::Duration::from_millis(750));
+    s.ask_direct(send(2, "secret hello"));
+    fake.page(&act(
+        r#""seq":2,"stage":"failed","why":"send refused","mid":"6000","reason":"private reason Discord gave""#,
+    ));
+    s.pump();
+    std::thread::sleep(std::time::Duration::from_millis(750));
+    s.ask_direct(DirectAsk::React { channel: ANA.into(), message: "900".into(), emoji: "\u{1F525}".into(), on: true });
+    fake.page(&act(r#""seq":3,"stage":"failed","why":"not shown""#));
+    s.pump();
+    s.ask_direct(DirectAsk::Forget { channel: ANA.into(), message: "2".into() });
+    s.set_on(false);
+    let lines = captured();
+    assert!(lines.contains(&"discord web: not sent: reply action not found".to_string()), "{lines:?}");
+    assert!(lines.contains(&"discord web: reaction not done: not shown".to_string()), "{lines:?}");
+    for line in &lines {
+        for private in ["Ana", "Example", "secret", "private reason", ANA, BO, "\u{1F525}", "6000", "900"] {
+            assert!(!line.contains(private), "{private:?} is in the log line {line:?}");
+        }
+    }
+    let shown: String = s.take_events().iter().map(|e| format!("{e:?}")).collect();
+    assert!(!shown.contains("private reason"), "{shown}");
 }

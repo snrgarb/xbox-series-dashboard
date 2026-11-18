@@ -87,6 +87,10 @@ const xsdFindStores = () => {
     if (registered) break;
   }
   const shape = (all) => [...byName.values(), ...candidates].find((o) => typeof o === "object" && all.every((n) => fn(o, n))) || null;
+  const shapeBest = (all, prefer) => {
+    const all_ = [...byName.values(), ...candidates].filter((o) => typeof o === "object" && all.every((n) => fn(o, n)));
+    return all_.find((o) => prefer.some((n) => fn(o, n))) || all_[0] || null;
+  };
   const pick = (names, methods) => {
     for (const n of names) if (byName.has(n)) return byName.get(n);
     return shape(methods);
@@ -99,8 +103,16 @@ const xsdFindStores = () => {
     readState: pick(["ReadStateStore"], ["getUnreadCount", "getMentionCount"]),
     messages: pick(["MessageStore"], ["getMessages", "getMessage"]),
     calls: pick(["CallStore"], ["getCall"]),
-    // An action, not a store: found by shape on the exports.
+    // Actions, not stores: found by shape on the exports (#201, docs/discord-web.md, "Acting"). Each is optional: the ask
+    // it serves fails plainly without it, and the reading goes on.
     older: shape(["fetchMessages"]),
+    reply: shape(["createPendingReply"]),
+    replyClear: shape(["deletePendingReply"]),
+    pending: pick(["PendingReplyStore"], ["getPendingReply"]),
+    react: shape(["addReaction", "removeReaction"]),
+    // `ack` alone is on more than one object: the one that also has its siblings is the channel read-state action.
+    ack: shapeBest(["ack"], ["bulkAck", "ackCategory", "localAck", "ackChannel"]),
+    forget: shape(["deleteMessage", "sendMessage"]) || shape(["deleteMessage"]),
   };
   out.S = S;
   // Discord's method names we call: [name, required]. A key is required when its first group is; `either` lists
@@ -113,6 +125,10 @@ const xsdFindStores = () => {
     messages: { need: ["getMessages"], opt: ["getMessage", "getLastMessage"] },
     calls: { either: ["getCall", "getCalls"], opt: [], optional: true },
     older: { need: ["fetchMessages"], opt: [], optional: true },
+    reply: { need: ["createPendingReply"], opt: ["deletePendingReply"], optional: true },
+    react: { need: ["addReaction", "removeReaction"], opt: [], optional: true },
+    ack: { need: ["ack"], opt: [], optional: true },
+    forget: { need: ["deleteMessage"], opt: [], optional: true },
   };
   for (const [k, w] of Object.entries(wants)) {
     const s = S[k];

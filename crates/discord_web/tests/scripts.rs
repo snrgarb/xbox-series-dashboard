@@ -29,7 +29,7 @@ fn the_page_scripts_touch_no_credential_and_make_no_request() {
         "eval(",
         "new function",
     ];
-    for name in ["stores.js", "direct.js"] {
+    for name in ["stores.js", "direct.js", "act.js"] {
         let text = std::fs::read_to_string(here().join("js").join(name)).unwrap().to_lowercase();
         for word in forbidden {
             assert!(!text.contains(word), "js/{name} mentions {word:?}");
@@ -61,5 +61,5 @@ fn the_page_script_reads_pushes_and_opens_against_made_up_stores_in_node() {
     let said = String::from_utf8_lossy(&out.stdout);
     eprintln!("node {version}:\n{said}{}", String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success(), "a check failed:\n{said}");
-    assert!(said.lines().filter(|l| l.starts_with("ok ")).count() >= 15, "too few checks ran:\n{said}");
+    assert!(said.lines().filter(|l| l.starts_with("ok ")).count() >= 30, "too few checks ran:\n{said}");
 }

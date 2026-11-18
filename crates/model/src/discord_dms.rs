@@ -365,6 +365,12 @@ pub enum DirectEvent {
     Captcha,
     /// Discord refused to send: "Discord didn't send it", with its own reason as its page gives it.
     Refused(Private),
+    /// A message sent under this nonce ([`DirectAsk::Send`]) is now Discord's, with this id (#201): the bubble kept
+    /// under the nonce becomes that message. Raised once, after the store showed it sent.
+    Sent { channel: Id, nonce: u64, message: Id },
+    /// A message sent under this nonce was not sent: refused, a captcha, a failure Discord's page showed, or no answer
+    /// within 15 s (#201). Its bubble stays under the nonce, [`Delivery::Failed`], until [`DirectAsk::Forget`].
+    NotSent { channel: Id, nonce: u64 },
 }
 
 impl DirectEvent {
@@ -403,6 +409,22 @@ mod tests {
         let said = format!("{ask:?}");
         assert!(!said.contains("hello") && !said.contains("42424242"), "{said}");
         assert!(said.contains("(11 chars)"));
+    }
+
+    #[test]
+    fn the_sending_events_say_no_id_or_reason_in_a_debug_line() {
+        let events = [
+            DirectEvent::Sent { channel: "42424242".into(), nonce: 7, message: "555666777".into() },
+            DirectEvent::NotSent { channel: "42424242".into(), nonce: 7 },
+            DirectEvent::Refused("You are being rate limited".into()),
+        ];
+        for event in events {
+            let said = format!("{event:?}");
+            for private in ["42424242", "555666777", "rate limited"] {
+                assert!(!said.contains(private), "{private} is in {said}");
+            }
+            assert_eq!(event.toast(), None);
+        }
     }
 
     #[test]

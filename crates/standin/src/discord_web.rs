@@ -21,6 +21,19 @@
 //! - `POST /standin/ring?channel=<id>&on=1|0` starts or stops a DM call ringing the user.
 //! - `GET /avatars/..`, `GET /channel-icons/..` a plain made-up picture, so `--discord-cdn-url` can name this stand-in.
 //!
+//! Acting (#201): the page "changes as the real one does". It has a message box (a contenteditable textbox in a form)
+//! while a conversation is its route; Enter in it sends: Discord's own optimistic message (state SENDING) goes into the
+//! fake MessageStore and, 300 ms later, is SENT under a real id. The fake page has Discord's reply, reaction, mark-read
+//! and delete-local actions by their shapes. Controls:
+//!
+//! - `POST /standin/send-fails?on=1|0[&reason=<words>]` the next sends go SEND_FAILED (with Discord's dialog showing the
+//!   reason, if one is given).
+//! - `POST /standin/captcha?on=1|0` the next send shows a captcha frame and sends nothing.
+//! - `POST /standin/slow?ms=<n>` how long a send stays SENDING.
+//! - `GET /standin/sent` a JSON list of what the fake received, in order: `{"kind":"message","channel","text","reply"}`,
+//!   `{"kind":"react","channel","message","emoji","on"}`, `{"kind":"read","channel"}`. The page posts each to
+//!   `POST /standin/sent`. Made-up test data only; the request log never holds a body.
+//!
 //! The channels are the three DM list links' ids ([`FRIENDS`]), `100000000000000010` (a Group DM of two) and
 //! `100000000000000011` ("Made-up Group", with 60 older messages). The page polls `GET /standin/world?since=<n>` for
 //! the controls, which are replayed when it loads again.
@@ -49,6 +62,9 @@ pub struct Web {
     /// The controls so far, as JSON, in order: what the page's world replays.
     #[allow(dead_code)]
     pub world: Arc<Mutex<Vec<String>>>,
+    /// What the fake Discord received (acting, #201), as JSON, in order: what `GET /standin/sent` lists.
+    #[allow(dead_code)]
+    pub sent: Arc<Mutex<Vec<String>>>,
 }
 
 impl Web {
@@ -62,15 +78,18 @@ impl Web {
         let kept = asked.clone();
         let world = Arc::new(Mutex::new(Vec::new()));
         let controls = world.clone();
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let received = sent.clone();
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (kept, phone, controls) = (kept.clone(), phone.clone(), controls.clone());
+                let (kept, phone, controls, received) =
+                    (kept.clone(), phone.clone(), controls.clone(), received.clone());
                 std::thread::spawn(move || {
-                    let _ = answer(stream, &kept, &phone, &controls);
+                    let _ = answer(stream, &kept, &phone, &controls, &received);
                 });
             }
         });
-        Ok(Web { addr, asked, world })
+        Ok(Web { addr, asked, world, sent })
     }
 
     pub fn base(&self) -> String {
@@ -116,7 +135,9 @@ fn app() -> String {
 nav{{width:72px;background:#1e1f22}}aside{{width:240px;background:#2b2d31;padding:12px}}a{{color:#ddd}}</style></head>
 <body><nav data-list-id="guildsnav" class="guilds_x0" aria-label="Servers"></nav>
 <aside><h2>Direct Messages</h2><ul role="list" aria-label="Direct Messages">{rows}</ul></aside>
-<main><p>Signed in to the stand-in.</p></main>
+<main><p>Signed in to the stand-in.</p>
+<form id="chat" hidden><div id="box" role="textbox" contenteditable="true" data-slate-editor="true" aria-label="Message" style="min-width:400px;min-height:2em;border:1px solid #888;padding:4px"></div></form>
+<div id="frames"></div><div id="dialogs"></div></main>
 <script>if (location.pathname === "/app") history.replaceState(null, "", "/channels/@me");</script>
 <script>{{FAKE}}</script>
 <script>
@@ -131,10 +152,35 @@ const poll = () => fetch("/standin/world?since=" + seen).then((r) => r.json()).t
 }}).catch(() => {{}}).finally(() => setTimeout(poll, 300));
 poll();
 </script>
+<script>{{WIRING}}</script>
 </body></html>"#
     )
     .replace("{FAKE}", FAKE)
+    .replace("{WIRING}", WIRING)
 }
+
+/// The app page's message box, captcha frame and dialog, wired to the fake world (acting, #201): what a real Enter in
+/// the box does is the fake Discord's own send, and what the fake received is reported to the stand-in.
+const WIRING: &str = r#"
+const chat = document.getElementById("chat"), box = document.getElementById("box");
+const showBox = () => { chat.hidden = !(world.selected && world.channels[world.selected]); };
+window.addEventListener("popstate", () => setTimeout(showBox, 0));
+showBox();
+box.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.shiftKey) return;
+  e.preventDefault();
+  const text = box.innerText;
+  box.textContent = "";
+  world.submit(text);
+});
+world.onReceived = (entry) => fetch("/standin/sent", { method: "POST", body: JSON.stringify(entry) }).catch(() => {});
+world.onCaptcha = (on) => { document.getElementById("frames").innerHTML = on ? '<iframe src="about:blank#captcha-frame" title="captcha"></iframe>' : ""; };
+world.onDialog = (text) => {
+  const d = document.getElementById("dialogs");
+  d.innerHTML = '<div role="dialog"></div>';
+  d.firstChild.textContent = text;
+};
+"#;
 
 /// The made-up Discord's stores, in the page's own scripts (and the Dashboard's page-script tests).
 const FAKE: &str = include_str!("../js/fake_discord.js");
@@ -144,6 +190,7 @@ fn answer(
     kept: &Mutex<Vec<String>>,
     scanned: &AtomicBool,
     controls: &Mutex<Vec<String>>,
+    received: &Mutex<Vec<String>>,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
@@ -169,7 +216,7 @@ fn answer(
     let mut body = vec![0; length];
     reader.read_exact(&mut body)?;
     let route = path.split(['?', '#']).next().unwrap_or("/").to_string();
-    if route != "/standin/qr" && route != "/standin/world" {
+    if route != "/standin/qr" && route != "/standin/world" && route != "/standin/sent" {
         kept.lock()
             .unwrap_or_else(|p| p.into_inner())
             .push(format!("{method} {route} ({})", if signed { "signed in" } else { "not signed in" }));
@@ -195,7 +242,24 @@ fn answer(
             let json = format!(r#"{{"total":{},"commands":[{news}]}}"#, controls.len());
             respond(&mut out, "200 OK", "application/json", json.as_bytes())
         }
-        ("POST", "/standin/dm-message") | ("POST", "/standin/unread") | ("POST", "/standin/ring") => {
+        ("POST", "/standin/sent") => {
+            // What the fake Discord received: kept as JSON, never logged.
+            let text = String::from_utf8_lossy(&body).into_owned();
+            if serde_json::from_str::<serde_json::Value>(&text).is_ok() {
+                received.lock().unwrap_or_else(|p| p.into_inner()).push(text);
+            }
+            page(&mut out, "200 OK", "noted")
+        }
+        ("GET", "/standin/sent") => {
+            let list = received.lock().unwrap_or_else(|p| p.into_inner()).join(",");
+            respond(&mut out, "200 OK", "application/json", format!("[{list}]").as_bytes())
+        }
+        ("POST", "/standin/dm-message")
+        | ("POST", "/standin/unread")
+        | ("POST", "/standin/ring")
+        | ("POST", "/standin/send-fails")
+        | ("POST", "/standin/captcha")
+        | ("POST", "/standin/slow") => {
             let channel = query(&path, "channel").unwrap_or_default();
             let command = match route.as_str() {
                 "/standin/dm-message" => {
@@ -205,6 +269,19 @@ fn answer(
                 "/standin/unread" => {
                     let count: u32 = query(&path, "count").and_then(|v| v.parse().ok()).unwrap_or(0);
                     serde_json::json!({ "do": "unread", "channel": channel, "count": count })
+                }
+                "/standin/send-fails" => {
+                    let on = matches!(query(&path, "on").as_deref(), Some("1" | "true" | "on"));
+                    let reason = query(&path, "reason").unwrap_or_default();
+                    serde_json::json!({ "do": "send-fails", "on": on, "reason": reason })
+                }
+                "/standin/captcha" => {
+                    let on = matches!(query(&path, "on").as_deref(), Some("1" | "true" | "on"));
+                    serde_json::json!({ "do": "captcha", "on": on })
+                }
+                "/standin/slow" => {
+                    let ms: u32 = query(&path, "ms").and_then(|v| v.parse().ok()).unwrap_or(0);
+                    serde_json::json!({ "do": "slow", "ms": ms })
                 }
                 _ => {
                     let on = matches!(query(&path, "on").as_deref(), Some("1" | "true" | "on"));
@@ -367,6 +444,35 @@ mod tests {
         assert!(world(9).ends_with(r#""commands":[]}"#));
         let asked = web.asked.lock().unwrap().clone();
         assert!(asked.iter().all(|l| !l.contains("are you") && !l.contains("/standin/world")), "{asked:?}");
+    }
+
+    #[test]
+    fn the_acting_controls_drive_the_world_and_what_the_fake_received_is_listed() {
+        let web = Web::start(0).unwrap();
+        let base = web.base();
+        let signed = format!("{COOKIE}=stand-in");
+        let app = get(&base, "/app", Some(&signed), None);
+        assert!(app.contains(r#"role="textbox""#) && app.contains("contenteditable") && app.contains("world.submit"));
+        assert!(!app.contains("{WIRING}") && !app.contains("{FAKE}"));
+        let body = |answer: &str| answer.split("\r\n\r\n").nth(1).unwrap().to_string();
+        assert_eq!(body(&get(&base, "/standin/sent", None, None)), "[]");
+        get(&base, "/standin/send-fails?on=1&reason=Too+fast", None, Some(""));
+        get(&base, "/standin/captcha?on=1", None, Some(""));
+        get(&base, "/standin/slow?ms=50", None, Some(""));
+        let world = body(&get(&base, "/standin/world?since=0", None, None));
+        let json: serde_json::Value = serde_json::from_str(&world).unwrap();
+        let commands = json["commands"].as_array().unwrap();
+        assert_eq!(commands[0], serde_json::json!({"do": "send-fails", "on": true, "reason": "Too fast"}));
+        assert_eq!(commands[1], serde_json::json!({"do": "captcha", "on": true}));
+        assert_eq!(commands[2], serde_json::json!({"do": "slow", "ms": 50}));
+        get(&base, "/standin/sent", None, Some(r#"{"kind":"message","channel":"1","text":"made up","reply":null}"#));
+        get(&base, "/standin/sent", None, Some("not json"));
+        get(&base, "/standin/sent", None, Some(r#"{"kind":"read","channel":"2"}"#));
+        let listed: serde_json::Value = serde_json::from_str(&body(&get(&base, "/standin/sent", None, None))).unwrap();
+        assert_eq!(listed.as_array().unwrap().len(), 2);
+        assert_eq!(listed[0]["text"], "made up");
+        let asked = web.asked.lock().unwrap().clone();
+        assert!(asked.iter().all(|l| !l.contains("made up") && !l.contains("/standin/sent")), "{asked:?}");
     }
 
     #[test]

@@ -157,7 +157,7 @@ model, and the events), `src/pictures.rs` (avatars), `src/win/host.rs` (`reading
 
 ### The script
 
-`discord_web::direct_script()` is `stores.js` and `direct.js` in one function. The host installs it with
+`discord_web::direct_script()` is `stores.js`, `direct.js` and `act.js` (see "Acting") in one function. The host installs it with
 `AddScriptToExecuteOnDocumentCreated`, so it runs in every new document of the web view before Discord's own scripts
 (not in frames: `window.top` only), and twice is once (`window.__xsdDirect`). It:
 
@@ -194,6 +194,7 @@ network call.
 | `messages` | `MessageStore` | `getMessages` (its `toArray()` or `_array`, `ready`, `hasMoreBefore`); optional `getMessage`, `getLastMessage` | yes |
 | `calls` | `CallStore` | `getCall` or `getCalls` (`ringing`) | no: no rings without it |
 | `older` | an exports object with `fetchMessages` (found by shape) | `fetchMessages({channelId, before, limit: 50})` | no: `Older` does nothing |
+| `reply`, `react`, `ack`, `forget` | exports objects found by shape: `createPendingReply`; `addReaction` + `removeReaction`; `ack`; `deleteMessage` | see "Acting" | no: the ask each serves fails plainly |
 
 A required key or method missing, or a required method that throws, is the **health** `ok: false`: the session's
 `DirectState::PageChanged`, and the log says which, once (`discord web: store "readState" no longer answers
@@ -238,9 +239,8 @@ to press; scrolling a hidden page is brittle), `before` the oldest loaded messag
 the call settles; `at_start` is `hasMoreBefore === false`. If that action was not found, `Older` does nothing and the
 log says so once (`discord web: older messages: Discord's action was not found; reading goes on without it`).
 
-Send, Forget, React, MarkRead, Call, Answer and Decline are #201's and the voice ticket's: `Session::ask_direct`
-logs `discord web: <kind> not built yet` once each and does nothing; its last arm is the hook, and the host takes a
-`PageOp` by name.
+Send, Forget, React and MarkRead are acted (below, "Acting"); Call, Answer and Decline are the voice ticket's
+(#297): `Session::ask_direct` logs `discord web: <kind> not built yet` once each and does nothing.
 
 ### The state, events, memory
 
@@ -283,11 +283,131 @@ argument, and whether the hidden page marks a conversation read on opening.
 ### The stand-in
 
 `standin serve-discord-web`'s app page carries the same fake webpack chunk global and stores (five DMs, one Group DM,
-unread counts, a conversation of varied messages in the first), and controls for a test: `POST
+unread counts, a conversation of varied messages in the first), and controls for a test (and, for acting, the ones in "Acting"): `POST
 /standin/dm-message?channel=<id>&text=<words>`, `POST /standin/unread?channel=<id>&count=<n>`, `POST
 /standin/ring?channel=<id>&on=1|0`; plain pictures at `/avatars/..` and `/channel-icons/..`, so `--discord-cdn-url`
 may name the same address. The channels are 100000000000000001 to 03 (the list's links), 100000000000000010 and
 100000000000000011. Its page may call the network (to poll the controls); only our injected scripts may not.
+
+## Acting: send, reply, react, mark read (#201)
+
+Code: `crates/discord_web/js/act.js` (the page's half, the last file of the page script), `src/act.rs` (the queue),
+`src/win/host.rs` (`act`, `type_message`, `enter`), `Session::ask_direct`. Tests: `tests/js/run.js` (the page's half
+in node against the fake Discord), `src/act.rs` and `src/direct_tests.rs` (the queue and the session), the stand-in.
+
+**The rule.** Reading is from Discord's Flux stores only. Acting goes **by id**: the route, then **the page's own control
+by trusted input** (DevTools' `Input.*`); one of **Discord's own functions** only where the page has no control that can
+be reached without hovering (a reply, a reaction, marking read). It never calls Discord's web interface itself and
+reads nothing that identifies the session; `tests/scripts.rs` fails the build if `act.js` holds the words for one.
+Each ask is **done only when the stores show it**.
+
+### One at a time, paced
+
+`act::Acts` is a queue. At most one action runs; the next starts no sooner than **0.7 s** after the last ended; each
+has **15 s** to finish (done, failed, or `no answer in 15 s`, when the page is told to let go: `cancel()`). Several
+sends queued are each reported Sending. Switching the session off, signing out, the page's user going and a failure
+**empty the queue**: each send that had not gone is `NotSent` (`discord web: not sent: the session ended`) and what
+was running is cancelled. The queue is driven by `Session::pump`, each frame. A send while the session is not up
+(off, signed out, the stores not read) is not sent at once (`discord web: not sent: not signed in`).
+**Forget** is local and not queued.
+
+### Send (`DirectAsk::Send { channel, text, reply, nonce }`)
+
+1. The page is routed to `/channels/@me/<channel>` (`history.pushState` + `popstate`, as `open` does) if it is not, and
+   the script waits (8 s) for the channel's messages (`MessageStore` `ready`) and **the message box**.
+2. **The one DOM lookup**: the box, `[role="textbox"][contenteditable="true"]` inside the chat form (else anywhere), as
+   the spike found it. It is focused by a script `.focus()` (focus emulation is on: `Emulation.setFocusEmulationEnabled`,
+   the hidden page believes it has focus) and must be the `document.activeElement`; else `not sent: composer not focused`.
+   The health record's `composer` key is yes once a lookup found it (the log's `stores found` line then lists it) and
+   no when one did not (`not sent: composer not found`); never a break.
+3. A **reply** (`reply: Some(message id)`): Discord's own `createPendingReply({ channel, message, shouldMention: true })`
+   with the `ChannelStore` channel object and the `MessageStore` message object, from the exports object that has that
+   function (health key `reply`). The page's Reply button needs a hover, so this is the one place a function is used.
+   Not found, or the message not loaded: nothing is sent, `not sent: reply action not found` / `reply target not found`.
+   A plain send first clears a reply the Dashboard did not ask for: `deletePendingReply(channel)` (found by shape, only
+   if the `PendingReplyStore` says one is set, or called blind where that store is not found).
+4. The page says `typing` (and whether the box holds a **draft**, which Discord keeps). The host then types, as the spike
+   did on the TV: a draft is cleared (Ctrl+A, Backspace), the text is inserted with `Input.insertText` one line at a
+   time with **Shift+Enter** between lines (a plain Enter sends; the Console keyboard makes single lines), and **400 ms
+   later one Enter**: `rawKeyDown`, `char "\r"`, `keyUp`.
+5. The page watches the store for a message that is **new since the box was focused, the user's own, with the text typed
+   (trimmed)**. The first is Discord's own optimistic message (`state: "SENDING"`, an id of its own): reported as
+   `sending`. When it is `SENT` (the store replaces it by the real one under another id), it reports `sent` with the real
+   id. `SEND_FAILED` is `failed`.
+6. **Failure**: `SEND_FAILED`, or nothing in 15 s: `Failed`. A **captcha** is detected only by a captcha frame appearing
+   in the page after the send began (`iframe[src*="captcha"]`, `hcaptcha`, `recaptcha`): `DirectEvent::Captcha`. A
+   **refusal** whose reason Discord's own dialog (`[role="dialog"]`) shows after `SEND_FAILED`: `DirectEvent::Refused`
+   with that text (`Private`; the log says `rate limited` if it says "slow down", "rate limit", "too fast" or "too
+   many", else `refused`). Without a reason it is just `NotSent` (`not sent: refused`). The log: `discord web: sent in
+   769 ms`, `discord web: not sent: captcha | rate limited | refused | no answer in 15 s | reply action not found | ...`.
+
+**What the screens get.** While a send is queued or in flight, `Direct::open` carries it as a message with
+`Delivery::Sending`, **id = the nonce as a decimal string**, own, author id empty, the text as one `Text` span, `at` the
+time it was asked: made by the session at once, and replaced by **Discord's own optimistic message** (the first new own
+`SENDING`/`SENT` message with equal text) as soon as the page has tied the send to it; that message is reported under
+the nonce id, never alongside. `DirectEvent::Sent { channel, nonce, message }` follows once the store shows it sent:
+from then the message is Discord's, under its real id (the conversation snapshot with it is always processed first, so
+the screens never see the real message after the event: **re-key the bubble from the nonce to `message` on the event**).
+`DirectEvent::NotSent { channel, nonce }` follows any failure (after `Captcha` or `Refused`, when those apply): the
+message stays in `Direct::open` under the nonce as `Delivery::Failed` (the store's own failed message where the page
+holds it, else made from what was sent) until **`DirectAsk::Forget { channel, message: nonce id }`**: the session drops it
+and asks the page to remove Discord's own failed message from its store locally (`deleteMessage(channel, id, true)`,
+found by shape, health key `forget`; if it is not found only the session's view drops it). Retry is the screens': a
+Forget and a new Send. A message's `state` is mapped for every own message: `SENDING` Sending, `SEND_FAILED` Failed,
+anything else Sent.
+
+### React (`DirectAsk::React { channel, message, emoji, on }`)
+
+Discord's own reaction action, from the exports object with both `addReaction` and `removeReaction` (health key
+`react`), for the message in the open conversation (it must be loaded). Called with
+`{ id: null, name: "<emoji>", animated: false }`. **The argument shape is checked by the function's `length`**: positional
+`(channelId, messageId, emoji)` (the builds seen), or one object `{ channelId, messageId, emoji }` where `length` is 1.
+Done when the store's message shows the reaction with `me` true (or no such reaction with `me`, for `on: false`); if it
+already does, it is done without asking Discord. Not shown within 10 s: `reaction not done: not shown`.
+
+### MarkRead (`DirectAsk::MarkRead(channel)`)
+
+Discord's own `ack(channelId)` from the exports object with a function `ack` (preferring one that also has `bulkAck`,
+`ackCategory`, `localAck` or `ackChannel`, since `ack` alone is on more than one object; health key `ack`). Done when
+`ReadStateStore`'s unread count for the channel is 0 (10 s). **A conversation opened by `DirectAsk::Open`** is expected to
+be marked read by the page itself (it believes it is visible and focused): when it had unread messages the page waits 3 s
+for the count to reach 0 and the log says once per open `discord web: conversation open, read by the page yes|no`; on
+`no` it calls the same `ack` once (the user opening a conversation in the Guide has read it). Nothing is logged for a
+conversation that had nothing unread.
+
+### Required and optional, and what breaks it
+
+All the actions' keys are **optional**: a missing one never makes `PageChanged`; the ask it serves fails with one log
+line and nothing is sent. The health record's `found` lists `reply`, `react`, `ack`, `forget` (Discord's names, by
+shape) and `composer` (yes once seen); the `stores found` log line lists those found.
+
+| Depends on | Breaks when | Shows as |
+|---|---|---|
+| the message box (`[role="textbox"][contenteditable="true"]`, in a form) | Discord renames its role or makes the box non-editable by that shape | `not sent: composer not found` / `composer not focused` |
+| `Input.insertText`, the Enter sequence, focus emulation | the page ignores input | `no answer in 15 s` |
+| the route `/channels/@me/<id>` and `MessageStore.getMessages(id).ready` | the router changes | `composer not found` |
+| `createPendingReply`, `deletePendingReply`, `PendingReplyStore.getPendingReply` (shape) | renamed or re-shaped | `not sent: reply action not found` |
+| `addReaction` / `removeReaction` (shape, argument form by `length`) | renamed, a third argument form | `reaction not done: ...` |
+| `ack` (shape) | renamed; another object with `ack` found first | `mark read not done: ...` |
+| `deleteMessage(channel, id, true)` (shape) | renamed | a failed message only leaves the session's view |
+| the message's `state`, `author.id`, `content` in `MessageStore` | reshaped | a send never ties: `no answer in 15 s` |
+
+### The terms
+
+This is the part Discord's terms are about: **it is the user's account sending, reacting and reading through a program
+that is not Discord's own client**. Discord's Terms of Service and its self-bot article do not allow other programs to
+use an account, and Discord says it can close an account for it (see "The terms, said plainly"). Acting by trusted input
+into the page's own box and by Discord's own functions, one at a time and paced at 0.7 s, keeps it to what a person at
+the keyboard would do; it is not a way round the terms, and the switch's line under it says so.
+
+### The stand-in
+
+The fake Discord changes as the real one does: a message box while a conversation is the route; Enter adds Discord's
+own optimistic message (`SENDING`, an id of its own) to the fake `MessageStore` and ~300 ms later makes it `SENT` under
+a real id; fake `createPendingReply`/`deletePendingReply`, `addReaction`/`removeReaction`, `ack` (and a decoy with only
+`ack`), `deleteMessage`, exported by the same shapes. Controls: `POST /standin/send-fails?on=1|0[&reason=<words>]`,
+`POST /standin/captcha?on=1|0`, `POST /standin/slow?ms=<n>`; `GET /standin/sent` lists what it received (`message` with
+channel, text and reply target; `react`; `read`), for an end-to-end payload.
 
 ## The terms, said plainly
 

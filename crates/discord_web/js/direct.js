@@ -8,15 +8,17 @@
 //   {k:"conv", ...}  the conversation the host opened
 //   {k:"rings", rings:[...]}  DM calls ringing the user
 //   {k:"reset"}  the user is gone (signed out in the page)
-// Read-only: only store getters are called, plus the page's own route (history) and Discord's own older-messages
-// action by the host's ask. It reads no secret, stores nothing and makes no request of its own.
+// Reading is read-only: only store getters are called, plus the page's own route (history) and Discord's own
+// older-messages action by the host's ask. Acting (send, react, mark read; act.js, the next file of the same function)
+// goes by id: the route, the page's own message box by trusted input from the host, and Discord's own actions only
+// where the page has no control to press. It reads no secret, stores nothing and makes no request of its own.
 // Idempotent: a second injection finds window.__xsdDirect and returns.
 if (window.__xsdDirect || window.top !== window) return;
 const O = Object.assign(
-  { poll: 500, settle: 2, cap: 15000, coalesce: 250, tries: 5, gap: 2000, slow: 30000 },
+  { poll: 500, settle: 2, cap: 15000, coalesce: 250, tries: 5, gap: 2000, slow: 30000, actPoll: 40, readyCap: 8000, actCap: 20000, readCap: 3000, doneCap: 10000 },
   window.__xsdDirectOptions || {}
 );
-const A = { S: null, me: "", open: null, anchor: null, older: false, timer: null, sent: {}, errors: new Set(), dm: new Map(), tries: 0, health: "" };
+const A = { S: null, me: "", open: null, anchor: null, older: false, timer: null, sent: {}, errors: new Set(), dm: new Map(), tries: 0, health: "", composer: false };
 const post = (o) => { try { window.chrome.webview.postMessage(o); } catch (e) {} };
 const str = (v) => (v === undefined || v === null ? "" : String(v));
 // The methods whose failure to answer is a break (the same ones stores.js requires).
@@ -109,6 +111,8 @@ const replyOf = (m) => {
 };
 
 const list = (v) => (Array.isArray(v) ? v : []);
+// Discord's message state, as one of three words.
+const stateOf = (m) => { const s = str(m && m.state); return s === "SENDING" || s === "SEND_FAILED" ? s : "SENT"; };
 const msgOf = (m) => {
   const a = m.author || {};
   const u = userOf(a.id) || a;
@@ -121,7 +125,7 @@ const msgOf = (m) => {
     type: Number(m.type) || 0,
     text: str(m.content),
     names: namesIn(m.content),
-    state: str(m.state || "SENT"),
+    state: stateOf(m),
     reply: replyOf(m),
     mentioned: list(m.mentions).map((x) => nameOf(userOf(x))).filter(Boolean),
     files: list(m.attachments).map((x) => ({ ct: str(x.content_type || x.contentType), name: str(x.filename), voice: ((Number(x.flags) || 0) & 8192) !== 0 || (x.waveform !== undefined && x.waveform !== null) })),
@@ -187,7 +191,9 @@ const sendIfChanged = (key, obj) => {
 
 const sendHealth = (extra) => {
   const missing = [...A.missing, ...[...A.errors].filter((e) => !A.missing.includes(e))];
-  sendIfChanged("health", Object.assign({ k: "health", ok: missing.length === 0, found: A.found, missing, older: !!(A.S && A.S.older), tries: A.tries }, extra || {}));
+  // `composer` is the message box as last looked for by a send: yes or no, never a reason for a break.
+  const found = Object.assign({}, A.found, { composer: A.composer ? ["textbox"] : [] });
+  sendIfChanged("health", Object.assign({ k: "health", ok: missing.length === 0, found, missing, older: !!(A.S && A.S.older), tries: A.tries }, extra || {}));
 };
 
 const flush = () => {

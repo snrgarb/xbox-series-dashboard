@@ -11,6 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_APP};
 
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
+use crate::act::ActOp;
 use crate::{say, Command, Report, Spawned, Tell};
 
 mod host;
@@ -56,6 +57,10 @@ pub fn runtime() -> Result<String, String> {
     host::Loader::load()?.runtime_version()
 }
 
+/// How long after a message's text went into the box Enter is pressed: the spike's send needed the box to have taken
+/// the text first (it waited 400 ms).
+const ENTER_AFTER: Duration = Duration::from_millis(400);
+
 /// How often the page is looked at: while the sign-in page is up, and while not.
 const LOOK_SHOWN: Duration = Duration::from_millis(250);
 const LOOK_HIDDEN: Duration = Duration::from_millis(1500);
@@ -91,8 +96,10 @@ fn run(
     let mut hands_off = true;
     let mut qr: Option<bool> = None;
     let mut next_look = Instant::now() + Duration::from_millis(500);
+    // The text of a message is in the box; Enter goes at this time (a moment after, so the box has taken it).
+    let mut enter_at: Option<Instant> = None;
     loop {
-        host::pump(Duration::from_millis(if shown { 100 } else { 500 }));
+        host::pump(Duration::from_millis(if shown || enter_at.is_some() { 100 } else { 500 }));
         if host::closed() {
             say("discord web: the web view's window was closed");
             host.close();
@@ -139,6 +146,23 @@ fn run(
                     host.insert(&text);
                 }
                 Command::Page(op) => host.page(&op),
+                Command::Act(op) => {
+                    if matches!(op, ActOp::Cancel) {
+                        enter_at = None;
+                    }
+                    if !host.act(&op) {
+                        // An ask the page did not take is a failure at once, not fifteen seconds of nothing.
+                        if let Some(seq) = op.seq() {
+                            let said =
+                                serde_json::json!({ "k": "act", "seq": seq, "stage": "failed", "why": "page error" });
+                            tell(Report::Page(said.to_string()));
+                        }
+                    }
+                }
+                Command::Type { text, clear } => {
+                    host.type_message(&text, clear);
+                    enter_at = Some(Instant::now() + ENTER_AFTER);
+                }
                 Command::Stop => {
                     host.close();
                     say("discord web: the web view is closed; the session is kept");
@@ -151,6 +175,10 @@ fn run(
                     return Some(removed);
                 }
             }
+        }
+        if enter_at.is_some_and(|at| Instant::now() >= at) {
+            enter_at = None;
+            host.enter();
         }
         if Instant::now() < next_look {
             continue;
