@@ -225,7 +225,12 @@ resumed and cancelled from Manage Queue, installed to the end with egl-sync's re
 launch`, and uninstalled from its Tile menu), `gog-gogdl` (#176: the same for GOG with the stand-in gogdl and the fake
 GOG's Pewter Isles: signed in with the stand-in's `auth --code`; downloaded, paused, resumed and cancelled; to the
 end with its set-up step, the stand-in script interpreter; played as its own program; uninstalled with its
-`unins000.exe /VERYSILENT`), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
+`unins000.exe /VERYSILENT`), `battlenet-agent` (#172: the fake Battle.net's Agent, standin.exe as
+`Agent\Agent.9999\Agent.exe`, started by the Dashboard and asked over its HTTP API, the token never logged; Larkspur
+Hollow from the catalogue installed into the fake's games folder with the Agent's bytes and speed in the Queue,
+paused, resumed and cancelled from Manage Queue with `DASHBOARD_BATTLENET_STEER=1`, installed to the end, played
+through the stand-in Battle.net, uninstalled from its Tile menu; then Quarry Bell, not owned, refused by the Agent and
+the client opened on its page instead), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
 Home, in Games a screenful at a time and in Full library, a Game hub of each store's, Search finding two stores' games
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
 each), `launchers` (Settings > Launchers on the fake Steam and Epic, docs/spec/launchers.md: Steam switched off with

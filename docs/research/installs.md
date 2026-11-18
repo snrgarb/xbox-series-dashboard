@@ -157,6 +157,21 @@ So "only via the Dashboard" needs, per store: a way to start an install that sho
 
 **Recommendation: fully possible if the Agent answers**: install to a chosen folder, uninstall, bytes and speed in the Queue; pause and cancel to find out (B3). Build it behind a test on a signed-in PC (B1 to B4), with `--game=<uid>` as the fallback.
 
+**Built in #172** (2026-11-18; docs/sources.md, "Battle.net through its Agent"), against a stand-in Agent only. Read for it, each at the commit given:
+
+- [barncastle/Battle.Net-Installer][bn-inst] @`3aa2d98d866b393197da0b75d7381b7fff495ad9`: `AgentApp.cs` and `Program.cs` (the start, the port from the TCP table, `GET /agent`, the three install calls and their bodies, the progress fields, the error codes in its README).
+- HSCentric `BattleNetAgentClient.cs` @`14f79eecd4`: the same calls from C#, `state` 1003 under way and 1004 idle.
+- DroidDeck `droiddeck-battlenet` @`0ce168b913b517f81c40b12e5c2008939eed5f2f`: the port from `Agent\Agent.dat`, `POST /uninstall {uid, run_compaction}`, errors in `form.<section>.error`.
+- soju `bnet-agent-install.js` @`1f9050f3d791d03f1600f9f5c2eec3fc23d8810f`: the install bodies again (`account_country`, `geo_ip_country`, `language`, `shortcut`, `tome_torrent`).
+- bnetswitch `agent.rs` (djmittens/neo-mittens @`e3d793fcdae69c73a0dfa9e30afc016a7ab824fb`): `Agent.dat`, the token, `GET /game` and `GET /game/<uid>`.
+- unifideck @`2e9981d2` `docs/feasibility/battlenet.md`: 401 from every call under Wine.
+- [wowdev.wiki "Agent"][wd-agent] (oldid 36960): the endpoints, the default port 1120, `DELETE /agent`.
+- Lutris @`eb1cedf4` (`services/battlenet.py`, `util/battlenet/definitions.py`, `product_db.py`), PlayniteExtensions @`886468f6` (BattleNetLibrary), NonSteamLaunchersDecky `battle_net_scanner.py` @`02dfcd07`, galaxy_blizzard_plugin's README @`83cfb024`, one-launch-rs's `Battle.net.config` fixture @`e7cf6c0d`: the product codes, uids and launch codes of the built-in catalogue; owned games are fetched online (Playnite) or tabled (Lutris), never read locally.
+
+Three ids for a product: the **product code** (product.db's second field, and the patch server's path: `lbra`), the **uid** (product.db's first, the API's paths, `--game=` and `--uid=`: `libra`) and the **launch code** (`--exec="launch LBRA"`). **Tony Hawk's Pro Skater 3 + 4** is `lbra`/`libra`/`LBRA`: checked on 2026-11-18 against Blizzard's public patch server (`http://us.patch.battle.net:1119/lbra/versions` answered build 67856; `/v2/summary` lists `lbra`). **Tony Hawk's Pro Skater 1 + 2 is not on Battle.net**: no product of it is on the patch server.
+
+Not known until the TV PC answers (B1 to B4; `e2e/htpc/probes/battlenet.ps1` reads what it can without changing anything): whether a native caller gets a token or 401; whether `Agent.dat` holds the port; the unit of `download_rate`; whether `Client.Install.DefaultInstallPath` is the config's key for the default folder; whether `enus` is the locale's case; whether an install under `Program Files (x86)` needs an administrator; pause and cancel (two guesses, behind `DASHBOARD_BATTLENET_STEER=1`).
+
 ## 8. Xbox and Game Pass
 
 | Approach | Install | Uninstall | Progress, pause, cancel | Needs | Xbox app sees it; licence, saves | Alive; licence | Risk |
@@ -305,7 +320,7 @@ Each to try once on the TV PC by the user, or on a spare PC, before the matching
 - U1. Does `uplay://install/<id>` skip its dialog when a default folder is set? Does the client write progress anywhere readable?
 
 **Battle.net**
-- B1. Does `Agent.exe --internalclienttools` then `GET /agent` (with `phoenix-agent/1.0`) still give a token, with and without the client open?
+- B1. Does `Agent.exe --internalclienttools` then `GET /agent` (with `phoenix-agent/1.0`) still give a token, with and without the client open? (`e2e/htpc/probes/battlenet.ps1` reads B1 to B4 without changing anything; #172.)
 - B2. Do `POST /install/<uid>` and `POST /uninstall` work with no window, and does the client then list the game?
 - B3. Can an Agent install be paused or cancelled (`DELETE /install/<uid>`, `/priorities`, `/download`)?
 - B4. Do `progress` and `download_rate` move live?
@@ -325,7 +340,7 @@ Each is one PR; the probes come first, since what they find decides the rest.
 1. **Probe: installs on a signed-in PC** (research, needs a human). A small `dashboard --probe-installs <store>` mode, read-only but for the one test game the user names, that runs S1 to S3, P1 to P3, G1 to G3, E1 to E3, U1, B1 to B4, X1 to X3 and L1 and logs what each answered, so one session at the TV fills section 12. Done when every question there has an answer written into this file.
 2. **Steam: install, pause, resume and cancel through `SteamClient`** (M7 or later). `source_steam::cef` gains `Installs` and `Downloads` calls; `Installer` for Steam (library folders, pause, resume, cancel, `OpenUninstallWizard(..., true)`); `steam.exe -silent` stays the route with the debugger off. Fake: the stand-in Steam's CEF page answers the calls. Depends on S1. Built in #171 (`source_steam::client`, the calls listed with how each is known in docs/sources.md, "Steam's own calls"), every call logging what it asked and what came back, so S1 and the `"0"` client id are answered by the first run on the TV PC.
 3. **The `Installer` interface and Manage Queue's Pause, Resume and Cancel** (needs the user's decision on where they go: open question 1). `model::Installer`, `Source::installer`, the Queue taking pause and cancel, the menu rows, the folder question. No store but Steam uses it yet.
-4. **Battle.net through its Agent.** `source-battlenet` starts the Agent, takes its token, installs to a chosen folder, uninstalls, reports bytes and speed; `--game` as the fallback. Fake: a stand-in Agent in `standin` answering the calls. Depends on B1 to B4.
+4. **Battle.net through its Agent.** `source-battlenet` starts the Agent, takes its token, installs to a chosen folder, uninstalls, reports bytes and speed; `--game` as the fallback. Fake: a stand-in Agent in `standin` answering the calls. Depends on B1 to B4. Built in #172 against the stand-in (section 7, "Built in #172"); B1 to B4 are answered by its first run on the TV PC.
 5. **Xbox: uninstall by the package manager, install by the Store's queue.** `RemovePackageAsync` once X3 holds; `AppInstallManager` for install and for reading and steering the Store's queue once X1 and X2 hold; `ms-windows-store://` stays the fallback. Fake: the VM's loose-file package (removal); a stand-in queue behind a trait for the rest.
 6. **Helpers: fetching, checking and removing legendary and gogdl** (Settings > Stores). Version and SHA-256 fixed in code, fetched on the user's Yes, licence and source link shown, removable. A runner in `shell` for helper jobs (start, read lines, stop).
 7. **Epic through legendary.** Sign-in page (WebView2 and the pad), `installed.json` as a fourth record, install, uninstall, pause by stopping, start through legendary; parsers tested on made-up lines. Depends on 3, 6 and P1 to P2.

@@ -118,6 +118,13 @@
 //!       The stand-in Battle.net, when this program is named `Battle.net.exe` in a fake Battle.net's folder: starts
 //!       the game with that product code from its install folder and waits for it; asked for a game's page, says so
 //!       in the log.
+//!   Agent.exe [--internalclienttools] [--seconds <n>]
+//!       The stand-in Battle.net Agent (#172, `source_battlenet::standin`), when this program is named `Agent.exe` in
+//!       a fake Battle.net's `Agent/Agent.<build>` folder, as make-battlenet writes it and the Dashboard starts it:
+//!       serves the Agent's HTTP calls on a free port of 127.0.0.1, written in the fake's `Agent/Agent.dat`, for <n>
+//!       seconds (1800), installing the fake's catalogue products into the folder it is given (their bytes counted
+//!       out `STANDIN_HELPER_STEP_MS` apart, 600 ms without) and uninstalling, by rewriting the fake's files; every
+//!       request a line in the log (`battlenet agent: POST /install {...} -> 200 {...}`), its token never.
 //!   standin open-address <address>
 //!       What `dashboard --open-addresses-with standin.exe` gives every store's address to, on a test machine whose
 //!       registry is left alone (the TV PC): does what the handler registered for the address's scheme would,
@@ -225,6 +232,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
        standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
+       Agent.exe [--internalclienttools] [--seconds <n>]
        standin open-address <address>
        standin serve-art [--port <n>] [--key <key>] [--candidates <n>]
        standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
@@ -1150,8 +1158,15 @@ fn run(args: &[String]) -> i32 {
             let (install, key) = set_up::named().expect("named");
             set_up::run(install, &key, args)
         }
-        // As a fake Battle.net's client.
+        // As a fake Battle.net's client, and its Agent.
         _ if named("Battle.net") => battlenet(args),
+        _ if named("Agent") => match std::env::current_exe() {
+            Ok(exe) => source_battlenet::standin::run(&exe, args, note),
+            Err(e) => {
+                note(&format!("battlenet agent: {e}"));
+                2
+            }
+        },
         _ if named("legendary") || named("gogdl") => helper(args),
         // As a GOG build's script interpreter and a GOG game's uninstaller, as the stand-in gogdl writes them (#176).
         _ if named("scriptinterpreter") => {
