@@ -24,8 +24,11 @@
 #   `it exited <n> ms after DELETE /agent`).
 # - Installed to the end from its hub again: the Agent the Dashboard started running all the while, no `stopped:`
 #   line and no Queue stop, `done: product.db says installed`, `queue: Larkspur Hollow installed`, only then the
-#   Agent stopped, and no Agent left running.
+#   Agent stopped, and no Agent left running. Installed under the uid the fake client knows it by (its
+#   Battle.net.config's Games: `the client knows it as larkspur`), with the account's country from its CachedData.db
+#   (`NZL`, `NZ`); `done: product.db says installed, playable, update complete, ...`, then `the Agent is done with it`.
 # - Play from its hub: `Battle.net.exe --exec=launch lkh` (the stand-in Battle.net's line), the stand-in game; ended.
+#   The stand-in Battle.net starts it by its own view (product.db under its uid), so a wrong uid fails here (#172).
 # - Uninstall from its Tile menu after the Dashboard's question: `POST /uninstall`, `uninstalled: product.db no longer
 #   says installed`, `queue: Larkspur Hollow uninstalled`, its folder gone, the Agent stopped.
 # - Quarry Bell from its Game hub: the install refused (`error 2221`), the install abandoned (`DELETE
@@ -160,6 +163,8 @@ try {
     $mark = Get-DashboardLogLength
     Press A '.+' | Out-Null
     Expect-Logged "^battlenet: ${code}: installing $uid \($name\) under $([regex]::Escape((Join-Path $script:root 'games'))) through the Agent$" $mark 'Install' | Out-Null
+    # Under the uid the client knows it by (#172), and the account's country from the client's cache, never USA.
+    Expect-Logged "^battlenet: ${code}: the client knows it as $uid \(Battle\.net\.config's Games names it\)$" $mark 'The client''s uid' | Out-Null
     Expect-Logged "^battlenet: agent: not answering \(.+\): starting $([regex]::Escape($agentDir))\\Agent\.9999\\Agent\.exe --internalclienttools$" $mark 'The Agent started' | Out-Null
     Expect-Logged '^battlenet: agent: up on port \d+ after \d+ ms \(pid \d+\)$' $mark 'The Agent up' | Out-Null
     $session = Expect-Logged '^battlenet: agent: session: GET /agent -> 200 \{.*"authorization":"<token>".*\}$' $mark 'A token, masked'
@@ -172,6 +177,8 @@ try {
     Expect-Logged "^battlenet: ${code}: the Agent's form: language 704 \(no language chosen yet\); locales enUS, enGB, frFR, deDE; its folder `"$dirname`" .*size state 1005; not finalized$" $mark 'The form read' | Out-Null
     $filling = Expect-Logged "^battlenet: ${code}: filling it in: locale (enUS|enGB|frFR|deDE) \(Windows' .+\), into $([regex]::Escape($gameDir))$" $mark 'Filled in'
     $locale = if ($filling -match 'locale (\w+) ') { $Matches[1] } else { 'enUS' }
+    Expect-Logged "^battlenet: ${code}: the account's country NZL, its address in NZ \(.+CachedData\.db's features_cached_data_points\)$" $mark 'The account''s country' | Out-Null
+    Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{`"account_country`":`"NZL`",.*`"geo_ip_country`":`"NZ`".*\} -> 200 .+$" $mark 'Its country sent' | Out-Null
     Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"finalized`":false,`"game_dir`":`"$gameJson`".*`"selected_locale`":`"$locale`".*\} -> 200 .+$" $mark 'Unfinalized, its folder and locale' | Out-Null
     Expect-Logged "^battlenet: ${code}: the form filled in: locales .*size state 1009; not finalized$" $mark 'Sized' | Out-Null
     Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"finalized`":true.*\} -> 200 \{.*`"finalized`":true.*\}$" $mark 'Finalized' | Out-Null
@@ -236,7 +243,9 @@ try {
     Expect-Logged "^queue: $name joined, asked for$" $mark 'Second install' | Out-Null
     Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second; .+$" $mark 'Downloading' 60 | Out-Null
     if (-not @(Get-OwnProcess Agent).Count) { throw 'no Agent running while the install is under way' }
-    Expect-Logged "^battlenet: ${code}: done: product\.db says installed$" $mark 'Done' 90 | Out-Null
+    # Done only once product.db says installed, playable and its update complete; the Agent then seen done with it.
+    Expect-Logged "^battlenet: ${code}: done: product\.db says installed, playable, update complete, version .+$" $mark 'Done' 90 | Out-Null
+    Expect-Logged "^battlenet: ${code}: the Agent is done with it: /game/$uid says installed and playable, nothing under way, \d+ ms on$" $mark 'The Agent done' 70 | Out-Null
     # Nothing took it for stopped, and the Agent the Dashboard started was let go only once it was done.
     $after = @(Get-DashboardLog | Select-Object -Skip $mark)
     $stops = @($after | Where-Object { $_ -match "^battlenet: ${code}: stopped: |^queue: $name stopped" })
@@ -258,7 +267,12 @@ try {
     Push-Button A
     Expect-Logged "^launch: $name \($code\) asked of Battle\.net, Launch screen up at \d+ ms$" $mark 'Play' 15 | Out-Null
     Expect-Standin "battlenet: asked to launch $code" $standinMark 'Started through Battle.net'
-    if (-not (Wait-Until { @(Get-StandInGame).Count } 30)) { throw "$name's stand-in game never started" }
+    # The stand-in client starts it by its own view: product.db under the uid it knows the game by. An install under
+    # another uid (#172, the TV PC's `libra`) shows Install there and starts nothing.
+    if (-not (Wait-Until { @(Get-StandInGame).Count } 30)) {
+        $install = @(Get-Content (Join-Path $env:E2E_OUT 'standin.log') | Select-Object -Skip $standinMark | Where-Object { $_ -match 'shows Install' })
+        throw "$name's stand-in game never started$(if ($install.Count) { ": $($install[0])" })"
+    }
     Expect-Logged '^launch: the game has booted' $mark 'Booted' 60 | Out-Null
     Start-Sleep -Milliseconds 1500
     Save-Screen '07-playing'

@@ -91,19 +91,29 @@ pub fn install(uid: &str, region: &str, product: &str) -> (&'static str, String,
 
 /// `POST /install/<uid>`: where (the game's own folder, `<chosen>\<the form's dirname>`, as the form's own
 /// `game_dir` is the default and the dirname), in which locale (one of the form's `list`, as it writes it), and
-/// whether finalized (barncastle's `ProductModel`; redact7's `InstallFinal`).
-pub fn install_options(uid: &str, game_dir: &str, locale: &str, finalized: bool) -> (&'static str, String, Value) {
-    let body = json!({
-        "account_country": "USA",
+/// whether finalized (barncastle's `ProductModel`; redact7's `InstallFinal`). The account's country and where its
+/// address is (`account_country`, `geo_ip_country`) only where the client's cache gives them (`crate::client`): never
+/// made up, as `USA` and `US` were (barncastle's defaults), and left out otherwise, as redact7 leaves them out.
+pub fn install_options(
+    uid: &str,
+    game_dir: &str,
+    locale: &str,
+    finalized: bool,
+    country: Option<&crate::client::Country>,
+) -> (&'static str, String, Value) {
+    let mut body = json!({
         "finalized": finalized,
         "game_dir": game_dir.trim_end_matches(['\\', '/']),
-        "geo_ip_country": "US",
         "language": [locale],
         "selected_asset_locale": locale,
         "selected_locale": locale,
         "shortcut": "none",
         "tome_torrent": "",
     });
+    if let Some(country) = country {
+        body["account_country"] = json!(country.account);
+        body["geo_ip_country"] = json!(country.geo_ip);
+    }
     ("POST", format!("/install/{uid}"), body)
 }
 
@@ -397,6 +407,18 @@ impl Progress {
             || self.state == Some(DONE_STATE)
             || self.fraction.is_some_and(|f| f >= 1.0)
     }
+
+    /// Whether an operation's own path says the Agent has nothing more to do on it: `state` 1004 (HSCentric's
+    /// `IsUpdateComplete`, DroidDeck's done), or the download complete with nothing moving.
+    pub fn idle(&self) -> bool {
+        self.state == Some(DONE_STATE) || (self.complete && self.rate.unwrap_or(0) == 0)
+    }
+
+    /// Whether the game's own path (`/game/<uid>`) says it is installed and playable (DroidDeck's last look, the
+    /// wiki's example).
+    pub fn ready(&self) -> bool {
+        self.installed == Some(true) && self.playable
+    }
 }
 
 /// A number, from a number or a text.
@@ -609,11 +631,16 @@ mod tests {
         assert_eq!(choose_locale(&list, None).as_deref(), Some("enUS"));
         assert_eq!(choose_locale(&["koKR".to_string()], Some("en-US")).as_deref(), Some("koKR"));
         assert_eq!(choose_locale(&[], None), None);
-        let (_, path, body) = install_options("libra", r"D:\Games\Tony Hawks Pro Skater 3 + 4\", "enUS", false);
-        assert_eq!(path, "/install/libra");
+        let (_, path, body) = install_options("lbra", r"D:\Games\Tony Hawks Pro Skater 3 + 4\", "enUS", false, None);
+        assert_eq!(path, "/install/lbra");
         assert_eq!(body["game_dir"], r"D:\Games\Tony Hawks Pro Skater 3 + 4");
         assert_eq!((body["selected_locale"].as_str(), body["finalized"].as_bool()), (Some("enUS"), Some(false)));
         assert_eq!(body["language"], json!(["enUS"]));
+        // No country known: none sent, never USA by default.
+        assert!(body.get("account_country").is_none() && body.get("geo_ip_country").is_none(), "{body}");
+        let country = crate::client::Country { account: "AUS".into(), geo_ip: "AU".into(), from: "a cache".into() };
+        let (_, _, body) = install_options("lbra", r"C:\Program Files (x86)\X", "enGB", true, Some(&country));
+        assert_eq!((body["account_country"].as_str(), body["geo_ip_country"].as_str()), (Some("AUS"), Some("AU")));
     }
 
     #[test]

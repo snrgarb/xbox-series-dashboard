@@ -6,8 +6,10 @@
 //! key naming `<dir>` as its folder and each game's; the client, `Battle.net.exe`; the agent's `Agent/product.db`
 //! (protobuf) and `Agent/aggregate.json`; the Agent itself, `Agent/Agent.9999/Agent.exe` (#172); each installed
 //! game's folder under `games/` (or where the stand-in Agent installed it); `catalogue.json`, the products the fake
-//! offers to install, which the source reads in place of its built-in table ([`crate::catalogue`]); and
-//! `fixture.json`, this spec, which the stand-in Agent reads and writes back as it installs and uninstalls. Given a
+//! offers to install, which the source reads in place of its built-in table ([`crate::catalogue`]); the client's own
+//! `Battle.net.config` (its `Games` keys: the uids the client knows its games by, [`client_uid`]) and `CachedData.db`
+//! (the account's country, [`ACCOUNT_COUNTRY`]), both of which the real client keeps under `%APPDATA%` and
+//! `%LOCALAPPDATA%`; and `fixture.json`, this spec, which the stand-in Agent reads and writes back as it installs and uninstalls. Given a
 //! program, it is the client and the Agent (the stand-in Battle.net and the stand-in Agent, crates/standin) and every
 //! game's `game.exe`; without one those are empty files. Every name, code and path is made up.
 use std::collections::BTreeMap;
@@ -28,6 +30,16 @@ pub const CATALOGUE: &str = "catalogue.json";
 
 /// This spec, under its folder, for the stand-in Agent.
 pub const SPEC: &str = "fixture.json";
+
+/// The client's settings, under its folder: `Games`, by uid.
+pub const CONFIG: &str = "Battle.net.config";
+
+/// The client's cache, under its folder: SQLite, `key_value_store`, the account's country in
+/// `features_cached_data_points`.
+pub const CACHE: &str = "CachedData.db";
+
+/// The fake account's country, and where its address is, as the client's cache writes them (made up).
+pub const ACCOUNT_COUNTRY: (&str, &str) = ("NZL", "NZ");
 
 /// The fake Agent's build: its program is `Agent/Agent.<build>/Agent.exe`.
 pub const AGENT_BUILD: &str = "9999";
@@ -65,6 +77,10 @@ pub struct Available {
     /// Whether the account owns it: the stand-in Agent installs it, else refuses it as the real one refuses what it
     /// may not install.
     pub owned: bool,
+    /// The uid the client knows it by, where that is not `uid` (the catalogue's, which may be stale, as the TV PC's
+    /// `libra` was: #172). An install under another uid is not installed to the stand-in client.
+    #[serde(default)]
+    pub client_uid: Option<String>,
 }
 
 /// What the agent's files and the registry say of a product.
@@ -102,6 +118,7 @@ impl Fixture {
             code: code.into(),
             name: name.into(),
             owned,
+            client_uid: None,
         };
         Fixture {
             products: vec![
@@ -131,6 +148,35 @@ impl Fixture {
     pub fn load(root: &Path) -> io::Result<Fixture> {
         let text = std::fs::read_to_string(root.join(SPEC))?;
         serde_json::from_str(&text).map_err(io::Error::other)
+    }
+}
+
+/// The uid the fake's client knows the product `code` by: the catalogue's (or its own `client_uid`), else that of a
+/// product the fake had installed from the start.
+pub fn client_uid(spec: &Fixture, code: &str) -> Option<String> {
+    if let Some(listed) = spec.available.iter().find(|a| a.code == code) {
+        return Some(listed.client_uid.clone().unwrap_or_else(|| listed.uid.clone()));
+    }
+    spec.products.iter().find(|p| p.code == code && p.dir.is_none()).map(|p| p.uid.clone())
+}
+
+/// What the fake's client makes of `code`: the folder of its install where `product.db` has it installed under the
+/// uid the client knows it by (the stand-in Battle.net starts it from there), else why it shows Install.
+pub fn client_sees(root: &Path, code: &str) -> Result<PathBuf, String> {
+    let spec = Fixture::load(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    let uid = client_uid(&spec, code).ok_or_else(|| format!("{code} is no product of Battle.net's"))?;
+    let products = crate::product::parse(&std::fs::read(root.join("Agent").join("product.db")).unwrap_or_default())
+        .map_err(|e| format!("product.db: {e}"))?;
+    let theirs = products.iter().find(|p| p.uid == uid && p.installed);
+    match theirs {
+        Some(p) => Ok(source_kit::native(&p.install_path)),
+        None => {
+            let under: Vec<&str> = products.iter().filter(|p| p.code == code).map(|p| p.uid.as_str()).collect();
+            Err(format!(
+                "{code} shows Install: product.db has nothing installed under {uid}, the uid the client knows it by{}",
+                if under.is_empty() { String::new() } else { format!(" (it has it under {})", under.join(", ")) }
+            ))
+        }
     }
 }
 
@@ -233,6 +279,19 @@ pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
         }
     }
     std::fs::write(agent.join("product.db"), database.finish())?;
+    // The client's own: the uids it knows (each product the fake had from the start, and those of the catalogue, as
+    // though the user had looked at each in the client; never what the stand-in Agent installed, whose uid is
+    // whatever it was asked), and the account's country.
+    let mut games = serde_json::Map::new();
+    games.insert("battle_net".into(), serde_json::json!({ "Resumable": "false" }));
+    let known = spec.products.iter().filter(|p| p.kind != Kind::Client && p.dir.is_none()).map(|p| p.uid.clone());
+    let listed = spec.available.iter().filter_map(|a| client_uid(spec, &a.code));
+    for uid in known.chain(listed) {
+        games.insert(uid, serde_json::json!({ "Resumable": "false", "ServerUid": "" }));
+    }
+    let config = serde_json::json!({ "Client": {}, "Games": games });
+    std::fs::write(root.join(CONFIG), serde_json::to_string_pretty(&config).map_err(io::Error::other)?)?;
+    write_cache(&root.join(CACHE)).map_err(io::Error::other)?;
     let aggregate = serde_json::json!({ "installed": aggregate });
     let json = |value: &serde_json::Value| serde_json::to_string_pretty(value).map_err(io::Error::other);
     std::fs::write(agent.join("aggregate.json"), json(&aggregate)?)?;
@@ -241,4 +300,21 @@ pub fn write(root: &Path, spec: &Fixture) -> io::Result<()> {
     std::fs::write(root.join(CATALOGUE), json(&serde_json::Value::Array(catalogue))?)?;
     std::fs::write(root.join(SPEC), serde_json::to_string_pretty(spec).map_err(io::Error::other)?)?;
     Registry::write(&root.join(REGISTRY), &keys)
+}
+
+/// The client's cache as the TV PC's had it: `key_value_store`, with the account's country among the features'
+/// data points (every value made up).
+fn write_cache(path: &Path) -> rusqlite::Result<()> {
+    let _ = std::fs::remove_file(path);
+    let db = rusqlite::Connection::open(path)?;
+    db.execute_batch("CREATE TABLE key_value_store (key TEXT PRIMARY KEY, value TEXT)")?;
+    let points = serde_json::json!({
+        "account_country": ACCOUNT_COUNTRY.0, "account_id": 123456789, "account_region": "US",
+        "geoip_country": ACCOUNT_COUNTRY.1, "licenses": [],
+    });
+    db.execute(
+        "INSERT INTO key_value_store (key, value) VALUES ('features_cached_data_points', ?1), ('other', 'x')",
+        [points.to_string()],
+    )?;
+    Ok(())
 }

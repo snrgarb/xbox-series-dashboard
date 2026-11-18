@@ -3,8 +3,13 @@
 //! - **Installed:** `%PROGRAMDATA%\Battle.net\Agent\product.db` (`product`): each product its agent says is
 //!   installed (`base_product_state.installed`), at its `install_path`, that is not one of the client's own parts
 //!   and whose folder is there. A game is its product code, its `source_id`: `emb`.
-//! - **Names:** `aggregate.json` beside it (`installed[].product_id` and `name`); else the game's Uninstall key's
-//!   `DisplayName`; else the catalogue's; else its uid.
+//! - **Names:** `aggregate.json` beside it (`installed[].product_id` and `name`); else the catalogue's; else the
+//!   game's Uninstall key's `DisplayName` (the Agent writes the folder's name there, `Tony Hawks Pro Skater 3 + 4`,
+//!   with no apostrophe); else its uid.
+//! - **Uids** (#172): the client knows each game by a uid of its own, which an install must use, or the client shows
+//!   Install for a game that is there and will not start it. Which it is: `catalogue` and [`resolve`]; a game
+//!   `product.db` has under another uid is re-registered under the client's while Battle.net is closed
+//!   (`BattleNet::reregister`), and until then Play says what to do instead of opening Battle.net (`cant_start`).
 //! - **Not installed:** the products of the catalogue (`catalogue`, a built-in table; a fake's `catalogue.json`),
 //!   while the client is installed, as available to install. Whether the account owns one is not known until the
 //!   Agent answers an install of it (#172).
@@ -35,6 +40,7 @@ macro_rules! eprintln {
 
 pub mod agent;
 pub mod catalogue;
+pub mod client;
 pub mod fixture;
 pub mod http;
 pub mod installing;
@@ -142,25 +148,120 @@ impl BattleNet {
         }
     }
 
-    /// What the game is to the Agent: its product in `product.db`, else in the catalogue.
+    /// The client's `Battle.net.config`: a fake's in its folder, else `%APPDATA%\Battle.net\Battle.net.config`.
+    fn config_path(&self) -> Option<PathBuf> {
+        match &self.fake {
+            Some(dir) => Some(dir.join(fixture::CONFIG)),
+            None => Some(PathBuf::from(std::env::var_os("APPDATA")?).join("Battle.net").join("Battle.net.config")),
+        }
+    }
+
+    /// The uids the client's `Battle.net.config` names in `Games`.
+    fn client_uids(&self) -> Vec<String> {
+        self.config_path().and_then(|path| client::config(&path)).map(|c| client::games(&c)).unwrap_or_default()
+    }
+
+    /// The account's country from the client's cache, a fake's in its folder, else `%LOCALAPPDATA%\Battle.net\
+    /// CachedData.db`; why not, as the log says it.
+    fn country(&self) -> Result<client::Country, String> {
+        let path = match &self.fake {
+            Some(dir) => dir.join(fixture::CACHE),
+            None => PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("no LOCALAPPDATA")?)
+                .join("Battle.net")
+                .join("CachedData.db"),
+        };
+        match client::country(&path) {
+            Ok(Some(country)) => Ok(country),
+            Ok(None) => Err(format!("{} has none", path.display())),
+            Err(e) => Err(format!("{}: {e:#}", path.display())),
+        }
+    }
+
+    /// What the game is to the Agent and the client (#172): its uid, the client's where that is known (the
+    /// catalogue's row verified, or confirmed on this PC: [`resolve`]), else `product.db`'s; and its install in
+    /// `product.db`, under that uid, else under another (`stale`: the TV PC's `libra`).
     fn target(&self, game: &Game) -> Option<Target> {
         let code = code(game)?;
         let products = self.products().unwrap_or_default();
         let listed = self.catalogue().into_iter().find(|p| p.code.eq_ignore_ascii_case(code));
-        if let Some(product) = products.iter().find(|p| p.code.eq_ignore_ascii_case(code)) {
+        let mine: Vec<&product::Product> = products.iter().filter(|p| p.code.eq_ignore_ascii_case(code)).collect();
+        let resolved = listed.as_ref().map(|listed| resolve(listed, &self.client_uids()));
+        // The uid: the client's where that is known; else the one product.db has it under (written by the client's
+        // own Agent, or an earlier install); else the table's, not verified.
+        let (uid, verified) = match (&resolved, mine.first()) {
+            (Some(Resolved { uid, verified: Some(how) }), _) => (uid.clone(), Some(how.clone())),
+            (_, Some(product)) => (product.uid.clone(), Some("product.db has it under it".to_string())),
+            (Some(Resolved { uid, verified: None }), None) => (uid.clone(), None),
+            (None, None) => return None,
+        };
+        let under = mine.iter().find(|p| p.uid == uid).copied();
+        let other = mine.iter().find(|p| p.uid != uid && !p.install_path.trim().is_empty()).copied();
+        let record = under.or(other);
+        let folder = record.map(|p| source_kit::native(p.install_path.trim()));
+        let has_path = record.is_some_and(|p| !p.install_path.trim().is_empty());
+        let installed = record.is_some_and(|p| p.installed) && has_path && folder.as_ref().is_some_and(|f| f.is_dir());
+        let partial = record.is_some_and(|p| !p.installed) && has_path;
+        Some(Target {
+            code: record
+                .map_or_else(|| listed.as_ref().map_or(code.to_string(), |l| l.code.clone()), |p| p.code.clone()),
+            uid,
+            verified,
+            name: listed.map_or_else(|| game.name.clone(), |p| p.name),
+            installed: installed.then(|| folder.clone()).flatten(),
+            partial: partial.then_some(folder).flatten(),
+            stale: under.is_none().then(|| other.map(|p| p.uid.clone())).flatten(),
+        })
+    }
+
+    /// Re-registers, under the uid the client knows it by, each game `product.db` has installed under another
+    /// (#172: the TV PC's Tony Hawk's Pro Skater 3 + 4, installed by the Dashboard as `libra`, which the client keeps
+    /// as `lbra`, so showed Install and would not start). Only where the client's uid is verified ([`resolve`]),
+    /// nothing is under it yet, the game's folder is there, and **nothing of Battle.net's runs** (the client and its
+    /// Agent keep `product.db` and would write their own over it): `product.db`'s record and handshake renamed and
+    /// nothing else changed (`product::reregister`, which refuses a file it would not write back byte for byte), a
+    /// copy kept beside it (`product.db.dashboard-<old uid>.bak`), the file replaced whole. The game's files are never
+    /// touched (an uninstall of the old uid would delete them). What is done, or waits on Battle.net closing, is said
+    /// once. Gives the codes still under an old uid.
+    fn reregister(&self) -> Vec<String> {
+        let Some(agent) = self.agent() else { return Vec::new() };
+        let Ok(products) = products_in(Some(&agent)) else { return Vec::new() };
+        let catalogue = self.catalogue();
+        let uids = self.client_uids();
+        let mut left = Vec::new();
+        for product in products.iter().filter(|p| p.installed && !product::clients_own(&p.uid)) {
+            let Some(listed) = catalogue.iter().find(|l| l.code.eq_ignore_ascii_case(&product.code)) else { continue };
+            let Resolved { uid, verified: Some(how) } = resolve(listed, &uids) else { continue };
             let folder = source_kit::native(product.install_path.trim());
-            let installed = product.installed && !product.install_path.trim().is_empty() && folder.is_dir();
-            let partial = !product.installed && !product.install_path.trim().is_empty();
-            return Some(Target {
-                code: product.code.clone(),
-                uid: product.uid.clone(),
-                name: listed.map_or_else(|| game.name.clone(), |p| p.name),
-                installed: installed.then_some(folder.clone()),
-                partial: partial.then_some(folder),
-            });
+            if uid == product.uid || products.iter().any(|p| p.uid == uid) || !folder.is_dir() {
+                continue;
+            }
+            let code = &product.code;
+            let what = format!(
+                "{code}: product.db has it installed in {} under {}, a uid the client does not know it by ({uid}: {how})",
+                folder.display(),
+                product.uid
+            );
+            let place = agent::Place { dir: agent.clone(), fake: self.fake.is_some() };
+            let running = place.others_running(agent::ours(&agent));
+            if !running.is_empty() || agent::ours(&agent).is_some() {
+                let mut why = running;
+                why.extend(agent::ours(&agent).map(|pid| format!("the Agent the Dashboard started (pid {pid})")));
+                once(&format!("{what}: re-registered once {} closed", why.join(", ")));
+                left.push(code.clone());
+                continue;
+            }
+            match rewrite(&agent, code, &product.uid, &uid) {
+                Ok(backup) => log(&format!(
+                    "{what}: re-registered as {uid}, its files left as they are ({} kept)",
+                    backup.display()
+                )),
+                Err(e) => {
+                    once(&format!("{what}: could not be re-registered ({e:#})"));
+                    left.push(code.clone());
+                }
+            }
         }
-        let listed = listed?;
-        Some(Target { code: listed.code, uid: listed.uid, name: listed.name, installed: None, partial: None })
+        left
     }
 
     /// The client's program, when it is there.
@@ -174,7 +275,10 @@ impl BattleNet {
         if let Some(dir) = &self.fake {
             return Some(dir.join("games"));
         }
-        config_install_path().or_else(|| std::env::var_os("ProgramFiles(x86)").map(PathBuf::from))
+        let config = self.config_path().and_then(|path| client::config(&path));
+        config
+            .and_then(|config| client::default_install_path(&config))
+            .or_else(|| std::env::var_os("ProgramFiles(x86)").map(PathBuf::from))
     }
 }
 
@@ -182,7 +286,13 @@ impl BattleNet {
 #[derive(Debug, Clone)]
 struct Target {
     code: String,
+    /// The uid the Agent is asked about: the client's own where it is known.
     uid: String,
+    /// What confirmed `uid` as the client's, as the log says it; None where only the built-in table gives it, and
+    /// then the Agent is not asked to install it (the client is opened on the game instead).
+    verified: Option<String>,
+    /// The uid `product.db` has it under where that is not `uid`: an install the client does not know (#172).
+    stale: Option<String>,
     name: String,
     /// Its folder, where `product.db` says it is installed and it is there.
     installed: Option<PathBuf>,
@@ -205,13 +315,59 @@ fn installed_in(agent: &Path, code: &str) -> bool {
     products_in(Some(agent)).unwrap_or_default().iter().any(|p| p.code.eq_ignore_ascii_case(code) && p.installed)
 }
 
-/// `%APPDATA%\Battle.net\Battle.net.config`'s `Client.Install.DefaultInstallPath`: the folder the client offers
-/// for a new install. Read as the config is commonly read; not seen on the TV PC yet.
-fn config_install_path() -> Option<PathBuf> {
-    let config = PathBuf::from(std::env::var_os("APPDATA")?).join("Battle.net").join("Battle.net.config");
-    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(config).ok()?).ok()?;
-    let path = json.get("Client")?.get("Install")?.get("DefaultInstallPath")?.as_str()?.trim();
-    (!path.is_empty()).then(|| source_kit::native(path))
+/// `code`'s product in `product.db` in `agent`, under `uid`.
+fn product_in(agent: &Path, code: &str, uid: &str) -> Option<product::Product> {
+    let products = products_in(Some(agent)).ok()?;
+    products.into_iter().find(|p| p.code.eq_ignore_ascii_case(code) && p.uid == uid)
+}
+
+/// A catalogue row's uid, and what confirmed it as the client's, where anything has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Resolved {
+    uid: String,
+    verified: Option<String>,
+}
+
+/// The uid the client knows a catalogue product by (#172): the row's, where the row is verified, or where the
+/// client's `Battle.net.config` names it in `Games`; else the product code, where `Games` names that (the current
+/// client keys the games of the last few years by their code: the TV PC's `lbra`); else the row's, not verified.
+fn resolve(listed: &catalogue::Product, client_uids: &[String]) -> Resolved {
+    let named = |uid: &str| client_uids.iter().any(|known| known.eq_ignore_ascii_case(uid));
+    let (uid, verified) = match &listed.verified {
+        Some(how) => (listed.uid.clone(), Some(how.clone())),
+        None if named(&listed.uid) => (listed.uid.clone(), Some("Battle.net.config's Games names it".into())),
+        None if named(&listed.code) => {
+            (listed.code.clone(), Some("Battle.net.config's Games names the product code, not the table's uid".into()))
+        }
+        None => (listed.uid.clone(), None),
+    };
+    Resolved { uid, verified }
+}
+
+/// `product.db` in `agent` with `code` re-registered from `from` to `to` (`product::reregister`): a copy of it as
+/// it was kept beside it (the first time only), the new one written beside it and put in its place. The copy's path.
+fn rewrite(agent: &Path, code: &str, from: &str, to: &str) -> Result<PathBuf> {
+    let db = agent.join("product.db");
+    let bytes = std::fs::read(&db).context("not read")?;
+    let again = product::reregister(&bytes, code, from, to)?.context("nothing under that uid any more")?;
+    let backup = agent.join(format!("product.db.dashboard-{from}.bak"));
+    if !backup.exists() {
+        std::fs::write(&backup, &bytes).with_context(|| format!("{} not written", backup.display()))?;
+    }
+    let fresh = agent.join("product.db.dashboard-new");
+    std::fs::write(&fresh, &again).with_context(|| format!("{} not written", fresh.display()))?;
+    std::fs::rename(&fresh, &db).context("not put in place")?;
+    Ok(backup)
+}
+
+/// A line of the log said once while the Dashboard runs: a state that holds until something else changes.
+fn once(line: &str) {
+    static SAID: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut said = SAID.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !said.iter().any(|s| s == line) {
+        said.push(line.to_string());
+        log(line);
+    }
 }
 
 /// A game's name as a folder's: what Windows does not take in a name left out.
@@ -292,6 +448,8 @@ impl Source for BattleNet {
         if self.fake.is_none() && client.is_none() && database.is_none() {
             return Ok(None);
         }
+        // A game under a uid the client does not know, re-registered under its own where that may be done now.
+        self.reregister();
         let products = self.products()?;
         let names = agent.as_deref().map(names).unwrap_or_default();
         let keys = uninstall_keys(&registry);
@@ -309,7 +467,7 @@ impl Source for BattleNet {
             let display =
                 key.and_then(|values| registry::get(values, "DisplayName")).map(|name| name.trim().to_string());
             let listed = catalogue.iter().find(|p| p.code.eq_ignore_ascii_case(&product.code)).map(|p| p.name.clone());
-            let name = names.get(&product.code).cloned().or(display).or(listed).unwrap_or_else(|| product.uid.clone());
+            let name = names.get(&product.code).cloned().or(listed).or(display).unwrap_or_else(|| product.uid.clone());
             games.push(Game {
                 source: SOURCE.into(),
                 source_id: product.code.clone(),
@@ -357,6 +515,32 @@ impl Source for BattleNet {
         let listed = self.catalogue().into_iter().find(|p| p.code.eq_ignore_ascii_case(code));
         let launch = listed.and_then(|p| p.launch).unwrap_or_else(|| code.to_string());
         Some(Start::Program { path, args: vec![format!("--exec=launch {launch}")], dir: None })
+    }
+
+    /// A game `product.db` has installed only under a uid the client does not know it by (#172): Battle.net would
+    /// show Install and start nothing, so Play says what to do instead. Re-registered first where that may be done
+    /// now (Battle.net closed), and then started as any other.
+    fn cant_start(&self, game: &Game) -> Option<String> {
+        let target = self.target(game)?;
+        let stale = target.stale.clone()?;
+        target.installed.as_ref()?;
+        if !self.reregister().contains(&target.code) {
+            return None;
+        }
+        let place = self.place();
+        let running = place.is_some_and(|place| !place.others_running(agent::ours(&place.dir)).is_empty());
+        log(&format!(
+            "{}: not started: product.db has it under {stale}, and Battle.net knows it as {}: {}",
+            target.code,
+            target.uid,
+            if running { "re-registered once Battle.net is closed" } else { "it could not be re-registered" }
+        ));
+        Some(if running {
+            "Battle.net doesn't show this game as installed yet. Close Battle.net, then play it here again.".into()
+        } else {
+            "Battle.net doesn't show this game as installed. In Battle.net, choose Install, then Locate the game."
+                .into()
+        })
     }
 
     /// Install: the game's page in the client, `--game=<uid>`. Uninstall: its Uninstall key's own command.
@@ -458,9 +642,24 @@ impl Installer for BattleNet {
         };
         let Some(mut detached) = open.detached() else { return Err(Refusal::Unsupported) };
         if target.installed.is_some() {
-            log(&format!("{}: installed already", target.code));
+            match &target.stale {
+                Some(stale) => log(&format!(
+                    "{}: installed already, under {stale}: re-registered as {} once Battle.net is closed",
+                    target.code, target.uid
+                )),
+                None => log(&format!("{}: installed already", target.code)),
+            }
             return Ok(());
         }
+        // Never under a uid only a table gives: the client may know the game by another, and would not see it.
+        let Some(verified) = target.verified.clone() else {
+            log(&format!(
+                "{}: its uid {} is the built-in table's, not confirmed on this PC (Battle.net.config's Games names \
+                 neither it nor {}): opening Battle.net on the game instead",
+                target.code, target.uid, target.code
+            ));
+            return Err(Refusal::Unsupported);
+        };
         if !self.jobs.begin(&target.code, &target.uid) {
             log(&format!("{}: under way already", target.code));
             return Ok(());
@@ -479,14 +678,16 @@ impl Installer for BattleNet {
             target.name,
             base.display()
         ));
+        log(&format!("{}: the client knows it as {} ({verified})", target.code, target.uid));
+        let country = self.country();
         let game = game.clone();
         std::thread::spawn(move || {
             let code = target.code.clone();
-            match agent_install(&place, &target, &base, no_download) {
+            match agent_install(&place, &target, &base, no_download, country) {
                 Asked::Taken(session, watch) => {
-                    let agent = place.dir.clone();
-                    let installed = move || installed_in(&agent, &code);
-                    installing::follow(jobs, session, place, *watch, game, detached, installed);
+                    let (agent, uid) = (place.dir.clone(), target.uid.clone());
+                    let product = move || product_in(&agent, &code, &uid);
+                    installing::follow(jobs, session, place, *watch, game, detached, product);
                 }
                 Asked::Refused(why) => {
                     jobs.end(&code);
@@ -617,7 +818,13 @@ enum Asked {
 /// Asks the Agent to install `target` under `base`, filling in its form (`agent::calls`): `POST /install`, `POST
 /// /install/<uid>` unfinalized until the size is known, then finalized, then `POST /update`. A form the Agent took
 /// and the Dashboard does not finish is abandoned (`calls::abandon`).
-fn agent_install(place: &agent::Place, target: &Target, base: &Path, no_download: bool) -> Asked {
+fn agent_install(
+    place: &agent::Place,
+    target: &Target,
+    base: &Path,
+    no_download: bool,
+    country: Result<client::Country, String>,
+) -> Asked {
     let mut session = match agent::connect(place) {
         Ok(session) => session,
         Err(why) => return Asked::Refused(why),
@@ -656,10 +863,24 @@ fn agent_install(place: &agent::Place, target: &Target, base: &Path, no_download
         "{code}: filling it in: locale {locale} (Windows' {}), into {game_dir}",
         windows.as_deref().unwrap_or("not known")
     ));
+    let country = match country {
+        Ok(country) => {
+            log(&format!(
+                "{code}: the account's country {}, its address in {} ({})",
+                country.account, country.geo_ip, country.from
+            ));
+            Some(country)
+        }
+        Err(why) => {
+            log(&format!("{code}: no country sent: the client's cache gives none ({why})"));
+            None
+        }
+    };
+    let country = country.as_ref();
     // Unfinalized, again each second while the Agent works out the size.
     let begun = Instant::now();
     let filled = loop {
-        let (method, path, body) = agent::calls::install_options(uid, &game_dir, &locale, false);
+        let (method, path, body) = agent::calls::install_options(uid, &game_dir, &locale, false, country);
         let answer = match session.call(&what, method, &path, Some(&body)) {
             Ok(answer) => answer,
             Err(why) => {
@@ -683,7 +904,7 @@ fn agent_install(place: &agent::Place, target: &Target, base: &Path, no_download
         abandon(&mut session, code, uid, why);
         return Asked::Stopped(why.into());
     }
-    let (method, path, body) = agent::calls::install_options(uid, &game_dir, &locale, true);
+    let (method, path, body) = agent::calls::install_options(uid, &game_dir, &locale, true, country);
     let finalized = match session.call(&what, method, &path, Some(&body)) {
         Ok(answer) => {
             if let Some(why) = agent::calls::problem(&answer) {
@@ -1079,6 +1300,121 @@ mod tests {
         wait("the client asked", || !open.opened().is_empty());
         assert_eq!(open.opened(), [format!("{} --game=larkspur", root.join(CLIENT_EXE).display())]);
         assert_eq!(agent::ours(&root.join("Agent")), None, "no Agent of the Dashboard's");
+    }
+
+    /// Adds `uids` to the fake client's `Battle.net.config` `Games`, as though the user had looked at those games.
+    fn known(root: &Path, uids: &[&str]) {
+        let path = root.join(fixture::CONFIG);
+        let mut config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for uid in uids {
+            config["Games"][*uid] = serde_json::json!({ "Resumable": "false" });
+        }
+        std::fs::write(&path, config.to_string()).unwrap();
+    }
+
+    /// The TV PC's case (#172), on the stand-ins: the table's uid for a game is not the client's.
+    #[test]
+    fn a_game_is_installed_only_under_the_uid_the_client_knows_it_by() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("battlenet");
+        // The table says `larkspur_old`, as Playnite's said `libra`; the client knows it by its code, `lkh`.
+        let mut spec = Fixture::standard();
+        spec.available[0].uid = "larkspur_old".into();
+        spec.available[0].client_uid = Some("lkh".into());
+        fixture::write(&root, &spec).unwrap();
+        let said = Arc::new(Mutex::new(Vec::<String>::new()));
+        let kept = said.clone();
+        let _served =
+            standin::serve(&root, Duration::from_millis(300), move |line| kept.lock().unwrap().push(line.into()))
+                .unwrap();
+        let battlenet = BattleNet::at(Some(root.clone())).with_steer(false);
+        let larkspur = game(&battlenet, "lkh");
+        let target = battlenet.target(&larkspur).unwrap();
+        assert_eq!(target.uid, "lkh", "Battle.net.config names the code: that is the uid");
+        assert!(target.verified.unwrap().contains("names the product code"));
+        let mut open = Kept::default();
+        battlenet.installer().unwrap().install(&larkspur, None, &mut open).unwrap();
+        wait("installed", || battlenet.installs().unwrap().is_empty());
+        assert!(game(&battlenet, "lkh").installed);
+        // The stand-in client starts it: product.db has it under its uid.
+        assert_eq!(fixture::client_sees(&root, "lkh").unwrap(), root.join("games").join("LarkspurHollow"));
+        let lines = said.lock().unwrap().clone();
+        assert!(lines.iter().any(|l| l.contains("POST /install/lkh {")), "{lines:?}");
+        assert!(lines.iter().all(|l| !l.contains("larkspur_old")), "{lines:?}");
+        // The account's country, the client cache's, sent; never USA.
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("\"account_country\":\"NZL\"") && l.contains("\"geo_ip_country\":\"NZ\"")));
+        assert!(lines.iter().all(|l| !l.contains("\"USA\"")), "{lines:?}");
+        assert!(open.opened().is_empty() && open.stops().is_empty());
+
+        // A uid only the table gives, which the client names nowhere: never asked of the Agent.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("battlenet");
+        let mut spec = Fixture::standard();
+        spec.available[0].uid = "larkspur_old".into();
+        spec.available[0].client_uid = Some("larkspur".into());
+        fixture::write(&root, &spec).unwrap();
+        let battlenet = BattleNet::at(Some(root.clone()));
+        let larkspur = game(&battlenet, "lkh");
+        assert_eq!(battlenet.target(&larkspur).unwrap().verified, None);
+        assert_eq!(battlenet.installer().unwrap().install(&larkspur, None, &mut open), Err(Refusal::Unsupported));
+
+        // One the client names, that the account does not own: the Agent refuses, and the client is asked.
+        known(&root, &["quarrybell"]);
+        assert!(battlenet.client_uids().contains(&"quarrybell".to_string()));
+        let _served = standin::serve(&root, Duration::from_millis(300), |_| {}).unwrap();
+        let quarry = game(&battlenet, "qbl");
+        battlenet.installer().unwrap().install(&quarry, None, &mut open).unwrap();
+        wait("the client asked", || !open.opened().is_empty());
+        assert_eq!(open.opened(), [format!("{} --game=quarrybell", root.join(CLIENT_EXE).display())]);
+    }
+
+    /// The TV PC as the first install left it (#172): the game's files there, `product.db` naming it under the
+    /// table's uid; the client shows Install. With Battle.net closed it is re-registered, nothing else touched.
+    #[test]
+    fn a_game_under_an_old_uid_is_re_registered_and_keeps_the_catalogues_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("battlenet");
+        let mut spec = Fixture::standard();
+        spec.available[0].client_uid = Some("lkh".into());
+        let folder = root.join("games").join("Larkspurs Hollow");
+        // Installed by the Agent as `larkspur` (the table's), the Uninstall key named for the folder, not the game.
+        spec.products.push(fixture::FixtureProduct {
+            uid: "larkspur".into(),
+            code: "lkh".into(),
+            name: "Larkspurs Hollow".into(),
+            kind: fixture::Kind::Unnamed,
+            dir: Some(folder.clone()),
+        });
+        fixture::write(&root, &spec).unwrap();
+        std::fs::write(folder.join(".build.info"), "made up").unwrap();
+        let before = std::fs::read(root.join("Agent").join("product.db")).unwrap();
+        let why = fixture::client_sees(&root, "lkh").unwrap_err();
+        assert!(why.contains("shows Install") && why.contains("under larkspur"), "{why}");
+
+        let battlenet = BattleNet::at(Some(root.clone()));
+        let larkspur = game(&battlenet, "lkh");
+        // The catalogue's name, not the Uninstall key's.
+        assert_eq!((larkspur.name.as_str(), larkspur.installed), ("Larkspur Hollow", true));
+        assert_eq!(fixture::client_sees(&root, "lkh").unwrap(), folder);
+        let backup = root.join("Agent").join("product.db.dashboard-larkspur.bak");
+        assert_eq!(std::fs::read(&backup).unwrap(), before);
+        assert_eq!(
+            std::fs::read_to_string(folder.join(".build.info")).unwrap(),
+            "made up",
+            "its files left as they are"
+        );
+        let products = products_in(Some(&root.join("Agent"))).unwrap();
+        assert_eq!(products.iter().filter(|p| p.code == "lkh").map(|p| p.uid.as_str()).collect::<Vec<_>>(), ["lkh"]);
+        assert_eq!(products.len(), parse_len(&before));
+        // Started as any other now; and installing it again is nothing to do.
+        assert_eq!(battlenet.cant_start(&larkspur), None);
+        assert_eq!(battlenet.target(&larkspur).unwrap().stale, None);
+    }
+
+    fn parse_len(bytes: &[u8]) -> usize {
+        product::parse(bytes).unwrap().len()
     }
 
     #[test]

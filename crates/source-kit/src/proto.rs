@@ -122,6 +122,24 @@ impl Writer {
         self.bytes(number, &value.0)
     }
 
+    /// A field as it was read: what lets a message be written again with one field changed (Battle.net's
+    /// `product.db` re-registered under another uid) and every other field as it was.
+    pub fn value(mut self, number: u32, value: Value) -> Self {
+        match value {
+            Value::Varint(v) => return self.varint(number, v),
+            Value::Bytes(b) => return self.bytes(number, b),
+            Value::Fixed64(v) => {
+                self.key(number, 1);
+                self.0.extend_from_slice(&v.to_le_bytes());
+            }
+            Value::Fixed32(v) => {
+                self.key(number, 5);
+                self.0.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        self
+    }
+
     pub fn finish(self) -> Vec<u8> {
         self.0
     }
@@ -157,6 +175,15 @@ mod tests {
         let repeated = Writer::new().text(1, "a").varint(2, 1).text(1, "b").finish();
         let repeated = fields(&repeated).unwrap();
         assert_eq!(all(&repeated, 1).filter_map(Value::text).collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    #[test]
+    fn every_field_written_again_as_read_is_the_same_bytes() {
+        let mut bytes = Writer::new().varint(1, 1 << 40).text(2, "lbra").finish();
+        bytes.extend_from_slice(&[0x19, 1, 2, 3, 4, 5, 6, 7, 8, 0x25, 9, 8, 7, 6]); // field 3 fixed64, 4 fixed32
+        let read = fields(&bytes).unwrap();
+        let again = read.iter().fold(Writer::new(), |w, (n, v)| w.value(*n, *v)).finish();
+        assert_eq!(again, bytes);
     }
 
     #[test]

@@ -751,6 +751,12 @@ impl App {
             eprintln!("launch: {} is from no source the Dashboard has", found.name);
             return;
         };
+        if let Some(why) = source.cant_start(found) {
+            eprintln!("launch: {} not asked of {}: {why}", found.name, source.name());
+            let id = found.id;
+            self.dashboard.tell_cant_start(id, why);
+            return;
+        }
         let home = window_handle(&state.window);
         let launch_screen = self.overlay.is_some();
         if let Some(launch) = Launch::start(found, source.clone(), dir, home, launch_screen, &mut *self.addresses) {

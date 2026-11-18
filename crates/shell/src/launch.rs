@@ -203,6 +203,8 @@ mod win {
         store_since: Option<Instant>,
         /// The game's largest window when last said, and how it was cloaked.
         found: (HWND, u32),
+        /// Whether waiting for the game behind another window in front has been said.
+        waiting_said: bool,
     }
 
     fn log(message: &str) {
@@ -270,6 +272,7 @@ mod win {
                 left: Vec::new(),
                 store_since: None,
                 found: (std::ptr::null_mut(), 0),
+                waiting_said: false,
             })
         }
 
@@ -333,6 +336,23 @@ mod win {
                     // Nothing of the game's has shown yet (the Launch screen stepped aside for a window that wanted
                     // the user): over once its store and the desktop have shown nothing of it for a while.
                     if !self.seen {
+                        // While the window that stepped the Launch screen aside (a store's client still starting the
+                        // game: Battle.net's took 5 s, #172) is still in front, the game is waited for, up to
+                        // GIVE_UP from the start; once it is not, GONE as before.
+                        let front = unsafe { GetForegroundWindow() };
+                        let other_up = !front.is_null()
+                            && front != self.home
+                            && !ours(front)
+                            && unsafe { IsWindowVisible(front) } != 0;
+                        if other_up && now - self.started < GIVE_UP {
+                            if !self.waiting_said {
+                                self.waiting_said = true;
+                                let front = unsafe { crate::describe(front) };
+                                log(&format!("nothing of the game's yet, {front} in front: waiting for the game"));
+                            }
+                            self.gone_since = None;
+                            return Step::Same;
+                        }
                         if now - *self.gone_since.get_or_insert(now) >= GONE {
                             return self.ended(overlay, "nothing of the game's showed");
                         }

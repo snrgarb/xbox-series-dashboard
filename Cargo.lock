@@ -2389,6 +2389,7 @@ dependencies = [
  "anyhow",
  "log-line",
  "model",
+ "rusqlite",
  "serde",
  "serde_json",
  "source-kit",

@@ -7,7 +7,9 @@
 //! the first answer of each path is logged whole, and any change of its status, so that one real run shows where the
 //! Agent says what.
 //!
-//! **When an install is over** ([`Judge`]), and only then: `product.db` says installed (done); the Agent names an
+//! **When an install is over** ([`Judge`]), and only then: `product.db` says installed, playable and its update
+//! complete (done: `product::Product::done`; installed alone is taken as done only once it has stayed so for
+//! [`SETTLE`]), after which the Agent is given time to finish ([`settle`]); the Agent names an
 //! error (failed, its code shown); the user cancels; or every path, the game's too, has said nothing for [`SILENT`]
 //! with the Agent's process gone (or for [`FORGOTTEN`] with it there). **A 404 on one path is never by itself the
 //! end**: on the TV PC that was taken for a stop, and the Agent the Dashboard started, and its download, killed.
@@ -25,6 +27,7 @@ use serde_json::Value;
 
 use crate::agent::{self, calls, Place, Session};
 use crate::http::{masked, Answer};
+use crate::product::Product;
 
 /// How often an install's progress is asked.
 pub const EVERY: Duration = Duration::from_secs(1);
@@ -330,13 +333,16 @@ pub fn follow(
     watch: Watch,
     game: Game,
     mut open: Box<dyn Opener + Send>,
-    installed: impl Fn() -> bool + Send + 'static,
+    product: impl Fn() -> Option<Product> + Send + 'static,
 ) {
     std::thread::spawn(move || {
         let code = watch.code.clone();
         let mut judge = Judge::new(&watch, Instant::now());
         let mut said: Option<InstallState> = None;
         let mut done_at: Option<Instant> = None;
+        // Since when `product.db` has said installed, and whether that has been said.
+        let mut installed_at: Option<Instant> = None;
+        let mut installed_said = false;
         let mut client_said = false;
         let mut round: u32 = 0;
         loop {
@@ -403,14 +409,32 @@ pub fn follow(
             };
             // `product.db` looked at each round once the Agent says the download is done, else every tenth round.
             let done = progress.says_done();
-            if (done || round.is_multiple_of(LOOK_EVERY)) && installed() {
-                crate::log(&format!("{code}: done: product.db says installed"));
-                jobs.end(&code);
-                return;
+            if done || round.is_multiple_of(LOOK_EVERY) {
+                if let Some(product) = product().filter(|p| p.installed) {
+                    let since = *installed_at.get_or_insert_with(Instant::now);
+                    if product.done() || since.elapsed() >= SETTLE {
+                        let how = if product.done() {
+                            String::new()
+                        } else {
+                            format!(" (taken as done: still so {} s on)", SETTLE.as_secs())
+                        };
+                        crate::log(&format!("{code}: done: product.db says {}{how}", product.said()));
+                        settle(&mut session, &watch);
+                        jobs.end(&code);
+                        return;
+                    }
+                    if !installed_said {
+                        installed_said = true;
+                        crate::log(&format!(
+                            "{code}: product.db says {}: not done until it is playable and its update complete",
+                            product.said()
+                        ));
+                    }
+                }
             }
             if done {
                 let since = *done_at.get_or_insert_with(Instant::now);
-                if since.elapsed() > SETTLE {
+                if since.elapsed() > SETTLE && installed_at.is_none() {
                     let told = "Battle.net's Agent finished the download, and Battle.net doesn't list the game as \
                                 installed. Look for it in Battle.net.";
                     crate::log(&format!(
@@ -438,6 +462,46 @@ pub fn follow(
             }
         }
     });
+}
+
+/// How long, once `product.db` says the install is done, the Agent is waited on to be done with it too.
+pub const IDLE_WAIT: Duration = Duration::from_secs(60);
+
+/// An install is done: before the session is let go (and with it the Agent the Dashboard started, `DELETE /agent`),
+/// the Agent is waited on, [`IDLE_WAIT`] at most, to say the game is installed and playable on its own path
+/// (`/game/<uid>`) and to have nothing more under way on the install's (each `404 {}`, says nothing, or is idle:
+/// `calls::Progress::idle`); then the Agent is given [`agent::GRACE_AFTER_INSTALL`] to go by itself.
+fn settle(session: &mut Session, watch: &Watch) {
+    let code = &watch.code;
+    let begun = Instant::now();
+    loop {
+        let read =
+            |answer: Result<Answer, String>| answer.ok().filter(Answer::ok).map(|a| calls::read_progress(&a, None));
+        let ready = read(session.get_silent(&watch.game_path)).is_some_and(|game| game.ready());
+        let idle = watch.paths.iter().all(|path| {
+            read(session.get_silent(path)).is_none_or(|progress| !progress.says_anything() || progress.idle())
+        });
+        if ready && idle {
+            crate::log(&format!(
+                "{code}: the Agent is done with it: {} says installed and playable, nothing under way, {} ms on",
+                watch.game_path,
+                begun.elapsed().as_millis()
+            ));
+            break;
+        }
+        if begun.elapsed() >= IDLE_WAIT {
+            crate::log(&format!(
+                "{code}: the Agent not seen done with it {} s on ({}: {}; under way: {}): let go all the same",
+                IDLE_WAIT.as_secs(),
+                watch.game_path,
+                if ready { "installed and playable" } else { "not installed and playable" },
+                if idle { "nothing" } else { "something" }
+            ));
+            break;
+        }
+        std::thread::sleep(EVERY);
+    }
+    session.install_over();
 }
 
 /// The user cancelled: the follower lets go of the session, which stops the Agent the Dashboard started (and with it

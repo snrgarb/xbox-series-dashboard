@@ -337,16 +337,17 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
     let uid_of = |body: &Value| body.get("uid").and_then(Value::as_str).unwrap_or("").to_string();
     match (request.method.as_str(), &parts[..]) {
         ("POST", ["install"]) => {
+            // As the real one (#172): the product is the patch URL's, and any uid is taken for it, the client's or not.
             let uid = uid_of(&request.body);
-            let Some(product) = catalogue.iter().find(|a| a.uid == uid) else {
+            let patch = request.body.get("instructions_patch_url").and_then(Value::as_str).unwrap_or("");
+            let Some(product) = catalogue.iter().find(|a| patch.ends_with(&format!("/{}", a.code))) else {
                 return (404, json!({ "error": 2300, "uid": uid }));
             };
+            if uid.is_empty() {
+                return (200, json!({ "error": 2301, "why": "no uid" }));
+            }
             if !product.owned {
                 return (200, json!({ "error": NOT_OWNED, "uid": uid }));
-            }
-            let patch = request.body.get("instructions_patch_url").and_then(Value::as_str).unwrap_or("");
-            if !patch.ends_with(&format!("/{}", product.code)) {
-                return (200, json!({ "error": 2301, "uid": uid, "why": "patch url names another product" }));
             }
             let games = state.root.join("games");
             let install = state.installs.entry(uid.clone()).or_insert(Install {
