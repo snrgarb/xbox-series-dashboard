@@ -463,6 +463,9 @@ pub fn run(
     });
     discord_web.set_profile(Some(dashboard.profile().id));
     discord_web.set_on(dashboard.options().discord_messages);
+    if let Some(cdn) = &args.discord.cdn_url {
+        discord_web.set_cdn(Some(cdn));
+    }
     dashboard.set_options(screens::Options { discord_web: discord_web.web(), ..dashboard.options() });
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
@@ -989,7 +992,18 @@ impl App {
         });
         self.discord_web.show(area);
         let was = self.dashboard.options().discord_web;
-        if self.discord_web.pump() || was != self.discord_web.web() {
+        let pumped = self.discord_web.pump();
+        // Direct Messages (#198, #200): what the session read, then what it tells once (a send's outcome, a prompt).
+        // The screens' asks in answer come back as `Effect::Direct` from `carry_out`.
+        if pumped {
+            self.dashboard.set_direct(self.discord_web.direct());
+            self.stale = true;
+        }
+        for event in self.discord_web.take_events() {
+            self.dashboard.direct_event(&event);
+            self.stale = true;
+        }
+        if pumped || was != self.discord_web.web() {
             let web = self.discord_web.web();
             self.dashboard.set_options(screens::Options { discord_web: web, ..self.dashboard.options() });
             if web.state == discord_web::WebState::SignedIn && was.state != web.state {
@@ -1133,8 +1147,12 @@ impl App {
                     self.discord_web.ask(ask);
                     self.follow_discord_web();
                 }
-                // What the Guide's Direct Messages ask of the web session (#200): wired by the data source's ticket.
-                Effect::Direct(_) => {}
+                // What the Guide's Direct Messages ask of the web session (#200, #298): it reads and acts, and what
+                // follows comes back through `follow_discord_web`.
+                Effect::Direct(ask) => {
+                    self.discord_web.ask_direct(ask);
+                    self.follow_discord_web();
+                }
                 // Settings > Account > Direct Messages > While playing: saved; the Toasts (#202) read it.
                 Effect::DiscordWhilePlaying(choice) => {
                     self.store.set_text(screens::settings::DISCORD_WHILE_PLAYING, choice.key());
@@ -2070,6 +2088,8 @@ impl ApplicationHandler for App {
         self.follow_media();
         let discord_wants = self.follow_discord();
         self.follow_discord_web();
+        // The web session's paced actions: a send's timeout, the next action's turn.
+        let discord_web_wants = self.discord_web.next_timer();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
         // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
         let mut release_wants = None;
@@ -2197,6 +2217,7 @@ impl ApplicationHandler for App {
             audio_wants,
             idle,
             discord_wants,
+            discord_web_wants,
         ];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);
         let wake = Instant::now() + wait;
