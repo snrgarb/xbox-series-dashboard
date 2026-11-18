@@ -11,6 +11,12 @@ pub fn guide_button(ui: &mut Ui, rect: Rect, color: Color) {
     drawn::draw(ui, rect, Drawing::GuideButton, color);
 }
 
+/// The square to draw the Guide button's mark in for its ring to be `ring` across: the ring's outer edge is 23.2 of
+/// the drawing's 24 (`drawn`, `Drawing::GuideButton`: radius 10.6, stroke 2).
+pub fn guide_button_across(ring: f32) -> f32 {
+    ring * 24.0 / 23.2
+}
+
 /// Discord's mark, filling `rect`: the Discord tab's icon, the account's, a Call's. The project's own drawing of
 /// chat, never Discord's logo (docs/spec/guide.md, 10.1).
 pub fn discord_mark(ui: &mut Ui, rect: Rect, color: Color) {

@@ -14,6 +14,8 @@ pub const STRIP: f32 = 102.0;
 /// A tab's box, and where the first starts.
 const TAB: (f32, f32) = (84.0, STRIP);
 const FIRST_TAB: f32 = 99.0;
+/// The Profile & system tab's picture, across.
+const PICTURE: f32 = 54.0;
 
 /// The panel's colours down its height: grey through the top half, then turning a dark green.
 const PANEL_STOPS: [(f32, u32); 5] =
@@ -69,12 +71,13 @@ pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture) {
         let colour = if selected { Color::WHITE } else { UNSELECTED };
         let square = |side: f32| Rect::new(cx - side / 2.0, cy - side / 2.0, side, side);
         match tab {
-            Tab::Landing => marks::guide_button(ui, square(33.0), colour),
+            // The picture's size, where the Bundle's Xbox mark is 33: the user's (#269).
+            Tab::Landing => marks::guide_button(ui, square(marks::guide_button_across(PICTURE)), colour),
             Tab::Discord => marks::discord_mark(ui, square(36.0), colour),
             Tab::ProfileAndSystem => {
                 // The disc shows where there is no picture; the picture is the same selected or not.
-                ui.fill(square(54.0), Color::rgb(0x4A4A4A), 999.0);
-                profile::picture(ui, square(54.0), picture);
+                ui.fill(square(PICTURE), Color::rgb(0x4A4A4A), 999.0);
+                profile::picture(ui, square(PICTURE), picture);
             }
         }
         if selected {
