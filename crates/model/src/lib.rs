@@ -271,6 +271,10 @@ pub enum FilterKind {
     Collection,
     /// The user's own: renamed, changed and deleted in Settings.
     Custom,
+    /// A launcher's whole library, installed or not (docs/spec/filters.md, section 4.2): there while the launcher is
+    /// switched on and has games, gone when it is not. Always a tab on Full library; a Group on Home only while
+    /// shown. Like a built-in it can only be shown or not, and moved.
+    Launcher,
 }
 
 /// What a filter's games are ordered by.
@@ -340,7 +344,8 @@ pub struct Filter {
     pub id: i64,
     pub kind: FilterKind,
     /// A built-in's own name for itself (`"favourites"`, `"installed"`, `"most-played"`, `"recently-added"`,
-    /// `"hidden"`), by which code knows it. No other kind has one.
+    /// `"hidden"`), by which code knows it; a launcher's filter's is `launcher.<source>` (`"launcher.steam"`). No
+    /// other kind has one.
     #[serde(default)]
     pub key: Option<String>,
     pub name: String,
@@ -482,8 +487,14 @@ impl Library {
         self.games.iter().filter(move |other| names::same_game_elsewhere(game, other))
     }
 
-    /// The filters that are a Group on Home and a tab on Full library, in order: those shown that have a game.
+    /// The filters that are a Group on Home, in order: those shown that have a game.
     pub fn groups(&self) -> impl Iterator<Item = &Filter> {
         self.filters.iter().filter(|f| f.shown && !f.games.is_empty())
+    }
+
+    /// The filters that are a tab on Full library, in order: the Groups, and each launcher's filter that has a game
+    /// whether it is shown on Home or not (docs/spec/filters.md, section 4.2).
+    pub fn tabs(&self) -> impl Iterator<Item = &Filter> {
+        self.filters.iter().filter(|f| (f.shown || f.kind == FilterKind::Launcher) && !f.games.is_empty())
     }
 }

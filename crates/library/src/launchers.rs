@@ -53,7 +53,8 @@ impl Database {
     }
 
     /// Switches a launcher on or off. Gives how many games the library has of it, hidden ones too: those that
-    /// leave every list, or come back to them.
+    /// leave every list, or come back to them. Its filter on Full library goes and comes back with them, as it was
+    /// (docs/spec/filters.md, 4.2).
     pub fn set_launcher(&self, key: &str, on: bool) -> Result<usize> {
         self.set_setting(&setting(key), if on { "true" } else { "false" })?;
         self.launcher_games(key)

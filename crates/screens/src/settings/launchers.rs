@@ -357,6 +357,8 @@ mod tests {
         let names: Vec<&str> = launcher::ALL.iter().map(|key| name(key)).collect();
         assert_eq!(names, ["Steam", "Epic Games", "GOG", "EA app", "Ubisoft Connect", "Battle.net", "Xbox"]);
         assert!(launcher::ALL.iter().all(|key| mark(key).is_some()));
+        // The library names each launcher's filter on Full library by the same names.
+        assert!(launcher::ALL.iter().all(|key| launcher::name(key) == Some(name(key))));
     }
 
     #[test]

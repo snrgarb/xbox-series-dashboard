@@ -2,7 +2,11 @@
 # Home's first two Groups, each landing on its Group's tab and B back on See all; the tabs stepped with Left and
 # Right to their ends and with LB and RB; the Sort list opened, walked to its end and chosen from; and, on Full
 # library as the nav opens it (no tab lit, every game), the name box opened with Y, a name typed in text entry
-# narrowing the grid, kept, cleared with B, and a name that finds nothing.
+# narrowing the grid, kept, cleared with B, and a name that finds nothing. Then each launcher's tab (#250,
+# docs/spec/filters.md 4.2), a fake Epic Games Launcher beside the fake Steam: the bumpers on to Steam's tab and
+# Epic Games', each the launcher's whole library, installed or not, Epic Games' the last; on Steam's a game that is
+# not installed (the fake's, by its name in the name box), its Tile menu's Install, and the stand-in Steam asked to
+# install it, the game joining the Queue.
 #
 # Judged by what --log-focus says after each press: `focus: MyGames: FullLibrary: Tile(0); tab 2/5 "Couch co-op",
 # sort Name, name "", 4 games` is the item that is up, where focus is on it, then the lit tab's place among the tabs
@@ -120,6 +124,13 @@ function Line([string] $Focus, [string] $Tab = '\d+/\d+ ".*"', [string] $Sort = 
     "MyGames: FullLibrary: $Focus; tab $Tab, sort $Sort, name `"$Name`", $Games games"
 }
 
+# A line the Dashboard must log after the mark $After, by this pattern.
+function Expect-Logged([string] $Pattern, [int] $After, [string] $What) {
+    $line = Wait-DashboardLog $Pattern 10 $After
+    if ($line) { Say "${What}: $line" } else { Say "${What}: no line like '$Pattern'"; $script:failures += "${What}: the Dashboard logged no '$Pattern'" }
+    $line
+}
+
 # The parts of Full library's line: the lit tab's place, how many tabs, its name, the sort and the count.
 function Parts([string] $Line) {
     if ($Line -match 'tab (\d+)/(\d+) "(.*)", sort (\w+)( reversed)?, name "(.*)", (\d+) games$') {
@@ -131,8 +142,13 @@ try {
     Close-WindowsPrompts
     Connect-Pad
     $library = Initialize-FakeSteam -FullShelf
-    $all = @($library.games).Count
-    $script:dashboard = Start-Dashboard @('--log-focus')
+    $epicRoot = Get-FakeRoot 'epic'
+    $epic = Initialize-FakeEpic $epicRoot
+    $steamGames = @($library.games)
+    $epicGames = @($epic.games)
+    $games = $steamGames + $epicGames
+    $all = $games.Count
+    $script:dashboard = Start-Dashboard @('--log-focus', '--epic', "`"$epicRoot`"")
     $first = Wait-DashboardLog 'first frame presented' 60
     if (-not $first) { throw 'The Dashboard never presented a frame' }
     Say "started: $first"
@@ -215,8 +231,8 @@ try {
     # The name: Y on a game opens the box, empty; A on it is text entry over the page. A few letters of a game's
     # name are typed on the VM's keyboard, and kept with Menu: the grid narrows to the games whose name has them,
     # focus on the first.
-    $needle = ((@($library.games)[0].name -replace '[^A-Za-z]', '').ToLower()).Substring(0, 3)
-    $found = @($library.games | Where-Object { $_.name.ToLower().Contains($needle) }).Count
+    $needle = (($steamGames[0].name -replace '[^A-Za-z]', '').ToLower()).Substring(0, 3)
+    $found = @($games | Where-Object { $_.name.ToLower().Contains($needle) }).Count
     Say "the name `"$needle`" is in $found of the $all games' names"
     Press Y (Line 'Name' '0/\d+ ""' 'Name' '' "$all") '12-my-games-full-library-name-box' | Out-Null
     Press A 'TextEntry: .+' | Out-Null
@@ -232,6 +248,41 @@ try {
     Press Start (Line 'Name' '0/\d+ ""' 'Name' 'zqxj' '0') 'nothing-found' | Out-Null
     Press-Stays Down 'nothing is in the grid'
     Press B (Line 'Filter' '0/\d+ ""' 'Name' '' "$all") | Out-Null
+
+    # --- Each launcher's tab (#250): after the Groups' tabs, Steam's then Epic Games', each its launcher's whole
+    # library, installed or not, by name. RB lights the first tab, and on until the log names Steam's.
+    Walk RightShoulder (Line 'Filter' '\d+/\d+ "Steam"' 'Name' '' "$($steamGames.Count)") 12
+    $steamTab = Parts (Focus-Now)
+    if (-not $steamTab -or $steamTab.Name -ne 'Steam') { throw "no tab of Steam's: '$(Focus-Now)'" }
+    $epicAt = "$($steamTab.Tab + 1)/$($steamTab.Tabs)"
+    Press RightShoulder (Line 'Filter' "$epicAt `"Epic Games`"" 'Name' '' "$($epicGames.Count)") '15-full-library-epic-games-tab' | Out-Null
+    if ($steamTab.Tab + 1 -ne $steamTab.Tabs) { $failures += "Epic Games' should be the last tab, after Steam's: '$(Focus-Now)'" }
+    Press-Stays RightShoulder 'Epic Games is the last tab'
+    $steamAt = "$($steamTab.Tab)/$($steamTab.Tabs) `"Steam`""
+    Press LeftShoulder (Line 'Filter' $steamAt 'Name' '' "$($steamGames.Count)") '16-full-library-steam-tab' | Out-Null
+
+    # A game of Steam's that is not installed, found on its tab by its name (the fake's: letters and spaces only, so
+    # that the VM's keyboard types it as it is), focus on it; its Tile menu's first row is Install, and A asks the
+    # stand-in Steam to install it.
+    $absent = @($steamGames | Where-Object { -not $_.installed -and $_.name -match '^[A-Za-z ]+$' }) | Select-Object -First 1
+    if (-not $absent) { throw 'the fake Steam has no game that is not installed' }
+    $typed = $absent.name.ToLower()
+    $hits = @($steamGames | Where-Object { $_.name.ToLower().Contains($typed) }).Count
+    Say "not installed: $($absent.name), found by `"$typed`" in $hits of Steam's $($steamGames.Count) games"
+    Press Y (Line 'Name' $steamAt 'Name' '' "$($steamGames.Count)") | Out-Null
+    Press A 'TextEntry: .+' | Out-Null
+    Type-Keys $typed
+    Press Start (Line 'Tile\(0\)' $steamAt 'Name' ([regex]::Escape($typed)) "$hits") '17-full-library-not-installed-found' | Out-Null
+    $name = [regex]::Escape($absent.name)
+    Press Start "TileMenu: Menu\(Install\) of $name" '18-full-library-install-menu' | Out-Null
+    $mark = Get-DashboardLogLength
+    Press A (Line 'Tile\(0\)' $steamAt 'Name' ([regex]::Escape($typed)) "$hits") | Out-Null
+    Expect-Logged "^store: asking Steam to install ${name}: app_install \d+$" $mark 'Install' | Out-Null
+    Expect-Logged "^queue: $name joined, asked for$" $mark 'Install, the Queue' | Out-Null
+    if ((Get-Foreground).Title -ne 'Xbox Series Dashboard') { Say "note: put in front: $(Set-Foreground 'Xbox Series Dashboard')" }
+    Picture '19-full-library-installing'
+    # B clears the name: the whole of Steam's tab again, the game still on it.
+    Press B (Line 'Tile\(\d+\)' $steamAt 'Name' '' "$($steamGames.Count)") | Out-Null
 
     # B with no name is Home.
     Press B 'Recent\(\d+\)' 'home-again' | Out-Null

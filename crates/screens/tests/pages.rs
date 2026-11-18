@@ -170,7 +170,8 @@ fn see_all_opens_full_library_on_its_groups_filter_and_b_comes_back_on_see_all_a
         assert_eq!(home.home_focus(), see_all);
         let at_rest = rests(&home);
         // Full library on that filter's tab, focus on its first game, the grid in the filter's own order.
-        let (tab, tabs, games) = (group + 1, shown.len(), filter.games.len());
+        // The tabs are the Groups and, after them, each launcher's whole library.
+        let (tab, tabs, games) = (group + 1, home.library().tabs().count(), filter.games.len());
         let sort = format!(
             "{:?}{}",
             filter.sort,

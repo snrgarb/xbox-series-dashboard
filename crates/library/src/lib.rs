@@ -214,6 +214,8 @@ impl Database {
             tx.pragma_update(None, "user_version", done as i64 + 1)?;
             tx.commit()?;
         }
+        // A database from before the launchers had filters gains them.
+        filters::sync_launchers(&conn)?;
         Ok(Self { conn, art: None, folder: None })
     }
 
@@ -470,6 +472,8 @@ impl Database {
                 tx.execute("INSERT INTO settings (key, value) VALUES (?1, 'taken')", [&key])?;
             }
         }
+        // A launcher that has its first game, or has lost its last, gains or loses its filter.
+        filters::sync_launchers(&tx)?;
         tx.commit()?;
         Ok(synced)
     }
