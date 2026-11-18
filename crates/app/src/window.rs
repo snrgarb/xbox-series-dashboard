@@ -679,7 +679,12 @@ impl App {
             if let Some(toast) = toasts.on_screen() {
                 let waiting = toasts.waiting();
                 let (text, kind, told) = (&toast.text, toast.kind, toast.told_line());
-                eprintln!("toasts: shown {text:?} ({kind:?}){told}, {waiting} waiting at {at:.0} ms");
+                if kind.is_private() {
+                    // Who wrote and what is never logged (docs/spec/party-chats.md, 10).
+                    eprintln!("toasts: shown ({kind:?}), {waiting} waiting at {at:.0} ms");
+                } else {
+                    eprintln!("toasts: shown {text:?} ({kind:?}){told}, {waiting} waiting at {at:.0} ms");
+                }
             }
         }
     }

@@ -645,7 +645,7 @@ impl Dashboard {
     }
 
     /// Something the web session tells once, as it happens. A captcha or a refusal is a prompt over the Guide, which
-    /// opens for it; the Toasts for a message, a mention and a ring are ticket #202's, and are not built yet.
+    /// opens for it. A message, a mention and a ring raise a Toast (docs/spec/party-chats.md, 7).
     pub fn direct_event(&mut self, event: &model::discord_dms::DirectEvent) {
         use model::discord_dms::DirectEvent;
         match event {
@@ -659,13 +659,106 @@ impl Dashboard {
                 }
                 self.effects.push(Effect::Sound(Sound::PromptOpen));
             }
-            // Toasts (#202): the hook is here.
+            DirectEvent::Message { channel, name, group, line, picture } => self.direct_message_toast(
+                channel,
+                name.as_str(),
+                group.as_ref().map(|group| group.as_str()),
+                line.as_str(),
+                picture,
+            ),
+            DirectEvent::Mention { name, channel_name } => {
+                self.direct_mention_toast(name.as_str(), channel_name.as_str())
+            }
+            DirectEvent::Ring(ring) => self.ring_toast(ring),
+            DirectEvent::RingEnded(channel) => self.toasts.withdraw(ToastKind::DiscordCall, channel),
             DirectEvent::Sent { channel, nonce, message } => self.guide.sent(channel, *nonce, message),
             DirectEvent::NotSent { channel, nonce } => self.guide.not_sent(channel, *nonce),
-            DirectEvent::Message { .. }
-            | DirectEvent::Mention { .. }
-            | DirectEvent::Ring(_)
-            | DirectEvent::RingEnded(_) => {}
+        }
+    }
+
+    /// Whether a Toast of Discord's kind shows now: its setting is on, and a game running allows it (While playing,
+    /// docs/spec/party-chats.md, 7.4). Toasts never take the pad from a game, so showing is safe.
+    fn discord_toast_allowed(&self, kind: ToastKind) -> bool {
+        let wanted = match kind {
+            ToastKind::DiscordDm => self.options.notify_messages,
+            ToastKind::DiscordMention => self.options.notify_mentions,
+            _ => self.options.notify_calls,
+        };
+        let playing = match self.options.while_playing {
+            WhilePlaying::ShowAll => true,
+            WhilePlaying::CallsOnly => kind == ToastKind::DiscordCall,
+            WhilePlaying::None => false,
+        };
+        wanted && (playing || self.playing.is_none())
+    }
+
+    /// A Direct Message's Toast (7.1): "Ana: hello", "Ana in Raid night: hello", or without the text "Ana sent you a
+    /// message" / "Ana in Raid night". One waiting for the same conversation is replaced: "Ana: 3 new messages".
+    fn direct_message_toast(
+        &mut self,
+        channel: &model::discord_dms::Id,
+        name: &str,
+        group: Option<&str>,
+        line: &str,
+        picture: &Option<model::discord_dms::Picture>,
+    ) {
+        if !self.discord_toast_allowed(ToastKind::DiscordDm) || self.guide.conversation_open(channel) {
+            return;
+        }
+        let who = match group {
+            Some(group) => format!("{name} in {group}"),
+            None => name.to_string(),
+        };
+        let first = line.lines().next().unwrap_or_default().trim();
+        let before = self.toasts.waiting_for(ToastKind::DiscordDm, channel).and_then(|toast| toast.who.as_ref());
+        let count = before.map_or(1, |(_, count)| count + 1);
+        let text = if count > 1 {
+            format!("{who}: {count} new messages")
+        } else if first.is_empty() || !self.options.notify_text {
+            match group {
+                Some(_) => who.clone(),
+                None => format!("{name} sent you a message"),
+            }
+        } else {
+            format!("{who}: {first}")
+        };
+        let toast = Toast {
+            channel: Some(channel.clone()),
+            who: Some((who, count)),
+            avatar: picture.clone(),
+            ..Toast::new(ToastKind::DiscordDm, text, self.options.use_guide)
+        };
+        if !self.toasts.replace_waiting(toast.clone()) {
+            self.toast(toast);
+        }
+    }
+
+    /// A mention's Toast (7.2): "Ana mentioned you in #general", Discord's mark.
+    fn direct_mention_toast(&mut self, name: &str, channel_name: &str) {
+        if !self.discord_toast_allowed(ToastKind::DiscordMention) {
+            return;
+        }
+        let text = format!("{name} mentioned you in #{channel_name}");
+        self.toast(Toast::new(ToastKind::DiscordMention, text, self.options.use_guide));
+    }
+
+    /// A DM call's Toast (7.3): "Ana is calling", up to 30 s, before those waiting. One ring is one Toast, by its
+    /// channel, however many connections saw it.
+    fn ring_toast(&mut self, ring: &model::discord_dms::Ring) {
+        if !self.discord_toast_allowed(ToastKind::DiscordCall) || self.toasts.has(ToastKind::DiscordCall, &ring.channel)
+        {
+            return;
+        }
+        let text = format!("{} is calling", ring.caller.as_str());
+        let toast = Toast {
+            channel: Some(ring.channel.clone()),
+            avatar: ring.picture.clone(),
+            ..Toast::new(ToastKind::DiscordCall, text, self.options.use_guide)
+        };
+        if self.startup.is_some() || self.greeting_owed {
+            self.held_toasts.push(toast);
+        } else if self.toasts.post_first(toast) {
+            self.effects.push(Effect::Sound(self.toast_sound()));
         }
     }
 
@@ -1429,10 +1522,10 @@ impl Dashboard {
                     }
                 }
                 // A tap while a Toast is on screen opens the Guide on what the Toast is about. Opening drops it.
-                let toast = self.toasts.on_screen().map(|toast| toast.kind);
+                let toast = self.toasts.on_screen().cloned();
                 self.open_guide();
                 if let Some(toast) = toast.filter(|_| self.guide.is_open()) {
-                    self.show_what_toast_told(toast);
+                    self.show_what_toast_told(&toast);
                 }
             }
             return false;
@@ -1887,10 +1980,30 @@ impl Dashboard {
 
     /// The Guide, just opened by a tap while a Toast of this kind was on screen, shows what the Toast was about
     /// (docs/spec/guide.md, 9.5). An Uninstalled Toast's is the Guide as it opens.
-    fn show_what_toast_told(&mut self, toast: ToastKind) {
-        match toast {
+    fn show_what_toast_told(&mut self, toast: &Toast) {
+        match toast.kind {
             ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled | ToastKind::Stopped => {}
             ToastKind::Notification => self.open_notifications(),
+            // Discord's: the tab; a DM's with its conversation open, focus on the reply box; a ring's on Answer (the
+            // tab's first focus while one rings).
+            ToastKind::DiscordDm | ToastKind::DiscordMention | ToastKind::DiscordCall => {
+                if !self.status.discord {
+                    return;
+                }
+                let around = Around {
+                    library: &self.library,
+                    playing: self.playing,
+                    discord: self.status.discord,
+                    audio: &self.audio,
+                    notifications: self.toasts.notifications(),
+                    now_playing: self.now_playing.card(self.now),
+                };
+                self.guide.show_tab(guide::Tab::Discord, around);
+                if let (ToastKind::DiscordDm, Some(channel)) = (toast.kind, &toast.channel) {
+                    self.guide.open_conversation(channel.clone());
+                    self.take_direct();
+                }
+            }
             // An achievement's opens it where the Profile's totals and last unlocks are, Rare or not.
             ToastKind::Greeting | ToastKind::Achievement | ToastKind::RareAchievement => {
                 let around = Around {
@@ -2004,6 +2117,9 @@ impl Dashboard {
             | ToastKind::Greeting
             | ToastKind::Achievement
             | ToastKind::RareAchievement
+            | ToastKind::DiscordDm
+            | ToastKind::DiscordMention
+            | ToastKind::DiscordCall
             | ToastKind::Stopped => return,
         };
         let art = Some(Box::new(found.clone()));

@@ -28,6 +28,8 @@ const TILE_FILL: Color = Color::argb(0x26FFFFFF);
 const MARK: f32 = 32.0;
 const MARK_GAP: f32 = 12.0;
 const MARK_DOWN: f32 = 1.0;
+/// The largest an avatar is decoded to: twice the 80 it is drawn at.
+const AVATAR_DECODED: u32 = 160;
 
 /// Coming in: from 0.3 of its size to all of it, fading in, over 300 ms.
 const IN_SECONDS: f32 = 0.3;
@@ -194,6 +196,21 @@ pub fn draw(ui: &mut Ui, toast: &Toast, age: f32, going: Option<f32>) {
                 ToastKind::Greeting => {
                     profile::picture(ui, at(tile.grow(-8.0)), toast.picture.as_ref().unwrap_or(&Default::default()))
                 }
+                // The sender's or the caller's avatar, round and 80 across, bare on the card; Discord's mark at 48 on
+                // the lighter square without one, and for a mention.
+                ToastKind::DiscordDm | ToastKind::DiscordMention | ToastKind::DiscordCall => match &toast.avatar {
+                    Some(picture) => {
+                        let rect = at(tile.grow(-8.0));
+                        let key = ui::memory_art::key(&picture.0, AVATAR_DECODED);
+                        ui.art(rect, &key, ui::Crop::Center, 1.0, rect.w / 2.0);
+                    }
+                    None => {
+                        ui.fill(at(tile), TILE_FILL, 4.0 * scale);
+                        let mark = 48.0 * scale;
+                        let (x, y) = (across(tile.center().0), cy);
+                        marks::discord_mark(ui, Rect::new(x - mark / 2.0, y - mark / 2.0, mark, mark), Color::WHITE);
+                    }
+                },
                 // A game's cover, the tile's whole square cut from its middle and bare on the card; its kind's
                 // icon until it is decoded, or with none.
                 ToastKind::Queued | ToastKind::Installed | ToastKind::Uninstalled | ToastKind::Stopped => {
