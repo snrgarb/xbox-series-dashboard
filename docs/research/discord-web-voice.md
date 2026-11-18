@@ -173,7 +173,7 @@ yes/no`.
 | --- | --- |
 | `servers: selectors matched: guildsnav=1 items=n servers=s name_from_dnd=a name_from_aria=b folders=f; DM rows on the first screen d` | The server bar: `[data-list-item-id^="guildsnav___"]` items whose id is a number are servers; names from the item's `data-dnd-name` parent or its `aria-label`. DM rows are the first screen's only (the list is virtualised; `--dms` reads it whole) |
 | `server: found (name matched exactly), opened by history.pushState + popstate: its channel list shown yes after n ms` | The server opened by its route, `/channels/<id>` |
-| `channels: r rows read over p pages (scroller found yes): voice by label v, stage by label s, name_ class n, users shown in voice channels u` | The channel list read whole; voice channels told by their accessible label "(voice channel)" (an English page) |
+| `channels: r rows read over p pages (scroller found yes): with any aria-label a, links l, voice by label v, stage by label s, with users w (u users), name_ class n` | The channel list read whole. A row is voice if any aria-label on it, inside it or on its list item says "voice", or users show in or right after its list item. The first TV run (labels on the row only) told none: 29 rows, 0 voice |
 | `voice-list: n voice channels in that server (stage channels among them s)` | |
 | `voice-list: the names written to <file> (not to this log)` | `voice-names.txt`: `server<TAB>name` lines, and `channel<TAB>name<TAB>people in it<TAB>voice/stage` |
 
@@ -197,6 +197,24 @@ yes/no`.
 | `leave: the voice panel is gone after n ms; peer connections open 0, connected 0` | **Left** |
 | `LEAVE NOT CONFIRMED: ...` | Could not see it leave: exit 13; look in Discord |
 | `incoming: a ring is still shown at the end: left as it is (not declined)` | |
+
+### Second build: what the page cannot hide, and its shape
+
+The first TV call worked on Discord's side (connected 3.1 s after the press, held 90 s, left in 514 ms; 760-970 MB
+private, 8-18% of one core), but every in-page count read 0: the hooks never ran (the note at the top; that run had the first build). The second build
+no longer depends on them:
+
+| Line | Means |
+| --- | --- |
+| `webaudio: DevTools WebAudio enabled: the page's AudioContexts are followed` | Chromium's own `WebAudio` domain: `contextCreated`/`contextChanged`/`contextWillBeDestroyed` events and `WebAudio.getRealtimeData` |
+| `targets (<when>): page 1, iframe n, worker n, ...` | DevTools' targets by type: whether Discord runs parts of the call in frames or workers |
+| `hold t s, outside the page: webaudio (DevTools): realtime contexts n (running r, made so far m), clocks +1.00 s, render capacity 0.05; Windows: web view output sessions n (active a, peak 0.120), input sessions n (active a, peak 0.040); default output peak 0.150, default input peak 0.050` | **Once a second, page-independent**: the page's AudioContexts and their clocks from Chromium, and Windows' own meters: the web view processes' audio sessions on the default output (sound it plays) and input (the microphone it takes), and each endpoint's peak. An active output session with a peak above 0 while the other person talks is sound reaching Windows |
+| `voice-join: the channel found (name matched exactly, told as unknown: no voice sign found: the only row of that name; ...)` | No voice sign was found, but exactly one row has that name: it is pressed and the voice panel decides |
+| `shape (<when>): n lines written to <file>` | `--dump-shape [--server-file f]`, or the `shape` control file during a hold: `shape.txt` beside the exe holds the page's shape where the selectors look (channel rows and what follows them, the user area, the voice status, voice users, speaking classes, the call area, tiles, the ring): tags, roles, `data-list-item-id` with digits as `#`, Discord's hashed class names, aria-labels and titles with every word outside a fixed list of Discord UI words as `x`, svg paths as a hash, text as its length unless it is all UI words. No names; read it before sharing all the same |
+
+Long command lines: `--args-file <f>` reads more arguments from a file, one a line (a name with spaces is one line;
+`#` lines skipped), so a task's `/tr` stays under schtasks' 261 characters; `--dir <d>` sets the folder relative names
+are taken from (the exe's own by default).
 
 ### Exit codes
 

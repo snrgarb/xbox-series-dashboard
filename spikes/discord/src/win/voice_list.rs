@@ -53,13 +53,16 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
                         list.len(),
                         list.iter().filter(|c| c["stage"] == true).count()
                     );
-                    text.push_str("# that server's voice channels: name, how many are in it, stage or voice\n");
-                    for c in &list {
+                    text.push_str(
+                        "# that server's channel rows: name, users shown in it, told as voice (yes/no), a link (yes/no)\n",
+                    );
+                    for c in v["rows"].as_array().into_iter().flatten() {
                         text.push_str(&format!(
-                            "channel\t{}\t{}\t{}\n",
+                            "channel\t{}\t{}\t{}\t{}\n",
                             clean(&c["name"]),
                             c["users"],
-                            if c["stage"] == true { "stage" } else { "voice" }
+                            if c["voice"] == true { "voice" } else { "-" },
+                            if c["link"] == true { "link" } else { "-" }
                         ));
                     }
                 }

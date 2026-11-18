@@ -20,11 +20,72 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId};
 
 use super::host::{self, pump, yes, Host, Loader, Show};
-use super::procs;
+use super::webaudio::WebAudio;
+use super::{meter, procs};
 use crate::args::{Options, Step, Way};
 use crate::say;
+use std::cell::RefCell;
 
 const HOOKS: &str = include_str!("../js/voice_hooks.js");
+const SHAPE: &str = include_str!("../js/shape.js");
+
+thread_local! {
+    /// The DevTools WebAudio follower of the step's web view.
+    static AUDIO: RefCell<Option<WebAudio>> = const { RefCell::new(None) };
+}
+
+/// What else runs Discord's page: DevTools' targets by type (frames, workers), counted.
+pub fn targets(host: &Host, when: &str) {
+    match host.cdp("Target.getTargets", json!({})) {
+        Ok(v) => {
+            let mut kinds: std::collections::BTreeMap<String, u32> = Default::default();
+            for t in v["targetInfos"].as_array().into_iter().flatten() {
+                *kinds.entry(t["type"].as_str().unwrap_or("?").to_string()).or_default() += 1;
+            }
+            let line: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
+            say!("targets ({when}): {}", if line.is_empty() { "none listed".into() } else { line.join(", ") });
+        }
+        Err(e) => say!("targets ({when}): Target.getTargets refused: {e}"),
+    }
+}
+
+/// The page's shape (`js/shape.js`) written to `--shape`; the log says only that and how many lines.
+pub fn dump_shape(host: &Host, options: &Options, when: &str) {
+    match host.eval(SHAPE) {
+        Ok(Value::String(text)) => {
+            let text = format!("# discord-spike shape, {when}. No names; check before sharing.\n{text}");
+            match std::fs::write(&options.shape, &text) {
+                Ok(()) => say!("shape ({when}): {} lines written to {}", text.lines().count(), options.shape.display()),
+                Err(e) => say!("shape ({when}): not written to {}: {e}", options.shape.display()),
+            }
+        }
+        Ok(_) => say!("shape ({when}): the script returned no text"),
+        Err(e) => say!("shape ({when}): the script failed: {e}"),
+    }
+}
+
+/// The once-a-second extras that do not depend on the page's scripts: DevTools WebAudio, and Windows' meters for
+/// the web view's processes.
+fn outside(host: &Host, last_clock: &mut f64) -> String {
+    let audio = AUDIO.with(|a| a.borrow().as_ref().map(|w| w.read(host)));
+    let pids: Vec<u32> = procs::webview(&host.env).iter().map(|u| u.pid).collect();
+    let windows = meter::read(&pids).line();
+    match audio {
+        Some(a) => {
+            let line = format!(
+                "webaudio (DevTools): realtime contexts {} (running {}, made so far {}), clocks +{:.2} s, render capacity {:.2}; {windows}",
+                a.count,
+                a.running,
+                a.created,
+                a.clock - *last_clock,
+                a.capacity
+            );
+            *last_clock = a.clock;
+            line
+        }
+        None => windows,
+    }
+}
 const SAMPLE: &str = include_str!("../js/voice_sample.js");
 const MARK: &str = include_str!("../js/mark.js");
 pub const SERVERS: &str = include_str!("../js/servers.js");
@@ -81,6 +142,8 @@ pub fn open(options: &Options, loader: &Loader) -> Result<Host, i32> {
     };
     // WebView2's own document-created script (the first TV run's DevTools Page.addScriptToEvaluateOnNewDocument
     // answered ok but never ran in Discord's page: the timer read 0 ticks).
+    // The page's AudioContexts through DevTools, whatever the page's own scripts do.
+    AUDIO.with(|a| *a.borrow_mut() = Some(WebAudio::start(&host)));
     match host.add_script(HOOKS) {
         Ok(()) => say!("voice: the hooks are set to run at the page's start (AddScriptToExecuteOnDocumentCreated)"),
         Err(e) => say!("voice: the hooks could not be set to run at the start ({e})"),
@@ -313,7 +376,7 @@ pub fn leave(host: &Host, cid: Option<&str>, way: Way) -> bool {
 
 /// The control files beside the exe: an old one is removed at the start, so only the lead's new ones act.
 pub fn clear_controls(dir: &Path) {
-    for name in ["mute", "deafen", "leave", "answer", "decline"] {
+    for name in ["mute", "deafen", "leave", "answer", "decline", "shape"] {
         let path = dir.join(name);
         if path.exists() {
             let _ = std::fs::remove_file(&path);
@@ -475,8 +538,11 @@ fn hold(host: &Host, options: &Options, cid: Option<&str>, incoming: bool) -> He
     let mut ring = false;
     let started = Instant::now();
     let mut second = 0;
+    let mut clock = 0.0;
+    let _ = outside(host, &mut clock);
+    targets(host, "the hold's start");
     say!(
-        "hold: {} s; control files in {}: mute, deafen, leave{}",
+        "hold: {} s; control files in {}: mute, deafen, leave, shape{}",
         options.hold,
         options.control.display(),
         if incoming { ", answer, decline" } else { "" }
@@ -489,6 +555,10 @@ fn hold(host: &Host, options: &Options, cid: Option<&str>, incoming: bool) -> He
         let s = sample(host, cid);
         if !incoming || in_call(&s) {
             say!("{}", line(second, &s, &last));
+            say!("hold {second} s, outside the page: {}", outside(host, &mut clock));
+        }
+        if take_control(&options.control, "shape") {
+            dump_shape(host, options, &format!("at {second} s of the hold"));
         }
         if incoming && (s["ring"] == true) != ring {
             ring = s["ring"] == true;
@@ -573,8 +643,9 @@ pub fn join(options: &Options, loader: &Loader) -> i32 {
     log_channels(&found);
     if found["found"] != 1 || found["stage"] == true {
         say!(
-            "voice-join: {} voice channels of that name{}: nothing joined",
+            "voice-join: {} channels of that name ({} kind){}: nothing joined",
             found["found"],
+            found["kind"].as_str().unwrap_or("?"),
             if found["stage"] == true { " (a stage channel: not tried)" } else { "" }
         );
         host.close();
@@ -583,8 +654,14 @@ pub fn join(options: &Options, loader: &Loader) -> i32 {
     let channel_id = found["cid"].as_str().unwrap_or_default().to_string();
     let cid = Some(channel_id.as_str());
     say!(
-        "voice-join: the channel found (name matched {}); already in a call: {}",
+        "voice-join: the channel found (name matched {}, told as {}: {}); already in a call: {}",
         if found["exact"] == true { "exactly" } else { "ignoring case" },
+        found["kind"].as_str().unwrap_or("?"),
+        if found["kind"] == "voice" {
+            "labelled voice or showing users"
+        } else {
+            "no voice sign found: the only row of that name; the press shows what it is"
+        },
         yes(in_call(&sample(&host, cid)))
     );
     let pressed = Instant::now();
@@ -720,15 +797,49 @@ pub fn log_servers(v: &Value) {
 pub fn log_channels(v: &Value) {
     let c = &v["counts"];
     say!(
-        "channels: {} rows read over {} pages (scroller found {}): voice by label {}, stage by label {}, name_ class {}, users shown in voice channels {}",
+        "channels: {} rows read over {} pages (scroller found {}): with any aria-label {}, links {}, voice by label {}, stage by label {}, with users {} ({} users), name_ class {}",
         c["rows"],
         v["pages"],
         yes(v["scroller"] == true),
+        c["labelled"],
+        c["links"],
         c["voice_by_label"],
         c["stage_by_label"],
-        c["name_class"],
-        c["voice_users"]
+        c["with_users"],
+        c["voice_users"],
+        c["name_class"]
     );
+}
+
+/// `--dump-shape [--server-file f]`: the signed-in page (that server open, if given) written as its shape.
+pub fn shape(options: &Options, loader: &Loader) -> i32 {
+    let server = match options.server_file.as_deref() {
+        Some(path) => match read_name(Some(path), "server") {
+            Ok(name) => Some(name),
+            Err(e) => {
+                say!("dump-shape: {e}");
+                return 10;
+            }
+        },
+        None => None,
+    };
+    let host = match open(options, loader) {
+        Ok(host) => host,
+        Err(code) => return code,
+    };
+    targets(&host, "the app shown");
+    let mut code = 0;
+    if let Some(server) = server {
+        if open_server(&host, &server).is_some() {
+            // The list fills in a moment after the route.
+            pump(Duration::from_secs(2));
+        } else {
+            code = 4;
+        }
+    }
+    dump_shape(&host, options, "--dump-shape");
+    host.close();
+    code
 }
 
 /// `--call`: the DM named, opened by route, its Start Voice Call button pressed once; held; left.
@@ -815,6 +926,7 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
         Step::VoiceJoin => join(options, loader),
         Step::Call => call(options, loader),
         Step::VoiceIncoming => incoming(options, loader),
+        Step::DumpShape => shape(options, loader),
         _ => unreachable!(),
     }
 }

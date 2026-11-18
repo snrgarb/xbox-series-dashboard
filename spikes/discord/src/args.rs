@@ -19,6 +19,9 @@ steps (exactly one):
                           joins that server's voice channel named in <f>, once; holds --hold s; always leaves
   --call --to-file <f>    starts a voice call in the DM named in <f>, once; holds --hold s; always leaves
   --voice-incoming        waits --hold s for an incoming call; the answer / decline control files press its buttons
+  --dump-shape [--server-file <f>]
+                          writes the page's shape (tags, roles, classes, Discord UI words of labels, icon hashes;
+                          no names) of the channel list, user panel, voice panel and call area to --shape
 options (a relative path is from the exe's folder):
   --data <dir>            the session (WebView2's user data folder)  [<exe dir>\\session]
   --log <file>            appended to                                  [<exe dir>\\discord-spike.log]
@@ -39,7 +42,10 @@ options (a relative path is from the exe's folder):
   --way <w>               how the voice steps press Discord's buttons: auto (key, then click, then route, each
                           only if the one before showed nothing), key, click, route  [auto]
   --voice-names <file>    --voice-list writes server and voice channel names here  [<exe dir>\\voice-names.txt]
-control files, made beside the exe while a voice step holds: mute, deafen, leave, answer, decline (each acted on
+  --shape <file>          where the shape goes                          [<exe dir>\\shape.txt]
+  --dir <dir>             the folder every relative name is taken from  [the exe's folder]
+  --args-file <f>         more arguments from <f>, one a line (# lines skipped): for long command lines
+control files, made in --dir while a voice step holds: mute, deafen, leave, answer, decline, shape (each acted on
 once, then removed)";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +60,7 @@ pub enum Step {
     VoiceJoin,
     Call,
     VoiceIncoming,
+    DumpShape,
 }
 
 impl Step {
@@ -69,6 +76,7 @@ impl Step {
             Step::VoiceJoin => "voice-join",
             Step::Call => "call",
             Step::VoiceIncoming => "voice-incoming",
+            Step::DumpShape => "dump-shape",
         }
     }
 
@@ -161,6 +169,8 @@ pub struct Options {
     pub voice_names: PathBuf,
     /// Where the control files (`mute`, `deafen`, `leave`, `answer`, `decline`) appear: the exe's folder.
     pub control: PathBuf,
+    /// `--dump-shape` and the `shape` control file write the page's shape here.
+    pub shape: PathBuf,
 }
 
 impl Options {
@@ -181,7 +191,42 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     parse_in(args, exe.parent().unwrap_or(Path::new(".")))
 }
 
-pub fn parse_in(args: &[String], base: &Path) -> Result<Options, String> {
+/// `--dir <d>` (the folder relative names are taken from, itself from the exe's folder) and `--args-file <f>` (more
+/// arguments, one a line, `#` lines skipped: for command lines longer than schtasks' 261 characters), resolved first.
+fn expand(args: &[String], exe_dir: &Path) -> Result<(Vec<String>, PathBuf), String> {
+    let mut base = exe_dir.to_path_buf();
+    if let Some(i) = args.iter().position(|a| a == "--dir") {
+        let dir = args.get(i + 1).ok_or("--dir needs a value")?;
+        base = exe_dir.join(dir);
+    }
+    let mut out = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--dir" => {
+                it.next();
+            }
+            "--args-file" => {
+                let path = base.join(it.next().ok_or("--args-file needs a value")?);
+                let text =
+                    std::fs::read_to_string(&path).map_err(|e| format!("--args-file {}: {e}", path.display()))?;
+                let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+                for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+                    if line == "--args-file" || line == "--dir" {
+                        return Err(format!("{line} cannot come from an --args-file"));
+                    }
+                    out.push(line.to_string());
+                }
+            }
+            _ => out.push(arg.clone()),
+        }
+    }
+    Ok((out, base))
+}
+
+pub fn parse_in(args: &[String], exe_dir: &Path) -> Result<Options, String> {
+    let (args, base) = expand(args, exe_dir)?;
+    let (args, base) = (args.as_slice(), base.as_path());
     let mut step = None;
     let mut options = Options {
         step: Step::Probe,
@@ -206,6 +251,7 @@ pub fn parse_in(args: &[String], base: &Path) -> Result<Options, String> {
         way: Way::Auto,
         voice_names: base.join("voice-names.txt"),
         control: base.to_path_buf(),
+        shape: base.join("shape.txt"),
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -225,6 +271,8 @@ pub fn parse_in(args: &[String], base: &Path) -> Result<Options, String> {
             "--voice-join" => set_step(Step::VoiceJoin)?,
             "--call" => set_step(Step::Call)?,
             "--voice-incoming" => set_step(Step::VoiceIncoming)?,
+            "--dump-shape" => set_step(Step::DumpShape)?,
+            "--shape" => options.shape = base.join(value("--shape")?),
             "--data" => options.data = base.join(value("--data")?),
             "--log" => options.log = base.join(value("--log")?),
             "--quit" => options.quit = base.join(value("--quit")?),
@@ -291,8 +339,8 @@ pub fn parse_in(args: &[String], base: &Path) -> Result<Options, String> {
     if step == Step::VoiceJoin && (options.server_file.is_none() || options.channel_file.is_none()) {
         return Err("--voice-join needs both --server-file and --channel-file".into());
     }
-    if !matches!(step, Step::VoiceJoin | Step::VoiceList) && options.server_file.is_some() {
-        return Err("--server-file is for --voice-list and --voice-join only".into());
+    if !matches!(step, Step::VoiceJoin | Step::VoiceList | Step::DumpShape) && options.server_file.is_some() {
+        return Err("--server-file is for --voice-list, --voice-join and --dump-shape only".into());
     }
     if step != Step::VoiceJoin && options.channel_file.is_some() {
         return Err("--channel-file is for --voice-join only".into());
@@ -403,6 +451,30 @@ mod tests {
         assert_eq!(parse("--voice-probe --hide visible-unshown").unwrap().hide, Hide::VisibleUnshown);
         assert_eq!(parse("--voice-join --server-file S --channel-file C --way click").unwrap().way, Way::Click);
         assert!(parse("--voice-probe --way swipe").is_err());
+    }
+
+    #[test]
+    fn dir_and_args_file() {
+        let o = parse("--dms --dir D").unwrap();
+        assert_eq!((o.data.as_path(), o.control.as_path()), (Path::new("/spike/D/session"), Path::new("/spike/D")));
+        let dir = std::env::temp_dir().join(format!("discord-spike-args-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("a.txt"),
+            "\u{feff}# the join\n--voice-join\n--server-file\nmy server.txt\n\n--hold\n120\n",
+        )
+        .unwrap();
+        let args = ["--args-file".to_string(), "a.txt".into(), "--channel-file".into(), "c.txt".into()];
+        let o = parse_in(&args, &dir).unwrap();
+        assert_eq!(o.step, Step::VoiceJoin);
+        assert_eq!(o.server_file, Some(dir.join("my server.txt")), "a line is one argument, spaces and all");
+        assert_eq!((o.hold, o.channel_file), (120, Some(dir.join("c.txt"))));
+        std::fs::write(dir.join("b.txt"), "--args-file\nb.txt\n").unwrap();
+        assert!(parse_in(&["--args-file".to_string(), "b.txt".into()], &dir).is_err(), "no nesting");
+        assert!(parse("--dms --args-file missing.txt").is_err());
+        assert!(parse("--dms --dir").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(parse("--dump-shape --server-file S").unwrap().shape, Path::new("/spike/shape.txt"));
     }
 
     #[test]

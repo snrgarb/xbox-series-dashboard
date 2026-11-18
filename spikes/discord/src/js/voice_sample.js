@@ -32,6 +32,10 @@
   const call = one('[class*="callContainer_"]') || one('[class*="voiceCallWrapper_"]');
   const tiles = all('[data-selenium-video-tile], [class*="tile_"]', call || document.createElement("div"));
   const scope = channelBox || call;
+  // A channel's users may follow its list item rather than sit in it.
+  const next = channelBox && channelBox.nextElementSibling;
+  const follow = next && !next.querySelector('[data-list-item-id^="channels___"]') ? next : null;
+  const inScope = (s) => (scope ? all(s, scope).length : 0) + (follow ? all(s, follow).length : 0);
 
   // Audio, from the objects Discord made (js/voice_hooks.js).
   R.pcs = R.pcs.filter((pc) => pc.connectionState !== "closed");
@@ -81,10 +85,10 @@
     mute: sw(/^(mute|unmute)$/i),
     deafen: sw(/^(deafen|undeafen)$/i),
     channelRow: !!row,
-    voiceUsers: scope ? all('[class*="voiceUser_"]', scope).length : 0,
-    voiceUsersPage: all('[class*="voiceUser_"]').length,
-    speakingNames: scope ? all('[class*="usernameSpeaking_"]', scope).length : 0,
-    speakingAvatars: scope ? all('[class*="avatarSpeaking_"]', scope).length : 0,
+    voiceUsers: inScope('[class*="voiceUser"]'),
+    voiceUsersPage: all('[class*="voiceUser"]').length,
+    speakingNames: inScope('[class*="usernameSpeaking"]'),
+    speakingAvatars: inScope('[class*="avatarSpeaking"]'),
     speakingTiles: call ? all('[class*="speaking_"]', call).length : 0,
     callView: !!call,
     tiles: tiles.length,

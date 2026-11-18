@@ -14,10 +14,10 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR,
     CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
-    CreateCoreWebView2EnvironmentCompletedHandler, ExecuteScriptCompletedHandler, NavigationCompletedEventHandler,
-    NavigationStartingEventHandler, NewWindowRequestedEventHandler, NotificationReceivedEventHandler,
-    PermissionRequestedEventHandler, ProcessFailedEventHandler, SetPermissionStateCompletedHandler,
-    SourceChangedEventHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, DevToolsProtocolEventReceivedEventHandler,
+    ExecuteScriptCompletedHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
+    NewWindowRequestedEventHandler, NotificationReceivedEventHandler, PermissionRequestedEventHandler,
+    ProcessFailedEventHandler, SetPermissionStateCompletedHandler, SourceChangedEventHandler,
 };
 use windows::core::{s, w, Interface, BOOL, HRESULT, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -563,6 +563,34 @@ impl Host {
         )
         .map_err(|e| format!("AddScriptToExecuteOnDocumentCreated: {e:?}"))?;
         rx.recv().map_err(|e| e.to_string())?.map_err(|e| format!("AddScriptToExecuteOnDocumentCreated: {e}"))
+    }
+
+    /// A DevTools protocol event: `handler` gets each one's parameters (its domain must be enabled too).
+    pub fn on_event(&self, name: &str, handler: Box<dyn Fn(Value)>) -> Result<(), String> {
+        unsafe {
+            let receiver = self
+                .webview
+                .GetDevToolsProtocolEventReceiver(&HSTRING::from(name))
+                .map_err(|e| format!("{name}: {e}"))?;
+            let mut token = 0i64;
+            receiver
+                .add_DevToolsProtocolEventReceived(
+                    &DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                        if let Some(args) = args {
+                            let mut p = PWSTR::null();
+                            if args.ParameterObjectAsJson(&mut p).is_ok() && !p.is_null() {
+                                let json = CoTaskMemPWSTR::from(p).to_string();
+                                if let Ok(v) = serde_json::from_str(&json) {
+                                    handler(v);
+                                }
+                            }
+                        }
+                        Ok(())
+                    })),
+                    &mut token,
+                )
+                .map_err(|e| format!("{name}: {e}"))
+        }
     }
 
     /// A DevTools protocol method, waited for: its answer.
