@@ -1,7 +1,10 @@
 # Guide hold: the Guide is one Guide, on the Overlay, over Home and over a game alike; it opens on the monitor the
 # window in front is on; and while it is open over a game the game is held still (docs/spec/guide.md, 7.2): frozen as
 # the Guide takes the foreground, thawed before the foreground goes back, and thawed at the Dashboard's next start if
-# the Dashboard was killed with the Guide open.
+# the Dashboard was killed with the Guide open. Last, with Settings' Pause the game while the Guide is open turned off
+# (#270) in a data folder of the test's own: the Guide opens over the game, the log says `guide: the game is not
+# frozen (Settings)` once, nothing is frozen, and the game runs on under the Guide (its pulse changing under the dim,
+# its "game: beat N" lines counting, its threads not suspended).
 #
 # The game is the stand-in, whose pulse (a square towards its window's bottom right, crates/standin/src/win.rs) changes
 # colour four times a second while it runs. A game that is frozen paints nothing, so the pulse standing still on the
@@ -45,6 +48,34 @@ function Assert-Pulse([string] $What, [bool] $Moving, [bool] $Dimmed, [double] $
     if ($Moving -and $seen.Count -lt 2) { $wrong += "${What}: the game's pulse stood still for $Seconds s: the game is not running" }
     if (-not $Moving -and $seen.Count -ne 1) { $wrong += "${What}: the game's pulse changed colour: the game is not frozen" }
     $wrong
+}
+
+# The stand-in's "game: beat N" lines, one a second while it runs.
+function Get-Beats {
+    @(Get-Content (Join-Path $Out 'standin.log') -ErrorAction SilentlyContinue | Where-Object { $_ -match 'game: beat \d+' })
+}
+
+# The last place --log-focus said focus is, without its prefix.
+function Get-LastFocus {
+    $lines = @(Get-DashboardLog | Where-Object { $_ -match '^focus: ' })
+    if ($lines.Count) { $lines[-1] -replace '^focus: ', '' } else { '' }
+}
+
+# One press, and the line it must bring.
+function Step([string] $Button, [string] $Line) {
+    $mark = Get-DashboardLogLength
+    Push-Button $Button
+    $hit = Wait-DashboardLog $Line 8 -After $mark
+    Say "$Button`: $(if ($hit) { $hit } else { "NO line '$Line' (focus: $(Get-LastFocus))" })"
+    if (-not $hit) { throw "$Button did not bring '$Line'" }
+}
+
+# A press while walking somewhere: one that brings no line is said, and the walk goes by the log again.
+function Walk([string] $Button, [string] $Line) {
+    $mark = Get-DashboardLogLength
+    Push-Button $Button
+    $hit = Wait-DashboardLog $Line 5 -After $mark
+    Say "$Button`: $(if ($hit) { $hit } else { "note: no line '$Line' of this press; the walk goes on" })"
 }
 
 try {
@@ -228,6 +259,89 @@ try {
     Save-Screen 'thawed-after-restart'
     $failures += @(Assert-Pulse 'after the Dashboard started again' $true $false)
     if ($dashboard.HasExited) { $failures += "the Dashboard exited with $($dashboard.ExitCode)" }
+
+    # ---- Settings' Pause the game off (#270): the Guide over the game, and the game runs on under it.
+    # A data folder of the test's own, so the switch turned off here is never left off for the Dashboard's own.
+    Copy-Item $DashboardLog (Join-Path $Out 'dashboard-second.log') -Force
+    Stop-StandInGame
+    Stop-Dashboard
+    $data = Get-TestFolder 'guide-hold-unpaused'
+    Remove-Item $data -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item $data -ItemType Directory -Force | Out-Null
+    $unpausedRecord = Join-Path $data 'frozen-game.txt'
+    $dashboard = Start-Dashboard @('--log-focus', '--data-dir', "`"$data`"")
+    if (-not (Wait-DashboardLog 'first frame presented' 60)) { throw 'The Dashboard never presented a frame (Pause the game off)' }
+    Wait-Greeting | Out-Null
+    Start-Sleep -Seconds 2
+    if ((Get-Foreground).Title -ne $dashboardTitle) { Say "note: put in front: $(Set-Foreground $dashboardTitle)" }
+    for ($i = 0; $i -lt 6 -and (Get-LastFocus) -notmatch 'TopBar\(Settings\)$'; $i++) { Walk Right '^focus: ' }
+    if ((Get-LastFocus) -notmatch 'TopBar\(Settings\)$') { throw "Focus never reached the top bar's Settings (focus: $(Get-LastFocus))" }
+    Step A '^focus: Settings: Rail: General$'
+    Step Right '^focus: Settings: General: Personalisation$'
+    Step Down '^focus: Settings: General: Guide$'
+    Step A '^focus: Settings: Guide: Use the Guide$'
+    Step Down '^focus: Settings: Guide: Pause the game while the Guide is open$'
+    $mark = Get-DashboardLogLength
+    Push-Button A
+    $saved = Wait-DashboardLog '^settings: guide\.pause_game = false$' 8 -After $mark
+    Save-Screen 'pause-the-game-off'
+    Say "Pause the game turned off: $(if ($saved) { $saved } else { 'no settings: guide.pause_game = false line' })"
+    if (-not $saved) { throw 'A on Pause the game did not turn it off' }
+    Step B '^focus: Settings: General: Guide$'
+    Step B '^focus: Settings: Rail: General$'
+    # Out of Settings, Home's focus where it was: a line if it says one.
+    Walk B '^focus: TopBar\('
+    # Down to the Recent row, then Left to its first tile, by the log.
+    Step Down '^focus: Recent\(\d+\)$'
+    for ($i = 0; $i -lt 10 -and (Get-LastFocus) -ne 'Recent(0)'; $i++) { Walk Left '^focus: Recent\(' }
+    if ((Get-LastFocus) -ne 'Recent(0)') { throw "Focus never reached the Recent row's first tile (focus: $(Get-LastFocus))" }
+    Push-Button A
+    if (-not (Wait-DashboardLog '^focus: GameHub: \d+ Hub Play$' 10)) { throw "A did not open the game's hub (Pause the game off)" }
+    $mark = Get-DashboardLogLength
+    Push-Button A
+    if (-not (Wait-DashboardLog 'the game has booted' 60 -After $mark)) { throw "The game never counted as booted (Pause the game off)" }
+    if (-not (Wait-DashboardLog 'Launch screen gone' 10 -After $mark)) { $failures += 'the Launch screen did not go (Pause the game off)' }
+    Start-Sleep -Milliseconds 500
+    $games = @(Get-StandInGame)
+    if ($games.Count -ne 1) { throw "There are $($games.Count) stand-in games running, not one (Pause the game off)" }
+    $gamePid = $games[0].Id
+    Say "the game again, with Pause the game off: process $gamePid; foreground $(Front)"
+    $stoodBefore = @(Get-StoodStill).Count
+
+    $mark = Get-DashboardLogLength
+    $beatsBefore = @(Get-Beats).Count
+    Push-Button Guide
+    $opened = Wait-DashboardLog 'Guide over the game' 10 -After $mark
+    $notFrozen = Wait-DashboardLog '^guide: the game is not frozen \(Settings\)$' 10 -After $mark
+    $atRest = Wait-Until { Test-Colour (Get-DesignPixel 270 900) $panel 6 } 6
+    Save-Screen 'guide-over-game-unpaused'
+    Say "Guide with Pause the game off: $(if ($opened) { $opened } else { 'no Guide over the game line' }); $(if ($notFrozen) { $notFrozen } else { 'no not frozen line' }); foreground $(Front)"
+    if (-not $opened) { $failures += 'the Guide did not open over the game with Pause the game off' }
+    if (-not $atRest) { $failures += "the Guide's panel is not on screen over the game with Pause the game off" }
+    if ((Get-Foreground).Title -ne $overlayTitle) { $failures += "the Guide did not take the foreground with Pause the game off: $(Front)" }
+    if (-not $notFrozen) { $failures += "no 'guide: the game is not frozen (Settings)' line as the Guide opened with Pause the game off" }
+    # The game under the Guide: its pulse moving under the dim, its own log counting, its threads running.
+    $failures += @(Assert-Pulse 'under the Guide, Pause the game off' $true $true)
+    $beatsUnder = @(Get-Beats).Count - $beatsBefore
+    Say "the game's beats said since the Guide opened: $beatsUnder; its threads all suspended: $(Test-Suspended $gamePid)"
+    if ($beatsUnder -lt 2) { $failures += "the game's log did not keep counting under the Guide with Pause the game off ($beatsUnder beat lines)" }
+    if (Test-Suspended $gamePid) { $failures += "the game's threads are suspended under the Guide with Pause the game off" }
+    if (Test-Path $unpausedRecord) { $failures += "a record of a frozen game was written with Pause the game off: $((Get-Content $unpausedRecord -Raw).Trim())" }
+    $saidTimes = @(Find-DashboardLog '^guide: the game is not frozen \(Settings\)$' $mark).Count
+    if ($saidTimes -ne 1) { $failures += "the not frozen line came $saidTimes times in one Guide, not once" }
+
+    $mark2 = Get-DashboardLogLength
+    Push-Button B
+    $closed = Wait-DashboardLog 'Guide closed' 10 -After $mark2
+    $back = Wait-DashboardLog '^overlay: foreground given back to ' 10 -After $mark2
+    Save-Screen 'guide-closed-unpaused'
+    Say "after B, Pause the game off: $(if ($back) { $back } else { 'no foreground given back line' }); foreground $(Front)"
+    if (-not $closed) { $failures += 'the Guide did not close with Pause the game off' }
+    if ((Get-Foreground).Title -ne $game.name) { $failures += "the game did not get the foreground back with Pause the game off: $(Front)" }
+    $freezeLines = @(Find-DashboardLog '^freeze: ' $mark)
+    if ($freezeLines.Count) { $failures += "the game was frozen or thawed with Pause the game off: $($freezeLines -join ' | ')" }
+    if (@(Get-StoodStill).Count -gt $stoodBefore) { $failures += "the game says it stood still under the Guide with Pause the game off: $((Get-StoodStill) -join ' | ')" }
+    if ($dashboard.HasExited) { $failures += "the Dashboard exited with $($dashboard.ExitCode) (Pause the game off)" }
 
     if ($failures.Count -eq 0) { $result = 'PASS' }
 } catch {

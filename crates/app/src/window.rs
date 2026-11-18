@@ -155,6 +155,8 @@ struct App {
     /// Holds the running game still while the Guide is open over it, and lets it go as the Guide hands the
     /// foreground back (docs/spec/guide.md, 7.2). After `launch` here, so it outlives it.
     freezer: Freezer,
+    /// Whether the freeze is wanted under this Guide, by Settings' Pause the game (#270).
+    hold: Hold,
     /// Since when the Guide has been closed with the button that closed it still down.
     release_wait: Option<Instant>,
     /// Who gets the foreground once the Guide has let go of it, when that is not the window that had it as the
@@ -526,6 +528,7 @@ pub fn run(
         launch: None,
         backdrop: Default::default(),
         freezer,
+        hold: Hold::default(),
         release_wait: None,
         hand_back: None,
         sounds: Sounds::open(args, &store),
@@ -2008,7 +2011,9 @@ impl ApplicationHandler for App {
         }
         // The game is let go before it is handed the foreground, so it can take it; and held only once the Overlay
         // has taken the foreground from it, as the Bundle orders the two.
-        if self.freezer.is_frozen() && self.dashboard.overlay() != OverlayShows::Guide {
+        // So is a game frozen as Settings' Pause the game is turned off (#270).
+        let pause = self.dashboard.options().pause_game;
+        if Hold::thaws(self.freezer.is_frozen(), self.dashboard.overlay() == OverlayShows::Guide, pause) {
             self.freezer.thaw();
         }
         let home_hides = self.hand_back();
@@ -2030,9 +2035,14 @@ impl ApplicationHandler for App {
             launch.quitting(self.dashboard.quitting());
             let over_game = self.dashboard.guide_over_game();
             launch.guide(over_game);
-            if over_game && self.overlay.as_ref().is_some_and(|overlay| overlay.mode() == Some(Mode::Guide)) {
-                launch.freeze(&mut self.freezer);
+            let on_overlay = self.overlay.as_ref().is_some_and(|overlay| overlay.mode() == Some(Mode::Guide));
+            match self.hold.over_game(over_game && on_overlay, pause) {
+                Over::Freeze => launch.freeze(&mut self.freezer),
+                Over::SayNotFrozen => eprintln!("guide: the game is not frozen (Settings)"),
+                Over::Nothing => {}
             }
+        } else {
+            self.hold.over_game(false, pause);
         }
 
         self.ledger.enter(Part::End);
@@ -2333,9 +2343,80 @@ fn window_handle(window: &Window) -> *mut std::ffi::c_void {
     }
 }
 
+/// Whether the running game is held still under the Guide, by Settings' Pause the game (docs/spec/guide.md, 7.2;
+/// #270). The leftovers of a crash are thawed at start whatever it says (`Freezer::thaw_leftovers`).
+#[derive(Debug, Default)]
+struct Hold {
+    /// The log has said this Guide that the game is not frozen.
+    said: bool,
+}
+
+/// What is done with the game this turn while the Guide is open over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Over {
+    Freeze,
+    SayNotFrozen,
+    Nothing,
+}
+
+impl Hold {
+    /// Whether a game frozen now is let go: the Guide no longer has the foreground, or Pause the game is off,
+    /// which lets go at once a game it froze.
+    fn thaws(frozen: bool, guide_has_foreground: bool, pause: bool) -> bool {
+        frozen && (!guide_has_foreground || !pause)
+    }
+
+    /// `over`: the Guide is open over the game on the Overlay, which has the foreground. With Pause the game on
+    /// the game is frozen (once: `Freezer::freeze` does nothing while it is); off, the log says once a Guide that
+    /// it is not.
+    fn over_game(&mut self, over: bool, pause: bool) -> Over {
+        if !over {
+            self.said = false;
+            Over::Nothing
+        } else if pause {
+            Over::Freeze
+        } else if !std::mem::replace(&mut self.said, true) {
+            Over::SayNotFrozen
+        } else {
+            Over::Nothing
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn with_pause_the_game_on_the_game_is_frozen_under_the_guide_and_let_go_after() {
+        let mut hold = Hold::default();
+        assert_eq!(hold.over_game(false, true), Over::Nothing, "no Guide over the game");
+        assert_eq!(hold.over_game(true, true), Over::Freeze);
+        assert_eq!(hold.over_game(true, true), Over::Freeze, "every turn: the freezer does it once");
+        assert!(!Hold::thaws(true, true, true), "held while the Guide has the foreground");
+        assert!(Hold::thaws(true, false, true), "let go as the Guide gives it back");
+        assert!(!Hold::thaws(false, false, true), "nothing frozen, nothing to let go");
+    }
+
+    #[test]
+    fn with_pause_the_game_off_the_game_is_never_frozen_and_the_log_says_so_once_a_guide() {
+        let mut hold = Hold::default();
+        assert_eq!(hold.over_game(true, false), Over::SayNotFrozen);
+        assert_eq!(hold.over_game(true, false), Over::Nothing, "once a Guide");
+        assert_eq!(hold.over_game(false, false), Over::Nothing, "the Guide closed");
+        assert_eq!(hold.over_game(true, false), Over::SayNotFrozen, "and once again the next Guide");
+    }
+
+    #[test]
+    fn a_game_frozen_as_pause_the_game_is_turned_off_is_let_go_at_once() {
+        let mut hold = Hold::default();
+        assert_eq!(hold.over_game(true, true), Over::Freeze);
+        // Turned off with the Guide still open over the game.
+        assert!(Hold::thaws(true, true, false));
+        assert_eq!(hold.over_game(true, false), Over::SayNotFrozen);
+        // Turned on again under the same Guide: frozen again.
+        assert_eq!(hold.over_game(true, true), Over::Freeze);
+    }
 
     /// A launch's looks at the desktop (`shell::launch`): one a turn of the loop, 200 ms after the last at the
     /// soonest, and one that comes 500 ms or more after the last counts for nothing.

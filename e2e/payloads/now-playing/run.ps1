@@ -138,6 +138,7 @@ try {
     Step Right '^focus: Settings: General: Personalisation$' | Out-Null
     Step Down '^focus: Settings: General: Guide$' | Out-Null
     Step A '^focus: Settings: Guide: Use the Guide$' | Out-Null
+    Step Down '^focus: Settings: Guide: Pause the game while the Guide is open$' | Out-Null
     Step Down '^focus: Settings: Guide: Now Playing source$' | Out-Null
     Step A '^focus: Settings: Guide: Now Playing source, list on "' '01-source-list' | Out-Null
     # Down the list, a press at a time, to the stand-in's app: Any, Spotify, then the apps seen this run.

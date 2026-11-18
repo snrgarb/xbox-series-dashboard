@@ -350,9 +350,10 @@ E/SettingsControl.xaml:405-441; C/SettingsState.cs:141-195; C/ExtensionCore.NowP
 
 With L1 and L2 lines in the two descriptions: checkbox top = 246.58 + 34.58 L1; dropdown top = checkbox top + 154.58 + 34.58 L2.
 
-**The port draws neither description** (#261, 16.11) and lays the page out as Idle's (6.7): "Guide" at 190, the checkbox 14 under it (238.58), "Now Playing source" 48 under the checkbox (344.58), its dropdown 14 under that (393.16).
+**The port draws neither description** (#261, 16.11) and lays the page out as Idle's (6.7): "Guide" at 190, the checkbox 14 under it (238.58), the port's second checkbox, **Pause the game while the Guide is open** (#270), 18 under that as two boxes are (314.58), "Now Playing source" 48 under the second checkbox (420.58), its dropdown 14 under that (469.16). The focused checkbox is drawn over the other, so its glow is (5.1).
 
 - **Use the Guide**: on by default. Off, the Guide never shows: the Guide button is left alone, Home's profile and Achievements tile do nothing, its Discord tile opens Settings on Discord (section 8.2), and a Toast has no "Press ... to view" (C/SettingsState.cs:155-160). In force at once, saved, shared by every Profile.
+- **Pause the game while the Guide is open** (the port's own, #270): on by default, which is the Bundle's freeze (guide.md 7.2). Off, the running game is never suspended under the Guide: the Guide still shows over it, Quit game and force quit still work, and a game frozen at the moment it is turned off is let go at once. It has no description on the page, as nothing here has since #261: what the freeze is for, and what happens without it, is guide.md 7.2. In force at once, saved, shared by every Profile.
 - **Now Playing source** choices: **Any**, **Spotify** (the default), then every other app that has had a media session this run (C/ExtensionCore.NowPlayingSource.cs:48-59, 107-108). A source saved in an earlier run whose app has had no session yet is among them, first after Spotify, so that the list always holds what the box shows. What it does: docs/spec/now-playing.md.
 
 ### 6.9 Theme settings > Discord - built in #143 ([../discord.md](../discord.md))
@@ -771,7 +772,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 | Page | What it holds |
 |---|---|
 | Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
-| Guide | "Guide" and Use the Guide, and the Now Playing source under them (#129), as 6.8 without its descriptions (#261). Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
+| Guide | "Guide", Use the Guide and Pause the game while the Guide is open (#270), and the Now Playing source under them (#129), as 6.8 without its descriptions (#261). Down and Up move between the three; A on a checkbox turns it over; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Pause the game while the Guide is open`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
 
 ### 16.2 A pane that would run off the screen scrolls
 
@@ -805,6 +806,7 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Show launcher icons (#248) | `home.recent_launcher` | on |
 | Show battery percentages | `status.battery_percent` | on |
 | Use the Guide | `guide.enabled` | on |
+| Pause the game while the Guide is open (#270) | `guide.pause_game` | on |
 | Download art online (16.8) | `art.online` | on |
 | Art sources (16.8) | `art.order` | `steam,xbox,playstation,steamgriddb` |
 | Boot video (start-up.md 2) | `startup.boot_video` | `XboxSeriesX`; a name, not `true` or `false`, saved by `Effect::BootVideo` |
@@ -830,12 +832,13 @@ Values are `true` and `false` (`1`, `on`, `yes` and their opposites are read too
 | Show launcher icons | The launcher's mark at the foot of each of the Recent row's tiles (home.md, 3.3.1), from the next frame. Off, none of them carries it; the Groups' cards, My games & apps, the Guide and Manage Queue keep theirs |
 | Show battery percentages | The figure beside the pad's battery and the PC's, on Home's top bar and in the Guide's Status area. Home's top bar draws a wireless pad's battery for it (home.md, 2.4): the cell, and the figure left of it |
 | Use the Guide | As 6.8: the Guide button and a hold of it do nothing, nor Home's profile and Achievements tile, and the Discord tile opens Settings. A Guide that is open stays open until it is closed |
+| Pause the game while the Guide is open | Read each turn the Guide is open over a game (guide.md 7.2): off, the game is not frozen and the log says `guide: the game is not frozen (Settings)` once a Guide; a game frozen as it is turned off is thawed at once. A crash's record is thawed at start whatever it says |
 
 ### 16.6 Sounds and the focus log
 
 The Dashboard's one rule for every screen (docs/ui.md, "Sounds") holds here: focus landing on another control is the move sound, a level up or down included, as Playnite's navigation sound is in the Bundle; A that turns a checkbox over is the activation sound, where the Bundle's is unverified (open question 11); B out of Settings is silent.
 
-`--log-focus` says `focus: Settings: ` and then the rail (`Rail: General`) or the pane and its control (`General: Guide`, `Personalisation: Reduce motion`, `Personalisation: Show launcher icons`, `Guide: Use the Guide`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3), a Profile's page the Profile and the Picture page `worn` (profiles.md 5).
+`--log-focus` says `focus: Settings: ` and then the rail (`Rail: General`) or the pane and its control (`General: Guide`, `Personalisation: Reduce motion`, `Personalisation: Show launcher icons`, `Guide: Use the Guide`, `Guide: Pause the game while the Guide is open`). A checkbox turned over leaves focus where it is and so says nothing there: its line is the `settings:` one above. A pane may add what a press changes without moving focus after a `; `, which is no move and makes no sound: the Groups page says whether the Group focus is on is shown (`Groups: Most played; shown`), a Group's page its name, count and the focused control's value (filters.md 6.2, 6.3), a Profile's page the Profile and the Picture page `worn` (profiles.md 5).
 
 The Groups page's menu is a dialog the page shows over itself: while it is up `Page::dialog` says so, it has a dialog's sounds and the Guide puts it away (filters.md 6.2).
 

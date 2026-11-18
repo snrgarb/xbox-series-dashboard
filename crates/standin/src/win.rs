@@ -37,6 +37,8 @@ const CRASHED: u32 = 0xC000_0005;
 const PULSE_MS: u32 = 250;
 /// A beat this long after the one before means the game stood still meanwhile: it was frozen.
 const STOOD_STILL_MS: u64 = 1500;
+/// Every this many beats, a second's worth, the game says how many it has beaten.
+const BEATS_SAID_EVERY: u64 = 4;
 /// The pulse's two colours, 0x00BBGGRR: (200, 200, 40) and (40, 200, 200). Far enough apart to tell under the
 /// Guide's dim.
 const PULSE_COLOURS: [u32; 2] = [0x0028_C8C8, 0x00C8_C828];
@@ -183,6 +185,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, message: u32, wparam: WPARAM, lpar
             let beats = BEATS.fetch_add(1, Ordering::Relaxed) + 1;
             if since >= STOOD_STILL_MS {
                 note(&format!("game: stood still for {since} ms, until beat {beats}"));
+            }
+            // A line a second while it runs, so a test can see it counting under a Guide that does not freeze it.
+            if beats % BEATS_SAID_EVERY == 0 {
+                note(&format!("game: beat {beats}"));
             }
             let mut client: RECT = std::mem::zeroed();
             GetClientRect(hwnd, &mut client);
