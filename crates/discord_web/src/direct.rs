@@ -23,6 +23,35 @@ pub enum Page {
     },
     /// The user is gone from the page (signed out there).
     Reset,
+    /// How the action the host asked for is going (`js/act.js`).
+    Act(Act),
+    /// A conversation the host opened had unread messages: whether the page marked it read by itself.
+    Opened(Opened),
+}
+
+/// One word from the page about the action it was asked for (#201): `typing` (the message box is focused, type now),
+/// `sending` (Discord's optimistic message, `mid`), `sent` (the real `mid`), `done` (a reaction or a read), `captcha`,
+/// or `failed` with `why`, one of a fixed set of words, and `reason`, Discord's own words where its page gave any.
+/// No `Debug`: a reason is Discord's text.
+#[derive(Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct Act {
+    pub seq: u64,
+    pub stage: String,
+    pub mid: String,
+    pub why: String,
+    pub reason: String,
+    /// With `typing`: the box held a draft, to be cleared first.
+    pub draft: bool,
+}
+
+#[derive(Deserialize, Default, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct Opened {
+    /// The page's own count of the conversation's unread messages went to 0 within a few seconds.
+    pub read: bool,
+    /// The page's own read action was called, once, because it did not.
+    pub acked: bool,
 }
 
 /// Which stores and methods the script found: our keys, Discord's method names.
@@ -393,6 +422,8 @@ pub struct Taken {
     pub log: Vec<String>,
     /// The user is gone from the page.
     pub reset: bool,
+    /// The page's word about the action it was asked for.
+    pub act: Option<Act>,
 }
 
 /// What the page has said, as the session keeps it until it is forgotten.
@@ -500,6 +531,13 @@ impl Reader {
             Page::Reset => {
                 taken.reset = true;
                 taken.changed = true;
+            }
+            Page::Act(act) => taken.act = Some(act),
+            Page::Opened(opened) => {
+                taken.log.push(format!(
+                    "discord web: conversation open, read by the page {}",
+                    if opened.read { "yes" } else { "no" }
+                ));
             }
         }
         taken
@@ -767,6 +805,34 @@ mod tests {
         );
         assert!(r.page_changed());
         assert_eq!(r.take(ok, None).log, vec!["discord web: the stores answer again".to_string()]);
+    }
+
+    #[test]
+    fn health_lists_the_optional_actions_and_the_box_and_a_missing_one_is_no_break() {
+        let mut r = Reader::new();
+        let ok = r#"{"k":"health","ok":true,"found":{"channels":["ChannelStore"],"reply":["(by shape)","createPendingReply"],"react":["(by shape)"],"ack":[],"composer":[]},"missing":[]}"#;
+        let t = r.take(ok, None);
+        assert_eq!(t.log, vec!["discord web: stores found: channels, react, reply".to_string()]);
+        assert!(!r.page_changed(), "no ack and no box is not a break");
+        let seen = r#"{"k":"health","ok":true,"found":{"channels":["ChannelStore"],"reply":["(by shape)"],"react":["(by shape)"],"ack":[],"composer":["textbox"]},"missing":[]}"#;
+        assert_eq!(
+            r.take(seen, None).log,
+            vec!["discord web: stores found: channels, composer, react, reply".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_pages_words_about_an_action_are_taken_for_the_queue() {
+        let mut r = Reader::new();
+        let t = r.take(r#"{"k":"act","seq":4,"stage":"failed","why":"not shown","reason":"x"}"#, None);
+        let act = t.act.unwrap();
+        assert_eq!(
+            (act.seq, act.stage.as_str(), act.why.as_str(), act.reason.as_str()),
+            (4, "failed", "not shown", "x")
+        );
+        assert!(!t.changed && t.log.is_empty());
+        let t = r.take(r#"{"k":"opened","read":true}"#, None);
+        assert_eq!(t.log, vec!["discord web: conversation open, read by the page yes".to_string()]);
     }
 
     #[test]

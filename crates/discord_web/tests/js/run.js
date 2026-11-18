@@ -10,7 +10,7 @@ const assert = require("assert");
 const script = fs.readFileSync(process.argv[2], "utf8");
 const { installFakeDiscord } = require(process.argv[3]);
 
-const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40 };
+const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40, actPoll: 5, readyCap: 300, actCap: 900, readCap: 150, doneCap: 200 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function page(opts, options) {
@@ -32,10 +32,11 @@ function page(opts, options) {
   };
   win.window = win;
   win.top = win;
-  win.document = { querySelector: () => null, querySelectorAll: () => [] };
   // The page script has no network: nothing to call.
   const ctx = vm.createContext(win);
   const world = installFakeDiscord(win, opts);
+  world.slowMs = 120;
+  win.document = world.fakeDocument();
   const run = () => vm.runInContext(script, ctx);
   return { win, ctx, posts, routes, world, run, last: (k) => [...posts].reverse().find((p) => p.k === k), all: (k) => posts.filter((p) => p.k === k) };
 }
@@ -51,6 +52,20 @@ async function check(name, fn) {
   }
 }
 
+const ME = "300000000000000099";
+// The host's half of a send: waits for the page to say it is typing, then types and presses Enter as trusted input would.
+async function sendText(p, op, text) {
+  const taken = p.win.__xsdDirect.send(Object.assign({ seq: 1 }, op, { text }));
+  if (!taken) return false;
+  const seq = op.seq || 1;
+  const typed = () => p.posts.find((x) => x.k === "act" && x.stage === "typing" && x.seq === seq);
+  for (let i = 0; i < 200 && !typed(); i++) await sleep(5);
+  const typing = typed();
+  if (typing) { p.world.type(text); p.world.enter(); }
+  return typing || null;
+}
+const acts = (p, seq) => p.posts.filter((x) => x.k === "act" && (seq === undefined || x.seq === seq));
+const stages = (p, seq) => acts(p, seq).map((x) => x.stage);
 const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "100000000000000010", NAMED = "100000000000000011";
 
 (async () => {
@@ -312,6 +327,306 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     await sleep(350);
     const h = p.last("health");
     assert.strictEqual(h.ok, false);
+  });
+
+  await check("a send routes the page, focuses the box, and is done only when the store shows it sent", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    const typing = await sendText(p, { channel: F1 }, "hello from a test");
+    assert.ok(typing, "the page asked for typing: " + JSON.stringify(p.posts.filter((x) => x.k === "act")));
+    assert.strictEqual(typing.draft, false);
+    assert.deepStrictEqual(p.routes, ["/channels/@me/" + F1]);
+    await sleep(300);
+    assert.deepStrictEqual(stages(p, 1), ["typing", "sending", "sent"]);
+    const [sending, sent] = acts(p).filter((x) => x.stage === "sending" || x.stage === "sent");
+    assert.ok(sending.mid && sent.mid && sending.mid !== sent.mid, "the optimistic id, then the real one");
+    assert.deepStrictEqual(p.world.received, [{ kind: "message", channel: F1, text: "hello from a test", reply: null }]);
+    const h = p.last("health");
+    assert.deepStrictEqual(h.found.composer, ["textbox"], "the box was seen");
+    assert.strictEqual(h.ok, true);
+    for (const k of ["reply", "react", "ack", "forget"]) assert.ok(h.found[k].length > 0, k);
+    assert.strictEqual(h.found.ack[0], "(by shape)");
+  });
+
+  await check("the conversation shows the message as SENDING, then SENT, with the optimistic id and then the real one", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.win.__xsdDirect.open(F1);
+    await sleep(80);
+    await sendText(p, { channel: F1 }, "watch me go");
+    await sleep(60);
+    let c = p.last("conv");
+    const out = c.msgs[c.msgs.length - 1];
+    assert.strictEqual(out.text, "watch me go");
+    assert.strictEqual(out.state, "SENDING");
+    assert.strictEqual(out.own, true);
+    assert.strictEqual(out.author.id, ME);
+    const optimistic = out.id;
+    await sleep(250);
+    c = p.last("conv");
+    const done = c.msgs[c.msgs.length - 1];
+    assert.strictEqual(done.state, "SENT");
+    assert.notStrictEqual(done.id, optimistic);
+    assert.strictEqual(c.msgs.filter((m) => m.text === "watch me go").length, 1, "never both");
+    // The conversation was posted before the act said sent: the host never sees the real message after the word.
+    let lastConv = -1;
+    p.posts.forEach((x, i) => { if (x.k === "conv") lastConv = i; });
+    const sentAt = p.posts.findIndex((x) => x.k === "act" && x.stage === "sent");
+    assert.ok(sentAt > 0 && lastConv < sentAt, "the fresh conversation comes before 'sent'");
+  });
+
+  await check("the same words said before are not taken for the send", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    await sendText(p, { channel: F1, seq: 1 }, "twice");
+    await sleep(300);
+    assert.strictEqual(stages(p, 1).pop(), "sent");
+    p.posts.length = 0;
+    p.world.slowMs = 200;
+    await sendText(p, { channel: F1, seq: 2 }, "twice");
+    await sleep(80);
+    assert.deepStrictEqual(stages(p, 2), ["typing", "sending"], "the earlier one is not this send's sent");
+    await sleep(300);
+    assert.strictEqual(stages(p, 2).pop(), "sent");
+    assert.strictEqual(p.world.received.length, 2);
+  });
+
+  await check("a reply is set by Discord's own action, with its channel and message, and goes as a reply", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    const target = p.world.pool[F1][2].id;
+    await sendText(p, { channel: F1, reply: target }, "answering you");
+    await sleep(300);
+    assert.strictEqual(stages(p, 1).pop(), "sent");
+    assert.deepStrictEqual(p.world.received, [{ kind: "message", channel: F1, text: "answering you", reply: target }]);
+    assert.deepStrictEqual(p.world.pending, {}, "the pending reply was used up");
+  });
+
+  await check("a plain send clears a reply the Dashboard did not ask for", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.world.pending[F1] = p.world.pool[F1][0];
+    await sendText(p, { channel: F1 }, "no reply here");
+    await sleep(300);
+    assert.deepStrictEqual(p.world.received, [{ kind: "message", channel: F1, text: "no reply here", reply: null }]);
+  });
+
+  await check("without Discord's reply action nothing is sent and the key is optional health", async () => {
+    const p = page({ noActions: ["reply"] });
+    p.run();
+    await sleep(150);
+    assert.strictEqual(p.last("health").ok, true);
+    assert.deepStrictEqual(p.last("health").found.reply, []);
+    p.win.__xsdDirect.send({ seq: 3, channel: F1, text: "never", reply: p.world.pool[F1][0].id });
+    await sleep(100);
+    const a = acts(p, 3);
+    assert.deepStrictEqual(a.map((x) => [x.stage, x.why]), [["failed", "reply action not found"]]);
+    assert.deepStrictEqual(p.world.received, []);
+    assert.ok(!p.posts.some((x) => x.k === "act" && x.stage === "typing"));
+  });
+
+  await check("a reply to a message that is not loaded sends nothing", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.win.__xsdDirect.send({ seq: 4, channel: F1, text: "never", reply: "999" });
+    await sleep(100);
+    assert.deepStrictEqual(acts(p, 4).map((x) => x.why), ["reply target not found"]);
+  });
+
+  await check("a failed send is the store's SEND_FAILED, with the reason the page's own dialog gives", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.world.sendFails = true;
+    p.world.failReason = "You are sending messages too fast. Slow down.";
+    await sendText(p, { channel: F1 }, "refused text");
+    await sleep(300);
+    const failed = acts(p, 1).pop();
+    assert.strictEqual(failed.stage, "failed");
+    assert.strictEqual(failed.why, "send refused");
+    assert.strictEqual(failed.reason, "You are sending messages too fast. Slow down.");
+    assert.ok(failed.mid);
+    assert.deepStrictEqual(p.world.received, []);
+  });
+
+  await check("a captcha frame after the send is a captcha, and nothing is sent", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.world.setCaptcha(true);
+    await sendText(p, { channel: F1 }, "checked text");
+    await sleep(120);
+    assert.deepStrictEqual(stages(p, 1), ["typing", "captcha"]);
+    assert.deepStrictEqual(p.world.received, []);
+  });
+
+  await check("no message box in time is a failure naming the box, and the health says no", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.win.__xsdDirect.send({ seq: 5, channel: "100000000000000099", text: "lost" });
+    await sleep(500);
+    assert.deepStrictEqual(acts(p, 5).map((x) => [x.stage, x.why]), [["failed", "composer not found"]]);
+    assert.deepStrictEqual(p.last("health").found.composer, []);
+  });
+
+  await check("one action at a time, and cancel lets the page go", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.world.slowMs = 5000;
+    assert.strictEqual(p.win.__xsdDirect.send({ seq: 1, channel: F1, text: "first" }), true);
+    assert.strictEqual(p.win.__xsdDirect.send({ seq: 2, channel: F1, text: "second" }), false, "busy");
+    assert.strictEqual(p.win.__xsdDirect.ack({ seq: 3, channel: F2 }), false);
+    p.win.__xsdDirect.cancel();
+    assert.strictEqual(p.win.__xsdDirect.ack({ seq: 3, channel: F2 }), true, "free again");
+    await sleep(60);
+    assert.deepStrictEqual(stages(p, 1), [], "the cancelled send says nothing more");
+  });
+
+  await check("bad asks are refused in the page: ids that are not digits, empty text", async () => {
+    const p = page();
+    p.run();
+    await sleep(120);
+    p.win.__xsdDirect.send({ seq: 1, channel: "1; alert(1)", text: "x" });
+    await sleep(30);
+    p.win.__xsdDirect.send({ seq: 2, channel: F1, text: "  " });
+    await sleep(30);
+    p.win.__xsdDirect.react({ seq: 3, channel: F1, message: "abc", emoji: "x", on: true });
+    await sleep(30);
+    assert.deepStrictEqual([1, 2, 3].map((n) => acts(p, n).map((x) => x.why)), [["page error"], ["page error"], ["page error"]]);
+    assert.deepStrictEqual(p.routes, []);
+  });
+
+  for (const form of ["positional", "object"]) {
+    await check("a reaction by Discord's own action (" + form + " arguments) is done when the store shows it, and again when it is gone", async () => {
+      const p = page({ reactForm: form });
+      p.run();
+      await sleep(150);
+      p.win.__xsdDirect.open(F1);
+      await sleep(60);
+      const target = p.world.pool[F1][0].id;
+      p.win.__xsdDirect.react({ seq: 1, channel: F1, message: target, emoji: "\u{1F525}", on: true });
+      await sleep(80);
+      assert.deepStrictEqual(stages(p, 1), ["done"]);
+      assert.deepStrictEqual(p.world.received, [{ kind: "react", channel: F1, message: target, emoji: "\u{1F525}", on: true }]);
+      assert.strictEqual(p.world.pool[F1][0].reactions[0].me, true);
+      // Already so: done without asking Discord again.
+      p.win.__xsdDirect.react({ seq: 2, channel: F1, message: target, emoji: "\u{1F525}", on: true });
+      await sleep(40);
+      assert.deepStrictEqual(stages(p, 2), ["done"]);
+      assert.strictEqual(p.world.received.length, 1);
+      p.win.__xsdDirect.react({ seq: 3, channel: F1, message: target, emoji: "\u{1F525}", on: false });
+      await sleep(80);
+      assert.deepStrictEqual(stages(p, 3), ["done"]);
+      assert.deepStrictEqual(p.world.pool[F1][0].reactions, []);
+    });
+  }
+
+  await check("a reaction fails plainly without the action, or on a message not loaded", async () => {
+    const p = page({ noActions: ["react"] });
+    p.run();
+    await sleep(150);
+    assert.strictEqual(p.last("health").ok, true);
+    p.win.__xsdDirect.react({ seq: 1, channel: F1, message: p.world.pool[F1][0].id, emoji: "x", on: true });
+    await sleep(40);
+    assert.deepStrictEqual(acts(p, 1).map((x) => x.why), ["react action not found"]);
+    const q = page();
+    q.run();
+    await sleep(150);
+    q.win.__xsdDirect.react({ seq: 1, channel: F1, message: "12345", emoji: "x", on: true });
+    await sleep(40);
+    assert.deepStrictEqual(acts(q, 1).map((x) => x.why), ["message not loaded"]);
+  });
+
+  await check("a reaction that never shows is not done", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    // Discord's action answers but the store never shows the reaction.
+    p.win.__xsdDirect.open(F1);
+    await sleep(60);
+    const target = p.world.pool[F1][0];
+    Object.defineProperty(target, "reactions", { get: () => [], set: () => {}, configurable: true });
+    p.win.__xsdDirect.react({ seq: 1, channel: F1, message: target.id, emoji: "\u{1F44D}", on: true });
+    await sleep(320);
+    assert.deepStrictEqual(acts(p, 1).map((x) => [x.stage, x.why]), [["failed", "not shown"]]);
+  });
+
+  await check("marking read is Discord's own action, done when the unread count is 0", async () => {
+    const p = page({ markReadOnOpen: false });
+    p.run();
+    await sleep(150);
+    assert.strictEqual(p.last("dms").dms.find((d) => d.id === F2).unread, 2);
+    p.win.__xsdDirect.ack({ seq: 1, channel: F2 });
+    await sleep(80);
+    assert.deepStrictEqual(stages(p, 1), ["done"]);
+    assert.deepStrictEqual(p.world.received, [{ kind: "read", channel: F2 }]);
+    assert.strictEqual(p.last("dms").dms.find((d) => d.id === F2).unread, 0);
+    p.win.__xsdDirect.ack({ seq: 2, channel: F2 });
+    await sleep(30);
+    assert.deepStrictEqual(stages(p, 2), ["done"], "nothing unread: done");
+    assert.strictEqual(p.world.received.length, 1);
+    const q = page({ noActions: ["ack"] });
+    q.run();
+    await sleep(150);
+    assert.strictEqual(q.last("health").ok, true);
+    assert.deepStrictEqual(q.last("health").found.ack, []);
+    q.win.__xsdDirect.ack({ seq: 1, channel: F2 });
+    await sleep(30);
+    assert.deepStrictEqual(acts(q, 1).map((x) => x.why), ["ack action not found"]);
+  });
+
+  await check("a conversation opened with unread messages says whether the page read it, and reads it itself if not", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.win.__xsdDirect.open(F2);
+    await sleep(100);
+    assert.deepStrictEqual(p.all("opened"), [{ k: "opened", read: true, acked: false }]);
+    p.win.__xsdDirect.open(F1);
+    await sleep(100);
+    assert.strictEqual(p.all("opened").length, 1, "nothing was unread: nothing to say");
+    const q = page({ markReadOnOpen: false });
+    q.run();
+    await sleep(150);
+    q.win.__xsdDirect.open(F2);
+    await sleep(300);
+    assert.deepStrictEqual(q.all("opened"), [{ k: "opened", read: false, acked: true }]);
+    assert.deepStrictEqual(q.world.received, [{ kind: "read", channel: F2 }]);
+    assert.strictEqual(q.last("dms").dms.find((d) => d.id === F2).unread, 0);
+  });
+
+  await check("a failed message of ours is dropped from Discord's store locally, and only that", async () => {
+    const p = page();
+    p.run();
+    await sleep(150);
+    p.world.sendFails = true;
+    await sendText(p, { channel: F1 }, "will fail");
+    await sleep(300);
+    const failed = acts(p, 1).pop();
+    assert.strictEqual(failed.stage, "failed");
+    assert.strictEqual(p.win.__xsdDirect.forget(F1, p.world.pool[F1][0].id), false, "not ours and failed");
+    assert.strictEqual(p.win.__xsdDirect.forget(F1, failed.mid), true);
+    assert.deepStrictEqual(p.world.deleted, [{ channelId: F1, id: failed.mid, local: true }]);
+    assert.strictEqual(p.win.__xsdDirect.forget(F1, failed.mid), false, "gone");
+  });
+
+  await check("every message of ours maps to one of three states", async () => {
+    const p = page();
+    p.run();
+    await sleep(120);
+    p.win.__xsdDirect.open(F1);
+    p.world.pool[F1][1].state = "SOMETHING_NEW";
+    p.world.stores.MessageStore.emitChange();
+    await sleep(80);
+    assert.strictEqual(p.last("conv").msgs[1].state, "SENT");
   });
 
   process.exit(failed ? 1 : 0);

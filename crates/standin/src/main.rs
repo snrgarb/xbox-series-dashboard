@@ -190,7 +190,14 @@
 //!       `POST /standin/ring?channel=<id>&on=1|0` (a DM call rings the user, or stops); and plain pictures at
 //!       `/avatars/..` and `/channel-icons/..`, so `--discord-cdn-url` may name the same address. The channels are
 //!       100000000000000001..03 (the list's links), 100000000000000010 (a Group DM) and 100000000000000011 (a named group
-//!       with 60 older messages). See crates/standin/src/discord_web.rs.
+//!       with 60 older messages). Acting (#201): the app page has a message box while a conversation is its route; Enter
+//!       in it adds Discord's own optimistic message (SENDING) to the fake store and, ~300 ms later, makes it SENT under a
+//!       real id; the fake page also has Discord's reply, reaction, mark-read and local-delete actions by their shapes.
+//!       Controls: `POST /standin/send-fails?on=1|0[&reason=<words>]` (the next sends go SEND_FAILED, with Discord's own
+//!       dialog showing the reason), `POST /standin/captcha?on=1|0` (the next send shows a captcha frame and sends
+//!       nothing), `POST /standin/slow?ms=<n>` (how long a send stays SENDING); and `GET /standin/sent`, a JSON list of
+//!       what the fake received, in order: `{"kind":"message","channel","text","reply"}`, `{"kind":"react","channel",
+//!       "message","emoji","on"}`, `{"kind":"read","channel"}` (made-up test data only). See crates/standin/src/discord_web.rs.
 //!   standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
 //!       A launcher's installer, and the uninstaller it leaves (`set_up`): in the test's own folder that
 //!       `STANDIN_SETUP` names, and nowhere else, writes what it was run with (`runs.txt`), the app's folder and its

@@ -20,6 +20,7 @@ use std::sync::Arc;
 pub use model::discord_dms::{Direct, DirectAsk, DirectEvent, DirectState};
 pub use model::discord_web::{Web, WebAsk, WebField, WebKey, WebState};
 
+pub(crate) mod act;
 pub mod direct;
 mod pictures;
 pub mod redact;
@@ -34,10 +35,16 @@ pub const DISCORD: &str = "https://discord.com";
 pub const CDN: &str = "https://cdn.discordapp.com";
 
 /// The script the host installs in every document of the web view (`AddScriptToExecuteOnDocumentCreated`): the store
-/// search (`js/stores.js`) and the reader that pushes what the stores hold (`js/direct.js`), in one function of their
-/// own so that a second injection and the page's scripts cannot meet. See docs/discord-web.md, "Reading".
+/// search (`js/stores.js`), the reader that pushes what the stores hold (`js/direct.js`) and the actions it takes by
+/// the host's ask (`js/act.js`), in one function of their own so that a second injection and the page's scripts cannot
+/// meet. See docs/discord-web.md, "Reading" and "Acting".
 pub fn direct_script() -> String {
-    format!("(() => {{\n{}\n{}\n}})();\n", include_str!("../js/stores.js"), include_str!("../js/direct.js"))
+    format!(
+        "(() => {{\n{}\n{}\n{}\n}})();\n",
+        include_str!("../js/stores.js"),
+        include_str!("../js/direct.js"),
+        include_str!("../js/act.js")
+    )
 }
 
 /// Where a Profile's session is kept:`<data>\discord-web\profile-<id>`, the web view's whole user data folder. One
@@ -109,6 +116,14 @@ pub(crate) enum Command {
     Text(String),
     /// Something for the page script: Discord's Direct Messages (docs/discord-web.md, "Reading").
     Page(PageOp),
+    /// An action for the page script (docs/discord-web.md, "Acting").
+    Act(act::ActOp),
+    /// What the Console keyboard kept for a message: typed into the page's focused message box, then Enter after a
+    /// moment. Never logged; `clear` first empties a draft the box held.
+    Type {
+        text: String,
+        clear: bool,
+    },
     /// Close the web view, remove the folder, end.
     SignOut,
     /// Close the web view and end; the folder stays.
@@ -272,6 +287,8 @@ pub struct Session {
     events: Vec<DirectEvent>,
     /// The conversation the screens asked to open.
     open: Option<model::discord_dms::Id>,
+    /// What is being done for the screens, one at a time, and what they sent that has not yet gone (#201).
+    acts: act::Acts,
     /// Kinds of ask not built yet that the log has said so of.
     unbuilt: std::collections::BTreeSet<&'static str>,
     older_unavailable_said: bool,
@@ -305,6 +322,7 @@ impl Session {
             direct_changed: false,
             events: Vec::new(),
             open: None,
+            acts: act::Acts::new(),
             unbuilt: Default::default(),
             older_unavailable_said: false,
             notifications: 0,
@@ -345,9 +363,9 @@ impl Session {
         std::mem::take(&mut self.events)
     }
 
-    /// What the screens ask of the Direct Messages. Open, Close and Older are built (#198); Send, Forget, React,
-    /// MarkRead are #201's, Call, Answer and Decline the voice ticket's: each says so once in the log, by kind only.
-    /// The hook for them is the last arm: the host already takes a [`PageOp`] by name.
+    /// What the screens ask of the Direct Messages. Open, Close and Older are read (#198); Send, Forget, React and
+    /// MarkRead are acted (#201: [`act::Acts`], one at a time, paced; docs/discord-web.md, "Acting"); Call, Answer and
+    /// Decline are the voice ticket's: each says it is not built once in the log, by kind only.
     pub fn ask_direct(&mut self, ask: DirectAsk) {
         match ask {
             DirectAsk::Open(id) => {
@@ -387,22 +405,84 @@ impl Session {
                     host.send(Command::Page(PageOp::Older));
                 }
             }
+            DirectAsk::Send { channel, text, reply, nonce } => {
+                let at = now_ms();
+                let outs = if self.acting() {
+                    self.acts.send(&channel, text.as_str(), reply.as_ref(), nonce, at)
+                } else {
+                    self.acts.refuse(channel.as_str(), text.as_str(), nonce, at, "not signed in")
+                };
+                self.apply(outs);
+                self.drive();
+            }
+            DirectAsk::Forget { channel, message } => {
+                let outs = self.acts.forget(&channel, &message);
+                self.apply(outs);
+            }
+            DirectAsk::React { channel, message, emoji, on } => {
+                if self.acting() {
+                    self.acts.react(&channel, &message, emoji.as_str(), on);
+                    self.drive();
+                } else {
+                    say("discord web: reaction not done: not signed in");
+                }
+            }
+            DirectAsk::MarkRead(channel) => {
+                if self.acting() {
+                    self.acts.mark_read(&channel);
+                    self.drive();
+                } else {
+                    say("discord web: mark read not done: not signed in");
+                }
+            }
             other => {
                 let kind = match other {
-                    DirectAsk::Send { .. } => "send",
-                    DirectAsk::Forget { .. } => "forget",
-                    DirectAsk::React { .. } => "react",
-                    DirectAsk::MarkRead(_) => "mark-read",
                     DirectAsk::Call(_) => "call",
                     DirectAsk::Answer(_) => "answer",
                     DirectAsk::Decline(_) => "decline",
-                    DirectAsk::Open(_) | DirectAsk::Close | DirectAsk::Older => return,
+                    _ => return,
                 };
                 if self.unbuilt.insert(kind) {
                     say(&format!("discord web: {kind} not built yet"));
                 }
             }
         }
+    }
+
+    /// Whether the page can be acted through: a web view that is up, signed in, with its stores read.
+    fn acting(&self) -> bool {
+        self.host.is_some() && !self.ending && self.direct_state() == DirectState::Ready
+    }
+
+    /// Does what the queue says: asks the host, tells the screens, writes the log. Then what the screens show.
+    fn apply(&mut self, outs: Vec<act::Out>) {
+        let changed = !outs.is_empty();
+        for out in outs {
+            match out {
+                act::Out::Op(op) => {
+                    if let Some(host) = &self.host {
+                        host.send(Command::Act(op));
+                    }
+                }
+                act::Out::Type { text, clear } => {
+                    if let Some(host) = &self.host {
+                        host.send(Command::Type { text, clear });
+                    }
+                }
+                act::Out::Event(event) => self.events.push(event),
+                act::Out::Log(line) => say(&line),
+                act::Out::Changed => {}
+            }
+        }
+        if changed {
+            self.refresh_direct();
+        }
+    }
+
+    /// The queue's clock: a timeout, or the next action's turn. Each frame, from [`Session::pump`].
+    fn drive(&mut self) {
+        let outs = self.acts.tick(std::time::Instant::now());
+        self.apply(outs);
     }
 
     /// How the screens' `Direct` follows the web session: Off, no runtime, loading while a web view checks or the
@@ -427,6 +507,10 @@ impl Session {
         self.pictures.forget();
         self.open = None;
         self.events.clear();
+        // What was queued is not sent and what ran is let go; each send is told so (after the events were cleared: the
+        // screens still hear of what did not go).
+        let outs = self.acts.reset();
+        self.apply(outs);
         self.refresh_direct();
     }
 
@@ -486,12 +570,14 @@ impl Session {
                 self.reader.conv.as_ref().filter(|c| c.loaded && self.open.as_ref().is_some_and(|o| o.as_str() == c.id))
             {
                 let dm = self.reader.dm(&conv.id);
+                let mut messages: Vec<_> = conv.msgs.iter().map(|m| direct::message(m, &pic)).collect();
+                self.acts.overlay(&conv.id, &mut messages);
                 direct.open = Some(Conversation {
                     id: Id(conv.id.clone()),
                     name: Private(dm.map(|d| d.name.clone()).unwrap_or_default()),
                     group: dm.is_some_and(|d| d.group),
                     picture: dm.and_then(|d| pic(&d.pic)),
-                    messages: conv.msgs.iter().map(|m| direct::message(m, &pic)).collect(),
+                    messages,
                     loading_older: conv.older,
                     at_start: !conv.more,
                     unread_from: (!conv.unread_from.is_empty()).then(|| Id(conv.unread_from.clone())),
@@ -774,6 +860,10 @@ impl Session {
                     if taken.reset {
                         self.forget_direct();
                     }
+                    if let Some(page_act) = taken.act {
+                        let outs = self.acts.page(&page_act, std::time::Instant::now());
+                        self.apply(outs);
+                    }
                     for event in taken.events {
                         let event = self.with_picture(event);
                         self.events.push(event);
@@ -830,6 +920,7 @@ impl Session {
                 }
             }
         }
+        self.drive();
         if self.pictures.pump() {
             self.refresh_direct();
         }
@@ -883,6 +974,11 @@ impl Drop for Session {
             }
         }
     }
+}
+
+/// Unix milliseconds now: the time a message the user sent shows as, until Discord gives its own.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or_default()
 }
 
 pub(crate) fn say(line: &str) {

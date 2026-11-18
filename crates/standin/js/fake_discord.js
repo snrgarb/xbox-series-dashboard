@@ -6,9 +6,18 @@
 // `standin serve-discord-web`'s app page (in a browser).
 //
 // installFakeDiscord(window, opts) -> world. opts: { seed: true, hide: [store names left out], noMethod: ["Store.method"],
-// markReadOnOpen: true }.
+// markReadOnOpen: true, noActions: ["reply", "react", "ack", "forget"] (action objects left out), reactForm:
+// "positional" | "object" (how the reaction action takes its arguments) }.
+//
+// Acting (#201): the page "changes as the real one does". A message box exists while a conversation is the page's route:
+// `world.type(text)` and `world.enter()` play the host's trusted input in node (the stand-in page has a real box,
+// which a real Enter sends). Sending adds Discord's own optimistic message (state SENDING, an id of its own) to the
+// MessageStore and, `world.slowMs` later (300), makes it SENT under a real id, or SEND_FAILED when `world.sendFails`;
+// with `world.captcha` nothing is sent and a captcha frame appears. Fake `createPendingReply`/`deletePendingReply`,
+// `addReaction`/`removeReaction`, `ack`, `deleteMessage` are exported by the same shapes as the real ones. What the fake
+// received is in `world.received` (and `world.onReceived(entry)`, for the stand-in to report).
 function installFakeDiscord(window, opts) {
-  opts = Object.assign({ seed: true, hide: [], noMethod: [], markReadOnOpen: true }, opts || {});
+  opts = Object.assign({ seed: true, hide: [], noMethod: [], markReadOnOpen: true, noActions: [], reactForm: "positional" }, opts || {});
   const ME = "300000000000000099";
   const T0 = Date.UTC(2026, 10, 18, 20, 0, 0);
   let seq = 0;
@@ -37,6 +46,18 @@ function installFakeDiscord(window, opts) {
     fetchLog: [],
     stores: {},
     notes: [],
+    pending: {},
+    received: [],
+    slowMs: 300,
+    sendFails: false,
+    failReason: "",
+    captcha: false,
+    captchaShown: false,
+    dialogText: "",
+    composer: { text: "", focused: false },
+    onReceived: null,
+    onCaptcha: null,
+    onDialog: null,
   };
   const emit = (...names) => { for (const n of names) if (world.stores[n]) world.stores[n].emitChange(); };
   const cnt = (id) => world.read[id] || (world.read[id] = { unread: 0, mentions: 0, oldest: null, ack: null });
@@ -86,6 +107,9 @@ function installFakeDiscord(window, opts) {
     getCall: (id) => world.calls[id],
     getCalls: () => Object.values(world.calls),
   });
+  mk("PendingReplyStore", {
+    getPendingReply: (id) => (world.pending[id] ? { channelId: id, message: world.pending[id] } : undefined),
+  });
   // Stores the page has that this code does not read: only there to make the registry realistic.
   mk("GuildStore", { getGuilds: () => ({}), getGuild: () => undefined });
   const actions = {
@@ -104,6 +128,68 @@ function installFakeDiscord(window, opts) {
     },
   };
   world.actions = actions;
+  const note = (entry) => { world.received.push(entry); if (world.onReceived) world.onReceived(entry); };
+  const findMessage = (channel, id) => (world.pool[channel] || []).find((m) => m.id === id);
+  const replyActions = {
+    createPendingReply(arg) {
+      if (!arg || !arg.channel || !arg.message) throw new Error("bad reply");
+      world.pending[arg.channel.id] = arg.message;
+      emit("PendingReplyStore");
+    },
+    deletePendingReply(channelId) { delete world.pending[channelId]; emit("PendingReplyStore"); },
+  };
+  const setReaction = (channel, id, emoji, on) => {
+    const m = findMessage(channel, id);
+    if (!m) return Promise.reject(new Error("unknown message"));
+    const name = emoji && emoji.name;
+    let list = (m.reactions || []).map((r) => Object.assign({}, r));
+    const at = list.findIndex((r) => !r.emoji.id && r.emoji.name === name);
+    if (on) {
+      if (at < 0) list.push({ emoji: { id: null, name }, count: 1, me: true });
+      else if (!list[at].me) { list[at].count++; list[at].me = true; }
+    } else if (at >= 0 && list[at].me) {
+      list[at].me = false;
+      if (--list[at].count <= 0) list.splice(at, 1);
+    }
+    m.reactions = list;
+    note({ kind: "react", channel, message: id, emoji: name, on });
+    emit("MessageStore");
+    return Promise.resolve();
+  };
+  // The positional builds take (channel, message, emoji); a newer one takes one object. `length` tells them apart.
+  const reactActions = {
+    addReaction: opts.reactForm === "object" ? function (a) { return setReaction(a.channelId, a.messageId, a.emoji, true); } : function (c, m, e) { return setReaction(c, m, e, true); },
+    removeReaction: opts.reactForm === "object" ? function (a) { return setReaction(a.channelId, a.messageId, a.emoji, false); } : function (c, m, e, l, u) { return setReaction(c, m, e, false); },
+  };
+  const ackActions = {
+    ack(channelId) {
+      const r = cnt(channelId);
+      r.unread = 0; r.mentions = 0; r.oldest = null;
+      const pool = world.pool[channelId] || [];
+      r.ack = pool.length ? pool[pool.length - 1].id : null;
+      note({ kind: "read", channel: channelId });
+      emit("ReadStateStore");
+      return Promise.resolve();
+    },
+    bulkAck() {},
+    localAck() {},
+  };
+  // Another object with an `ack` and nothing else: not the read-state action.
+  const decoyAck = { ack() { throw new Error("not the read action"); } };
+  const messageActions = {
+    sendMessage() {},
+    deleteMessage(channelId, id, local) {
+      const l = world.loaded[channelId];
+      const pool = world.pool[channelId] || [];
+      for (const arr of [pool, l && l.arr]) {
+        if (!arr) continue;
+        const at = arr.findIndex((m) => m.id === id);
+        if (at >= 0) arr.splice(at, 1);
+      }
+      world.deleted = (world.deleted || []).concat([{ channelId, id, local }]);
+      emit("MessageStore");
+    },
+  };
 
   // ---- webpack: two runtimes share the global, each answers a probe chunk with its own require.
   const mod = (exports) => ({ exports });
@@ -116,6 +202,11 @@ function installFakeDiscord(window, opts) {
     Flux.registry.push(s);
   }
   big.c[++n] = mod({ Ay: actions });
+  if (!opts.noActions.includes("ack")) big.c[++n] = mod({ Dk: decoyAck });
+  if (!opts.noActions.includes("reply")) big.c[++n] = mod({ Rp: replyActions });
+  if (!opts.noActions.includes("react")) big.c[++n] = mod({ Rx: reactActions });
+  if (!opts.noActions.includes("ack")) big.c[++n] = mod({ Ak: ackActions });
+  if (!opts.noActions.includes("forget")) big.c[++n] = mod({ Ms: messageActions });
   const chunk = [];
   const runtimes = [big, small];
   chunk.push = function (item) {
@@ -147,6 +238,72 @@ function installFakeDiscord(window, opts) {
       select(m ? m[1] : null);
     });
   }
+
+  // ---- the message box and sending
+  world.type = (text) => { world.composer.text += text; };
+  world.clearBox = () => { world.composer.text = ""; };
+  world.enter = () => {
+    const text = world.composer.text;
+    world.composer.text = "";
+    world.submit(text);
+  };
+  // What the box's Enter does, with the box's text.
+  world.submit = (text) => {
+    const channel = world.selected;
+    if (!channel || !world.channels[channel] || !String(text).trim()) return null;
+    if (world.captcha) {
+      world.captchaShown = true;
+      if (world.onCaptcha) world.onCaptcha(true);
+      return null;
+    }
+    const ref = world.pending[channel] || null;
+    delete world.pending[channel];
+    const u = world.users[ME];
+    const id = flake(Date.now());
+    const m = {
+      id, channel_id: channel, type: ref ? 19 : 0, content: String(text).trim(), timestamp: new Date(), editedTimestamp: null,
+      state: "SENDING", author: { id: ME, username: u && u.username, avatar: u && u.avatar },
+      attachments: [], embeds: [], stickerItems: [], reactions: [], mentions: [],
+    };
+    if (ref) { m.messageReference = { message_id: ref.id, channel_id: channel }; m.referencedMessage = ref; }
+    world.pool[channel].push(m);
+    const l = world.loaded[channel];
+    if (l) l.arr = l.arr.concat([m]);
+    emit("MessageStore");
+    setTimeout(() => {
+      if (world.sendFails) {
+        m.state = "SEND_FAILED";
+        if (world.failReason) { world.dialogText = world.failReason; if (world.onDialog) world.onDialog(world.failReason); }
+      } else {
+        m.id = flake(Date.now());
+        m.state = "SENT";
+        world.channels[channel].lastMessageId = m.id;
+        note({ kind: "message", channel, text: m.content, reply: ref ? ref.id : null });
+      }
+      emit("MessageStore", "ChannelStore", "PrivateChannelSortStore");
+    }, world.slowMs);
+    return m;
+  };
+  world.setCaptcha = (on) => { world.captcha = !!on; if (!on) { world.captchaShown = false; if (world.onCaptcha) world.onCaptcha(false); } };
+  // A document for node, where the page has none: the box exists while a conversation is the route.
+  world.fakeDocument = () => {
+    const box = {
+      isContentEditable: true,
+      focus() { world.composer.focused = true; },
+      contains: (x) => x === box,
+      get textContent() { return world.composer.text; },
+    };
+    return {
+      get activeElement() { return world.composer.focused ? box : null; },
+      querySelector(sel) {
+        if (sel.includes("textbox")) return world.selected && world.channels[world.selected] ? box : null;
+        if (sel.includes("captcha")) return world.captchaShown ? { tagName: "IFRAME" } : null;
+        if (sel.includes("dialog")) return world.dialogText ? { textContent: world.dialogText } : null;
+        return null;
+      },
+      querySelectorAll: () => [],
+    };
+  };
 
   // ---- what a test or the stand-in page changes
   world.addUser = (id, username, globalName, avatar) => { world.users[id] = { id, username, globalName, avatar: avatar || null }; };
@@ -201,6 +358,9 @@ function installFakeDiscord(window, opts) {
       case "say": world.say(cmd.channel, cmd.author || world.channels[cmd.channel].recipients[0], cmd.text); break;
       case "unread": world.setUnread(cmd.channel, cmd.count); break;
       case "ring": world.ring(cmd.channel, !!cmd.on); break;
+      case "send-fails": world.sendFails = !!cmd.on; world.failReason = cmd.reason || ""; break;
+      case "captcha": world.setCaptcha(!!cmd.on); break;
+      case "slow": world.slowMs = Math.max(0, Number(cmd.ms) || 0); break;
       default: break;
     }
   };

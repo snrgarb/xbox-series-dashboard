@@ -24,6 +24,7 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, Lo
 use windows::Win32::System::Threading::INFINITE;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use crate::act::ActOp;
 use crate::{redact, say, Area, Notified, PageOp, Report, Tell, WebKey};
 
 type CreateEnvironment = unsafe extern "system" fn(PCWSTR, PCWSTR, *mut c_void, *mut c_void) -> HRESULT;
@@ -454,6 +455,26 @@ impl Host {
         }
     }
 
+    /// An action for the page script (`js/act.js`; docs/discord-web.md, "Acting"). False when the page did not take it:
+    /// the page script is not there, it is busy, or the ask is not well formed. Nothing of the ask is logged but its kind.
+    pub fn act(&self, op: &ActOp) -> bool {
+        let Some(js) = op.script() else {
+            say(&format!("discord web: {} was not asked of the page: not well formed", op.kind()));
+            return false;
+        };
+        match self.eval(&js) {
+            Ok(Value::Bool(true)) => true,
+            Ok(_) => {
+                say(&format!("discord web: the page script did not take {}", op.kind()));
+                false
+            }
+            Err(e) => {
+                say(&format!("discord web: the page script's {} failed: {e}", op.kind()));
+                false
+            }
+        }
+    }
+
     /// WebView2's own `AddScriptToExecuteOnDocumentCreated`: the script runs in every new document of the main world
     /// before the page's scripts. Waited for.
     fn add_script(&self, js: &str) -> Result<(), String> {
@@ -515,8 +536,12 @@ impl Host {
     /// A key pressed and let go, by DevTools' `Input.dispatchKeyEvent`: trusted input, whether or not the window has
     /// the foreground. Enter is the full sequence the spike found a form needs: rawKeyDown, char, keyUp.
     pub fn key(&self, key: WebKey) {
+        self.key_with(key, if key == WebKey::ShiftTab { 8 } else { 0 });
+    }
+
+    /// A key with modifiers (Alt 1, Ctrl 2, Meta 4, Shift 8: DevTools' bit set).
+    fn key_with(&self, key: WebKey, modifiers: i32) {
         let (name, code, vk, text) = parts(key);
-        let modifiers = if key == WebKey::ShiftTab { 8 } else { 0 };
         let base = json!({ "key": name, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk, "modifiers": modifiers });
         let with = |kind: &str| {
             let mut event = base.clone();
@@ -545,6 +570,36 @@ impl Host {
         } else {
             self.cdp_send("Input.insertText", json!({ "text": text }));
         }
+    }
+
+    /// A message for the page's focused message box, as typing would put it there: emptied of a draft first if `clear`
+    /// (select all, delete), then each line inserted, a line break by Shift+Enter (a plain Enter would send). Enter
+    /// itself is pressed later, by [`Host::enter`], once the box has had a moment to take the text (the spike's lesson).
+    /// Never logged, never kept.
+    pub fn type_message(&self, text: &str, clear: bool) {
+        if clear {
+            let ctrl = json!({ "key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "nativeVirtualKeyCode": 65, "modifiers": 2 });
+            for kind in ["rawKeyDown", "keyUp"] {
+                let mut event = ctrl.clone();
+                event["type"] = json!(kind);
+                self.cdp_send("Input.dispatchKeyEvent", event);
+            }
+            self.key(WebKey::Backspace);
+        }
+        for (i, line) in text.split('\n').enumerate() {
+            if i > 0 {
+                self.key_with(WebKey::Enter, 8);
+            }
+            let line = line.trim_end_matches('\r');
+            if !line.is_empty() {
+                self.cdp_send("Input.insertText", json!({ "text": line }));
+            }
+        }
+    }
+
+    /// The one Enter that sends: rawKeyDown, char, keyUp.
+    pub fn enter(&self) {
+        self.key(WebKey::Enter);
     }
 
     /// Takes focus off the field the page put it in by itself (Discord focuses the e-mail field), so the sign-in page
