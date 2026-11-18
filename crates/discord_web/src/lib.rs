@@ -17,13 +17,17 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
+pub use model::discord::{Ask, Browse, BrowseAsk, CallAsk, Shortcut, Voice};
 pub use model::discord_dms::{Direct, DirectAsk, DirectEvent, DirectState};
 pub use model::discord_web::{Web, WebAsk, WebField, WebKey, WebState};
 
 pub(crate) mod act;
+mod art;
 pub mod direct;
 mod pictures;
 pub mod redact;
+mod shortcuts;
+pub mod voice;
 #[cfg(windows)]
 mod win;
 
@@ -36,14 +40,15 @@ pub const CDN: &str = "https://cdn.discordapp.com";
 
 /// The script the host installs in every document of the web view (`AddScriptToExecuteOnDocumentCreated`): the store
 /// search (`js/stores.js`), the reader that pushes what the stores hold (`js/direct.js`) and the actions it takes by
-/// the host's ask (`js/act.js`), in one function of their own so that a second injection and the page's scripts cannot
+/// the host's ask (`js/act.js`) and voice (`js/voice.js`), in one function of their own so that a second injection and the page's scripts cannot
 /// meet. See docs/discord-web.md, "Reading" and "Acting".
 pub fn direct_script() -> String {
     format!(
-        "(() => {{\n{}\n{}\n{}\n}})();\n",
+        "(() => {{\n{}\n{}\n{}\n{}\n}})();\n",
         include_str!("../js/stores.js"),
         include_str!("../js/direct.js"),
-        include_str!("../js/act.js")
+        include_str!("../js/act.js"),
+        include_str!("../js/voice.js")
     )
 }
 
@@ -83,6 +88,32 @@ pub fn count(folder: &Path) -> usize {
     entries.flatten().map(|entry| if entry.path().is_dir() { count(&entry.path()) } else { 1 }).sum()
 }
 
+/// WebView2's `COREWEBVIEW2_PERMISSION_KIND` as a word for the log (kind names only, never an address).
+pub fn permission_name(kind: i32) -> &'static str {
+    match kind {
+        1 => "microphone",
+        2 => "camera",
+        3 => "geolocation",
+        4 => "notifications",
+        9 => "autoplay",
+        _ => "other",
+    }
+}
+
+/// Whether the page's permission request is granted: only Discord's own address (the session's base authority) and only
+/// the microphone and autoplay, for voice, and notifications where this runtime can take them. The camera (D5: no
+/// video) and everything else are refused, whoever asks. `from` and `base` are `host:port`, lower case.
+pub fn permission_granted(kind: i32, from: &str, base: &str, notifications_taken: bool) -> bool {
+    if from.is_empty() || from != base {
+        return false;
+    }
+    match kind {
+        1 | 9 => true,
+        4 => notifications_taken,
+        _ => false,
+    }
+}
+
 /// The sign-in page's area on the screen, in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Area {
@@ -98,12 +129,16 @@ pub struct Area {
 /// 2.2 times, Discord's QR panel about 390 pixels across. docs/discord-web.md, "The QR code first".
 pub const VIEW_MIN: (f64, f64) = (860.0, 440.0);
 
+/// The sign-in page is zoomed to this much of what fits (#294): the user found the fitted zoom "a little zoomed in", and
+/// Discord's whole sign-in panel wants margin around it. The QR code is still large.
+pub const ZOOM_MARGIN: f64 = 0.85;
+
 /// The page zoom (WebView2's `ZoomFactor`) for `area` at the window's rasterization scale `raster` (its DPI scale):
-/// the largest that leaves the page `VIEW_MIN` CSS pixels at least, never less than 1.
+/// [`ZOOM_MARGIN`] of the largest that leaves the page `VIEW_MIN` CSS pixels at least, never less than 1.
 pub fn zoom(area: Area, raster: f64) -> f64 {
     let raster = if raster > 0.0 { raster } else { 1.0 };
     let fit = (area.width as f64 / VIEW_MIN.0).min(area.height as f64 / VIEW_MIN.1) / raster;
-    (fit * 100.0).floor().max(100.0) / 100.0
+    (fit * ZOOM_MARGIN * 100.0).floor().max(100.0) / 100.0
 }
 
 /// What the Dashboard's thread asks of the host thread.
@@ -141,6 +176,8 @@ pub(crate) enum PageOp {
     Older,
     /// Send everything again.
     Resend,
+    /// The server (digits) whose voice channels are pushed as they change, or none.
+    Browse(Option<String>),
 }
 
 /// A web notification Discord's page raised, taken by the host (marked handled, so Windows shows nothing). Its words
@@ -253,6 +290,14 @@ enum By {
     Itself,
 }
 
+/// What the Servers Flyout was last asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Asked {
+    Closed,
+    Servers,
+    Server { id: String, name: String },
+}
+
 /// The session, as the Dashboard's thread drives it.
 pub struct Session {
     base: String,
@@ -289,9 +334,20 @@ pub struct Session {
     open: Option<model::discord_dms::Id>,
     /// What is being done for the screens, one at a time, and what they sent that has not yet gone (#201).
     acts: act::Acts,
-    /// Kinds of ask not built yet that the log has said so of.
-    unbuilt: std::collections::BTreeSet<&'static str>,
     older_unavailable_said: bool,
+    /// Voice (#297): the pictures kept on disk in the RPC crate's art cache, the Known channels (Shortcuts), and what the
+    /// screens see: the Call, the Servers Flyout, the Shortcuts, who is signed in. Memory only but for the pictures and
+    /// the Known channels' file; forgotten with the session.
+    art: art::Art,
+    known: shortcuts::Known,
+    known_loaded: bool,
+    last_call: Option<String>,
+    asked: Asked,
+    voice: Voice,
+    browse: Browse,
+    shortcuts: Vec<Shortcut>,
+    me: Option<model::discord_dms::Private>,
+    voice_changed: bool,
     notifications: u32,
 }
 
@@ -317,14 +373,23 @@ impl Session {
         let cdn = base.is_none().then(|| CDN.to_string());
         Session {
             reader: direct::Reader::new(),
-            pictures: pictures::Pictures::new(cdn, wake.clone()),
+            pictures: pictures::Pictures::new(cdn.clone(), wake.clone()),
             direct: Direct::default(),
             direct_changed: false,
             events: Vec::new(),
             open: None,
             acts: act::Acts::new(),
-            unbuilt: Default::default(),
             older_unavailable_said: false,
+            art: art::Art::new(data.map(|d| d.join("art").join("discord")), cdn.clone(), wake.clone()),
+            known: shortcuts::Known::default(),
+            known_loaded: false,
+            last_call: None,
+            asked: Asked::Closed,
+            voice: Voice::default(),
+            browse: Browse::Closed,
+            shortcuts: Vec::new(),
+            me: None,
+            voice_changed: false,
             notifications: 0,
             base: base.unwrap_or(DISCORD).trim_end_matches('/').to_string(),
             data: data.map(Path::to_path_buf),
@@ -350,6 +415,7 @@ impl Session {
     /// None for no pictures. Unless set, Discord's own CDN, or none when the session is pointed at a stand-in Discord.
     pub fn set_cdn(&mut self, cdn: Option<&str>) {
         self.pictures.set_cdn(cdn.map(str::to_string));
+        self.art.set_cdn(cdn.map(str::to_string));
     }
 
     /// Discord's Direct Messages as the web session last read them (docs/discord-web.md, "Reading").
@@ -365,7 +431,7 @@ impl Session {
 
     /// What the screens ask of the Direct Messages. Open, Close and Older are read (#198); Send, Forget, React and
     /// MarkRead are acted (#201: [`act::Acts`], one at a time, paced; docs/discord-web.md, "Acting"); Call, Answer and
-    /// Decline are the voice ticket's: each says it is not built once in the log, by kind only.
+    /// Decline are voice's (#297): joining a DM's call (ringing it when nobody is in it), answering a ring, and stopping it.
     pub fn ask_direct(&mut self, ask: DirectAsk) {
         match ask {
             DirectAsk::Open(id) => {
@@ -435,17 +501,213 @@ impl Session {
                     say("discord web: mark read not done: not signed in");
                 }
             }
-            other => {
-                let kind = match other {
-                    DirectAsk::Call(_) => "call",
-                    DirectAsk::Answer(_) => "answer",
-                    DirectAsk::Decline(_) => "decline",
-                    _ => return,
-                };
-                if self.unbuilt.insert(kind) {
-                    say(&format!("discord web: {kind} not built yet"));
+            DirectAsk::Call(channel) => self.voice_join(channel.as_str(), true),
+            DirectAsk::Answer(channel) => self.voice_join(channel.as_str(), false),
+            DirectAsk::Decline(channel) => {
+                if self.voice_acting() {
+                    self.acts.decline(channel.as_str());
+                    self.drive();
+                } else {
+                    say("discord web: decline not done: not ready");
                 }
             }
+        }
+    }
+
+    /// Whether the session is signed in with the stores voice requires found: the Call, the Servers Flyout and the
+    /// Shortcuts are the web session's then. A missing voice store never turns the Direct Messages into PageChanged.
+    pub fn voice_ready(&self) -> bool {
+        self.host.is_some() && !self.ending && self.web.state == WebState::SignedIn && self.reader.voice_ready()
+    }
+
+    /// The Call the user is in and their own mute and deafen, as Discord's stores last said (docs/discord-web.md,
+    /// "Voice"). Default while not [`Session::voice_ready`].
+    pub fn voice(&self) -> &Voice {
+        &self.voice
+    }
+
+    /// The Servers Flyout, as last asked and answered.
+    pub fn browse(&self) -> &Browse {
+        &self.browse
+    }
+
+    /// The six most recently joined Known channels, most recently first.
+    pub fn shortcuts(&self) -> &[Shortcut] {
+        &self.shortcuts
+    }
+
+    /// Who is signed in to the web session, by display name, once the page has said (never logged).
+    pub fn me(&self) -> Option<&model::discord_dms::Private> {
+        self.me.as_ref()
+    }
+
+    fn voice_acting(&self) -> bool {
+        self.voice_ready()
+    }
+
+    fn voice_join(&mut self, channel: &str, ring: bool) {
+        if !self.voice_acting() {
+            say("discord web: join not done: not ready");
+            return;
+        }
+        if self.voice.call.as_ref().is_some_and(|c| c.id == channel) {
+            say("discord web: join: already in that call");
+            return;
+        }
+        self.acts.join(channel, ring);
+        self.drive();
+    }
+
+    /// What the Discord tab asks of voice: Mute, Deafen, Leave, joining a Shortcut or a server's voice channel,
+    /// Remove shortcut and the Servers Flyouts. The RPC connection's own asks (Settings') are ignored.
+    pub fn ask_voice(&mut self, ask: Ask) {
+        match ask {
+            Ask::Call(call) => {
+                if !self.voice_acting() {
+                    say("discord web: the call's ask not done: not ready");
+                    return;
+                }
+                match call {
+                    CallAsk::Mute => self.acts.mute(),
+                    CallAsk::Deafen => self.acts.deafen(),
+                    CallAsk::Leave if self.voice.call.is_none() => return,
+                    CallAsk::Leave => self.acts.leave(),
+                }
+                self.drive();
+            }
+            Ask::Join(id) => self.voice_join(&id, false),
+            Ask::RemoveShortcut(id) => {
+                if self.known.forget(&id) {
+                    say("discord web: shortcut removed");
+                    self.save_known();
+                    self.refresh_voice();
+                }
+            }
+            Ask::Browse(browse) => {
+                if !self.voice_ready() {
+                    return;
+                }
+                match browse {
+                    BrowseAsk::Servers | BrowseAsk::Back => {
+                        self.asked = Asked::Servers;
+                        self.page_browse(None);
+                    }
+                    BrowseAsk::Server { id, name } => {
+                        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+                            return;
+                        }
+                        if self.reader.server.as_ref().is_some_and(|s| s.id != id) {
+                            self.reader.server = None;
+                        }
+                        self.page_browse(Some(id.clone()));
+                        self.asked = Asked::Server { id, name };
+                    }
+                    BrowseAsk::Close => {
+                        self.asked = Asked::Closed;
+                        self.page_browse(None);
+                    }
+                }
+                self.refresh_voice();
+            }
+            _ => {}
+        }
+    }
+
+    fn page_browse(&self, id: Option<String>) {
+        if let Some(host) = &self.host {
+            host.send(Command::Page(PageOp::Browse(id)));
+        }
+    }
+
+    fn known_path(&self) -> Option<PathBuf> {
+        Some(self.data.as_ref()?.join("discord-web").join(format!("known-profile-{}.json", self.profile?)))
+    }
+
+    fn save_known(&mut self) {
+        if let Some(path) = self.known_path() {
+            self.known.save(&path);
+        }
+    }
+
+    /// A Call the user is really in becomes a Known channel, at the front, once; as it goes on, its channel takes the
+    /// name and picture it lacked.
+    fn learn_call(&mut self) {
+        let Some(raw) = self.reader.voice.as_ref() else { return };
+        match voice::joined(raw) {
+            Some(joined) => {
+                if self.last_call.as_deref() != Some(joined.id.as_str()) {
+                    self.known.learn(&joined);
+                    self.last_call = Some(joined.id);
+                } else {
+                    self.known.remember_call(&joined);
+                }
+            }
+            None if raw.channel.is_empty() => self.last_call = None,
+            None => {}
+        }
+        self.save_known();
+    }
+
+    /// Forgets the Call, the Flyout, the Shortcuts in memory and who is signed in. Pictures kept on disk stay (art), and
+    /// so does the Known channels' file, until a sign-out removes it.
+    fn forget_voice(&mut self) {
+        self.known = shortcuts::Known::default();
+        self.known_loaded = false;
+        self.last_call = None;
+        self.asked = Asked::Closed;
+        self.refresh_voice();
+    }
+
+    /// Builds what the screens see of voice from what the page said and the pictures that have come.
+    fn refresh_voice(&mut self) {
+        let ready = self.voice_ready();
+        if ready && !self.known_loaded {
+            self.known_loaded = true;
+            if let Some(path) = self.known_path() {
+                self.known = shortcuts::Known::load(&path);
+            }
+        }
+        let (mut voice, mut browse, mut shortcuts, mut me) = (Voice::default(), Browse::Closed, Vec::new(), None);
+        if ready {
+            if let Some(raw) = &self.reader.voice {
+                voice = Voice { call: voice::call(raw, &mut self.art), mute: raw.mute, deaf: raw.deaf };
+                me = Some(model::discord_dms::Private(raw.me.clone())).filter(|p| !p.is_empty());
+            }
+            shortcuts = voice::shortcuts(&self.known, &mut self.art);
+            browse = match &self.asked {
+                Asked::Closed => Browse::Closed,
+                Asked::Servers => {
+                    let (ordered, guilds) = match &self.reader.guilds {
+                        Some((ordered, guilds)) => (*ordered, guilds.as_slice()),
+                        None => (false, &[][..]),
+                    };
+                    Browse::Servers {
+                        loading: self.reader.guilds.is_none(),
+                        servers: voice::servers(guilds, ordered, &self.known, &mut self.art),
+                    }
+                }
+                Asked::Server { id, name } => {
+                    let raw = self.reader.server.as_ref().filter(|s| s.id == *id);
+                    Browse::Server {
+                        id: id.clone(),
+                        name: name.clone(),
+                        loading: raw.is_none(),
+                        channels: raw.map(|s| voice::channels(s, &mut self.art)).unwrap_or_default(),
+                    }
+                }
+            };
+        }
+        if (&voice, &browse, &shortcuts, &me) != (&self.voice, &self.browse, &self.shortcuts, &self.me) {
+            (self.voice, self.browse, self.shortcuts, self.me) = (voice, browse, shortcuts, me);
+            self.voice_changed = true;
+        }
+    }
+
+    /// A web view is about to be closed while the user is in a Call: Discord's own leave is asked first, best effort (the
+    /// host gives it half a second before it closes; Discord times the connection out in any case).
+    fn leave_before_closing(&self, host: &Host) {
+        if self.voice.call.is_some() {
+            host.send(Command::Act(act::ActOp::Leave { seq: 0 }));
         }
     }
 
@@ -519,6 +781,7 @@ impl Session {
         let outs = self.acts.reset();
         self.apply(outs);
         self.refresh_direct();
+        self.forget_voice();
     }
 
     /// Builds what the screens see from what the page said and the pictures that have come, asks for the pictures that
@@ -649,6 +912,7 @@ impl Session {
         let wanted = self.on.then_some(()).and(self.profile);
         if let Some(host) = &self.host {
             if wanted != Some(host.profile) && !self.ending {
+                self.leave_before_closing(host);
                 host.send(Command::Stop);
                 self.ending = true;
             }
@@ -764,6 +1028,7 @@ impl Session {
             self.web.field = None;
         }
         self.refresh_direct();
+        self.refresh_voice();
     }
 
     /// Shows Discord's sign-in page over `area`, or puts it away (None). Only a change is sent.
@@ -812,6 +1077,7 @@ impl Session {
         say(&format!("discord web: signing out: {} files in the session's folder", count(&folder)));
         match &self.host {
             Some(host) if !self.ending => {
+                self.leave_before_closing(host);
                 host.send(Command::SignOut);
                 self.ending = true;
             }
@@ -830,6 +1096,11 @@ impl Session {
             Err(e) => say(&format!("discord web: signed out, but {e} in {}", folder.display())),
         }
         self.web.kept = kept(folder);
+        // The Known channels' file goes with the session: nothing of it is left.
+        if let Some(path) = self.known_path() {
+            let _ = std::fs::remove_file(path);
+        }
+        self.forget_voice();
         if self.on {
             self.set_state(WebState::SignedOut);
         }
@@ -872,11 +1143,22 @@ impl Session {
                         self.apply(outs);
                     }
                     for event in taken.events {
+                        match &event {
+                            DirectEvent::Ring(_) => say("discord web: ringing"),
+                            DirectEvent::RingEnded(_) => say("discord web: ring ended"),
+                            _ => {}
+                        }
                         let event = self.with_picture(event);
                         self.events.push(event);
                     }
                     if taken.changed {
                         self.refresh_direct();
+                    }
+                    if taken.voice {
+                        self.learn_call();
+                    }
+                    if taken.voice || taken.changed {
+                        self.refresh_voice();
                     }
                 }
                 Report::Notified(notified) => {
@@ -931,11 +1213,18 @@ impl Session {
         if self.pictures.pump() {
             self.refresh_direct();
         }
-        let failed = self.pictures.take_failures();
+        if self.art.pump() {
+            self.refresh_voice();
+        }
+        let failed: Vec<String> = self.pictures.take_failures().into_iter().chain(self.art.take_failures()).collect();
         if !failed.is_empty() {
             say(&format!("discord web: {} pictures could not be fetched ({})", failed.len(), failed[0]));
         }
-        before != self.web || std::mem::take(&mut self.direct_changed)
+        let changed = before != self.web;
+        // Both flags are taken: neither may stay set for the next frame.
+        let direct = std::mem::take(&mut self.direct_changed);
+        let voice = std::mem::take(&mut self.voice_changed);
+        changed || direct || voice
     }
 
     /// The event with the picture it names, as far as it has come.
@@ -964,8 +1253,39 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         let Some(mut host) = self.host.take() else { return };
+        let mut ended = false;
         if !self.ending {
-            host.send(Command::Stop);
+            // In a Call: Discord's own leave first, and up to 2 s for the stores to show it, best effort.
+            if self.voice.call.is_some() {
+                host.send(Command::Act(act::ActOp::Leave { seq: 0 }));
+                let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
+                    match self.reports.recv_timeout(left) {
+                        Ok(Report::Page(json)) => {
+                            self.reader.take(&json, None);
+                            if self.reader.voice.as_ref().is_some_and(|v| v.channel.is_empty()) {
+                                say("discord web: left the call");
+                                break;
+                            }
+                        }
+                        Ok(Report::Ended { .. }) => {
+                            ended = true;
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+            }
+            if !ended {
+                host.send(Command::Stop);
+            }
+        }
+        if ended {
+            if let Some(thread) = host.thread.take() {
+                let _ = thread.join();
+            }
+            return;
         }
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while let Some(left) = until.checked_duration_since(std::time::Instant::now()) {
@@ -1030,13 +1350,41 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_microphone_is_granted_to_discords_own_address_and_nothing_else_is() {
+        let base = "discord.com";
+        for (kind, name) in
+            [(1, "microphone"), (2, "camera"), (4, "notifications"), (9, "autoplay"), (3, "geolocation"), (6, "other")]
+        {
+            assert_eq!(permission_name(kind), name);
+        }
+        assert!(permission_granted(1, "discord.com", base, true), "the microphone, for voice");
+        assert!(permission_granted(1, "discord.com", base, false), "whether or not notifications can be taken");
+        assert!(permission_granted(9, "discord.com", base, true), "autoplay, for voice");
+        assert!(permission_granted(4, "discord.com", base, true));
+        assert!(!permission_granted(4, "discord.com", base, false), "notifications only where they can be taken");
+        for kind in [2, 3, 5, 6, 7, 8, 10, 11, 12, 99, 0] {
+            assert!(
+                !permission_granted(kind, "discord.com", base, true),
+                "kind {kind}: the camera and the rest are refused"
+            );
+        }
+        for from in ["", "evil.test", "discord.com.evil.test", "cdn.discordapp.com", "discord.com:8443"] {
+            assert!(!permission_granted(1, from, base, true), "{from:?} is not Discord's own address");
+        }
+        assert!(
+            permission_granted(1, "127.0.0.1:9000", "127.0.0.1:9000", false),
+            "a stand-in Discord's own, in a test"
+        );
+    }
+
+    #[test]
     fn the_sign_in_page_is_zoomed_as_far_as_keeps_the_qr_panel() {
         let tv = Area { x: 0, y: 0, width: 3840, height: 1940 };
-        assert_eq!(zoom(tv, 2.0), 2.2, "a 4K TV at 200%");
-        assert_eq!(zoom(Area { width: 1920, height: 970, ..tv }, 1.0), 2.2, "1080 at 100%: the same");
-        assert_eq!(zoom(Area { width: 1920, height: 970, ..tv }, 1.5), 1.46);
+        assert_eq!(zoom(tv, 2.0), 1.87, "a 4K TV at 200%");
+        assert_eq!(zoom(Area { width: 1920, height: 970, ..tv }, 1.0), 1.87, "1080 at 100%: the same");
+        assert_eq!(zoom(Area { width: 1920, height: 970, ..tv }, 1.5), 1.24, "the TV of #294 (was 1.46)");
         assert_eq!(zoom(Area { width: 800, height: 400, ..tv }, 1.0), 1.0, "never below 1");
-        assert_eq!(zoom(tv, 0.0), 4.4, "no scale known: 1");
+        assert_eq!(zoom(tv, 0.0), 3.74, "no scale known: 1");
         for (area, raster) in [(tv, 2.0), (Area { width: 1920, height: 970, ..tv }, 1.25)] {
             let z = zoom(area, raster) * raster;
             assert!(area.width as f64 / z >= VIEW_MIN.0 && area.height as f64 / z >= VIEW_MIN.1);

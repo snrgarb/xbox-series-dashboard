@@ -34,6 +34,21 @@
 //!   `{"kind":"react","channel","message","emoji","on"}`, `{"kind":"read","channel"}`. The page posts each to
 //!   `POST /standin/sent`. Made-up test data only; the request log never holds a body.
 //!
+//! Voice (#297): the page also has three made-up servers (`400000000000000001` "Stand-in Server", `...03` "Made-up Place",
+//! `...02` "Test Guild", in that order, the user's own), voice channels (`500000000000000001` "Lounge", occupied by
+//! `300000000000000001`; `...02` "Games"; `...04` a stage channel; `500000000000000011` with `300000000000000002` muted;
+//! `500000000000000021`; `500000000000000022`, which the user may not connect to), a fake `selectVoiceChannel` that connects
+//! 300 ms later, `toggleSelfMute`/`toggleSelfDeaf` and `ring`/`stopRinging`. A ring ends when it is answered or declined.
+//! Controls:
+//!
+//! - `POST /standin/voice-speak?user=<id>&on=1|0` that user starts or stops speaking.
+//! - `POST /standin/voice-join?channel=<id>&user=<id>` that user joins that voice channel (the signed-in user,
+//!   `300000000000000099`, by the fake's own join).
+//! - `POST /standin/voice-leave[?user=<id>]` that user leaves voice; with none named, the signed-in user (as if moved out
+//!   from another device).
+//! - `GET /standin/sent` also lists the voice actions received: `{"kind":"join","channel"}`, `{"kind":"leave"}`,
+//!   `{"kind":"mute"}`, `{"kind":"deafen"}`, `{"kind":"ring","channel"}`, `{"kind":"stop-ringing","channel"}`.
+//!
 //! The channels are the three DM list links' ids ([`FRIENDS`]), `100000000000000010` (a Group DM of two) and
 //! `100000000000000011` ("Made-up Group", with 60 older messages). The page polls `GET /standin/world?since=<n>` for
 //! the controls, which are replayed when it loads again.
@@ -259,7 +274,10 @@ fn answer(
         | ("POST", "/standin/ring")
         | ("POST", "/standin/send-fails")
         | ("POST", "/standin/captcha")
-        | ("POST", "/standin/slow") => {
+        | ("POST", "/standin/slow")
+        | ("POST", "/standin/voice-speak")
+        | ("POST", "/standin/voice-join")
+        | ("POST", "/standin/voice-leave") => {
             let channel = query(&path, "channel").unwrap_or_default();
             let command = match route.as_str() {
                 "/standin/dm-message" => {
@@ -278,6 +296,18 @@ fn answer(
                 "/standin/captcha" => {
                     let on = matches!(query(&path, "on").as_deref(), Some("1" | "true" | "on"));
                     serde_json::json!({ "do": "captcha", "on": on })
+                }
+                "/standin/voice-speak" => {
+                    let on = matches!(query(&path, "on").as_deref(), Some("1" | "true" | "on"));
+                    serde_json::json!({ "do": "voice-speak", "user": query(&path, "user").unwrap_or_default(), "on": on })
+                }
+                "/standin/voice-join" => serde_json::json!({
+                    "do": "voice-join",
+                    "channel": channel,
+                    "user": query(&path, "user").unwrap_or_default(),
+                }),
+                "/standin/voice-leave" => {
+                    serde_json::json!({ "do": "voice-leave", "user": query(&path, "user").unwrap_or_default() })
                 }
                 "/standin/slow" => {
                     let ms: u32 = query(&path, "ms").and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -444,6 +474,40 @@ mod tests {
         assert!(world(9).ends_with(r#""commands":[]}"#));
         let asked = web.asked.lock().unwrap().clone();
         assert!(asked.iter().all(|l| !l.contains("are you") && !l.contains("/standin/world")), "{asked:?}");
+    }
+
+    #[test]
+    fn the_voice_controls_drive_the_world_and_the_voice_actions_received_are_listed() {
+        let web = Web::start(0).unwrap();
+        let base = web.base();
+        let signed = format!("{COOKIE}=stand-in");
+        let app = get(&base, "/app", Some(&signed), None);
+        assert!(app.contains("selectVoiceChannel") && app.contains("toggleSelfMute") && app.contains("stopRinging"));
+        let body = |answer: &str| answer.split("\r\n\r\n").nth(1).unwrap().to_string();
+        get(&base, "/standin/voice-speak?user=300000000000000001&on=1", None, Some(""));
+        get(&base, "/standin/voice-join?channel=500000000000000002&user=300000000000000002", None, Some(""));
+        get(&base, "/standin/voice-leave", None, Some(""));
+        get(&base, "/standin/voice-leave?user=300000000000000002", None, Some(""));
+        let world = body(&get(&base, "/standin/world?since=0", None, None));
+        let json: serde_json::Value = serde_json::from_str(&world).unwrap();
+        let commands = json["commands"].as_array().unwrap();
+        assert_eq!(commands[0], serde_json::json!({"do": "voice-speak", "user": "300000000000000001", "on": true}));
+        assert_eq!(
+            commands[1],
+            serde_json::json!({"do": "voice-join", "channel": "500000000000000002", "user": "300000000000000002"})
+        );
+        assert_eq!(commands[2], serde_json::json!({"do": "voice-leave", "user": ""}));
+        assert_eq!(commands[3], serde_json::json!({"do": "voice-leave", "user": "300000000000000002"}));
+        for entry in
+            [r#"{"kind":"join","channel":"5"}"#, r#"{"kind":"mute"}"#, r#"{"kind":"stop-ringing","channel":"7"}"#]
+        {
+            get(&base, "/standin/sent", None, Some(entry));
+        }
+        let listed: serde_json::Value = serde_json::from_str(&body(&get(&base, "/standin/sent", None, None))).unwrap();
+        assert_eq!(listed.as_array().unwrap().len(), 3);
+        assert_eq!(listed[2]["kind"], "stop-ringing");
+        let asked = web.asked.lock().unwrap().clone();
+        assert!(asked.iter().all(|l| !l.contains("voice-join?") && !l.contains("500000000000000002")), "{asked:?}");
     }
 
     #[test]

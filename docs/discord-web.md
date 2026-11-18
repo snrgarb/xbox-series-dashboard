@@ -1,8 +1,8 @@
 # Discord messages: the web session (#197)
 
 The Dashboard's own discord.com, in a WebView2, signed in by the user on Discord's own page: what the Guide's Party
-will read DMs and notifications through (#198 to #202; reading: below). Voice stays on the RPC connection (docs/discord.md), which
-this does not touch. The decisions are #192's (D1 opt-in, D2 our own web session, D6 messages in memory only, D7 our
+will read DMs and notifications through (#198 to #202; reading: below), and, since #297, Discord voice ("Voice", below), in the
+RPC connection's place (docs/discord.md: kept until the app is wired to this and the voice has run on the TV). The decisions are #192's (D1 opt-in, D2 our own web session, D6 messages in memory only, D7 our
 own code); what the spike found on the TV PC is docs/research/discord-web-spike.md.
 
 Code: `crates/discord_web` (the session and its host thread), `crates/model/src/discord_web.rs` (what the screens see),
@@ -83,8 +83,8 @@ there, which Settings says.
 - Text the Console keyboard keeps goes to the focused field by DevTools' `Input.insertText` and is dropped. It is in no
   log line, no focus line (`WebAsk`'s `Debug` says `Text(7 characters)`), nothing saved.
 - The log has addresses as scheme, host and path only, ids and long segments hidden (`redact::address`).
-- WebView2's own password saving and autofill are off; DevTools, the context menu, new windows and permission
-  requests are refused.
+- WebView2's own password saving and autofill are off; DevTools, the context menu and new windows are refused, and
+  so is every permission request but the ones "Voice" names, which only Discord's own address is given.
 
 ## The sign-in page, and which keyboard
 
@@ -99,12 +99,15 @@ Scanning Discord's QR code with the Discord mobile app is the first way to sign 
   pad sends a key, the session lets go of any field focused (`blur()`, looked at four times a second), and the first
   Down puts focus in the form's first field, where Tab would have begun.
 - The page is **zoomed, never cropped or restyled** (WebView2's `ZoomFactor`, kept across navigations, set back to 1
-  when the page is put away): as far as leaves the page 860 x 440 CSS pixels at least (`discord_web::VIEW_MIN`,
-  `zoom`). Discord drops its QR panel from a narrow login page, so the width is kept above that; within it the QR
-  code is as large as it goes: 2.2 times on a 1080-line screen at any DPI scale, so Discord's QR panel (176 CSS pixels
-  across, as the panel is laid out) is about 390 pixels at the 1080 scale. The breakpoint and the panel's size are
-  Discord's as seen in its stylesheet and UNVERIFIED against today's discord.com; the log line `discord web: page zoom
-  2.20 at scale 2.00, 873x441 CSS pixels` and `discord web: QR code shown yes` say what the TV got.
+  when the page is put away): to **0.85 of** the zoom that leaves the page 860 x 440 CSS pixels at least
+  (`discord_web::VIEW_MIN`, `ZOOM_MARGIN`, `zoom`), never below 1. Discord drops its QR panel from a narrow login page,
+  so the width is kept above that; the fitted zoom is 2.2 times on a 1080-line screen at any DPI scale, and the page
+  takes 0.85 of it, 1.87 there. The first build zoomed to the fit itself and the user found it "a little zoomed in"
+  (the log read `page zoom 1.46 at scale 3.00, 877x443 CSS pixels`): the whole of Discord's sign-in panel wants margin
+  around it, so that TV now gets 1.24, and Discord's QR panel (176 CSS pixels across, as the panel is laid out) is about 330
+  pixels across at the 1080 scale (176 x 1.87) and 650 on that 4K TV: still large. The breakpoint and the panel's size are Discord's as seen in its
+  stylesheet and UNVERIFIED against today's discord.com; the log line `discord web: page zoom 1.24 at scale 3.00,
+  1032x522 CSS pixels` and `discord web: QR code shown yes` say what the TV got.
 - The band's first line, in Discord's words where it has them: "Scan the QR code with the Discord mobile app to log
   in instantly. To type instead, move to a field and press A."
 - The QR code is Discord's: it expires and refreshes itself, and nothing of ours reads it or the page's token. After
@@ -157,7 +160,7 @@ model, and the events), `src/pictures.rs` (avatars), `src/win/host.rs` (`reading
 
 ### The script
 
-`discord_web::direct_script()` is `stores.js`, `direct.js` and `act.js` (see "Acting") in one function. The host installs it with
+`discord_web::direct_script()` is `stores.js`, `direct.js`, `act.js` (see "Acting") and `voice.js` (see "Voice") in one function. The host installs it with
 `AddScriptToExecuteOnDocumentCreated`, so it runs in every new document of the web view before Discord's own scripts
 (not in frames: `window.top` only), and twice is once (`window.__xsdDirect`). It:
 
@@ -239,8 +242,7 @@ to press; scrolling a hidden page is brittle), `before` the oldest loaded messag
 the call settles; `at_start` is `hasMoreBefore === false`. If that action was not found, `Older` does nothing and the
 log says so once (`discord web: older messages: Discord's action was not found; reading goes on without it`).
 
-Send, Forget, React and MarkRead are acted (below, "Acting"); Call, Answer and Decline are the voice ticket's
-(#297): `Session::ask_direct` logs `discord web: <kind> not built yet` once each and does nothing.
+Send, Forget, React and MarkRead are acted (below, "Acting"); Call, Answer and Decline are voice's (#297, "Voice").
 
 ### The state, events, memory
 
@@ -408,6 +410,136 @@ a real id; fake `createPendingReply`/`deletePendingReply`, `addReaction`/`remove
 `ack`), `deleteMessage`, exported by the same shapes. Controls: `POST /standin/send-fails?on=1|0[&reason=<words>]`,
 `POST /standin/captcha?on=1|0`, `POST /standin/slow?ms=<n>`; `GET /standin/sent` lists what it received (`message` with
 channel, text and reply target; `react`; `read`), for an end-to-end payload.
+
+## Voice (#297)
+
+Code: `crates/discord_web/js/voice.js` (the page's half, the last file of the page script), `src/voice.rs` (its JSON to
+`model::discord`), `src/shortcuts.rs` (Known channels), `src/art.rs` (pictures on disk), `src/act.rs` (the queue),
+`src/win/host.rs` (permissions), `Session::{voice, browse, shortcuts, me, voice_ready, ask_voice}`. Decided by #192's
+overturn (docs/research/discord-web-voice.md, 0): voice is the web session's, so the Discord app and the RPC connection
+are no longer needed (`crates/discord` stays until the app is wired to this and the voice has run on the TV).
+
+### Reading, pushed
+
+From Discord's stores only, found by the same search as the Direct Messages' (`stores.js`), pushed on the stores' change
+events, **at most one push a 150 ms window** (SpeakingStore changes many times a second), each kind only when it differs
+from the last sent: `{k:"voice"}` (the user's Call and own mute and deafen: `channel` empty out of a Call, who is in it,
+who speaks), `{k:"guilds"}` (the servers) and, for the server the Flyout is on (`browse(id)`), `{k:"server"}` (its voice
+and stage channels with who is in each). Nothing is read until the required stores are found.
+
+| Our key | Discord's store (by Flux name, then by shape) | Methods called | |
+|---|---|---|---|
+| `voice` | `VoiceStateStore` | `getVoiceStatesForChannel`; optional `getVoiceStateForUser` | required |
+| `media` | `MediaEngineStore` | `isSelfMute`, `isSelfDeaf` | required |
+| `guilds` | `GuildStore` | `getGuilds` | required |
+| `voiceActions` | an exports object with `selectVoiceChannel` | `selectVoiceChannel(id)`, `selectVoiceChannel(null)` | required |
+| `channels` | `ChannelStore` | `getChannel`, `getMutableGuildChannelsForGuild` | required (the DMs') |
+| `speaking` | `SpeakingStore` | `isSpeaking` | optional: nobody speaks without it |
+| `selected` | `SelectedChannelStore` | `getVoiceChannelId` | optional: else the user's own voice state's channel |
+| `rtc` | `RTCConnectionStore` | `isConnected`, else `getState() === "RTC_CONNECTED"` | optional: joined is the voice state alone |
+| `members` | `GuildMemberStore` | `getNick(guildId, userId)` | optional: display name, else username |
+| `guildOrder` | `SortedGuildStore` | `getFlattenedGuildIds` | optional: servers by name |
+| `guildChannels` | `GuildChannelStore` | `getChannels(guildId).<group>[].channel` | optional: when `ChannelStore` lacks the method |
+| `permissions` | `PermissionStore` | `can(CONNECT, channel)`, CONNECT being `1 << 20` (Discord's documented bit) | optional: all channels listed |
+| `mediaActions` | an exports object with `toggleSelfMute` and `toggleSelfDeaf` | both | optional: Mute and Deafen fail plainly |
+| `callActions` | an exports object with `ring` and `stopRinging` (or `call`) | `ring(channelId)`, `stopRinging(channelId)` | optional: no ring started, Decline fails plainly |
+
+- **The Call**: the channel is `SelectedChannelStore.getVoiceChannelId()`, else the channel of the user's own entry in
+  VoiceStateStore. Its title is a server channel's name, a DM's other people comma-joined, a Group DM's name, else
+  "Call". The people are `getVoiceStatesForChannel(id)` in Discord's order (the screens put the user first), named by
+  their server nickname (`getNick`), else display name, else username, muted or deafened by themselves or the server
+  (`selfMute || mute`, `selfDeaf || deaf`), speaking by `isSpeaking`. While the user is selected but not yet in the
+  channel's voice states (connecting) the user is shown in it alone. The user's own mute and deafen are
+  `MediaEngineStore`'s, in a Call or out of one. "Joined" is the user's own voice state in the channel and RTC connected
+  where that store was found.
+- **The Servers Flyout**: `BrowseAsk::Servers` is answered at once from the last `guilds` push (loading only before the
+  first), in the user's own order where `SortedGuildStore` gives one, else the Bundle's (the servers joined in most
+  recent first, then by name). `BrowseAsk::Server` asks the page to push that server's channels (types 2 and 13, by
+  position, only those `can(CONNECT)` allows: where it says no to every one it is not trusted and all are listed),
+  with who is in each, kept up to date until Back or Close.
+- **Pictures** are `Option<PathBuf>` in these types: fetched host-side from the CDN (`discord_web::CDN`,
+  `--discord-cdn-url`) into the **same on-disk art cache and names the RPC connection uses**,
+  `<data>/art/discord/avatars/<user>/<hash>.png`, `embed/<n>.png` (the default avatar), `icons/<guild>/<hash>.png`, so
+  the screens need no change and a picture the RPC crate kept is used at once (`src/art.rs`, a copy of the part of that
+  crate that names, fetches and keeps one). Unlike the DMs' pictures (memory only) these stay on disk, as the spec has
+  them (docs/spec/discord-tab.md); a hash changes with the picture, so none is stale. Never logged.
+- **Shortcuts** (the six most recently joined Known channels): a Call the user is really in, once, is learned at the
+  front, by the RPC crate's rules (a DM stays until removed, a server's channel only while among the six, a removed
+  one is not brought back by its Call going on, the servers joined in remembered most recent first). **Not the RPC
+  crate's store**: that is its encrypted secret store behind its connection, which is to be deleted. A file of its own
+  in the same shape (`{Id, GuildId, Name, Image, ServerName}`, `Image` the CDN path) at
+  `<data>/discord-web/known-profile-<id>.json`, plain, read when the session signs in and written when it changes. Off
+  and a sign-out of the page forget it from memory; **a sign-out in Settings removes the file**. `Ask::RemoveShortcut`
+  forgets one.
+- **Who is signed in** (`Session::me`, a `Private`): the user's display name from the page, for the tab's account card.
+
+### Acting
+
+Through the same paced queue as the Direct Messages (one at a time, 0.7 s apart, 15 s each, **a join 22 s**; the page
+gives a join 20 s). By id, and Discord's own functions found by shape: **`selectVoiceChannel(id)` is used directly, not
+the page's Join Voice button**: it is language-independent and needs no layout (the spike's button press depended on an
+English label). No call to Discord's web interface, nothing credential-like (`tests/scripts.rs` fails the build if
+`voice.js` holds the words).
+
+| Ask | Does | Done when |
+|---|---|---|
+| `Ask::Join(id)` (a Shortcut or a server's channel), `DirectAsk::Answer(dm)` | `selectVoiceChannel(id)`; nothing if it is the Call's already | the user's own voice state is in that channel, and RTC says connected if found, within 20 s; else the page leaves and reports `not connected` |
+| `DirectAsk::Call(dm)` | the same, then, if nobody else is in the call, `ring(dm)` | as above; the log says whether the ring was asked |
+| `CallAsk::Mute` / `Deafen` | `toggleSelfMute()` / `toggleSelfDeaf()` | `MediaEngineStore` shows the flip |
+| `CallAsk::Leave` | `selectVoiceChannel(null)` | the user has no voice channel |
+| `DirectAsk::Decline(dm)` | `stopRinging(dm)` | `CallStore` no longer rings the user there |
+
+The Dashboard closing, the switch turned off or a sign-out while in a Call asks Discord's own leave first (best effort:
+2 s at closing, half a second for the host otherwise).
+
+### The microphone
+
+`PermissionRequested` grants the **microphone**, **autoplay** and (where this runtime can take them) notifications to
+**Discord's own address only** (the session's base authority), and nothing else: the camera is refused (D5: no video),
+so is every other kind, and so is any other address (`discord_web::permission_granted`, tested on Linux). The same
+three are also set ahead on the profile (`ICoreWebView2Profile4::SetPermissionState`) so the page never waits on a
+prompt. The log: `discord web: permission: microphone granted`, `permission: camera refused` (kind names only).
+
+### Devices
+
+They follow Windows' own defaults (docs/research/discord-web-voice.md, 7): Chromium's `default` input and output are
+whatever Windows says; the Dashboard chooses none and builds no device menu.
+
+### Health, and what a missing store does
+
+Required for voice: `voice`, `media`, `guilds`, `voiceActions` (and `channels`). `Session::voice_ready()` is signed in
+and those found. **A missing voice store never makes `DirectState::PageChanged`**: voice has its own flag, and the page's
+health record carries `voice_missing` apart from `missing`. The log says what: `discord web: voice stores found: ...`,
+`discord web: voice store "voice" no longer answers`, `... "voiceActions" no longer answers (selectVoiceChannel)`,
+`discord web: the voice stores answer again`. A store that loads late is searched for again, five times two seconds
+apart and then every 30 s. The other lines: `in a call, 3 people`, `left the call`, `joined in 1600 ms`, `join not done:
+<reason>`, `mute on|off`, `deafen on|off`, `ringing`, `ring ended`; counts and states only, never a name or an id.
+
+### Lost against the Discord app (research, 8)
+
+- **Push to talk** is the browser's and works only with the window focused; a hidden web view is never focused, so the
+  Call is voice activity and mute.
+- **Echo cancellation, noise suppression and gain** are the browser's (Krisp where Discord offers it to WebView2),
+  not the app's media engine.
+- **The in-game overlay, per-app volume under "Discord" in Windows' mixer and video or screen share** are gone (the
+  sound comes from WebView2's processes; D5 leaves video out).
+
+### What breaks it
+
+Discord renaming or reshaping a store, a method or the webpack chunk global: `voice store ... no longer answers` names
+the key and method; the Discord tab then says what the page lacks, and the names in the table are what to update.
+Nothing falls back to the DOM. `selectVoiceChannel` taking another argument shape, `ring` needing more than a channel id,
+or `can` not taking a BigInt show as `join not done: ...`, no ring, and all channels listed. Joining a DM's call does not
+tell the other person unless `ring` worked.
+
+### The stand-in
+
+`standin serve-discord-web`'s app page has three made-up servers (in the user's own order), voice channels (some
+occupied, one the user may not connect to), the fake stores and the fake `selectVoiceChannel` (connecting 300 ms later),
+mute, deafen, ring and stop-ringing; controls `POST /standin/voice-speak?user=<id>&on=1|0`, `POST
+/standin/voice-join?channel=<id>&user=<id>`, `POST /standin/voice-leave[?user=<id>]`; `GET /standin/sent` also lists the
+voice actions received (`join`, `leave`, `mute`, `deafen`, `ring`, `stop-ringing`). A ring ends when it is answered or
+declined. See `crates/standin/src/discord_web.rs`.
 
 ## The terms, said plainly
 

@@ -10,7 +10,7 @@ const assert = require("assert");
 const script = fs.readFileSync(process.argv[2], "utf8");
 const { installFakeDiscord } = require(process.argv[3]);
 
-const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40, actPoll: 5, readyCap: 300, actCap: 900, readCap: 150, doneCap: 200 };
+const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40, actPoll: 5, readyCap: 300, actCap: 900, readCap: 150, doneCap: 200, voiceWindow: 60, joinCap: 700 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function page(opts, options) {
@@ -293,7 +293,7 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     await sleep(150);
     assert.strictEqual(p.all("dms").length, 1);
     assert.strictEqual(p.all("health").length, 1);
-    assert.strictEqual(p.world.stores.ChannelStore._l.size, 1);
+    assert.strictEqual(p.world.stores.ChannelStore._l.size, 2, "the DM reader's and voice's, once each");
   });
 
   await check("the page signing out resets, and resend sends it all again", async () => {
@@ -627,6 +627,227 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     p.world.stores.MessageStore.emitChange();
     await sleep(80);
     assert.strictEqual(p.last("conv").msgs[1].state, "SENT");
+  });
+
+  // ---- voice (#297)
+  const G1 = "400000000000000001", G2 = "400000000000000002", G3 = "400000000000000003";
+  const LOUNGE = "500000000000000001", GAMES = "500000000000000002", STAGE = "500000000000000004", VOICE1 = "500000000000000011";
+  const QUIET = "500000000000000021", VAULT = "500000000000000022";
+  const ANA = "300000000000000001", PAL = "300000000000000002";
+  const doneOf = (p, seq) => acts(p, seq).find((x) => x.stage === "done" || x.stage === "failed");
+  const waitDone = async (p, seq) => { for (let i = 0; i < 400 && !doneOf(p, seq); i++) await sleep(5); return doneOf(p, seq); };
+
+  await check("voice: the stores are found, out of a call there is no channel and the servers are in the user's order", async () => {
+    const p = page();
+    p.run();
+    await sleep(200);
+    const health = p.last("health");
+    assert.strictEqual(health.ok, true);
+    assert.deepStrictEqual(health.voice_missing, []);
+    for (const k of ["voice", "media", "guilds", "voiceActions", "speaking", "selected", "rtc", "members", "guildOrder", "permissions", "mediaActions", "callActions", "guildChannels"]) assert.ok(health.found[k].length > 0, k);
+    assert.strictEqual(health.found.voice[0], "VoiceStateStore");
+    assert.ok(health.found.callActions.includes("ring") && health.found.callActions.includes("stopRinging"));
+    const v = p.last("voice");
+    assert.strictEqual(v.channel, "");
+    assert.strictEqual(v.me, "Me Myself");
+    assert.deepStrictEqual([v.mute, v.deaf, v.people.length, v.guild], [false, false, 0, null]);
+    const g = p.last("guilds");
+    assert.deepStrictEqual(g.servers.map((x) => x.id), [G1, G3, G2], "the user's own order, not by name");
+    assert.strictEqual(g.ordered, true);
+    assert.deepStrictEqual(g.servers[0], { id: G1, name: "Stand-in Server", icon: "gha" });
+    assert.strictEqual(g.servers[2].icon, "", "a server without an icon");
+  });
+
+  await check("voice: a server's voice and stage channels are read in position order, only those the user may connect to, with who is in them", async () => {
+    const p = page();
+    p.run();
+    await sleep(200);
+    assert.strictEqual(p.win.__xsdDirect.browse("not digits"), false);
+    assert.strictEqual(p.win.__xsdDirect.browse(G1), true);
+    await sleep(120);
+    const s = p.last("server");
+    assert.strictEqual(s.id, G1);
+    assert.deepStrictEqual(s.channels.map((c) => [c.name, c.type, c.users.length]), [["Lounge", 2, 1], ["Games", 2, 0], ["Stage", 13, 0]], "text channels left out");
+    assert.deepStrictEqual(s.channels[0].users, [{ id: ANA, avatar: "ha1" }]);
+    p.win.__xsdDirect.browse(G3);
+    await sleep(120);
+    assert.deepStrictEqual(p.last("server").channels.map((c) => c.id), [QUIET], "the channel the user may not connect to is left out");
+    // When the permission store says no to every channel it is not trusted: all are listed.
+    p.world.noConnect = [QUIET, VAULT];
+    p.world.stores.PermissionStore.emitChange();
+    await sleep(120);
+    assert.deepStrictEqual(p.last("server").channels.map((c) => c.id), [QUIET, VAULT]);
+    // Someone joins a channel of the browsed server: pushed.
+    p.win.__xsdDirect.browse(G1);
+    await sleep(100);
+    p.world.voiceJoin(GAMES, PAL);
+    await sleep(120);
+    assert.strictEqual(p.last("server").channels[1].users.length, 1);
+    p.win.__xsdDirect.browse(null);
+    const n = p.all("server").length;
+    p.world.voiceJoin(GAMES, "300000000000000003");
+    await sleep(120);
+    assert.strictEqual(p.all("server").length, n, "no longer browsing: nothing pushed");
+  });
+
+  await check("voice: joining by id shows the Call with the nickname, who is muted, the user's own mute and deafen, and leaving ends it", async () => {
+    const p = page();
+    p.run();
+    await sleep(200);
+    assert.strictEqual(p.win.__xsdDirect.join({ seq: 1, channel: LOUNGE, ring: false }), true);
+    const d = await waitDone(p, 1);
+    assert.strictEqual(d.stage, "done", JSON.stringify(d));
+    assert.deepStrictEqual(p.world.received.filter((r) => r.kind === "join"), [{ kind: "join", channel: LOUNGE }]);
+    await sleep(120);
+    const v = p.last("voice");
+    assert.deepStrictEqual([v.channel, v.title, v.in, v.rtc, v.dm], [LOUNGE, "Lounge", true, true, false]);
+    assert.deepStrictEqual(v.guild, { id: G1, name: "Stand-in Server", icon: "gha" });
+    assert.deepStrictEqual(v.people.map((x) => [x.name, x.me, x.muted, x.deafened]), [["Lounge Regular", false, false, false], ["Me Myself", true, false, false]], "the nickname, else the display name");
+    // Joined already: nothing is asked of Discord again.
+    p.win.__xsdDirect.join({ seq: 2, channel: LOUNGE, ring: false });
+    assert.strictEqual((await waitDone(p, 2)).stage, "done");
+    assert.strictEqual(p.world.received.filter((r) => r.kind === "join").length, 1);
+    // Mute and deafen: Discord's own functions, done when the store shows the flip.
+    p.win.__xsdDirect.mute({ seq: 3 });
+    const m = await waitDone(p, 3);
+    assert.deepStrictEqual([m.stage, m.on], ["done", true]);
+    p.win.__xsdDirect.deafen({ seq: 4 });
+    assert.deepStrictEqual([(await waitDone(p, 4)).stage, doneOf(p, 4).on], ["done", true]);
+    await sleep(120);
+    const v2 = p.last("voice");
+    assert.deepStrictEqual([v2.mute, v2.deaf, v2.people.find((x) => x.me).muted], [true, true, true]);
+    p.win.__xsdDirect.mute({ seq: 5 });
+    assert.strictEqual((await waitDone(p, 5)).on, false);
+    assert.deepStrictEqual(p.world.received.map((r) => r.kind).filter((k) => k !== "join"), ["mute", "deafen", "mute"]);
+    p.win.__xsdDirect.leave({ seq: 6 });
+    assert.strictEqual((await waitDone(p, 6)).stage, "done");
+    await sleep(120);
+    const v3 = p.last("voice");
+    assert.deepStrictEqual([v3.channel, v3.people.length, v3.deaf], ["", 0, true], "out of the call, the deafen stays");
+    assert.strictEqual(p.world.received.filter((r) => r.kind === "leave").length, 1);
+  });
+
+  await check("voice: speaking is coalesced to one push a window and not repeated", async () => {
+    const p = page();
+    p.run();
+    await sleep(200);
+    p.win.__xsdDirect.join({ seq: 1, channel: LOUNGE, ring: false });
+    await waitDone(p, 1);
+    await sleep(150);
+    const before = p.all("voice").length;
+    for (let i = 0; i < 14; i++) { p.world.voiceSpeak(ANA, i % 2 === 0); await sleep(4); }
+    p.world.voiceSpeak(ANA, true);
+    await sleep(150);
+    const pushed = p.all("voice").length - before;
+    assert.ok(pushed >= 1 && pushed <= 3, "14 changes in about 60 ms: " + pushed + " pushes");
+    assert.deepStrictEqual(p.last("voice").speaking, [ANA]);
+    const n = p.posts.length;
+    p.world.stores.SpeakingStore.emitChange();
+    await sleep(120);
+    assert.strictEqual(p.posts.length, n, "nothing changed: nothing sent");
+  });
+
+  await check("voice: a DM's call is joined by its id and rings the other person only when nobody is in it", async () => {
+    const p = page();
+    p.run();
+    await sleep(200);
+    p.win.__xsdDirect.join({ seq: 1, channel: F1, ring: true });
+    const d = await waitDone(p, 1);
+    assert.deepStrictEqual([d.stage, d.ring], ["done", "yes"]);
+    assert.deepStrictEqual(p.world.received.filter((r) => r.kind === "ring"), [{ kind: "ring", channel: F1 }]);
+    await sleep(120);
+    const v = p.last("voice");
+    assert.deepStrictEqual([v.dm, v.title], [true, "Stand-in Friend"], "a DM is titled by the other person");
+    // Another person already in the call: nobody to ring.
+    p.win.__xsdDirect.leave({ seq: 2 });
+    await waitDone(p, 2);
+    p.world.voiceJoin(F2, PAL);
+    p.win.__xsdDirect.join({ seq: 3, channel: F2, ring: true });
+    const d2 = await waitDone(p, 3);
+    assert.deepStrictEqual([d2.stage, d2.ring], ["done", ""]);
+    assert.strictEqual(p.world.received.filter((r) => r.kind === "ring").length, 1);
+  });
+
+  await check("voice: a ring is answered by joining, which ends it, and declined by Discord's own stop, done when CallStore no longer rings", async () => {
+    const p = page();
+    p.run();
+    await sleep(200);
+    p.world.ring(F1, true);
+    await sleep(100);
+    assert.strictEqual(p.last("rings").rings.length, 1);
+    p.win.__xsdDirect.join({ seq: 1, channel: F1, ring: false });
+    assert.strictEqual((await waitDone(p, 1)).stage, "done");
+    await sleep(100);
+    assert.strictEqual(p.last("rings").rings.length, 0, "answered: the ring ended");
+    p.win.__xsdDirect.leave({ seq: 2 });
+    await waitDone(p, 2);
+    p.world.ring(F2, true);
+    await sleep(100);
+    p.win.__xsdDirect.decline({ seq: 3, channel: F2 });
+    assert.strictEqual((await waitDone(p, 3)).stage, "done");
+    assert.deepStrictEqual(p.world.received.filter((r) => r.kind === "stop-ringing"), [{ kind: "stop-ringing", channel: F2 }]);
+    await sleep(100);
+    assert.strictEqual(p.last("rings").rings.length, 0);
+    // Not ringing: done at once, nothing asked.
+    p.win.__xsdDirect.decline({ seq: 4, channel: F2 });
+    assert.strictEqual((await waitDone(p, 4)).stage, "done");
+    assert.strictEqual(p.world.received.filter((r) => r.kind === "stop-ringing").length, 1);
+  });
+
+  await check("voice: a join that does not connect in time leaves and fails; an action Discord lacks fails plainly", async () => {
+    const p = page();
+    p.world;
+    p.run();
+    p.world.connectMs = 5000;
+    await sleep(200);
+    p.win.__xsdDirect.join({ seq: 1, channel: LOUNGE, ring: false });
+    const d = await waitDone(p, 1);
+    assert.deepStrictEqual([d.stage, d.why], ["failed", "not connected"]);
+    assert.strictEqual(p.world.received.filter((r) => r.kind === "leave").length, 1, "left, so nothing is half joined");
+    assert.strictEqual(p.world.voiceChannel, null);
+    const q = page({ noActions: ["voice", "media", "call"] });
+    q.run();
+    await sleep(200);
+    assert.strictEqual(q.last("health").ok, true);
+    assert.ok(q.last("health").voice_missing.includes("voiceActions"), JSON.stringify(q.last("health").voice_missing));
+    assert.strictEqual(q.all("voice").length, 0, "no voice read without what it requires");
+    q.win.__xsdDirect.join({ seq: 1, channel: LOUNGE, ring: false });
+    assert.deepStrictEqual([(await waitDone(q, 1)).why], ["voice action not found"]);
+    q.win.__xsdDirect.mute({ seq: 2 });
+    assert.strictEqual((await waitDone(q, 2)).why, "media action not found");
+    q.win.__xsdDirect.decline({ seq: 3, channel: F1 });
+    assert.strictEqual((await waitDone(q, 3)).why, "call action not found");
+  });
+
+  await check("voice: a missing voice store is voice's alone: the Direct Messages are still read and health stays ok", async () => {
+    const p = page({ hide: ["VoiceStateStore", "MediaEngineStore"] });
+    p.run();
+    await sleep(200);
+    const h = p.last("health");
+    assert.strictEqual(h.ok, true, JSON.stringify(h));
+    assert.deepStrictEqual(h.missing, []);
+    assert.deepStrictEqual(h.voice_missing.sort(), ["media", "voice"]);
+    assert.strictEqual(p.last("dms").dms.length, 5);
+    assert.strictEqual(p.all("voice").length, 0);
+    // The store loads later: found again, and voice is read.
+    p.world.late("VoiceStateStore");
+    p.world.late("MediaEngineStore");
+    await sleep(250);
+    assert.deepStrictEqual(p.last("health").voice_missing, []);
+    assert.strictEqual(p.all("voice").length >= 1, true);
+  });
+
+  await check("voice: a required voice method that throws is named, never a break of the DMs", async () => {
+    const p = page();
+    p.run();
+    await sleep(200);
+    p.world.stores.VoiceStateStore.getVoiceStatesForChannel = () => { throw new Error("changed"); };
+    p.world.voiceChannel = LOUNGE;
+    p.world.stores.SelectedChannelStore.emitChange();
+    await sleep(150);
+    const h = p.last("health");
+    assert.strictEqual(h.ok, true);
+    assert.deepStrictEqual(h.voice_missing, ["voice.getVoiceStatesForChannel"]);
   });
 
   process.exit(failed ? 1 : 0);

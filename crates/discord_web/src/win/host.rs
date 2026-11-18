@@ -263,10 +263,11 @@ impl Host {
                     if let Some(args) = args {
                         let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
                         let _ = args.PermissionKind(&mut kind);
-                        // Notifications, for Discord's own address only, so that the page raises them and `reading`
-                        // takes them; every other permission is refused.
+                        // Discord's own address only: the microphone (and autoplay) for voice, notifications for
+                        // `reading`; the camera (no video) and every other permission are refused
+                        // (`crate::permission_granted`).
                         let from = authority_of(|p| args.Uri(p));
-                        let grant = taken && kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS && from == authority;
+                        let grant = crate::permission_granted(kind.0, &from, &authority, taken);
                         let state = if grant {
                             COREWEBVIEW2_PERMISSION_STATE_ALLOW
                         } else {
@@ -274,9 +275,9 @@ impl Host {
                         };
                         let _ = args.SetState(state);
                         say(&format!(
-                            "discord web: a permission asked and {}: kind {}",
-                            if grant { "granted" } else { "refused" },
-                            kind.0
+                            "discord web: permission: {} {}",
+                            crate::permission_name(kind.0),
+                            if grant { "granted" } else { "refused" }
                         ));
                     }
                     Ok(())
@@ -378,7 +379,9 @@ impl Host {
             if let Err(e) = added {
                 say(&format!("discord web: WebMessageReceived refused: {e}"));
             }
-            let Ok(w24) = self.webview.cast::<ICoreWebView2_24>() else {
+            let w24 = self.webview.cast::<ICoreWebView2_24>();
+            self.allow_ahead(base, w24.is_ok());
+            let Ok(w24) = w24 else {
                 say("discord web: this runtime has no NotificationReceived (ICoreWebView2_24): notifications stay refused");
                 return;
             };
@@ -408,32 +411,37 @@ impl Host {
                 say(&format!("discord web: NotificationReceived refused: {e}"));
             }
         }
-        self.allow_notifications(base);
     }
 
-    /// Notifications allowed ahead for Discord's origin, so the page never waits on a prompt; nothing else is.
-    fn allow_notifications(&self, base: &str) {
+    /// Allowed ahead for Discord's origin, so the page never waits on a prompt: notifications, the microphone and
+    /// autoplay (voice); nothing else, and never the camera.
+    fn allow_ahead(&self, base: &str, notifications: bool) {
         let profile = unsafe { self.webview.cast::<ICoreWebView2_13>().and_then(|w| w.Profile()) };
         let Ok(profile) = profile.and_then(|p| p.cast::<ICoreWebView2Profile4>()) else {
-            say("discord web: this runtime cannot allow notifications ahead: only as asked");
+            say("discord web: this runtime cannot allow permissions ahead: only as asked");
             return;
         };
-        let handler = SetPermissionStateCompletedHandler::create(Box::new(|result| {
-            if let Err(e) = result {
-                say(&format!("discord web: notifications could not be allowed ahead: {e}"));
-            }
-            Ok(())
-        }));
         let origin = HSTRING::from(origin(base));
-        if let Err(e) = unsafe {
-            profile.SetPermissionState(
-                COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
-                &origin,
-                COREWEBVIEW2_PERMISSION_STATE_ALLOW,
-                &handler,
-            )
-        } {
-            say(&format!("discord web: notifications refused ahead: {e}"));
+        for (kind, name) in [
+            (COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS, "notifications"),
+            (COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, "microphone"),
+            (COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY, "autoplay"),
+        ] {
+            // Notifications only where this runtime lets `reading` take them: else Windows would show them.
+            if kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS && !notifications {
+                continue;
+            }
+            let handler = SetPermissionStateCompletedHandler::create(Box::new(move |result| {
+                if let Err(e) = result {
+                    say(&format!("discord web: {name} could not be allowed ahead: {e}"));
+                }
+                Ok(())
+            }));
+            if let Err(e) =
+                unsafe { profile.SetPermissionState(kind, &origin, COREWEBVIEW2_PERMISSION_STATE_ALLOW, &handler) }
+            {
+                say(&format!("discord web: {name} refused ahead: {e}"));
+            }
         }
     }
 
@@ -447,6 +455,13 @@ impl Host {
             PageOp::Close => ("close", "window.__xsdDirect ? window.__xsdDirect.close() : false".to_string()),
             PageOp::Older => ("older", "window.__xsdDirect ? window.__xsdDirect.older() : false".to_string()),
             PageOp::Resend => ("resend", "window.__xsdDirect ? window.__xsdDirect.resend() : false".to_string()),
+            PageOp::Browse(Some(id)) if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) => {
+                ("browse", format!("window.__xsdDirect ? window.__xsdDirect.browse(\"{id}\") : false"))
+            }
+            PageOp::Browse(Some(_)) => return,
+            PageOp::Browse(None) => {
+                ("browse", "window.__xsdDirect ? window.__xsdDirect.browse(null) : false".to_string())
+            }
         };
         match self.eval(&js) {
             Ok(Value::Bool(true)) => {}

@@ -197,7 +197,12 @@
 //!       dialog showing the reason), `POST /standin/captcha?on=1|0` (the next send shows a captcha frame and sends
 //!       nothing), `POST /standin/slow?ms=<n>` (how long a send stays SENDING); and `GET /standin/sent`, a JSON list of
 //!       what the fake received, in order: `{"kind":"message","channel","text","reply"}`, `{"kind":"react","channel",
-//!       "message","emoji","on"}`, `{"kind":"read","channel"}` (made-up test data only). See crates/standin/src/discord_web.rs.
+//!       "message","emoji","on"}`, `{"kind":"read","channel"}` (made-up test data only). Voice (#297): three made-up servers,
+//!       voice channels (some occupied), a fake `selectVoiceChannel` that connects 300 ms later, mute, deafen, ring and
+//!       stop-ringing actions; controls `POST /standin/voice-speak?user=<id>&on=1|0`, `POST /standin/voice-join?channel=<id>&user=<id>`,
+//!       `POST /standin/voice-leave[?user=<id>]`; `GET /standin/sent` also lists `{"kind":"join","channel"}`, `leave`, `mute`,
+//!       `deafen`, `{"kind":"ring","channel"}`, `{"kind":"stop-ringing","channel"}`. A ring ends when answered or declined.
+//!       See crates/standin/src/discord_web.rs.
 //!   standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
 //!       A launcher's installer, and the uninstaller it leaves (`set_up`): in the test's own folder that
 //!       `STANDIN_SETUP` names, and nowhere else, writes what it was run with (`runs.txt`), the app's folder and its

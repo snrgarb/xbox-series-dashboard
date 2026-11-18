@@ -29,7 +29,7 @@ fn the_page_scripts_touch_no_credential_and_make_no_request() {
         "eval(",
         "new function",
     ];
-    for name in ["stores.js", "direct.js", "act.js"] {
+    for name in ["stores.js", "direct.js", "act.js", "voice.js"] {
         let text = std::fs::read_to_string(here().join("js").join(name)).unwrap().to_lowercase();
         for word in forbidden {
             assert!(!text.contains(word), "js/{name} mentions {word:?}");

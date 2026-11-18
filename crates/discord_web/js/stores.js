@@ -113,6 +113,21 @@ const xsdFindStores = () => {
     // `ack` alone is on more than one object: the one that also has its siblings is the channel read-state action.
     ack: shapeBest(["ack"], ["bulkAck", "ackCategory", "localAck", "ackChannel"]),
     forget: shape(["deleteMessage", "sendMessage"]) || shape(["deleteMessage"]),
+    // Voice (#297; docs/discord-web.md, "Voice"). Required for voice: voice, media, guilds, voiceActions (js/voice.js
+    // decides); the rest is optional.
+    guilds: pick(["GuildStore"], ["getGuilds"]),
+    guildChannels: pick(["GuildChannelStore"], ["getChannels", "getDefaultChannel"]),
+    voice: pick(["VoiceStateStore"], ["getVoiceStatesForChannel"]),
+    speaking: pick(["SpeakingStore"], ["isSpeaking"]),
+    media: pick(["MediaEngineStore"], ["isSelfMute", "isSelfDeaf"]),
+    selected: pick(["SelectedChannelStore"], ["getVoiceChannelId"]),
+    rtc: pick(["RTCConnectionStore"], ["isConnected", "getState"]),
+    members: pick(["GuildMemberStore"], ["getNick"]),
+    guildOrder: pick(["SortedGuildStore"], ["getFlattenedGuildIds"]),
+    permissions: pick(["PermissionStore"], ["can", "computePermissions"]),
+    voiceActions: shape(["selectVoiceChannel"]),
+    mediaActions: shape(["toggleSelfMute", "toggleSelfDeaf"]),
+    callActions: shape(["ring", "stopRinging"]) || shape(["stopRinging"]),
   };
   out.S = S;
   // Discord's method names we call: [name, required]. A key is required when its first group is; `either` lists
@@ -129,6 +144,20 @@ const xsdFindStores = () => {
     react: { need: ["addReaction", "removeReaction"], opt: [], optional: true },
     ack: { need: ["ack"], opt: [], optional: true },
     forget: { need: ["deleteMessage"], opt: [], optional: true },
+    // Voice keys never make `missing` (the DM reading goes on without them); js/voice.js says what voice lacks.
+    guilds: { need: ["getGuilds"], opt: ["getGuild"], optional: true },
+    guildChannels: { need: ["getChannels"], opt: [], optional: true },
+    voice: { need: ["getVoiceStatesForChannel"], opt: ["getVoiceStateForUser"], optional: true },
+    speaking: { need: ["isSpeaking"], opt: [], optional: true },
+    media: { need: ["isSelfMute", "isSelfDeaf"], opt: [], optional: true },
+    selected: { need: ["getVoiceChannelId"], opt: [], optional: true },
+    rtc: { either: ["isConnected", "getState"], opt: [], optional: true },
+    members: { need: ["getNick"], opt: [], optional: true },
+    guildOrder: { need: ["getFlattenedGuildIds"], opt: [], optional: true },
+    permissions: { need: ["can"], opt: [], optional: true },
+    voiceActions: { need: ["selectVoiceChannel"], opt: [], optional: true },
+    mediaActions: { need: ["toggleSelfMute", "toggleSelfDeaf"], opt: [], optional: true },
+    callActions: { need: ["stopRinging"], opt: ["ring", "call"], optional: true },
   };
   for (const [k, w] of Object.entries(wants)) {
     const s = S[k];

@@ -15,10 +15,10 @@
 // Idempotent: a second injection finds window.__xsdDirect and returns.
 if (window.__xsdDirect || window.top !== window) return;
 const O = Object.assign(
-  { poll: 500, settle: 2, cap: 15000, coalesce: 250, tries: 5, gap: 2000, slow: 30000, actPoll: 40, readyCap: 8000, actCap: 20000, readCap: 3000, doneCap: 10000 },
+  { poll: 500, settle: 2, cap: 15000, coalesce: 250, voiceWindow: 150, joinCap: 20000, tries: 5, gap: 2000, slow: 30000, actPoll: 40, readyCap: 8000, actCap: 20000, readCap: 3000, doneCap: 10000 },
   window.__xsdDirectOptions || {}
 );
-const A = { S: null, me: "", open: null, anchor: null, older: false, timer: null, sent: {}, errors: new Set(), dm: new Map(), tries: 0, health: "", composer: false };
+const A = { S: null, me: "", open: null, anchor: null, older: false, timer: null, sent: {}, errors: new Set(), dm: new Map(), tries: 0, health: "", composer: false, voiceMissing: [], onInstall: [] };
 const post = (o) => { try { window.chrome.webview.postMessage(o); } catch (e) {} };
 const str = (v) => (v === undefined || v === null ? "" : String(v));
 // The methods whose failure to answer is a break (the same ones stores.js requires).
@@ -193,7 +193,7 @@ const sendHealth = (extra) => {
   const missing = [...A.missing, ...[...A.errors].filter((e) => !A.missing.includes(e))];
   // `composer` is the message box as last looked for by a send: yes or no, never a reason for a break.
   const found = Object.assign({}, A.found, { composer: A.composer ? ["textbox"] : [] });
-  sendIfChanged("health", Object.assign({ k: "health", ok: missing.length === 0, found, missing, older: !!(A.S && A.S.older), tries: A.tries }, extra || {}));
+  sendIfChanged("health", Object.assign({ k: "health", ok: missing.length === 0, found, missing, voice_missing: A.voiceMissing, older: !!(A.S && A.S.older), tries: A.tries }, extra || {}));
 };
 
 const flush = () => {
@@ -273,7 +273,7 @@ const api = {
     return true;
   },
   // Sends everything again (the host lost it, or a new session began).
-  resend() { A.sent = {}; schedule(); return true; },
+  resend() { A.sent = {}; schedule(); if (A.onResend) A.onResend(); return true; },
 };
 Object.defineProperty(window, "__xsdDirect", { value: api, enumerable: false, configurable: true });
 
@@ -285,6 +285,7 @@ const install = (found) => {
     const s = A.S[k];
     try { if (s && typeof s.addChangeListener === "function") s.addChangeListener(schedule); } catch (e) {}
   }
+  for (const f of A.onInstall) { try { f(); } catch (e) {} }
   flush();
 };
 

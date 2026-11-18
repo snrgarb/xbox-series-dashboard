@@ -20,6 +20,8 @@ use crate::direct::{spans, Act};
 pub const PACE: Duration = Duration::from_millis(700);
 /// How long an action has to finish before it is called not done.
 pub const LIMIT: Duration = Duration::from_secs(15);
+/// How long a join has: the page gives up at 20 s (and leaves), this is the margin for its answer.
+pub const JOIN_LIMIT: Duration = Duration::from_secs(22);
 /// Discord's limit for one message without Nitro.
 pub const LONGEST: usize = 2000;
 
@@ -40,6 +42,26 @@ pub enum ActOp {
         on: bool,
     },
     Ack {
+        seq: u64,
+        channel: String,
+    },
+    /// Voice (#297): join this voice channel or DM's call, and with `ring` ring the DM when nobody else is in it.
+    Join {
+        seq: u64,
+        channel: String,
+        ring: bool,
+    },
+    Leave {
+        seq: u64,
+    },
+    Mute {
+        seq: u64,
+    },
+    Deafen {
+        seq: u64,
+    },
+    /// Stop the ring in this DM.
+    Decline {
         seq: u64,
         channel: String,
     },
@@ -65,6 +87,11 @@ impl std::fmt::Debug for ActOp {
             }
             ActOp::React { seq, on, .. } => write!(f, "React(#{seq}, {})", if *on { "on" } else { "off" }),
             ActOp::Ack { seq, .. } => write!(f, "Ack(#{seq})"),
+            ActOp::Join { seq, ring, .. } => write!(f, "Join(#{seq}{})", if *ring { ", ring" } else { "" }),
+            ActOp::Leave { seq } => write!(f, "Leave(#{seq})"),
+            ActOp::Mute { seq } => write!(f, "Mute(#{seq})"),
+            ActOp::Deafen { seq } => write!(f, "Deafen(#{seq})"),
+            ActOp::Decline { seq, .. } => write!(f, "Decline(#{seq})"),
             ActOp::Cancel => write!(f, "Cancel"),
             ActOp::Forget { .. } => write!(f, "Forget"),
         }
@@ -83,6 +110,11 @@ impl ActOp {
             ActOp::Send { .. } => "send",
             ActOp::React { .. } => "react",
             ActOp::Ack { .. } => "mark read",
+            ActOp::Join { .. } => "join",
+            ActOp::Leave { .. } => "leave",
+            ActOp::Mute { .. } => "mute",
+            ActOp::Deafen { .. } => "deafen",
+            ActOp::Decline { .. } => "decline",
             ActOp::Cancel => "cancel",
             ActOp::Forget { .. } => "forget",
         }
@@ -90,7 +122,14 @@ impl ActOp {
 
     pub fn seq(&self) -> Option<u64> {
         match self {
-            ActOp::Send { seq, .. } | ActOp::React { seq, .. } | ActOp::Ack { seq, .. } => Some(*seq),
+            ActOp::Send { seq, .. }
+            | ActOp::React { seq, .. }
+            | ActOp::Ack { seq, .. }
+            | ActOp::Join { seq, .. }
+            | ActOp::Leave { seq }
+            | ActOp::Mute { seq }
+            | ActOp::Deafen { seq }
+            | ActOp::Decline { seq, .. } => Some(*seq),
             ActOp::Cancel | ActOp::Forget { .. } => None,
         }
     }
@@ -126,6 +165,21 @@ impl ActOp {
                     return None;
                 }
                 call("ack", json!({ "seq": seq, "channel": channel }).to_string())
+            }
+            ActOp::Join { seq, channel, ring } => {
+                if !digits(channel) {
+                    return None;
+                }
+                call("join", json!({ "seq": seq, "channel": channel, "ring": ring }).to_string())
+            }
+            ActOp::Leave { seq } => call("leave", json!({ "seq": seq }).to_string()),
+            ActOp::Mute { seq } => call("mute", json!({ "seq": seq }).to_string()),
+            ActOp::Deafen { seq } => call("deafen", json!({ "seq": seq }).to_string()),
+            ActOp::Decline { seq, channel } => {
+                if !digits(channel) {
+                    return None;
+                }
+                call("decline", json!({ "seq": seq, "channel": channel }).to_string())
             }
             ActOp::Cancel => call("cancel", String::new()),
             ActOp::Forget { channel, message } => {
@@ -176,6 +230,11 @@ enum Work {
     Send { nonce: u64 },
     React { channel: String, message: String, emoji: String, on: bool },
     Read { channel: String },
+    Join { channel: String, ring: bool },
+    Leave,
+    Mute,
+    Deafen,
+    Decline { channel: String },
 }
 
 struct Job {
@@ -187,6 +246,11 @@ struct Running {
     job: Job,
     started: Instant,
     typed: bool,
+    limit: Duration,
+    /// The switch as the page said it stands, for a mute or deafen.
+    on: Option<bool>,
+    /// What the page said of the ring after a join that was to ring.
+    ring: String,
 }
 
 /// The queue, and the user's outgoing messages.
@@ -213,6 +277,13 @@ fn word(why: &str) -> &'static str {
         "message not loaded" => "message not loaded",
         "not shown" => "not shown",
         "send refused" => "refused",
+        "voice action not found" => "voice action not found",
+        "join action failed" => "join action failed",
+        "not connected" => "not connected",
+        "media action not found" => "media action not found",
+        "media action failed" => "media action failed",
+        "call action not found" => "call action not found",
+        "call action failed" => "call action failed",
         _ => "page error",
     }
 }
@@ -307,6 +378,36 @@ impl Acts {
         self.queue.push_back(Job { seq, work: Work::Read { channel: channel.as_str().to_string() } });
     }
 
+    fn push(&mut self, work: Work) {
+        let seq = self.next_seq();
+        self.queue.push_back(Job { seq, work });
+    }
+
+    /// Voice (#297): join a voice channel or a DM's call; with `ring`, ring the DM too when nobody else is in it.
+    pub fn join(&mut self, channel: &str, ring: bool) {
+        if digits(channel) {
+            self.push(Work::Join { channel: channel.to_string(), ring });
+        }
+    }
+
+    pub fn leave(&mut self) {
+        self.push(Work::Leave);
+    }
+
+    pub fn mute(&mut self) {
+        self.push(Work::Mute);
+    }
+
+    pub fn deafen(&mut self) {
+        self.push(Work::Deafen);
+    }
+
+    pub fn decline(&mut self, channel: &str) {
+        if digits(channel) {
+            self.push(Work::Decline { channel: channel.to_string() });
+        }
+    }
+
     /// A failed message dropped from the view (by the nonce the screens know it by). Only a failed one: what is queued or
     /// in flight is not forgotten. Discord's own store drops its failed message too, locally.
     pub fn forget(&mut self, channel: &Id, message: &Id) -> Vec<Out> {
@@ -342,9 +443,10 @@ impl Acts {
     pub fn tick(&mut self, now: Instant) -> Vec<Out> {
         let mut out = Vec::new();
         if let Some(run) = &self.running {
-            if now.saturating_duration_since(run.started) >= LIMIT {
+            if now.saturating_duration_since(run.started) >= run.limit {
+                let said = if run.limit == JOIN_LIMIT { "no answer in 22 s" } else { "no answer in 15 s" };
                 out.push(Out::Op(ActOp::Cancel));
-                out.extend(self.end(now, Err("no answer in 15 s")));
+                out.extend(self.end(now, Err(said)));
             }
         }
         if self.running.is_some() || self.last_end.is_some_and(|end| now.saturating_duration_since(end) < PACE) {
@@ -364,8 +466,14 @@ impl Acts {
                 ActOp::React { seq, channel: channel.clone(), message: message.clone(), emoji: emoji.clone(), on: *on }
             }
             Work::Read { channel } => ActOp::Ack { seq, channel: channel.clone() },
+            Work::Join { channel, ring } => ActOp::Join { seq, channel: channel.clone(), ring: *ring },
+            Work::Leave => ActOp::Leave { seq },
+            Work::Mute => ActOp::Mute { seq },
+            Work::Deafen => ActOp::Deafen { seq },
+            Work::Decline { channel } => ActOp::Decline { seq, channel: channel.clone() },
         };
-        self.running = Some(Running { job, started: now, typed: false });
+        let limit = if matches!(job.work, Work::Join { .. }) { JOIN_LIMIT } else { LIMIT };
+        self.running = Some(Running { job, started: now, typed: false, limit, on: None, ring: String::new() });
         out.push(Out::Op(op));
         out
     }
@@ -410,7 +518,11 @@ impl Acts {
                 }
                 out
             }
-            "done" => self.end(now, Ok(())),
+            "done" => {
+                run.on = Some(act.on);
+                run.ring = act.ring.clone();
+                self.end(now, Ok(()))
+            }
             "captcha" => {
                 let mut out = vec![Out::Event(DirectEvent::Captcha)];
                 out.extend(self.end(now, Err("captcha")));
@@ -448,6 +560,24 @@ impl Acts {
             (Work::Send { .. }, Ok(())) => out.push(Out::Log(format!("discord web: sent in {took} ms"))),
             (Work::React { .. }, Ok(())) => out.push(Out::Log(format!("discord web: reaction shown in {took} ms"))),
             (Work::Read { .. }, Ok(())) => out.push(Out::Log(format!("discord web: marked read in {took} ms"))),
+            (Work::Join { .. }, Ok(())) => {
+                out.push(Out::Log(format!("discord web: joined in {took} ms")));
+                match run.ring.as_str() {
+                    "yes" => out.push(Out::Log("discord web: call: ring asked of Discord".into())),
+                    "no" => out.push(Out::Log(
+                        "discord web: call: ring not asked: Discord's call action was not found".into(),
+                    )),
+                    _ => {}
+                }
+            }
+            // What the stores show is logged as it is read (`voice::log_lines`: left the call, mute on, deafen off).
+            (Work::Leave | Work::Mute | Work::Deafen, Ok(())) => {}
+            (Work::Decline { .. }, Ok(())) => out.push(Out::Log(format!("discord web: ring declined in {took} ms"))),
+            (Work::Join { .. }, Err(why)) => out.push(Out::Log(format!("discord web: join not done: {why}"))),
+            (Work::Leave, Err(why)) => out.push(Out::Log(format!("discord web: leave not done: {why}"))),
+            (Work::Mute, Err(why)) => out.push(Out::Log(format!("discord web: mute not done: {why}"))),
+            (Work::Deafen, Err(why)) => out.push(Out::Log(format!("discord web: deafen not done: {why}"))),
+            (Work::Decline { .. }, Err(why)) => out.push(Out::Log(format!("discord web: decline not done: {why}"))),
             (Work::Send { nonce }, Err(why)) => {
                 out.push(Out::Log(format!("discord web: not sent: {why}")));
                 if let Some(o) = self.outgoing_mut(nonce) {
@@ -853,5 +983,83 @@ mod tests {
         for private in ["secret", "424242", "777", "555", "private reason", "\u{1F525}"] {
             assert!(!said.contains(private), "{private} is in:\n{said}");
         }
+    }
+
+    #[test]
+    fn a_join_has_twenty_two_seconds_a_mute_fifteen_and_each_says_why_it_was_not_done() {
+        let (base, mut a) = (t0(), Acts::new());
+        a.join("42", false);
+        a.mute();
+        let outs = a.tick(base);
+        assert!(matches!(ops(&outs)[..], [ActOp::Join { seq: 1, channel, ring: false }] if channel == "42"));
+        assert!(a.tick(at(base, 21_900)).is_empty(), "still within its time");
+        let outs = a.tick(at(base, 22_000));
+        assert_eq!(logs(&outs), ["discord web: join not done: no answer in 22 s"]);
+        assert!(matches!(ops(&outs)[..], [ActOp::Cancel]));
+        let outs = a.tick(at(base, 22_800));
+        assert!(matches!(ops(&outs)[..], [ActOp::Mute { seq: 2 }]));
+        let outs = a.tick(at(base, 22_800 + 15_000));
+        assert_eq!(logs(&outs), ["discord web: mute not done: no answer in 15 s"]);
+    }
+
+    #[test]
+    fn a_join_done_says_how_long_and_whether_the_ring_was_asked_and_a_failure_its_reason() {
+        let (base, mut a) = (t0(), Acts::new());
+        a.join("42", true);
+        a.tick(base);
+        let outs = a.page(&Act { ring: "yes".into(), ..act(1, "done", "") }, at(base, 1_600));
+        assert_eq!(logs(&outs), ["discord web: joined in 1600 ms", "discord web: call: ring asked of Discord"]);
+        a.join("43", true);
+        a.tick(at(base, 2_400));
+        let outs = a.page(&Act { ring: "no".into(), ..act(2, "done", "") }, at(base, 2_500));
+        assert!(logs(&outs)[1].contains("ring not asked"));
+        a.join("44", false);
+        a.tick(at(base, 3_300));
+        let outs = a.page(&Act { why: "not connected".into(), ..act(3, "failed", "") }, at(base, 23_300));
+        assert_eq!(logs(&outs), ["discord web: join not done: not connected"]);
+        a.leave();
+        a.tick(at(base, 24_100));
+        let outs = a.page(&Act { why: "voice action not found".into(), ..act(4, "failed", "") }, at(base, 24_200));
+        assert_eq!(logs(&outs), ["discord web: leave not done: voice action not found"]);
+        a.decline("42");
+        a.deafen();
+        a.tick(at(base, 25_000));
+        let outs = a.page(&act(5, "done", ""), at(base, 25_100));
+        assert_eq!(logs(&outs), ["discord web: ring declined in 100 ms"]);
+        a.tick(at(base, 26_000));
+        let outs = a.page(&Act { on: true, ..act(6, "done", "") }, at(base, 26_100));
+        assert!(logs(&outs).is_empty(), "what the stores show is logged as it is read");
+    }
+
+    #[test]
+    fn the_voice_scripts_hold_ids_as_digits_and_are_well_formed_only_then() {
+        let join = ActOp::Join { seq: 3, channel: "42".into(), ring: true };
+        assert_eq!(
+            join.script().unwrap(),
+            r#"window.__xsdDirect ? window.__xsdDirect.join({"channel":"42","ring":true,"seq":3}) : false"#
+        );
+        assert!(ActOp::Join { seq: 1, channel: "4\"2".into(), ring: false }.script().is_none());
+        assert!(ActOp::Decline { seq: 1, channel: "x".into() }.script().is_none());
+        assert!(ActOp::Leave { seq: 1 }.script().unwrap().contains("leave({\"seq\":1})"));
+        assert!(ActOp::Mute { seq: 1 }.script().unwrap().contains(".mute("));
+        assert!(ActOp::Deafen { seq: 1 }.script().unwrap().contains(".deafen("));
+        let mut a = Acts::new();
+        a.join("x", false);
+        a.decline("");
+        assert!(a.idle(), "not ids: nothing queued");
+        for op in [&join, &ActOp::Leave { seq: 1 }, &ActOp::Decline { seq: 2, channel: "7".into() }] {
+            assert!(!format!("{op:?}").contains("42"), "{op:?}");
+        }
+    }
+
+    #[test]
+    fn a_reset_cancels_a_running_join_and_empties_the_voice_queue() {
+        let (base, mut a) = (t0(), Acts::new());
+        a.join("42", false);
+        a.mute();
+        a.tick(base);
+        let outs = a.reset();
+        assert!(matches!(ops(&outs)[..], [ActOp::Cancel]));
+        assert!(a.idle());
     }
 }
