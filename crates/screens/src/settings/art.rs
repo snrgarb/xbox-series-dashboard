@@ -8,8 +8,9 @@
 //! is kept. Nothing here ever has it again: the page shows dots while there is one, "Not set" while there is not.
 //!
 //! Last, "Art sources" (#246): the four online sources in the order they are asked, each a Row ticked while it is
-//! on. A turns a source on or off; Menu opens its menu, the Tile menu's panel over the dimmed page, which moves it up
-//! or down, as Settings > Groups moves a Group (`groups.rs`). Each change goes to the shell as `Effect::ArtOrder`.
+//! on and numbered at its right end by its place among the sources that are on (#262). A turns a source on or off;
+//! Menu opens its menu, the Tile menu's panel over the dimmed page, which moves it up or down, as Settings > Groups
+//! moves a Group (`groups.rs`). Each change goes to the shell as `Effect::ArtOrder`.
 //! The page scrolls to keep what has focus on screen.
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -60,6 +61,10 @@ const BUTTON_WIDTH: f32 = 180.0;
 /// how a refresh goes under them, as Discord's status line.
 const BUTTONS_APART: f32 = 20.0;
 const LINE_UNDER: f32 = 24.0;
+/// A source's number on its Row: right-aligned in a box this wide, as far in from the Row's right end as its tick is
+/// from the left (the tick's middle 45 in, 12 either side of it).
+const NUMBER_WIDTH: f32 = 60.0;
+const NUMBER_IN: f32 = 33.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Focus {
@@ -323,16 +328,20 @@ impl Pane for Art {
 
     /// `Art: Type`, `Art: Clear`, `Art: Clear downloaded art`, `Art: Refresh all art and details`, `Art: Download
     /// art online`; with a question up, `Art: Prompt(Clear) of Clear downloaded art`. On a source's Row, its place
-    /// and whether it is on: `Art: Source Xbox, 2 of 4, on`; with its menu up, `Art: Menu(Move up) of Xbox`.
+    /// among the Rows, and whether it is on with the number its Row shows: `Art: Source Xbox, 2 of 4, on, number 2`,
+    /// `Art: Source PlayStation, 3 of 4, off`; with its menu up, `Art: Menu(Move up) of Xbox`.
     fn focus(&self) -> String {
         if let Some(menu) = &self.menu {
             let row = menu.panel.rows().get(menu.panel.focus()).map_or("", |row| row.label.as_str());
             return format!("Art: Menu({row}) of {}", menu.source.name());
         }
         if let (Focus::Source(source), None) = (self.focus, &self.prompt) {
-            let on = if self.order.is_on(source) { "on" } else { "off" };
             let (at, of) = (self.order.place(source) + 1, self.order.0.len());
-            return format!("Art: Source {}, {at} of {of}, {on}", source.name());
+            let number = match self.order.number(source) {
+                Some(number) => format!("on, number {number}"),
+                None => "off".into(),
+            };
+            return format!("Art: Source {}, {at} of {of}, {number}", source.name());
         }
         match &self.prompt {
             Some(prompt) => {
@@ -515,7 +524,13 @@ impl Pane for Art {
             controls::description(ui, LEFT, layout.sources_about, ROW_WIDTH, SOURCES_ABOUT);
             let source_row = |ui: &mut Ui, i: usize, focused: bool| {
                 let (source, on) = order.0[i];
-                controls::row_marked(ui, layout.row(i), source.name(), on.then_some(glyph::TICK), focused);
+                let row = layout.row(i);
+                controls::row_marked(ui, row, source.name(), on.then_some(glyph::TICK), focused);
+                // Its number in the order at the Row's right end; none while it is off.
+                if let Some(number) = order.number(source) {
+                    let number_box = Rect::new(row.right() - NUMBER_IN - NUMBER_WIDTH, row.y, NUMBER_WIDTH, row.h);
+                    ui.paragraph(number_box, &number.to_string(), &BODY, HAlign::Right, VAlign::Center, 1);
+                }
             };
             let at = match focus {
                 Focus::Source(source) => Some(order.place(source)),
