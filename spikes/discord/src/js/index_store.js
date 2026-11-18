@@ -5,7 +5,7 @@
   const started = performance.now();
   const st = xsdStores();
   const S = st.S || {};
-  const out = { ok: false, why: st.why, found: st.found, modules: st.modules || 0, guilds: [], channels: [], dms: [] };
+  const out = { ok: false, why: st.why, found: st.found, modules: st.modules || 0, diag: st.diag, guilds: [], channels: [], dms: [] };
   if (!S.guilds || !(S.channels || S.guildChannels)) {
     out.why = out.why || "the guild or channel store was not found";
     return out;

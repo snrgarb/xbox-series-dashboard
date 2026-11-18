@@ -232,7 +232,13 @@ stores only** (no DOM fallback). This is now the spike's main question, and the 
 
 **How** (`js/store_find.js`, `js/index_store.js`, `src/index.rs`). Discord's web client is a webpack bundle; its chunk
 global `webpackChunkdiscord_app` takes a probe chunk once, which hands back webpack's `require` and its module
-cache. The cache is searched for objects by the methods they have: the guild store (`getGuilds`, `getGuild`), the
+cache. The first TV run searched too early and too narrowly (102 modules, no store found), so the search now waits
+until the module cache stops growing (capped at 15 s), takes every module's exports and each of their own properties
+as candidates (each read guarded), and finds a store first by its Flux name (`getName()` or
+`constructor.displayName`: `GuildStore`, `ChannelStore`, `GuildChannelStore`, `VoiceStateStore`, ...), then by
+methods on its prototype, adding Flux's own registry (`getAll()` on a store's parent class) if reachable. On a miss
+the log gives the module count, the exports, the named stores and the first 60 store class names. By method the
+search looks for: the guild store (`getGuilds`, `getGuild`), the
 channel store (`getChannel`, `getMutableGuildChannelsForGuild`; or the guild channel store's `getChannels`), the
 private channel order (`getPrivateChannelIds` or `getSortedPrivateChannels`), voice states
 (`getVoiceStatesForChannel`), users (`getUser`, `getCurrentUser`), speaking (`isSpeaking`), the media engine
