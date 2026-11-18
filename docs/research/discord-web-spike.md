@@ -178,7 +178,7 @@ The window covers the screen; a bar along the bottom says the pad's keys.
 
 | Line | Means |
 | --- | --- |
-| `pad: one is connected (XInput slot n)` / `pad: none connected` | The pad the step reads |
+| `pad: one is connected (XInput slot n)` / `pad: none connected (looked for once a second)` | The pad the step reads; one that connects later is taken up and logged then. `app` in `page:` is any app route (the TV went `/login` -> `/app` -> `/quest-home`): no login route, no password field, the server bar shown |
 | `page: route login, login form yes, password field yes, captcha no (0 hCaptcha frames), two-factor no, QR code yes, new-location check no, app no` | **What Discord shows**, written each time it changes (looked at every 2 s). `captcha`: an hCaptcha frame or a captcha element. `two-factor`: a one-time-code field or its words. `new-location check`: the words of Discord's "new login location" or e-mail check (English page only). `QR code`: the QR login panel |
 | `focus: a text field (email / password / text / contenteditable)` / `focus: not a text field` | Where the pad's Tab put focus: the kind of field, never its value |
 | `keyboard: the spike's pad keyboard opened (a text field took focus)` | The pad keyboard came up by itself |
@@ -215,10 +215,13 @@ name one line. Never retried.
 | `send: a conversation named in n characters, a message of m characters` | The files were read |
 | `send: k conversations of that name among r rows ...: nothing sent` | Not found, or not one (exit 4). The name must be as the DM list shows it; case is ignored if no exact match |
 | `send: the conversation found (name matched exactly, over p pages); covered by something else: no` | Found; nothing lay over the point to click |
-| `send: opened by the click in <ms> ms; it shows n messages` | A DevTools mouse click on the row opened the conversation and its message box |
+| `send: viewport WxH css px, visibility ...; the row wxh at x,y; elementFromPoint at its centre is the row: yes/no` | What a hidden web view gives the page: a 0x0 viewport or a miss means clicks cannot land (try `--hide offscreen`) |
+| `send: <way>: after <ms> ms the route is the conversation's yes/no, its message box (role textbox) present yes/no` | One line per way of opening, tried in order until one works: `history.pushState + popstate` (the page's own router), `Navigate to the address` (a full load of `/channels/@me/<id>`), `a DevTools click on the row`. The first TV run's click alone did not open it (exit 5) |
+| `send: opened by <way>; it shows n messages` | The way that worked |
 | `send: the message box already holds a draft: nothing sent` | Exit 6: never mixes with the user's own draft |
-| `send: the message box has focus after a click: yes` | The box takes a DevTools click; "no" stops it (exit 5) |
-| `send: Enter pressed (once)` | `Input.insertText` put the text in and Enter went |
+| `send: the message box has focus after DOM.focus / a DevTools click / the box's focus(): yes` | Tried in that order; none: exit 5, nothing sent |
+| `send: the message box holds exactly the text: yes` | `Input.insertText` put the text in; "no": Enter is not pressed, exit 7, nothing sent (the text stays as a draft in the spike's session) |
+| `send: Enter pressed (once)` | Enter went, by `Input.dispatchKeyEvent` |
 | `send: after <ms> ms: the newest message is the text yes, still marked sending no, marked failed no, box empty yes; ...` | **Whether the message appeared in the page** |
 | `send: the message appeared in the page` | Exit 0. Otherwise exit 7: look in Discord itself |
 
@@ -251,7 +254,7 @@ name one line. Never retried.
 | Which selectors match Discord's DM list today; how is unread best told; how are counts read? | 3: `selectors matched`, `unread`, `with a count` | #198 (our selectors file and its health probe) |
 | Is the list virtualised, and does paging through it by scrolling work hidden? | 3: `scroller found`, `pages` | #198 |
 | What does it cost hidden: memory, CPU at idle? | 3: `memory`, `cpu` | #197 (always on or on demand), #202 (a session kept for notifications) |
-| Do DevTools input events open a conversation and send, hidden, with no foreground? | 4: `opened by the click`, `has focus`, `appeared` | #201 |
+| Do DevTools input events open a conversation and send, hidden, with no foreground? | 4: `viewport`, each way of opening, `has focus`, `holds exactly the text`, `appeared` | #201 |
 | Does Discord accept a message sent that way, or answer with a captcha or refusal? | 4: `marked failed`, and Discord itself | #201 |
 | Does sign-out leave nothing, and what stays on Discord's side? | 5 | #197 |
 | Do Discord's web notifications reach the web view? | **Not tested**: every permission is refused here. A follow-up for #202 if wanted | #202 |

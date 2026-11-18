@@ -84,6 +84,7 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
     let limit = Duration::from_secs(options.minutes * 60);
     let mut presses = Presses::default();
     let mut pad_slot: Option<Option<u32>> = None;
+    let mut last_search = Instant::now() - Duration::from_secs(10);
     let mut clicking = false;
     let mut last_look = Instant::now() - Duration::from_secs(10);
     let mut shown = String::new();
@@ -107,11 +108,21 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
         pump(Duration::from_millis(16));
 
         // The pad.
-        let (slot, state) = read_pad();
+        // The connected pad's slot every look; the others (slow to ask while empty) once a second, so a pad that
+        // connects after the start is taken up.
+        let known = pad_slot.flatten();
+        let (slot, state) = match known.map(read_slot) {
+            Some(Some(state)) => (known, Some(state)),
+            _ if known.is_some() || last_search.elapsed() >= Duration::from_secs(1) => {
+                last_search = Instant::now();
+                read_pad()
+            }
+            _ => (None, None),
+        };
         if pad_slot != Some(slot) {
             match slot {
                 Some(n) => say!("pad: one is connected (XInput slot {n})"),
-                None => say!("pad: none connected"),
+                None => say!("pad: none connected (looked for once a second)"),
             }
             pad_slot = Some(slot);
         }
@@ -256,12 +267,16 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
 /// The first connected pad, and its state.
 fn read_pad() -> (Option<u32>, Option<XINPUT_STATE>) {
     for slot in 0..4 {
-        let mut state = XINPUT_STATE::default();
-        if unsafe { XInputGetState(slot, &mut state) } == 0 {
+        if let Some(state) = read_slot(slot) {
             return (Some(slot), Some(state));
         }
     }
     (None, None)
+}
+
+fn read_slot(slot: u32) -> Option<XINPUT_STATE> {
+    let mut state = XINPUT_STATE::default();
+    (unsafe { XInputGetState(slot, &mut state) } == 0).then_some(state)
 }
 
 fn mouse(dx: i32, dy: i32, wheel: i32, flags: MOUSE_EVENT_FLAGS) {

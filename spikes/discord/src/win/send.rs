@@ -13,6 +13,39 @@ use crate::say;
 const FIND: &str = include_str!("../js/find.js");
 const COMPOSER: &str = include_str!("../js/composer.js");
 const SENT: &str = include_str!("../js/sent.js");
+const VIEWPORT: &str = include_str!("../js/viewport.js");
+/// The page's router follows the history: a new entry, and the event it listens for.
+const PUSH: &str =
+    "history.pushState(history.state, '', HREF); dispatchEvent(new PopStateEvent('popstate', { state: history.state })); true";
+/// Discord's message box.
+const BOX_JS: &str = r#"(document.querySelector('[role="textbox"][data-slate-editor="true"]') || document.querySelector('div[role="textbox"][contenteditable="true"]'))"#;
+const BOX_SELECTOR: &str = r#"[role="textbox"][contenteditable="true"]"#;
+
+#[derive(Clone, Copy)]
+enum Open {
+    Push,
+    Navigate,
+    Click,
+}
+
+impl Open {
+    fn name(self) -> &'static str {
+        match self {
+            Open::Push => "history.pushState + popstate",
+            Open::Navigate => "Navigate to the address",
+            Open::Click => "a DevTools click on the row",
+        }
+    }
+}
+
+/// DevTools' own focus on the message box: the document, the box's node, `DOM.focus`.
+fn dom_focus(host: &Host) -> Result<(), String> {
+    let root = host.cdp("DOM.getDocument", json!({ "depth": 0 }))?;
+    let root = root.pointer("/root/nodeId").and_then(Value::as_i64).ok_or("no document node")?;
+    let node = host.cdp("DOM.querySelector", json!({ "nodeId": root, "selector": BOX_SELECTOR }))?;
+    let node = node["nodeId"].as_i64().filter(|&n| n != 0).ok_or("no message box node")?;
+    host.cdp("DOM.focus", json!({ "nodeId": node })).map(|_| ())
+}
 
 /// Discord's limit for one message without Nitro.
 const LONGEST: usize = 2000;
@@ -95,38 +128,100 @@ fn send(host: &Host, to: &str, text: &str) -> i32 {
         found["pages"],
         yes(found["covered"] == true)
     );
-    let (x, y) = (found["x"].as_f64().unwrap_or(0.0), found["y"].as_f64().unwrap_or(0.0));
-    host.click(x, y);
-
     let composer_js = with("HREF", &json!(href), COMPOSER);
-    let started = Instant::now();
+    if let Ok(v) = host.eval(&with("HREF", &json!(href), VIEWPORT)) {
+        say!(
+            "send: viewport {}x{} css px, visibility {}; the row {}x{} at {},{}; elementFromPoint at its centre is the row: {}",
+            v["w"],
+            v["h"],
+            v["visibility"].as_str().unwrap_or("?"),
+            v["rw"],
+            v["rh"],
+            v["rx"],
+            v["ry"],
+            yes(v["hit"] == true)
+        );
+    }
+
+    // Opening it: the page's own router first, then a full load of the address, then a DevTools click on the row.
     let mut composer = Value::Null;
-    while started.elapsed() < Duration::from_secs(10) {
-        pump(Duration::from_millis(250));
-        if let Ok(c) = host.eval(&composer_js) {
-            let ready = c["opened"] == true && c["box"] == true;
-            composer = c;
-            if ready {
-                break;
+    let mut opened_by = None;
+    for (way, limit) in [(Open::Push, 6), (Open::Navigate, 30), (Open::Click, 10)] {
+        match way {
+            Open::Push => {
+                if let Err(e) = host.eval(&with("HREF", &json!(href), PUSH)) {
+                    say!("send: {}: the script failed: {e}", way.name());
+                    continue;
+                }
+            }
+            Open::Navigate => host.navigate(&format!("https://discord.com{href}")),
+            Open::Click => {
+                // The row found again: the ways before may have moved or reloaded the list.
+                let again = host.evaluate(&with("TARGET", &json!(to), FIND)).unwrap_or(Value::Null);
+                if again["found"] != 1 {
+                    say!("send: {}: the row is not found again", way.name());
+                    continue;
+                }
+                host.click(again["x"].as_f64().unwrap_or(0.0), again["y"].as_f64().unwrap_or(0.0));
             }
         }
-    }
-    if composer["box"] != true {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(limit) {
+            pump(Duration::from_millis(250));
+            if let Ok(c) = host.eval(&composer_js) {
+                let ready = c["opened"] == true && c["box"] == true;
+                composer = c;
+                if ready {
+                    break;
+                }
+            }
+        }
         say!(
-            "send: the conversation did not open with its message box in 10 s (route reached: {}): nothing sent",
-            yes(composer["opened"] == true)
+            "send: {}: after {} ms the route is the conversation's {}, its message box (role textbox) present {}",
+            way.name(),
+            host::ms(started),
+            yes(composer["opened"] == true),
+            yes(composer["box"] == true)
         );
-        return 5;
+        if composer["opened"] == true && composer["box"] == true {
+            opened_by = Some(way);
+            break;
+        }
     }
-    say!("send: opened by the click in {} ms; it shows {} messages", host::ms(started), composer["messages"]);
+    let Some(way) = opened_by else {
+        say!("send: the conversation did not open by any way: nothing sent");
+        return 5;
+    };
+    say!("send: opened by {}; it shows {} messages", way.name(), composer["messages"]);
     if composer["empty"] != true {
         say!("send: the message box already holds a draft: nothing sent");
         return 6;
     }
-    host.click(composer["x"].as_f64().unwrap_or(0.0), composer["y"].as_f64().unwrap_or(0.0));
-    pump(Duration::from_millis(400));
-    let focused = host.eval(&composer_js).map(|c| c["focused"] == true).unwrap_or(false);
-    say!("send: the message box has focus after a click: {}", yes(focused));
+
+    // Focus: DevTools' DOM.focus on the box, else a DevTools click in it, else the box's own focus().
+    let mut focused = false;
+    for way in ["DOM.focus", "a DevTools click", "the box's focus()"] {
+        match way {
+            "DOM.focus" => {
+                if let Err(e) = dom_focus(host) {
+                    say!("send: DOM.focus: {e}");
+                    continue;
+                }
+            }
+            "a DevTools click" => {
+                host.click(composer["x"].as_f64().unwrap_or(0.0), composer["y"].as_f64().unwrap_or(0.0))
+            }
+            _ => {
+                let _ = host.eval(&format!("{{ {BOX_JS}.focus(); true }}"));
+            }
+        }
+        pump(Duration::from_millis(400));
+        focused = host.eval(&composer_js).map(|c| c["focused"] == true).unwrap_or(false);
+        say!("send: the message box has focus after {way}: {}", yes(focused));
+        if focused {
+            break;
+        }
+    }
     if !focused {
         say!("send: not sent: the text would go elsewhere");
         return 5;
@@ -138,6 +233,15 @@ fn send(host: &Host, to: &str, text: &str) -> i32 {
         return 7;
     }
     pump(Duration::from_millis(400));
+    let holds = host
+        .eval(&with("TEXT", &json!(text), &format!("(({BOX_JS}.textContent || '').replace(/[\\u200b\\ufeff]/g, '').replace(/\\s+/g, ' ').trim() === TEXT.replace(/\\s+/g, ' ').trim())")))
+        .map(|v| v == true)
+        .unwrap_or(false);
+    say!("send: the message box holds exactly the text: {}", yes(holds));
+    if !holds {
+        say!("send: Enter not pressed: nothing sent (what went in stays as a draft in this session's box)");
+        return 7;
+    }
     host.key(Key::Enter, false);
     let sent_at = Instant::now();
     say!("send: Enter pressed (once)");
