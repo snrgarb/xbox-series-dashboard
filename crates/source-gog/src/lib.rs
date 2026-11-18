@@ -342,8 +342,12 @@ pub fn load_with(places: &Places, records: Vec<Record>, owned: Option<&source_ki
         if info.as_ref().is_some_and(|info| !info.is_game()) {
             continue;
         }
-        let name = Some(record.name.clone())
-            .filter(|name| !name.is_empty())
+        // The owned list's name first: the folder's is whatever its installer called it (gogdl's `folder_name`), and a
+        // game installed from the list keeps the name it was listed by, in the Queue, Recent and the library.
+        let listed = owned.and_then(|list| list.games.iter().find(|g| g.id == record.id && !g.name.is_empty()));
+        let name = listed
+            .map(|game| game.name.clone())
+            .or_else(|| Some(record.name.clone()).filter(|name| !name.is_empty()))
             .or_else(|| info.map(|info| info.name).filter(|name| !name.is_empty()))
             .or_else(|| galaxy.titles.get(&record.id).cloned());
         let Some(name) = name else { continue };
@@ -720,6 +724,47 @@ mod tests {
         assert!(!gog.refresh_owned());
         assert_eq!(source_kit::owned::read(&owned, SOURCE).unwrap().unwrap().games.len(), 4);
         assert_eq!(listed(&gog).len(), 4);
+    }
+
+    #[test]
+    fn a_game_installed_from_the_owned_list_keeps_its_name_installed_and_uninstalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("GOG.com");
+        fs::create_dir_all(root.join("Games")).unwrap();
+        // As gogdl leaves it: the folder and the .info named by `info`'s folder_name, not the game's name.
+        let folder = dir.path().join("games").join("Game 1900000104");
+        fs::create_dir_all(&folder).unwrap();
+        let info = json!({"gameId": "1900000104", "rootGameId": "1900000104", "name": "Game 1900000104",
+                          "playTasks": [{"isPrimary": true, "type": "FileTask", "path": "game.exe"}]});
+        fs::write(folder.join("goggame-1900000104.info"), info.to_string()).unwrap();
+        let list = source_kit::owned::List {
+            store: SOURCE.into(),
+            games: vec![source_kit::owned::Owned {
+                id: "1900000104".into(),
+                name: "Quarrel Fen".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let record = |path: &Path| Record { id: "1900000104".into(), path: path.to_path_buf(), ..Record::default() };
+        let names = |library: Library| -> Vec<(String, bool)> {
+            library.games.into_iter().map(|g| (g.name, g.installed)).collect()
+        };
+
+        let installed = load_with(&Places::under(&root), vec![record(&folder)], Some(&list)).unwrap();
+        assert_eq!(names(installed), [("Quarrel Fen".to_string(), true)]);
+
+        fs::remove_dir_all(&folder).unwrap();
+        let uninstalled = load_with(&Places::under(&root), vec![record(&folder)], Some(&list)).unwrap();
+        assert_eq!(names(uninstalled), [("Quarrel Fen".to_string(), false)]);
+
+        // With no list, the folder's name as before.
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("goggame-1900000104.info"), info.to_string()).unwrap();
+        assert_eq!(
+            names(load(&Places::under(&root), vec![record(&folder)]).unwrap()),
+            [("Game 1900000104".to_string(), true)]
+        );
     }
 
     fn standin_auth(home: &Path) {
