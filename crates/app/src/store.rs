@@ -109,6 +109,7 @@ fn open_library(args: &Args) -> (Library, Store) {
             let into = |library: &Library| -> Result<(Library, Database)> {
                 let mut database = Database::open(&path)?;
                 first_profile(&mut database);
+                game_pass_as_set(&database);
                 let library = through(&mut database, library)?;
                 Ok((library, database))
             };
@@ -133,6 +134,7 @@ fn open_library(args: &Args) -> (Library, Store) {
         .and_then(|path| Database::open(path).map_err(|e| eprintln!("library: {}: {e:#}", path.display())).ok());
     if let Some(database) = &mut database {
         first_profile(database);
+        game_pass_as_set(database);
     }
     let stored = database.as_ref().and_then(|db| db.snapshot().ok()).filter(|library| !library.games.is_empty());
     if let Some(library) = &stored {
@@ -205,6 +207,14 @@ fn dressed(library: Library, mut store: Store) -> (Library, Store) {
 
 /// With no Profile in the database yet, the first, made from the Windows user: their name, and their account
 /// picture if Windows has one.
+/// The Game Pass catalogue as the database's settings have it, before the sources are first read (#277).
+fn game_pass_as_set(database: &Database) {
+    let Some(game_pass) = crate::game_pass::get() else { return };
+    let setting = |key: &str| database.setting(key).ok().flatten();
+    let options = Options::read(setting);
+    game_pass.set(options.show_game_pass, options.game_pass_region);
+}
+
 fn first_profile(database: &mut Database) {
     match database.first_profile(&shell::account::name(), shell::account::picture().as_deref()) {
         Ok(Some(made)) => eprintln!("profiles: {made}"),
@@ -605,6 +615,30 @@ impl Store {
     /// Settings' options as the database has them: each its default until it has been set. Those that are set
     /// are said in the log, which is how a test knows a change outlived the Dashboard that made it.
     pub fn options(&self) -> Options {
+        let windows_region = crate::game_pass::get().and_then(|game_pass| game_pass.windows_region());
+        Options { windows_region, ..self.options_kept() }
+    }
+
+    /// The Game Pass catalogue's region, None for Windows' (Settings > Launchers): saved, and in force for the next
+    /// read of Xbox.
+    pub fn set_game_pass(&self, shown: bool, region: Option<model::game_pass::Region>) {
+        if let Some(database) = &self.database {
+            let key = model::game_pass::REGION_KEY;
+            let saved = match region {
+                Some(region) => database.set_setting(key, region.code()),
+                None => database.delete_setting(key),
+            };
+            match saved {
+                Ok(()) => eprintln!("settings: {key} = {}", region.map_or("Windows'".to_string(), |r| r.to_string())),
+                Err(e) => eprintln!("settings: {key} not saved: {e:#}"),
+            }
+        }
+        if let Some(game_pass) = crate::game_pass::get() {
+            game_pass.set(shown, region);
+        }
+    }
+
+    fn options_kept(&self) -> Options {
         let keys = Setting::ALL.iter().map(|setting| setting.key());
         for key in keys.chain([screens::idle::DIM_KEY, screens::idle::SHOW_KEY]) {
             if let Some(value) = self.setting(key) {

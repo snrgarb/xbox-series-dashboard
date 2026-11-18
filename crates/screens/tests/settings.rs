@@ -504,6 +504,9 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         build: screens::settings::about::Build::default(),
         daily_update_check: false,
         updates: model::update::Updates::Unchecked,
+        show_game_pass: true,
+        game_pass_region: None,
+        windows_region: None,
     };
     assert_eq!(dashboard.options(), left);
 
@@ -1502,12 +1505,17 @@ fn launchers_are_walked_by_those_that_can_be_switched_and_one_off_leaves_every_l
     press(&mut dashboard, &[A]);
     let line = |row: &str, count: &str| format!("Settings: Launchers: {row}; {count}; ready");
     assert_eq!(dashboard.focus_line(), line("Steam; on, 5 games", "14 games from 2 launchers"));
-    // Down passes over the four not on this PC, to Xbox and Update now; the foot stops.
+    // Down passes over the four not on this PC, to Xbox, Update now and the Game Pass controls; the foot stops.
     press(&mut dashboard, &[Down, Down]);
     assert_eq!(dashboard.focus_line(), line("Xbox; on, 0 games", "14 games from 2 launchers"));
-    press(&mut dashboard, &[Down, Down]);
+    press(&mut dashboard, &[Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Launchers: Update now; 14 games from 2 launchers; ready");
-    press(&mut dashboard, &[Up, Up]);
+    press(&mut dashboard, &[Down, Down, Down]);
+    assert_eq!(
+        dashboard.focus_line(),
+        "Settings: Launchers: Game Pass region; 14 games from 2 launchers; ready; Game Pass on, Windows'"
+    );
+    press(&mut dashboard, &[Up, Up, Up, Up]);
     assert_eq!(dashboard.focus_line(), line("Epic Games; on, 9 games", "14 games from 2 launchers"));
 
     // Epic off: its games leave the library every page shows, and the count; on again, they are back.
@@ -1587,7 +1595,7 @@ fn settings_launchers() {
 
     stage.press(&[Down, A]);
     carry_out(&mut stage.dashboard, &database);
-    stage.press(&[Down, Down, Down]);
+    stage.press(&[Down, Down]);
     stage.dashboard.set_library(with_update(&database, model::launcher::Update::Working));
     let line = stage.dashboard.focus_line();
     assert!(line.starts_with("Settings: Launchers: Update now; 5 games from 1 launcher"), "{line}");
@@ -1608,6 +1616,66 @@ fn settings_launchers() {
     stage.press(&[A, A]);
     assert!(stage.dashboard.focus_line().contains("; refused: Quit "), "{}", stage.dashboard.focus_line());
     stage.check("settings-launchers-refused");
+}
+
+/// Show Game Pass games asks for the setting turned over; the region's list opens on Windows' region and a market
+/// chosen there is asked for and shown at once (#277).
+#[test]
+fn the_game_pass_controls_ask_for_the_switch_and_the_region() {
+    let database = launchers_database();
+    let mut dashboard = start(&database);
+    let gb = model::game_pass::Region::parse("GB");
+    dashboard.set_options(screens::Options { windows_region: gb, ..dashboard.options() });
+    to_launchers(&mut dashboard);
+    press(&mut dashboard, &[A, Down, Down, Down, Down]);
+    assert_eq!(
+        dashboard.focus_line(),
+        "Settings: Launchers: Show Game Pass games; 14 games from 2 launchers; ready; Game Pass on, GB (Windows')"
+    );
+    dashboard.take_effects();
+    press(&mut dashboard, &[A]);
+    let off = screens::settings::Change { setting: screens::settings::Setting::ShowGamePass, on: false };
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::Set(off)]);
+    assert!(dashboard.focus_line().ends_with("; Game Pass off, GB (Windows')"), "{}", dashboard.focus_line());
+    press(&mut dashboard, &[Down, A]);
+    assert!(
+        dashboard
+            .focus_line()
+            .starts_with("Settings: Launchers: Game Pass region, list on \"Windows' region (United Kingdom)\"; "),
+        "{}",
+        dashboard.focus_line()
+    );
+    // Down to Albania, the first market, and chosen.
+    press(&mut dashboard, &[Down, A]);
+    let albania = model::game_pass::Region::parse("AL");
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::GamePassRegion(albania)]);
+    assert!(dashboard.focus_line().ends_with("; Game Pass off, AL"), "{}", dashboard.focus_line());
+    // Opened again on it; Up is Windows' again.
+    press(&mut dashboard, &[A, Up, A]);
+    assert_eq!(carry_out(&mut dashboard, &database), [Effect::GamePassRegion(None)]);
+    // B closes the list unchanged.
+    press(&mut dashboard, &[A, Down, B]);
+    assert_eq!(carry_out(&mut dashboard, &database), []);
+    assert!(
+        dashboard.focus_line().starts_with("Settings: Launchers: Game Pass region; "),
+        "{}",
+        dashboard.focus_line()
+    );
+}
+
+/// The Game Pass controls, focus on the region with its list open on the United Kingdom (#277).
+#[test]
+fn settings_launchers_game_pass() {
+    let database = launchers_database();
+    let mut stage = Stage::new(database.snapshot().unwrap());
+    let gb = model::game_pass::Region::parse("GB");
+    let options = stage.dashboard.options();
+    stage.dashboard.set_options(screens::Options { windows_region: gb, game_pass_region: gb, ..options });
+    to_launchers(&mut stage.dashboard);
+    stage.press(&[A, Down, Down, Down, Down, Down, A]);
+    let line = stage.dashboard.focus_line();
+    assert!(line.starts_with("Settings: Launchers: Game Pass region, list on \"United Kingdom\""), "{line}");
+    stage.check("settings-launchers-game-pass");
 }
 
 // --- Games & apps > Helpers (docs/spec/helpers.md) ---

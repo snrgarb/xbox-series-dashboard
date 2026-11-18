@@ -18,10 +18,16 @@
 //!   `SplashScreenImage` (1920x1080 in a GDK game), else the manifest's splash screen; **header** the manifest's
 //!   `Wide310x150Logo`; no **cover**: a package has nothing portrait. The config's `StoreId` is `OnlineArt::product`,
 //!   by which the art lookup asks the Microsoft Store's catalogue for the rest (#110; docs/sources.md, "Art").
-//! - **Not installed:** nothing. What the user owns, and the Game Pass catalogue, are Xbox's servers' to say.
+//! - **Not installed:** the PC Game Pass catalogue of the region Settings names (#277), where the Dashboard is given
+//!   one ([`Xbox::with_game_pass`]): each of its games not installed is listed not installed, marked `game_pass`,
+//!   its `source_id` its package family name (else its product id), so that once installed it is the same game. An
+//!   installed game the catalogue lists (by family name, else by its config's `StoreId`) is marked too, and listed
+//!   once. Fetching the catalogue is the library's (`library::game_pass`), handed in as a function. What the user
+//!   owns, and whether they subscribe, are Xbox's servers' to say: nothing is read of them.
 //! - **Start:** the app user model ID, `<family name>!<application id>`, as an address: `shell:AppsFolder\<AUMID>`,
 //!   which Windows activates as the Start menu does. Never the game's exe, which would skip its app-launch.
-//! - **Install:** the Store's page for the config's `StoreId`, `ms-windows-store://pdp/?ProductId=<id>`, where known.
+//! - **Install:** the Store's page for the config's `StoreId` (a catalogue game's product id),
+//!   `ms-windows-store://pdp/?ProductId=<id>`, where known.
 //!   **Uninstall:** Settings' installed apps, `ms-settings:appsfeatures`, as Playnite opens: whether removing a
 //!   package from outside removes a GDK game cleanly is not known.
 //! - **Running:** a process of this session runs as the package's family (`GetPackageFamilyName`), which covers the
@@ -44,10 +50,14 @@ pub mod gaming_root;
 pub mod manifest;
 #[cfg(windows)]
 mod packaged;
+pub mod region;
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
+use std::sync::Arc;
+
+use model::game_pass::Catalogue;
 use model::{Ask, Found, Game, Library, OnlineArt, Source, Start};
 
 use manifest::{asset, plain};
@@ -58,11 +68,21 @@ pub const SOURCE: &str = "xbox";
 /// Where a drive's packaged games may be that `.GamingRoot` does not name.
 const MODIFIABLE: [&str; 2] = ["Program Files", "ModifiableWindowsApps"];
 
+/// What gives the Game Pass catalogue to list: None while it is switched off or there is none.
+pub type GamePass = Arc<dyn Fn() -> Option<Catalogue> + Send + Sync>;
+
 /// The Xbox games on this machine, as the library reads them and the shell starts them.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct Xbox {
     /// A fake drive to read in place of this machine's.
     fake: Option<PathBuf>,
+    game_pass: Option<GamePass>,
+}
+
+impl std::fmt::Debug for Xbox {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Xbox").field("fake", &self.fake).field("game_pass", &self.game_pass.is_some()).finish()
+    }
 }
 
 /// A package the package manager says is registered for this user.
@@ -77,8 +97,71 @@ pub struct Registered {
 impl Xbox {
     /// This machine's packages, or with `Some(dir)` the fake drive at `dir` (`--xbox`).
     pub fn at(fake: Option<PathBuf>) -> Self {
-        Self { fake }
+        Self { fake, game_pass: None }
     }
+
+    /// With the PC Game Pass catalogue `game_pass` gives at each read (#277).
+    pub fn with_game_pass(self, game_pass: GamePass) -> Self {
+        Self { game_pass: Some(game_pass), ..self }
+    }
+
+    /// The installed games and the catalogue's: see [`with_catalogue`].
+    fn listed(&self, found: Option<Found>) -> Option<Found> {
+        let Some(catalogue) = self.game_pass.as_ref().and_then(|game_pass| game_pass()) else { return found };
+        let mut found = found.unwrap_or_else(|| Found { library: Library::default(), from: String::new() });
+        let (marked, added) = with_catalogue(&mut found.library.games, &catalogue);
+        let from = format!(
+            "the PC Game Pass catalogue for {} ({} games: {marked} installed, {added} not)",
+            catalogue.market,
+            catalogue.products.len()
+        );
+        found.from = if found.from.is_empty() { from } else { format!("{} and {from}", found.from) };
+        Some(found)
+    }
+}
+
+/// Merges the catalogue into the installed games: an installed game the catalogue lists (its family name the
+/// product's, else its config's `StoreId` the product's or one of its bundle's) is marked `game_pass`; every other
+/// product is a game not installed, its `source_id` its family name, else its product id. How many were marked and
+/// added.
+pub fn with_catalogue(games: &mut Vec<Game>, catalogue: &Catalogue) -> (usize, usize) {
+    let mut marked = 0;
+    let mut added = Vec::new();
+    for product in &catalogue.products {
+        let same = |game: &Game| {
+            let family = product.family.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(&game.source_id));
+            let id = game.online.product.as_deref().is_some_and(|id| {
+                id.eq_ignore_ascii_case(&product.id) || product.bundled.iter().any(|b| b.eq_ignore_ascii_case(id))
+            });
+            family || id || game.source_id.eq_ignore_ascii_case(&product.id)
+        };
+        if let Some(game) = games.iter_mut().find(|game| same(game)) {
+            if !game.game_pass {
+                game.game_pass = true;
+                marked += 1;
+            }
+            continue;
+        }
+        if added.iter().any(|game: &Game| same(game)) {
+            continue;
+        }
+        added.push(Game {
+            source: SOURCE.into(),
+            source_id: product.family.clone().unwrap_or_else(|| product.id.clone()),
+            name: product.name.clone(),
+            installed: false,
+            online: product.art.clone(),
+            developers: product.developers.clone(),
+            publishers: product.publishers.clone(),
+            released: product.released,
+            game_pass: true,
+            ..Game::default()
+        });
+    }
+    let count = added.len();
+    games.extend(added);
+    games.sort_by_key(|game| game.name.to_lowercase());
+    (marked, count)
 }
 
 /// The package roots on the drive (or the folder standing for one) at `drive`: under each folder its `.GamingRoot`
@@ -249,13 +332,13 @@ impl Source for Xbox {
     }
 
     fn read(&self) -> Result<Option<Found>> {
-        let Some(dir) = &self.fake else { return read_machine() };
+        let Some(dir) = &self.fake else { return Ok(self.listed(read_machine()?)) };
         if !dir.is_dir() {
             bail!("{}: no such folder", dir.display());
         }
         let (roots, _) = package_roots(dir);
         let library = Library { games: games(roots.into_iter().map(|root| (root, None))), ..Library::default() };
-        Ok(Some(Found { library, from: dir.display().to_string() }))
+        Ok(self.listed(Some(Found { library, from: dir.display().to_string() })))
     }
 
     /// `shell:AppsFolder\<family name>!<application id>`, the application the game's config names.
@@ -274,8 +357,7 @@ impl Source for Xbox {
         }
         match ask {
             Ask::Install => {
-                let config = manifest::read_config(game.install_dir.as_deref()?).ok()??;
-                let id = config.store_id.filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric()))?;
+                let id = store_id(game)?;
                 Some(Start::Address(format!("ms-windows-store://pdp/?ProductId={id}")))
             }
             Ask::Uninstall => Some(Start::Address("ms-settings:appsfeatures".into())),
@@ -290,6 +372,16 @@ impl Source for Xbox {
         }
         let _ = game;
         false
+    }
+}
+
+/// The game's product in the Store: its config's `StoreId` where it is installed, else the catalogue's product id.
+pub fn store_id(game: &Game) -> Option<String> {
+    let product_id = |id: &str| id.len() == 12 && id.chars().all(|c| c.is_ascii_alphanumeric());
+    let config = game.install_dir.as_deref().and_then(|root| manifest::read_config(root).ok().flatten());
+    match config {
+        Some(config) => config.store_id.filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric()) && !id.is_empty()),
+        None => game.online.product.clone().filter(|id| product_id(id)),
     }
 }
 
@@ -404,6 +496,92 @@ mod tests {
         // Not Xbox's: nothing.
         let steam = Game { source: "steam".into(), ..tidewater.clone() };
         assert_eq!((xbox.start(&steam), xbox.ask(&steam, Ask::Uninstall)), (None, None));
+    }
+
+    /// The fake catalogue of a market as `library::game_pass` would read it: its products, each with its family.
+    fn catalogue(market: &str) -> Catalogue {
+        let (_, games) = fixture::GAME_PASS.iter().find(|(m, _)| *m == market).unwrap();
+        let products = games
+            .iter()
+            .map(|(id, name, identity)| model::game_pass::Product {
+                id: id.to_string(),
+                name: name.to_string(),
+                family: Some(family::family_name(identity, fixture::PUBLISHER)),
+                art: OnlineArt { product: Some(id.to_string()), ..OnlineArt::default() },
+                ..Default::default()
+            })
+            .collect();
+        Catalogue { market: market.into(), language: "en-GB".into(), fetched: 1, products, ..Catalogue::default() }
+    }
+
+    #[test]
+    fn the_catalogues_games_not_installed_are_listed_and_the_installed_one_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("xbox");
+        fixture::write(&root, &Fixture::standard()).unwrap();
+        let shown = std::sync::Arc::new(std::sync::Mutex::new(Some("GB")));
+        let asked = shown.clone();
+        let game_pass: GamePass = Arc::new(move || asked.lock().unwrap().map(catalogue));
+        let xbox = Xbox::at(Some(root.clone())).with_game_pass(game_pass);
+        let found = xbox.read().unwrap().unwrap();
+        let games = &found.library.games;
+        let names: Vec<(&str, bool, bool)> =
+            games.iter().map(|g| (g.name.as_str(), g.installed, g.game_pass)).collect();
+        assert_eq!(
+            names,
+            [
+                ("Ember Orchard", false, true),
+                ("Kestrel Line", false, true),
+                ("Lumen Hollow", true, false),
+                ("Pebble Courier", true, false),
+                ("Saltmarsh Run", false, true),
+                ("Tidewater Trials", true, true),
+            ]
+        );
+        assert!(
+            found.from.ends_with("the PC Game Pass catalogue for GB (4 games: 1 installed, 3 not)"),
+            "{}",
+            found.from
+        );
+        let saltmarsh = games.iter().find(|g| g.name == "Saltmarsh Run").unwrap();
+        assert_eq!(saltmarsh.source_id, family::family_name("MadeUpStudio.SaltmarshRun", fixture::PUBLISHER));
+        assert_eq!(
+            xbox.ask(saltmarsh, Ask::Install),
+            Some(Start::Address("ms-windows-store://pdp/?ProductId=9ZZZGPASS101".into()))
+        );
+        assert_eq!(xbox.start(saltmarsh), None);
+        assert!(xbox.can_install(saltmarsh));
+
+        // US's has no Kestrel Line; off, none of the catalogue's.
+        *shown.lock().unwrap() = Some("US");
+        assert_eq!(xbox.read().unwrap().unwrap().library.games.len(), 5);
+        *shown.lock().unwrap() = None;
+        let games = xbox.read().unwrap().unwrap().library.games;
+        assert_eq!(games.len(), 3);
+        assert!(games.iter().all(|g| g.installed && !g.game_pass));
+    }
+
+    #[test]
+    fn an_installed_game_is_matched_by_its_store_id_where_the_family_differs() {
+        let installed = Game {
+            source: SOURCE.into(),
+            source_id: "MadeUpStudio.Bundled_registered".into(),
+            name: "Bundled".into(),
+            installed: true,
+            online: OnlineArt { product: Some("9ZZZGPASS204".into()), ..OnlineArt::default() },
+            ..Game::default()
+        };
+        let mut games = vec![installed];
+        let product = model::game_pass::Product {
+            id: "9ZZZGPASS203".into(),
+            name: "Bundled Deluxe".into(),
+            bundled: vec!["9ZZZGPASS204".into()],
+            ..Default::default()
+        };
+        let catalogue = Catalogue { products: vec![product.clone(), product], ..Catalogue::default() };
+        assert_eq!(with_catalogue(&mut games, &catalogue), (1, 0));
+        assert_eq!(games.len(), 1);
+        assert!(games[0].game_pass);
     }
 
     #[test]

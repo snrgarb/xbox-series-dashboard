@@ -346,6 +346,13 @@ function Start-Dashboard([string[]] $Arguments = @(), [switch] $Startup) {
     # No test asks a store's real services for art (docs/sources.md, "Art"): where a test has no stand-in for them,
     # an address that answers nothing.
     if (@($Arguments) -notcontains '--store-art-service') { $Arguments = @($Arguments) + @('--store-art-service', 'http://127.0.0.1:9') }
+    # Nor Microsoft's real PC Game Pass catalogue (#277): where a test gives no local one, an empty folder, which has
+    # none for any region.
+    if (@($Arguments) -notcontains '--gamepass') {
+        $none = Join-Path $script:Payload 'fakes\none\gamepass'
+        New-Item $none -ItemType Directory -Force | Out-Null
+        $Arguments = @($Arguments) + @('--gamepass', "`"$none`"")
+    }
     $start = @{ FilePath = $exe; WorkingDirectory = $script:Payload; RedirectStandardError = $script:DashboardLog
                 NoNewWindow = $true; PassThru = $true }
     if ($Arguments.Count) { $start.ArgumentList = $Arguments }  # Start-Process refuses an empty list

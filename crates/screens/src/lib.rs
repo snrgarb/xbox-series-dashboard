@@ -133,6 +133,9 @@ pub enum Effect {
     /// (`model::ArtOrder`). In force on the page at once; whoever keeps the settings saves it, and the art lookup
     /// and the Art picker follow it.
     ArtOrder(model::ArtOrder),
+    /// Settings > Launchers' Game Pass region (#277): the region whose PC Game Pass catalogue is listed, None for
+    /// Windows' own. In force on the page at once; whoever keeps the settings saves it and reads Xbox again.
+    GamePassRegion(Option<model::game_pass::Region>),
     /// Settings > Art: remove the art downloaded into the data folder (the user has said yes). A store's own art is
     /// not touched.
     ClearArt,
@@ -1140,6 +1143,11 @@ impl Dashboard {
             PageAction::Effect(Effect::ArtKey(key)) => {
                 self.options.art_key = key.is_some();
                 self.effects.push(Effect::ArtKey(key));
+            }
+            // The Game Pass region: shown at once, saved, and the catalogue read again.
+            PageAction::Effect(Effect::GamePassRegion(region)) => {
+                self.options.game_pass_region = region;
+                self.effects.push(Effect::GamePassRegion(region));
             }
             // The art sources' order: shown at once, and saved.
             PageAction::Effect(Effect::ArtOrder(order)) => {

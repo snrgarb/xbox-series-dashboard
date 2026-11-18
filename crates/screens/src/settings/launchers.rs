@@ -8,13 +8,20 @@
 //! Update now asks the shell (`Effect::UpdateLaunchers`), which reads off the UI thread and says how it goes in the
 //! snapshots it hands over (`Library::launchers`): working, then what changed. Pressed while it works, it does
 //! nothing.
+//!
+//! Under them, the PC Game Pass catalogue's two controls (#277): Show Game Pass games, a checkbox row
+//! (`Setting::ShowGamePass`), and Game Pass region, a dropdown of Windows' own region and every market where PC Game
+//! Pass is sold (`Effect::GamePassRegion`). Either change has Xbox read again.
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use model::game_pass::{self, Region};
 use model::launcher::{self, Found, Launcher, Update};
 use ui::{Button, Color, HAlign, Press, Rect, Ui, VAlign};
 
-use super::controls::{self, glyph, BOXES_TOP, FIELD_HEIGHT, LEFT, RIGHT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH};
-use super::{Pane, Step};
+use super::controls::{
+    self, glyph, Dropdown, BOXES_TOP, FIELD_HEIGHT, FIELD_WIDTH, LEFT, RIGHT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH,
+};
+use super::{Change, Pane, Setting, Step};
 use crate::home::{self, Source};
 use crate::pages::{Around, PageAction};
 use crate::theme::{BODY, TEXT_DIM};
@@ -25,6 +32,11 @@ pub const TITLE: &str = "Launchers";
 const UPDATE: &str = "Update now";
 const WORKING: &str = "Updating your library...";
 const FAILED: &str = "Your library couldn't be updated. Try again later.";
+const GAME_PASS: &str = "Game Pass";
+const SHOW_GAME_PASS: &str = "Show Game Pass games";
+const REGION: &str = "Game Pass region";
+/// How tall an open region list is kept on screen at most, for the page's scroll: six choices.
+const LIST_SHOWN: f32 = 8.0 + 18.0 + 62.0 * 6.0;
 /// How dim a launcher that is not on this PC is drawn.
 const ABSENT: f32 = 0.4;
 
@@ -43,6 +55,22 @@ fn name(key: &str) -> &'static str {
 enum Line {
     Launcher(String),
     Update,
+    ShowGamePass,
+    Region,
+}
+
+/// The region list's choices: Windows' own region first, then every market where PC Game Pass is sold, by name.
+fn regions(windows: Option<Region>) -> Vec<String> {
+    let windows = match windows {
+        Some(region) => format!("Windows' region ({})", region.name()),
+        None => "Windows' region".to_string(),
+    };
+    std::iter::once(windows).chain(game_pass::MARKETS.iter().map(|(_, name)| name.to_string())).collect()
+}
+
+/// The region chosen's place among [`regions`]' choices: 0 for Windows' own.
+fn region_place(chosen: Option<Region>) -> usize {
+    chosen.and_then(|region| game_pass::markets().position(|market| market == region)).map_or(0, |at| at + 1)
 }
 
 /// Every launcher as the library has them; with none (a library from no database), each on, its games counted.
@@ -125,6 +153,11 @@ pub struct Launchers {
     /// Why the last press did nothing, said beside Update now until focus moves: a game playing from the launcher.
     note: Option<String>,
     scroll: f32,
+    region: Dropdown,
+    /// What the Game Pass controls are set to: shown, the region chosen, Windows' region. Taken from the options at
+    /// each press, and changed at once by the press that asks for a change, so the focus line says it before the
+    /// shell has carried it out.
+    game_pass: (bool, Option<Region>, Option<Region>),
 }
 
 impl Launchers {
@@ -137,6 +170,8 @@ impl Launchers {
             at: Line::Update,
             note: None,
             scroll: 0.0,
+            region: Dropdown::default(),
+            game_pass: (true, None, None),
         };
         page.take(around);
         page.at = page.lines().swap_remove(0);
@@ -148,18 +183,32 @@ impl Launchers {
         self.list = launchers(around);
         self.count = count_line(around);
         self.update = around.library.launchers.update.clone();
+        let options = around.options;
+        self.game_pass = (options.show_game_pass, options.game_pass_region, options.windows_region);
+    }
+
+    /// What the Game Pass controls are set to, for the focus log: `Game Pass on, GB (Windows')`.
+    fn game_pass_line(&self) -> String {
+        let (shown, chosen, windows) = self.game_pass;
+        let on = if shown { "on" } else { "off" };
+        let region = match (chosen, windows) {
+            (Some(region), _) => region.to_string(),
+            (None, Some(windows)) => format!("{windows} (Windows')"),
+            (None, None) => "Windows'".to_string(),
+        };
+        format!("{GAME_PASS} {on}, {region}")
     }
 
     /// The lines focus may be on: each launcher that can be switched, then Update now.
     fn lines(&self) -> Vec<Line> {
         let rows = self.list.iter().filter(|l| l.switchable()).map(|l| Line::Launcher(l.key.clone()));
-        rows.chain([Line::Update]).collect()
+        rows.chain([Line::Update, Line::ShowGamePass, Line::Region]).collect()
     }
 
     fn launcher(&self) -> Option<&Launcher> {
         match &self.at {
             Line::Launcher(key) => self.list.iter().find(|launcher| &launcher.key == key),
-            Line::Update => None,
+            _ => None,
         }
     }
 
@@ -175,6 +224,17 @@ impl Launchers {
         let update = rows + ROW_PITCH * (launcher::ALL.len() - 1) as f32 + ROW_HEIGHT + 40.0;
         (rows, update)
     }
+
+    /// The Game Pass controls under Update now: its label's top, the checkbox row, the region's label's top and its
+    /// dropdown. Each label's control 14 under it, the next label 48 under that, as on Guide's page.
+    fn game_pass_layout(ui: &mut Ui, update_top: f32) -> (f32, Rect, f32, Rect) {
+        let label = ui.measure(&BODY, "0").height;
+        let heading = update_top + FIELD_HEIGHT + 40.0;
+        let show = Rect::new(LEFT, heading + label + 14.0, FIELD_WIDTH, FIELD_HEIGHT);
+        let region_label = show.bottom() + 48.0;
+        let region = Rect::new(LEFT, region_label + label + 14.0, FIELD_WIDTH, FIELD_HEIGHT);
+        (heading, show, region_label, region)
+    }
 }
 
 impl Pane for Launchers {
@@ -187,6 +247,11 @@ impl Pane for Launchers {
         match &self.at {
             Line::Launcher(key) => format!("Launchers: {}", name(key)),
             Line::Update => format!("Launchers: {UPDATE}"),
+            Line::ShowGamePass => format!("Launchers: {SHOW_GAME_PASS}"),
+            Line::Region => match self.region.focused() {
+                None => format!("Launchers: {REGION}"),
+                Some(choice) => format!("Launchers: {REGION}, list on {choice:?}"),
+            },
         }
     }
 
@@ -195,6 +260,19 @@ impl Pane for Launchers {
             return Step::Stay;
         }
         self.take(around);
+        if self.region.is_open() {
+            let markets: Vec<Region> = game_pass::markets().collect();
+            let chosen = match self.region.press(press.button) {
+                Some(0) => None,
+                Some(at) => match markets.get(at - 1) {
+                    Some(&region) => Some(region),
+                    None => return Step::Stay,
+                },
+                None => return Step::Stay,
+            };
+            self.game_pass.1 = chosen;
+            return Step::Do(PageAction::Effect(Effect::GamePassRegion(chosen)));
+        }
         let lines = self.lines();
         let at = lines.iter().position(|line| *line == self.at).unwrap_or(0);
         match press.button {
@@ -212,6 +290,15 @@ impl Pane for Launchers {
                 Line::Update => {
                     self.note = None;
                     return Step::Do(PageAction::Effect(Effect::UpdateLaunchers));
+                }
+                Line::ShowGamePass => {
+                    let change = Change { setting: Setting::ShowGamePass, on: !around.options.show_game_pass };
+                    self.game_pass.0 = change.on;
+                    return Step::Do(PageAction::Effect(Effect::Set(change)));
+                }
+                Line::Region => {
+                    let options = around.options;
+                    self.region.open(regions(options.windows_region), region_place(options.game_pass_region));
                 }
                 Line::Launcher(key) => {
                     let Some(on) = self.launcher().map(|launcher| launcher.on) else { return Step::Stay };
@@ -248,7 +335,11 @@ impl Pane for Launchers {
             (None, Update::Done(changes)) => format!("updated: {changes}"),
             (None, Update::Failed) => "update failed".to_string(),
         };
-        format!("{}{}; {update}", row.unwrap_or_default(), self.count)
+        let game_pass = match self.at {
+            Line::ShowGamePass | Line::Region => format!("; {}", self.game_pass_line()),
+            _ => String::new(),
+        };
+        format!("{}{}; {update}{game_pass}", row.unwrap_or_default(), self.count)
     }
 
     /// The launchers as the new snapshot has them; a launcher that can no longer be switched leaves focus on the
@@ -265,14 +356,26 @@ impl Pane for Launchers {
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool) {
         self.take(around);
         let (rows_top, update_top) = Self::layout(ui);
+        let (heading, show_row, region_label, region_box) = Self::game_pass_layout(ui, update_top);
         let row = |i: usize| Rect::new(LEFT, rows_top + ROW_PITCH * i as f32, ROW_WIDTH, ROW_HEIGHT);
         let update_box = Rect::new(LEFT, update_top, controls::pane_button_width(ui, UPDATE), FIELD_HEIGHT);
         let focused_rect = match &self.at {
             Line::Update => update_box,
             Line::Launcher(key) => row(self.list.iter().position(|l| &l.key == key).unwrap_or(0)),
+            Line::ShowGamePass => show_row,
+            // With its list open, as much of the list as six choices too.
+            Line::Region if self.region.is_open() => {
+                Rect::new(region_box.x, region_box.y, region_box.w, region_box.h + LIST_SHOWN)
+            }
+            Line::Region => region_box,
         };
         let now = now();
-        let Self { list, count, update, at, note, scroll } = self;
+        let options = around.options;
+        let region_value = match options.game_pass_region {
+            Some(region) => region.name().to_string(),
+            None => regions(options.windows_region).swap_remove(0),
+        };
+        let Self { list, count, update, at, note, scroll, region, .. } = self;
         controls::scrolled(ui, scroll, BOXES_TOP, focused_rect.y, focused_rect.bottom(), |ui| {
             controls::label(ui, LEFT, BOXES_TOP, count);
             let draw = |ui: &mut Ui, i: usize, launcher: &Launcher, focused: bool| {
@@ -305,7 +408,16 @@ impl Pane for Launchers {
                 (None, Update::Done(changes)) => said(ui, &done(changes), Color::WHITE, line),
                 (None, Update::Failed) => said(ui, FAILED, Color::WHITE, line),
             }
+            // The Game Pass catalogue's (#277): no line saying what they are for (settings.md 16.11).
+            controls::label(ui, LEFT, heading, GAME_PASS);
+            let on_show = focused && *at == Line::ShowGamePass;
+            controls::checkbox_row(ui, show_row, SHOW_GAME_PASS, options.show_game_pass, on_show);
+            controls::label(ui, LEFT, region_label, REGION);
+            region.draw(ui, region_box, &region_value, focused && *at == Line::Region);
         });
+        // The list over everything, where the box is on screen now.
+        let shown = Rect::new(region_box.x, region_box.y - *scroll, region_box.w, region_box.h);
+        region.draw_list(ui, shown);
     }
 }
 
@@ -354,6 +466,18 @@ mod tests {
         assert!(launcher::ALL.iter().all(|key| mark(key).is_some()));
         // The library names each launcher's filter on Full library by the same names.
         assert!(launcher::ALL.iter().all(|key| launcher::name(key) == Some(name(key))));
+    }
+
+    #[test]
+    fn the_region_list_is_windows_then_the_markets_and_opens_on_the_one_chosen() {
+        let gb = Region::parse("GB");
+        let choices = regions(gb);
+        assert_eq!(choices[0], "Windows' region (United Kingdom)");
+        assert_eq!(regions(None)[0], "Windows' region");
+        assert_eq!(choices.len(), game_pass::MARKETS.len() + 1);
+        assert_eq!(region_place(None), 0);
+        assert_eq!(choices[region_place(gb)], "United Kingdom");
+        assert_eq!(choices[region_place(Region::parse("AL"))], "Albania");
     }
 
     #[test]

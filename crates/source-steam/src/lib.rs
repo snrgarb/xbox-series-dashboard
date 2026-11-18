@@ -443,6 +443,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     community_score: score(common, "review_percentage"),
                     play_count: 0,
                     art: Default::default(),
+                    game_pass: false,
                 },
             ))
         })

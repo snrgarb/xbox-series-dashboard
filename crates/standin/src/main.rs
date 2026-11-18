@@ -107,6 +107,7 @@
 //!       and with --json writes the Library it read there. Battle.net's client in the fake, `Battle.net.exe`, is a
 //!       copy of this program too.
 //!   standin make-xbox <dir> [--json <file>]
+//!   standin make-gamepass <dir>   (a local PC Game Pass catalogue, US and GB, for --gamepass <dir>: #277)
 //!       As make-ea, for a fake drive of Xbox games (`source_xbox::fixture`): a `.GamingRoot` and made-up packages,
 //!       each game's `game.exe` a copy of this program, read with `--xbox <dir>`. Tidewater Trials' package is whole,
 //!       as Windows registers a folder of loose files: the end-to-end test registers it on the VM.
@@ -231,6 +232,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
                     [--windowed <percent>] [--crash-ms <n>] [--hand-off-ms <n>]
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
        standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
+       standin make-gamepass <dir>
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        Agent.exe [--internalclienttools] [--seconds <n>]
        standin open-address <address>
@@ -960,6 +962,22 @@ fn run(args: &[String]) -> i32 {
                 return 2;
             };
             made(what, dir, make_store(&what["make-".len()..], dir, json))
+        }
+        Some("make-gamepass") => {
+            let [dir] = &args[1..] else {
+                note(USAGE);
+                return 2;
+            };
+            match source_xbox::fixture::write_game_pass(Path::new(dir)) {
+                Ok(()) => {
+                    note(&format!("make-gamepass: a PC Game Pass catalogue for US and GB at {dir}"));
+                    0
+                }
+                Err(e) => {
+                    note(&format!("make-gamepass: {dir}: {e}"));
+                    1
+                }
+            }
         }
         Some("uplay-url") => match &args[1..] {
             [dir, url] => uplay_url(Path::new(dir), url),

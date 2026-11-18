@@ -215,6 +215,8 @@ Still not known after the first try: whether the `pid` header opens the client's
 - **Who calls A outside Microsoft's packaged apps**: Fleet's [`install-microsoft-store-app.ps1`][fleet] from plain PowerShell, with the Store's notices off; it says a paid app fails with `0x803F8001` where the device has no entitlement [code]. winget uses the same queue for Store apps (`MSStore.cpp`), but winget is Microsoft's own packaged app [code]. `AppInstallManager.AppInstallItems` lists the whole Store queue: if the Xbox app's installs go through it (X2), the Queue could also show, pause and cancel installs started in the Xbox app [inferred].
 - **Microsoft Services Agreement** (effective 2026-09-30, [link][msa]): Code of Conduct 3.a.vi, "Don't circumvent any restrictions on access to, usage, or availability of the Services"; 8.b.ii forbids to "decompile, decrypt, hack, emulate, exploit, or reverse engineer any software". My reading [inferred]: A, D and E are Windows' public APIs and addresses and circumvent nothing; calling A against its "restricted" note is a support risk (it can stop working), not a breach. F is what those clauses are about.
 
+**The Game Pass catalogue** itself, which games a region's PC Game Pass has, is public and needs no sign-in: docs/research/game-pass.md (#277). Its games install by E with their product id until A is proven.
+
 **Recommendation: possibly fully.** Uninstall by D once X3 shows it leaves no `XboxGames` folder behind and the Xbox app says "not installed"; until then, Settings' page as now. Install by A if X1 shows it takes an owned or Game Pass product from the Dashboard's process; else the Store's page, with A only to read and steer the Store's queue.
 
 ## 9. Prior art across stores
