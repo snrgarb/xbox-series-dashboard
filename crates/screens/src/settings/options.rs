@@ -21,6 +21,9 @@ pub enum Setting {
     ShowBatteryPercent,
     /// The Guide opens with the Guide button and from Home; off, the button is left to Steam or another program.
     UseGuide,
+    /// The running game is paused (its processes suspended) while the Guide is open over it; off, it runs on under
+    /// the Guide (Settings > General > Guide, #270; docs/spec/guide.md 7.2).
+    PauseGame,
     /// Art is downloaded for the games that have none on the PC: the stores' own online, and SteamGridDB's with a
     /// key (Settings > Art). Off, nothing is asked of any service.
     DownloadArtOnline,
@@ -33,13 +36,14 @@ pub enum Setting {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 9] = [
+    pub const ALL: [Setting; 10] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
         Setting::ShowRecentLauncher,
         Setting::ShowBatteryPercent,
         Setting::UseGuide,
+        Setting::PauseGame,
         Setting::DownloadArtOnline,
         Setting::AskWhosPlaying,
         Setting::DailyUpdateCheck,
@@ -54,6 +58,7 @@ impl Setting {
             Setting::ShowRecentLauncher => "home.recent_launcher",
             Setting::ShowBatteryPercent => "status.battery_percent",
             Setting::UseGuide => "guide.enabled",
+            Setting::PauseGame => "guide.pause_game",
             // `library::art::ONLINE_SETTING`.
             Setting::DownloadArtOnline => "art.online",
             Setting::AskWhosPlaying => "startup.ask_whos_playing",
@@ -112,6 +117,8 @@ pub struct Options {
     pub show_recent_launcher: bool,
     pub show_battery_percent: bool,
     pub use_guide: bool,
+    /// The running game is paused while the Guide is open over it: on by default, as the Bundle has it (#270).
+    pub pause_game: bool,
     /// Art is downloaded for the games that have none on the PC (Settings > Art): on by default.
     pub art_online: bool,
     /// A SteamGridDB key has been entered (Settings > Art): with art online on, SteamGridDB is asked too.
@@ -149,6 +156,7 @@ impl Default for Options {
             show_recent_launcher: of(Setting::ShowRecentLauncher),
             show_battery_percent: of(Setting::ShowBatteryPercent),
             use_guide: of(Setting::UseGuide),
+            pause_game: of(Setting::PauseGame),
             art_online: of(Setting::DownloadArtOnline),
             art_key: false,
             art_order: model::ArtOrder::default(),
@@ -191,6 +199,7 @@ impl Options {
             Setting::ShowRecentLauncher => self.show_recent_launcher,
             Setting::ShowBatteryPercent => self.show_battery_percent,
             Setting::UseGuide => self.use_guide,
+            Setting::PauseGame => self.pause_game,
             Setting::DownloadArtOnline => self.art_online,
             Setting::AskWhosPlaying => self.ask_whos_playing,
             Setting::DailyUpdateCheck => self.daily_update_check,
@@ -205,6 +214,7 @@ impl Options {
             Setting::ShowRecentLauncher => &mut self.show_recent_launcher,
             Setting::ShowBatteryPercent => &mut self.show_battery_percent,
             Setting::UseGuide => &mut self.use_guide,
+            Setting::PauseGame => &mut self.pause_game,
             Setting::DownloadArtOnline => &mut self.art_online,
             Setting::AskWhosPlaying => &mut self.ask_whos_playing,
             Setting::DailyUpdateCheck => &mut self.daily_update_check,
@@ -232,6 +242,8 @@ mod tests {
         // The port's own (#248): the Recent row's launcher marks show until they are turned off.
         assert!(options.show_recent_launcher);
         assert!(options.use_guide && !options.reduce_motion && options.ask_whos_playing);
+        // The game is paused under the Guide until that is turned off (#270).
+        assert!(options.pause_game);
         // The port's own: art online is on until it is turned off.
         assert!(options.art_online && !options.art_key);
         assert_eq!(options.art_order, model::ArtOrder::default(), "Steam, Xbox, PlayStation, SteamGridDB, all on");

@@ -206,12 +206,15 @@ fn b_climbs_one_level_at_a_time_and_a_page_gives_focus_back_to_the_box_that_open
     let mut dashboard = settings(&database);
     press(&mut dashboard, &[Right, Down, A]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Use the Guide");
-    // The Guide page has two controls: Use the Guide, and the Now Playing source under it. Right does nothing.
+    // The Guide page has three controls: Use the Guide, Pause the game while the Guide is open, and the Now
+    // Playing source under them. Right does nothing.
     press(&mut dashboard, &[Up, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Use the Guide");
+    press(&mut dashboard, &[Down, Right]);
+    assert_eq!(dashboard.focus_line(), "Settings: Guide: Pause the game while the Guide is open");
     press(&mut dashboard, &[Down, Down, Right]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Now Playing source");
-    press(&mut dashboard, &[Up]);
+    press(&mut dashboard, &[Up, Up]);
     for back in [B, Left] {
         press(&mut dashboard, &[back]);
         assert_eq!(dashboard.focus_line(), "Settings: General: Guide");
@@ -389,6 +392,36 @@ fn use_the_guide_off_leaves_the_guide_button_and_homes_profile_alone() {
     assert!(dashboard.guide_open());
 }
 
+/// Pause the game while the Guide is open (#270): on as it starts; turned over in place, saved, and read back on
+/// the next start. What it does to a game is the executable's (`app::window`'s `Hold`).
+#[test]
+fn pause_the_game_is_turned_off_saved_and_read_back() {
+    let database = database();
+    let mut dashboard = settings(&database);
+    assert!(dashboard.options().pause_game, "on until it is turned off");
+    press(&mut dashboard, &[Right, Down, A, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Guide: Pause the game while the Guide is open");
+    press(&mut dashboard, &[A]);
+    assert!(!dashboard.options().pause_game);
+    assert!(dashboard.options().use_guide, "Use the Guide is left as it was");
+    assert_eq!(dashboard.focus_line(), "Settings: Guide: Pause the game while the Guide is open", "focus stays");
+    assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::PauseGame, on: false }]);
+    assert_eq!(database.setting("guide.pause_game").unwrap().as_deref(), Some("false"));
+    assert!(!start(&database).options().pause_game, "kept across a restart");
+    // On again.
+    press(&mut dashboard, &[A]);
+    assert_eq!(save(&mut dashboard, &database), [Change { setting: Setting::PauseGame, on: true }]);
+    assert!(start(&database).options().pause_game);
+}
+
+/// Pause the game off, focus on it: its box unticked under Use the Guide's, the Now Playing source under both.
+#[test]
+fn settings_guide_pause_the_game_off() {
+    let mut stage = settings_stage();
+    stage.press(&[Right, Down, A, Down, A]);
+    stage.check("settings-guide-pause-game-off");
+}
+
 /// Settings > Guide's Now Playing source, as the Dashboard is told of it and of the apps with a session.
 fn now_playing_apps(dashboard: &mut Dashboard, apps: &[&str]) {
     let sessions = apps
@@ -412,7 +445,7 @@ fn the_now_playing_source_lists_any_spotify_and_every_app_seen_and_a_choice_is_s
     let mut dashboard = settings(&database);
     now_playing_apps(&mut dashboard, &["chrome.exe", "Spotify.exe"]);
     now_playing_apps(&mut dashboard, &["vlc.exe"]);
-    press(&mut dashboard, &[Right, Down, A, Down]);
+    press(&mut dashboard, &[Right, Down, A, Down, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Guide: Now Playing source");
     // The list opens on the source set now, Spotify until one is chosen.
     press(&mut dashboard, &[A]);
@@ -445,12 +478,12 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
     assert_eq!(dashboard.options(), Options::default(), "nothing is set until it is changed");
     assert!(Setting::ALL.iter().all(|setting| database.setting(setting.key()).unwrap().is_none()));
 
-    // Every checkbox on Personalisation turned over, and Use the Guide.
+    // Every checkbox on Personalisation turned over, and the Guide page's two.
     dashboard.open_page(Open::Settings(Entry::Tile));
-    press(&mut dashboard, &[A, A, Down, A, Down, A, Down, A, Down, A, B, Down, A, A]);
+    press(&mut dashboard, &[A, A, Down, A, Down, A, Down, A, Down, A, B, Down, A, A, Down, A]);
     // And Idle's Dim after, from 2 min to 10 min, which raises Show things after to 10 min with it.
     press(&mut dashboard, &[B, Up, Right, A, A, Down, Down, A]);
-    assert_eq!(save(&mut dashboard, &database).len(), 6);
+    assert_eq!(save(&mut dashboard, &database).len(), 7);
     let ten = Some(std::time::Duration::from_secs(600));
     let left = Options {
         background_delay: false,
@@ -459,6 +492,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         show_recent_launcher: false,
         show_battery_percent: false,
         use_guide: false,
+        pause_game: false,
         art_online: true,
         art_key: false,
         art_order: model::ArtOrder::default(),
@@ -794,7 +828,7 @@ fn settings_guide() {
 fn settings_guide_now_playing_source_list() {
     let mut stage = settings_stage();
     now_playing_apps(&mut stage.dashboard, &["chrome.exe", "vlc.exe"]);
-    stage.press(&[Right, Down, A, Down, A]);
+    stage.press(&[Right, Down, A, Down, Down, A]);
     stage.check("settings-guide-now-playing-source-list");
 }
 

@@ -1,5 +1,6 @@
-//! General > Guide (docs/spec/settings.md, 6.8): Use the Guide, and under it the Now Playing source, which
-//! app the Audio Flyout's Now Playing card follows (docs/spec/now-playing.md).
+//! General > Guide (docs/spec/settings.md, 6.8): Use the Guide, Pause the game while the Guide is open (#270), and
+//! under them the Now Playing source, which app the Audio Flyout's Now Playing card follows
+//! (docs/spec/now-playing.md).
 use ui::{Button, Press, Rect, Ui};
 
 use super::controls::{self, Dropdown, FIELD_HEIGHT, FIELD_WIDTH, LEFT, TOP};
@@ -7,12 +8,16 @@ use super::{Change, Pane, Setting, Step};
 use crate::pages::{Around, PageAction};
 use crate::Effect;
 
-/// The page's two controls, top to bottom.
+/// The page's three controls, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
     UseGuide,
+    PauseGame,
     Source,
 }
+
+/// The second checkbox's name, and its focus line's.
+const PAUSE_GAME: &str = "Pause the game while the Guide is open";
 
 pub struct Guide {
     focus: Focus,
@@ -36,11 +41,13 @@ impl Pane for Guide {
         "Guide".into()
     }
 
-    /// `Guide: Use the Guide`, `Guide: Now Playing source`, and with its list open the choice focus is on:
+    /// `Guide: Use the Guide`, `Guide: Pause the game while the Guide is open`, `Guide: Now Playing source`, and
+    /// with its list open the choice focus is on:
     /// `Guide: Now Playing source, list on "Spotify"`.
     fn focus(&self) -> String {
         match (self.focus, self.source.focused()) {
             (Focus::UseGuide, _) => "Guide: Use the Guide".into(),
+            (Focus::PauseGame, _) => format!("Guide: {PAUSE_GAME}"),
             (Focus::Source, None) => "Guide: Now Playing source".into(),
             (Focus::Source, Some(choice)) => format!("Guide: Now Playing source, list on {choice:?}"),
         }
@@ -58,10 +65,13 @@ impl Pane for Guide {
             };
         }
         match (press.button, self.focus) {
-            (Button::Down, Focus::UseGuide) => self.focus = Focus::Source,
-            (Button::Up, Focus::Source) => self.focus = Focus::UseGuide,
-            (Button::A, Focus::UseGuide) if !press.repeat => {
-                let change = Change { setting: Setting::UseGuide, on: !around.options.use_guide };
+            (Button::Down, Focus::UseGuide) => self.focus = Focus::PauseGame,
+            (Button::Down, Focus::PauseGame) => self.focus = Focus::Source,
+            (Button::Up, Focus::Source) => self.focus = Focus::PauseGame,
+            (Button::Up, Focus::PauseGame) => self.focus = Focus::UseGuide,
+            (Button::A, Focus::UseGuide | Focus::PauseGame) if !press.repeat => {
+                let setting = if self.focus == Focus::UseGuide { Setting::UseGuide } else { Setting::PauseGame };
+                let change = Change { setting, on: !around.options.get(setting) };
                 return Step::Do(PageAction::Effect(Effect::Set(change)));
             }
             // The list opens on the source set now: Any, Spotify, then every app seen since the start.
@@ -77,12 +87,30 @@ impl Pane for Guide {
     }
 
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool) {
-        // Each label, its control 14 under it, and the next label 48 under that, as Idle's: no descriptions (#261).
+        // Each label, its control 14 under it, and the next label 48 under that, as Idle's: no descriptions (#261),
+        // nor one for Pause the game (#270: its why is in docs/spec/guide.md, 7.2).
         let mut y = TOP;
         y += controls::label(ui, LEFT, y, "Guide") + 14.0;
-        let row = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
-        let on_row = focused && self.focus == Focus::UseGuide;
-        controls::checkbox_row(ui, row, "Use the Guide", around.options.use_guide, on_row);
+        // The two checkboxes, the second 18 under the first as two boxes are, the focused one drawn last so its
+        // glow is over its neighbour (5.1).
+        let use_row = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
+        y += FIELD_HEIGHT + 18.0;
+        let pause_row = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
+        let use_guide = |ui: &mut Ui| {
+            let on_row = focused && self.focus == Focus::UseGuide;
+            controls::checkbox_row(ui, use_row, "Use the Guide", around.options.use_guide, on_row);
+        };
+        let pause_game = |ui: &mut Ui| {
+            let on_row = focused && self.focus == Focus::PauseGame;
+            controls::checkbox_row(ui, pause_row, PAUSE_GAME, around.options.pause_game, on_row);
+        };
+        if self.focus == Focus::UseGuide {
+            pause_game(ui);
+            use_guide(ui);
+        } else {
+            use_guide(ui);
+            pause_game(ui);
+        }
         y += FIELD_HEIGHT + 48.0;
         y += controls::label(ui, LEFT, y, "Now Playing source") + 14.0;
         let dropdown = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
