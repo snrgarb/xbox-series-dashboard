@@ -12,6 +12,8 @@ Read on 18 November 2026, on Linux. **No store client was run, nothing was signe
 - **[inferred]** my reasoning. A guess until a signed-in PC tests it.
 - **[UNVERIFIED]** looked for and not settled.
 
+**Since (2026-11-18, the user: "the big one to finish building is 276").** B-O1 is answered from a read-only copy of the TV PC's Battle.net files: `CachedData.db` holds the account's licences, and the client's `Cache` its whole catalogue as plain JSON with the rules from licences to products, so **Battle.net's owned games need no sign-in** (`source_battlenet::cache`, which says what was proven and what is inferred; docs/sources.md "Which games can be installed"). Built for #276: ticket 1 (the owned list as a file, `source_kit::owned`, refreshed at start and on Update now by `Source::refresh_owned`), ticket 6 from the cache (decision 4 taken as recommended: unowned catalogue games hidden once the list is known), ticket 4's B-O1 counts in `e2e/htpc/probes/battlenet.ps1` (B-O2 not run: not needed now), and, in a pull request of its own, ticket 2 (GOG through gogdl, decision 6 as recommended). Ticket 3 is #277/#282. **Tickets 5, 7 and 8 (the store sign-in page, EA's owned games and EA's Install) wait for M9's web view host** and are as written below; with Battle.net's list local, ticket 5 is now for EA alone.
+
 ## Summary
 
 **What the Dashboard lists today**, from each crate's own header (`crates/source-*/src/lib.rs`):
@@ -207,7 +209,7 @@ Eight tickets: four with no sign-in (1 to 4), four on the web view (5 to 8).
 
 ## 13. What only a signed-in PC can answer
 
-- **B-O1** `CachedData.db`: its tables and columns; does a product the account owns and never installed appear?
+- **B-O1** `CachedData.db`: its tables and columns; does a product the account owns and never installed appear? **Answered** (2026-11-18, from a copy): its tables are `schema_info`, `login_cache`, `remote_objects`, `key_value_store`, `catalog_cache`, `browser_stats`, `personal_avatar`; the licences are in `key_value_store`, and with the catalogue `catalog_cache` names they give the owned products, installed or not (`source_battlenet::cache`).
 - **B-O2** The Agent's check (`POST /install`, read `error`, `DELETE /install/<uid>`): does `product.db` come back unchanged, for an owned and an unowned product?
 - **B-O3** Does `account.battle.net` sign in and answer `/api/games-and-subs` in WebView2? How long does its session last unused?
 - **E-O1** Does `accounts.ea.com/connect/auth?client_id=ORIGIN_JS_SDK&prompt=none` answer a script in the signed-in page? How long does EA's site session last?

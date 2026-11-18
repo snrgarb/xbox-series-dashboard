@@ -594,8 +594,11 @@ function Initialize-FakeUbisoft([string] $Root = (Get-FakeRoot 'ubisoft')) {
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-battlenet.json in the test's output):
 # games by name, each with source_id (its product code), name, installed, install_dir.
-function Initialize-FakeBattleNet([string] $Root = (Get-FakeRoot 'battlenet')) {
-    $library = New-FakeStore 'make-battlenet' $Root 'fake-battlenet.json'
+#
+# -Owned writes the client's catalogue and the account's licences into the fake's cache (`make-battlenet --owned`,
+# #276): its owned games alone are then offered.
+function Initialize-FakeBattleNet([string] $Root = (Get-FakeRoot 'battlenet'), [switch] $Owned) {
+    $library = New-FakeStore 'make-battlenet' $Root 'fake-battlenet.json' @(if ($Owned) { '--owned' })
     $games = @($library.games)
     Say "fake Battle.net at ${Root}: $($games.Count) games, $(@($games | Where-Object installed).Count) installed"
     $library

@@ -105,7 +105,8 @@
 //!       `source_battlenet::fixture`: made-up games, each installed one with a copy of this program as its
 //!       `game.exe`, titled with its name), reads it back as the Dashboard does with `--ea <dir>` (and the others),
 //!       and with --json writes the Library it read there. Battle.net's client in the fake, `Battle.net.exe`, is a
-//!       copy of this program too.
+//!       copy of this program too. make-battlenet's --owned (last) writes `source_battlenet::fixture::Fixture::owned`:
+//!       the client's catalogue and the account's licences in its cache, so the games owned are known (#276).
 //!   standin make-xbox <dir> [--json <file>]
 //!   standin make-gamepass <dir>   (a local PC Game Pass catalogue, US and GB, for --gamepass <dir>: #277)
 //!       As make-ea, for a fake drive of Xbox games (`source_xbox::fixture`): a `.GamingRoot` and made-up packages,
@@ -236,7 +237,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin game [--title <t>] [--splash-ms <n>] [--seconds <n>] [--ignore-close] [--start-ms <n>] [--gap-ms <n>]
                     [--windowed <percent>] [--crash-ms <n>] [--hand-off-ms <n>]
        standin steam-url steam://rungameid/<appid> | steam://install/<appid> | steam://uninstall/<appid>
-       standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>]
+       standin make-ea | make-ubisoft | make-battlenet | make-xbox <dir> [--json <file>] [--owned]
        standin make-gamepass <dir>
        standin uplay-url <dir> uplay://launch/<id> | uplay://install/<id> | uplay://uninstall/<id>
        Agent.exe [--internalclienttools] [--seconds <n>]
@@ -619,7 +620,7 @@ fn steam_workshop(root: &Path, appid: u32, done: u32, items: u32) -> Result<(), 
 
 /// Writes the fake `store` (ea, ubisoft, battlenet or xbox) at `dir`, with this program as every installed game's
 /// `game.exe`, and reads it back as the Dashboard does.
-fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String> {
+fn make_store(store: &str, dir: &Path, json: Option<&Path>, owned: bool) -> Result<(), String> {
     let dir = std::path::absolute(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let exe = std::env::current_exe().map_err(|e| format!("no path to this program: {e}"))?;
     let written = |e: std::io::Error| format!("writing {}: {e}", dir.display());
@@ -637,7 +638,11 @@ fn make_store(store: &str, dir: &Path, json: Option<&Path>) -> Result<(), String
             (Box::new(source_ubisoft::Ubisoft::at(Some(dir.clone()))), names(spec.expected()))
         }
         "battlenet" => {
-            let standard = source_battlenet::fixture::Fixture::standard();
+            let standard = if owned {
+                source_battlenet::fixture::Fixture::owned()
+            } else {
+                source_battlenet::fixture::Fixture::standard()
+            };
             let spec = source_battlenet::fixture::Fixture { game_exe: Some(exe), ..standard };
             source_battlenet::fixture::write(&dir, &spec).map_err(written)?;
             (Box::new(source_battlenet::BattleNet::at(Some(dir.clone()))), names(spec.expected()))
@@ -1099,11 +1104,13 @@ fn run(args: &[String]) -> i32 {
             }
         },
         Some(what @ ("make-ea" | "make-ubisoft" | "make-battlenet" | "make-xbox")) => {
-            let Some((dir, json)) = dir_and_json(&args[1..]) else {
+            // Battle.net's --owned, last (#276).
+            let owned = what == "make-battlenet" && args.last().is_some_and(|last| last == "--owned");
+            let Some((dir, json)) = dir_and_json(&args[1..args.len() - usize::from(owned)]) else {
                 note(USAGE);
                 return 2;
             };
-            made(what, dir, make_store(&what["make-".len()..], dir, json))
+            made(what, dir, make_store(&what["make-".len()..], dir, json, owned))
         }
         Some("make-gamepass") => {
             let [dir] = &args[1..] else {
@@ -1969,6 +1976,15 @@ mod tests {
         }
         assert!(dir.path().join("battlenet").join("Battle.net.exe").is_file());
         assert_eq!(run(&strings(&["make-ea"])), 2);
+        // Battle.net with the client's catalogue and licences in its cache (#276): its owned games alone offered.
+        let (root, json) = (dir.path().join("owned"), dir.path().join("owned.json"));
+        let args = strings(&["make-battlenet", root.to_str().unwrap(), "--json", json.to_str().unwrap(), "--owned"]);
+        assert_eq!(run(&args), 0);
+        let library: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(json).unwrap()).unwrap();
+        let names: Vec<&str> =
+            library["games"].as_array().unwrap().iter().map(|g| g["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"Moorlight Saga") && !names.contains(&"Quarry Bell"), "{names:?}");
+        assert!(root.join("Cache").is_dir());
     }
 
     #[test]
