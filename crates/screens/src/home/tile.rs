@@ -138,7 +138,7 @@ pub fn source(game: &Game) -> Option<Source> {
 }
 
 impl Source {
-    /// The project's own drawing that marks the store (docs/spec/home.md 3.3.1).
+    /// The store's own mark (docs/spec/home.md 3.3.1).
     pub fn drawing(self) -> Drawing {
         match self {
             Source::Steam => Drawing::Steam,
@@ -162,7 +162,7 @@ pub fn game_mark(game: &Game) -> Drawing {
     }
 }
 
-/// A source's mark, filling `mark`, in white: the project's own drawing of it, never the store's logo.
+/// A source's mark, filling `mark`, in white: the store's own logo (docs/spec/home.md 3.3.1).
 pub fn source_mark(ui: &mut Ui, mark: Rect, source: Source) {
     mark_drawn(ui, mark, source.drawing());
 }

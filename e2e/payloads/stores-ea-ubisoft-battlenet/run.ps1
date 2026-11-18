@@ -9,7 +9,7 @@
 # Judged by the Dashboard's log lines and --log-focus's after each press, a press at a time. No position in a row or on
 # the keyboard is counted: a walk goes until the log names the key or the game. Passes when every store's games were
 # read, each of the three games launched, booted, ended with Home back, and the Dashboard stayed up. The screenshots of
-# each Game hub show the store's placeholder mark on the cover card (a square, a ring, a bar; Steam's is a disc).
+# each Game hub show the store's own mark on the cover card (EA's, Ubisoft's swirl, Battle.net's; Steam's is a disc).
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'

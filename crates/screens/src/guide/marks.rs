@@ -1,20 +1,14 @@
-//! The marks the Bundle draws from vector paths that are other companies' trademarks: the Xbox mark, Discord's, the
-//! stores'. They are not this project's to ship (docs/spec/guide.md, section 10): a store's is the project's own
-//! drawing (`crate::drawn`), as are the Guide button's and chat's in the Xbox mark's and Discord's places.
+//! The marks the Bundle draws from vector paths that are other companies' trademarks. The Xbox sphere and the
+//! stores' are drawn as the Bundle draws them (`crate::drawn`, NOTICE.md); Discord's is still the project's own
+//! drawing of chat (docs/spec/guide.md, section 10).
 use ui::{Color, Rect, Ui};
 
 use crate::drawn::{self, Drawing};
 
-/// The Guide button's mark, filling `rect`, where the Bundle draws the Xbox mark: the landing tab's icon, the Guide
-/// button's hint and the Toasts' prompt. The project's own drawing of a home button (docs/spec/guide.md, 10.1).
-pub fn guide_button(ui: &mut Ui, rect: Rect, color: Color) {
-    drawn::draw(ui, rect, Drawing::GuideButton, color);
-}
-
-/// The square to draw the Guide button's mark in for its ring to be `ring` across: the ring's outer edge is 23.2 of
-/// the drawing's 24 (`drawn`, `Drawing::GuideButton`: radius 10.6, stroke 2).
-pub fn guide_button_across(ring: f32) -> f32 {
-    ring * 24.0 / 23.2
+/// The Xbox sphere, filling `rect`, where the Bundle draws it for the Guide button: the landing tab's icon, the
+/// Guide button's hint and the Toasts' prompt and circle (docs/spec/guide.md, 10.1).
+pub fn xbox(ui: &mut Ui, rect: Rect, color: Color) {
+    drawn::draw(ui, rect, Drawing::Xbox, color);
 }
 
 /// Discord's mark, filling `rect`: the Discord tab's icon, the account's, a Call's. The project's own drawing of

@@ -1,6 +1,6 @@
 //! Install from: the question an Install asks when the library has the same game, not installed, from other
 //! launchers that can install it now (docs/spec/install-from.md; #249). A prompt in the middle of the screen over the
-//! dimmed page, as "Where do you want to install X?" is: a row a launcher, its placeholder mark and its name, in
+//! dimmed page, as "Where do you want to install X?" is: a row a launcher, its mark and its name, in
 //! Settings > Launchers' order, focus on the launcher of the game that was pressed. A goes on with the one chosen as
 //! Install does for it alone (`tile_menu::install_from_store`: the folder's question, the store asked, the Queue); B
 //! installs nothing.

@@ -11,7 +11,7 @@ use tiny_skia as sk;
 use ui::art::RgbaImage;
 use ui::{ArtKey, Button, Color, Font, Kind, Painter, Rect, TextStyle, Ui};
 
-use crate::path_data::parse;
+use crate::path_data::{marks, parse};
 
 /// The pad's box, 442 by 312: the Bundle's Canvas.
 pub const SIZE: (f32, f32) = (442.0, 312.0);
@@ -50,12 +50,12 @@ const VIEW_FRONT: &str = "M 186.4,86.9 L 193.4,86.9 L 193.4,93.9 L 186.4,93.9 Z"
 /// Menu's mark, lit: three bars.
 const MENU_MARK: &str = "M 248.1,84.4 L 259.1,84.4 L 259.1,86.2 L 248.1,86.2 Z M 248.1,87.5 L 259.1,87.5 \
     L 259.1,89.3 L 248.1,89.3 Z M 248.1,90.6 L 259.1,90.6 L 259.1,92.4 L 248.1,92.4 Z";
-/// The Guide button: its middle, the Bundle's sphere's radius outlined (Kenney's sphere scaled by 0.725) and its
-/// disc's when lit, and the sphere's radius cut out of the disc (scaled by 0.56).
+/// The Guide button: its middle and its disc's radius when lit; and where the Xbox sphere (Kenney's, on its 64 grid
+/// about (32, 32)) goes, as the XAML's MatrixTransforms put it: scaled by 0.725 outlined, by 0.56 cut out of the disc.
 const GUIDE: (f32, f32) = (221.0, 43.3);
-const GUIDE_RING: f32 = 24.0 * 0.725;
 const GUIDE_DISC: f32 = 19.5;
-const GUIDE_LIT_RING: f32 = 24.0 * 0.56;
+const GUIDE_OUTLINED: [f32; 3] = [0.725, 197.8, 20.1];
+const GUIDE_LIT: [f32; 3] = [0.56, 203.1, 25.4];
 
 /// A part of the pad a tip can be about, named as the Bundle's (its ControllerButton; the D-pad's four as one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -292,16 +292,22 @@ fn paint(layer: Layer, scale: f32) -> RgbaImage {
     image
 }
 
-/// **The Guide button's mark: a hook.** The Bundle outlines the Xbox sphere there (Kenney's Input Prompts, its top
-/// filled) and, lit, cuts it out of a white disc; the port never draws the Xbox logo, so a plain ring stands in at the
-/// sphere's size: outlined, or cut out of the disc.
+/// The Guide button's mark, the Xbox sphere as the Bundle draws it there (Kenney's Input Prompts,
+/// `marks::XBOX_GUIDE_*`): its three lower pieces outlined and its top filled; lit, the whole sphere cut out of a
+/// white disc. The line is 1.8 whatever the sphere's scale, as WPF strokes a transformed geometry.
 fn guide_mark(canvas: &mut Canvas, lit: bool) {
-    let circle = |r: f32| sk::PathBuilder::from_circle(GUIDE.0, GUIDE.1, r).expect("a circle");
+    let sphere = |data: &str, [scale, x, y]: [f32; 3]| {
+        parse(data).transform(sk::Transform::from_row(scale, 0.0, 0.0, scale, x, y)).expect("the sphere")
+    };
     if lit {
-        canvas.fill(&circle(GUIDE_DISC));
-        canvas.cut_stroke(&circle(GUIDE_LIT_RING), GUIDE_LINE);
+        canvas.fill(&sk::PathBuilder::from_circle(GUIDE.0, GUIDE.1, GUIDE_DISC).expect("a circle"));
+        canvas.cut(&sphere(marks::XBOX_GUIDE_PIECES, GUIDE_LIT));
+        canvas.cut(&sphere(marks::XBOX_GUIDE_TOP, GUIDE_LIT));
     } else {
-        canvas.stroke(&circle(GUIDE_RING), GUIDE_LINE);
+        canvas.stroke(&sphere(marks::XBOX_GUIDE_PIECES, GUIDE_OUTLINED), GUIDE_LINE);
+        let top = sphere(marks::XBOX_GUIDE_TOP, GUIDE_OUTLINED);
+        canvas.fill(&top);
+        canvas.stroke(&top, GUIDE_LINE);
     }
 }
 
@@ -334,10 +340,6 @@ impl Canvas {
 
     fn stroke(&mut self, path: &sk::Path, width: f32) {
         self.pixmap.stroke_path(path, &Self::paint(false), &Self::round(width), self.at, None);
-    }
-
-    fn cut_stroke(&mut self, path: &sk::Path, width: f32) {
-        self.pixmap.stroke_path(path, &Self::paint(true), &Self::round(width), self.at, None);
     }
 }
 
@@ -374,10 +376,19 @@ mod tests {
         // The front square cut out of the disc, the disc whole beside it.
         assert_eq!(alpha(&painted, view, 190.0, 90.5), 0);
         assert!(alpha(&painted, view, 188.1, 96.0) > 250);
+        // The sphere cut out of the Guide button's disc: its bottom piece at the middle, the disc whole round it.
         let guide = Layer::Lit(Part::Guide);
         let painted = paint(guide, 1.0);
-        assert!(alpha(&painted, guide, 221.0, 43.3) > 250);
-        assert!(alpha(&painted, guide, 221.0 + GUIDE_LIT_RING, 43.3) < 60);
+        assert!(alpha(&painted, guide, 221.0, 46.0) < 60);
+        assert!(alpha(&painted, guide, 221.0, 43.3 + 17.0) > 250);
+    }
+
+    #[test]
+    fn the_guide_button_outlines_the_sphere_its_top_filled() {
+        let outline = paint(Layer::Outline, 1.0);
+        // Kenney's (32, 10), in the top: filled. Its (32, 40), inside the bottom piece: clear.
+        assert!(alpha(&outline, Layer::Outline, 221.0, 10.0 * 0.725 + 20.1) > 200);
+        assert_eq!(alpha(&outline, Layer::Outline, 221.0, 40.0 * 0.725 + 20.1), 0);
     }
 
     #[test]

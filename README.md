@@ -4,7 +4,7 @@ A standalone Windows dashboard for a TV PC, modelled on the Xbox Series X|S dash
 
 **Status: M0 to M7 built, M8 (installs) under way.** Home, the Guide over games, Toasts, My games & apps, the Game hub, Search, Settings, Start-up, Profiles, the Idle screen, Now Playing, the Discord tab and achievements run from the libraries of Steam, Xbox, Epic, GOG, EA, Ubisoft and Battle.net, read from their own files. The Dashboard can be the PC's shell (Settings > System). Steam's, Epic's and GOG's games install, pause and uninstall from the Queue. See [docs/plan.md](docs/plan.md) for each milestone's state and [docs/HANDOVER.md](docs/HANDOVER.md) for how work is done.
 
-An unofficial fan project, not affiliated with Microsoft, Valve or Discord.
+An unofficial fan project, not affiliated with or endorsed by Microsoft, Valve, Discord or any of the stores it reads. Xbox and the Xbox logo are trademarks of Microsoft; the stores' logos it shows belong to their owners. See [NOTICE.md](NOTICE.md).
 
 ## Build and test
 

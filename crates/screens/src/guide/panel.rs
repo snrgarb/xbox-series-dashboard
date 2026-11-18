@@ -72,7 +72,7 @@ pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture) {
         let square = |side: f32| Rect::new(cx - side / 2.0, cy - side / 2.0, side, side);
         match tab {
             // The picture's size, where the Bundle's Xbox mark is 33: the user's (#269).
-            Tab::Landing => marks::guide_button(ui, square(marks::guide_button_across(PICTURE)), colour),
+            Tab::Landing => marks::xbox(ui, square(PICTURE), colour),
             Tab::Discord => marks::discord_mark(ui, square(36.0), colour),
             Tab::ProfileAndSystem => {
                 // The disc shows where there is no picture; the picture is the same selected or not.
