@@ -1,5 +1,7 @@
 //! Requests to the Agent on 127.0.0.1, each said in one line of the log with what came back, the session's token
-//! never among them: it is written `<token>` wherever it would appear, in a request or an answer.
+//! never among them: it is written `<token>` wherever it would appear, in a request or an answer. Nor the account's
+//! and Windows' names for the user, which `GET /agent` gives beside the token (`session`, `user_id`, a Windows SID,
+//! and `user_name`, as the TV PC's Agent answered): each written `<masked>` (`SECRET`).
 use std::time::Duration;
 
 use serde_json::Value;
@@ -27,6 +29,9 @@ pub struct Http {
     agent: ureq::Agent,
     port: u16,
     pub token: Option<String>,
+    /// One more header sent with every request: the `pid` asked of an Agent the Dashboard did not start
+    /// (`agent::calls::PID_HEADER`).
+    pub extra: Option<(&'static str, String)>,
 }
 
 /// The user agent the Agent answers (barncastle's `AgentApp.cs`, HSCentric's `BattleNetAgentClient.cs`).
@@ -40,7 +45,7 @@ impl Http {
             .user_agent(USER_AGENT)
             .build()
             .into();
-        Self { agent, port, token: None }
+        Self { agent, port, token: None, extra: None }
     }
 
     pub fn port(&self) -> u16 {
@@ -65,8 +70,9 @@ impl Http {
     ) -> Result<Answer, String> {
         let url = format!("http://127.0.0.1:{}{path}", self.port);
         let sent = body.map(Value::to_string);
+        let shown = body.map(|body| masked(body).to_string());
         let result = self.send(method, &url, sent.as_deref());
-        let asked = match &sent {
+        let asked = match &shown {
             Some(sent) => format!("{method} {path} {}", self.mask(sent)),
             None => format!("{method} {path}"),
         };
@@ -76,7 +82,7 @@ impl Http {
                 crate::log(&format!(
                     "agent: {what}: {asked} -> {} {}",
                     answer.status,
-                    self.mask(&answer.body.to_string())
+                    self.mask(&masked(&answer.body).to_string())
                 ));
                 Ok(answer)
             }
@@ -89,15 +95,16 @@ impl Http {
 
     fn send(&self, method: &str, url: &str, body: Option<&str>) -> Result<Answer, String> {
         let token = self.token.as_deref();
+        let extra = self.extra.as_ref().map(|(name, value)| (*name, value.as_str()));
         let response = match (method, body) {
-            ("GET", _) => with_token(self.agent.get(url), token).call(),
-            ("DELETE", _) => with_token(self.agent.delete(url), token).call(),
-            ("POST", body) => {
-                with_token(self.agent.post(url), token).content_type("application/json").send(body.unwrap_or("{}"))
-            }
-            ("PUT", body) => {
-                with_token(self.agent.put(url), token).content_type("application/json").send(body.unwrap_or("{}"))
-            }
+            ("GET", _) => with_token(self.agent.get(url), token, extra).call(),
+            ("DELETE", _) => with_token(self.agent.delete(url), token, extra).call(),
+            ("POST", body) => with_token(self.agent.post(url), token, extra)
+                .content_type("application/json")
+                .send(body.unwrap_or("{}")),
+            ("PUT", body) => with_token(self.agent.put(url), token, extra)
+                .content_type("application/json")
+                .send(body.unwrap_or("{}")),
             (other, _) => return Err(format!("{other} is not a method asked of the Agent")),
         };
         let mut response = response.map_err(|e| e.to_string())?;
@@ -117,10 +124,46 @@ impl Http {
     }
 }
 
-fn with_token<B>(request: ureq::RequestBuilder<B>, token: Option<&str>) -> ureq::RequestBuilder<B> {
+fn with_token<B>(
+    request: ureq::RequestBuilder<B>,
+    token: Option<&str>,
+    extra: Option<(&str, &str)>,
+) -> ureq::RequestBuilder<B> {
+    let request = match extra {
+        Some((name, value)) => request.header(name, value),
+        None => request,
+    };
     match token {
         Some(token) => request.header("Authorization", token),
         None => request,
+    }
+}
+
+/// The fields of the Agent's answers that name the user or open a session, never said: `GET /agent`'s `session`,
+/// `user_id` (a Windows SID) and `user_name` (the TV PC's Agent, 2.42.1.9886). The token is `<token>` (`mask`).
+pub const SECRET: &[&str] = &["session", "user_id", "user_name"];
+
+/// `value` with every field [`SECRET`] names written `<masked>`, and every `authorization` `<token>`, at any depth.
+pub fn masked(value: &Value) -> Value {
+    match value {
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(key, field)| {
+                    let key_lower = key.to_ascii_lowercase();
+                    let shown = if key_lower == "authorization" {
+                        Value::String("<token>".into())
+                    } else if SECRET.contains(&key_lower.as_str()) && !field.is_null() {
+                        Value::String("<masked>".into())
+                    } else {
+                        masked(field)
+                    };
+                    (key.clone(), shown)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(masked).collect()),
+        other => other.clone(),
     }
 }
 
@@ -144,6 +187,19 @@ pub fn mask(text: &str, token: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_users_names_and_session_are_never_said() {
+        let answer = serde_json::json!({"authorization": "T0K3N", "opt_in_feedback": true, "pid": 9, "region": "us",
+            "session": "1234567890", "state": 1007, "type": "retail", "user_id": "S-1-5-21-1-2-3-1001",
+            "user_name": "someone", "inner": [{"Session": 5}]});
+        let said = masked(&answer).to_string();
+        for secret in ["T0K3N", "1234567890", "S-1-5-21", "someone", "\"Session\":5"] {
+            assert!(!said.contains(secret), "{said}");
+        }
+        assert!(said.contains("\"user_id\":\"<masked>\"") && said.contains("\"authorization\":\"<token>\""));
+        assert!(said.contains("\"state\":1007") && said.contains("\"region\":\"us\""));
+    }
 
     #[test]
     fn a_token_is_never_said() {
