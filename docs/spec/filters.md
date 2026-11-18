@@ -84,13 +84,14 @@ The rest of this file is the concrete form of that.
 
 A **filter** is a name, a rule that picks games, a sort, a place in the order and whether it shows. A filter that shows is a **Group** on Home and a tab on Full library, as a flagged preset was both. "Filter" is the stored thing and the word in code; the user only ever reads "Group".
 
-There are three kinds:
+There are four kinds:
 
 | Kind | Made by | Rule | Name | Can be deleted |
 |---|---|---|---|---|
 | `builtin` | A migration | Fixed (section 4) | Fixed | No: only shown or not |
 | `collection` | The sync, one per Steam collection (section 5) | "the games in this collection", fixed | Steam's, follows a rename | No: it goes when Steam's collection goes |
 | `custom` | The user, in Settings (section 6) | The user's | The user's | Yes |
+| `launcher` | The sync, one per launcher with games (section 4.2, #250) | `sources: [<the launcher>]`, fixed | The launcher's (Steam, Epic Games, ...) | No: it goes when the launcher has no game left |
 
 ### 3.1 The fields a rule can use
 
@@ -192,6 +193,37 @@ The Bundle shows a flagged preset's Group even when it matches nothing, and show
 
 This is a choice, not a finding (open question 1), and it is decided so (issue #49).
 
+### 4.2 Each launcher's whole library (#250)
+
+The user (2026-11-18): "add full library filters for different game libraries to allow importing and downloading not installed games". So Full library has a tab for each launcher that has games, with that launcher's whole library, installed or not, from which a game that is not installed is installed by the routes that exist already: Install on its Tile menu and in its Game hub. Nothing in the Bundle backs it: Playnite's presets could filter by source, but the Bundle made none.
+
+**What each launcher's tab can show is what its source reads** (`crates/source-*`, as of this ticket). A tab never lists a game its source does not list; where a source reads the installed games only, its tab is those, and says nothing of what else the account owns.
+
+| Launcher | Games owned and not installed, read from | Without that | Install of one not installed |
+|---|---|---|---|
+| Steam | Yes: the apps the account's packages grant (`appcache/packageinfo.vdf`), else every app `localconfig.vdf` lists; games only (`appinfo.vdf` type `game`) | (always there with Steam) | Steam's client, over its debugger or `steam.exe +app_install` (sources.md) |
+| Epic Games | Yes, once the launcher was signed in on the PC: its catalogue cache (`Data\Catalog\catcache.bin`), or the eglv2 launcher's library cache; and, with legendary added and signed in, legendary's `metadata\` (every game of the account it has listed) | Installed games only | The launcher's link (`?action=install`, its own dialog), or legendary where it is signed in |
+| GOG | Yes, once Galaxy was signed in on the PC: Galaxy's database (`ProductPurchaseDates`, GOG's own release keys). gogdl lists no library | Installed games only | Galaxy (`/command=installGame`) where it is installed, or gogdl where it is signed in |
+| EA app | **No**: installed games only (the Uninstall keys). No local file lists what the account owns | | |
+| Ubisoft Connect | Yes, once the client was signed in on the PC: its cache (`cache\configuration\configurations`) | Installed games only, named by their folders | `uplay://install/<id>` |
+| Battle.net | **No**: installed games only (`Agent\product.db`) | | |
+| Xbox | **No**: installed games only (the packages on the PC). What the account owns and Game Pass are Xbox's servers' to say, with a sign-in | | |
+
+So the tabs of EA app, Battle.net and Xbox are their installed games, the same as Games' for those launchers: they are there so that every launcher's library is one press away, and they gain games not installed if their sources ever read them.
+
+**Decided** (#250):
+
+1. **A filter of its own kind**, `launcher`, one per launcher, its key `launcher.<source>` (`launcher.steam`), its name the launcher's as Settings > Launchers writes it (Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net, Xbox), its rule `{"sources": ["<source>"]}`, its sort A–Z. The rule is in the `filters` table like any other's; only the kind is new, so no migration (`launcher` is a kind's text, and a key is free text).
+2. **Derived, not the user's.** The library makes one for each launcher that has a game its source still lists (hidden games count), and removes it when it has none: after every sync, and as the database opens (so a database from before this gains them). A new one is last in the order, not shown, those made together in the launchers' order. Its name follows the launcher's. Settings > Groups lists it as a Row like a built-in: its menu is Move up and Move down, never Edit or Delete (`set_filter`, `delete_filter` refuse it).
+3. **Always a tab; a Group only when ticked.** Full library's tabs are the Groups (shown, with a game), and every launcher's filter that has a game whether shown or not, in the filters' order (`Library::tabs()`; Home keeps `Library::groups()`). So a launcher's tab comes after the tabs there were, at first; moving its Row in Settings moves its tab. Its tick in Settings > Groups is "a Group on Home too", not shown at first; See all on that Group lights its tab. This is the one exception to open question 6's "one set": a launcher's tab cannot be taken off Full library but by switching the launcher off.
+4. **A launcher switched off keeps its filter**, as it keeps its games ([launchers.md](launchers.md) section 3, "Off hides, never deletes"): the row stays, with whether it is shown and its place, and is listed nowhere (not in Settings, not a tab, not a Group) until the launcher is on again, when it is back as it was. A move in Settings passes over it. A launcher whose source stops listing every game (uninstalled, or its last game gone) loses its filter, and the user's choice for it with it, as a Steam collection's goes.
+5. **One launcher still has its tab.** With Steam alone the Steam tab lists what the page shows with no tab lit; it is kept, so that the rule is one and the user always finds a launcher's library in the same place.
+6. **Hidden games** are not in it, as in no filter but Hidden (3.1). A launcher whose games are all hidden has a filter with no game, and so no tab (4.1).
+7. **What a game not installed looks like there** is what it looks like on every Full library tab: the Download state badge at the tile's top left ([my-games.md](my-games.md) 5.3; not darkened, 17.9). An install under way has its Installing band, as anywhere. Nothing new is drawn.
+8. **A game owned in two launchers** is two games ([../sources.md](../sources.md)), one in each launcher's tab. Which launcher Install asks when it is the same game is #249's, not this.
+
+Tests: `crates/library/src/filters.rs` (made, named, by name, installed or not, hidden left out, a tab and not a Group, kept while off and back as it was, gone with its last game, made as an old database opens); `crates/screens/tests/my_games.rs` (the tabs stepped to the launchers', Install from a game not installed, a launcher switched off and on; the picture `my_games_full_library_launcher_tab`); `e2e/payloads/full-library/run.ps1` (the fakes' Steam and Epic Games tabs, and a Steam game not installed found on its tab and installed against the stand-in Steam).
+
 ---
 
 ## 5. Steam collections
@@ -282,7 +314,7 @@ The Group's menu is the Tile menu's panel ([tile-menu.md](tile-menu.md) section 
 | Edit | U+E70F | `custom` | Closes the menu and opens the filter's page (6.3) |
 | Delete | U+E74D | `custom` | The panel is replaced in place by the prompt "Delete <name>?" with rows Delete and Cancel, focus on Delete, as "Remove <game>?" ([tile-menu.md](tile-menu.md) section 5.2). Delete removes the filter, closes the prompt and puts focus on the Row that takes its place |
 
-B closes the menu, focus on the Row it was opened on (which may have moved). A built-in's or a collection's menu therefore holds only the two Move rows.
+B closes the menu, focus on the Row it was opened on (which may have moved). A built-in's, a collection's or a launcher's (4.2) menu therefore holds only the two Move rows. A launcher's Row's tick is whether it is a Group on Home: its tab on Full library is there either way.
 
 **As built (#57).**
 
@@ -417,7 +449,7 @@ pub fn delete_filter(&self, filter: i64) -> Result<()>;             // custom on
 - A name is kept without the spaces around it; an empty one is an error (`add_filter`, `set_filter`). The 40-character limit of 6.3 is the editor's.
 - `model::Rule` is the clauses of 3.1 as a struct of options, `model::Sort` the four sorts with `Sort::default_descending()` for the direction 6.3 gives each.
 
-`snapshot()` fills `Library::filters` from `filters()` (and `snapshot_at(now)` from `filters_at(now)`). Each of the setters is followed by a new snapshot to the core (`set_library`), which keeps focus on the game or box it was on.
+`snapshot()` fills `Library::filters` from `filters()` (and `snapshot_at(now)` from `filters_at(now)`). A launcher's filter (kind `launcher`, key `launcher.<source>`, 4.2) is in the same table; `filters()` leaves out that of a launcher switched off, and `move_filter` counts places among the filters it lists. Each of the setters is followed by a new snapshot to the core (`set_library`), which keeps focus on the game or box it was on.
 
 ---
 
@@ -429,7 +461,7 @@ Only what follows from the filters; everything else is the page's own spec.
 |---|---|---|
 | Home's Groups | Flagged presets in Playnite's order; Favourites as a fallback | `Library::filters` with `shown` and at least one game, in order; Favourites empty as the fallback (4.1). The stand-in Groups of [home.md](home.md) section 11 (Installed, Most played, worked out in the screen) are deleted |
 | A Group's See all | Full library on the preset's tab; plain Full library for the fallback | Full library on that filter's tab, always: Favourites is a real filter now and has a tab |
-| Full library's tabs | The flagged presets | The same filters as Home's Groups, same order |
+| Full library's tabs | The flagged presets | The same filters as Home's Groups, same order, and each launcher's whole library (4.2) |
 | Full library with no tab lit | The user's own Playnite filter | Every game not hidden, by name ascending |
 | Full library's Sort dropdown | Five options | Four, until there is a release date (3.2). A choice there overrides the tab's own sort until the page closes, as in the Bundle |
 | The Tile menu's Add to / Remove from Favourites | Sets Playnite's flag; the Favourites fallback follows | `set_favourite`, then a new snapshot: the Favourites Group and tab follow at once |
@@ -463,7 +495,7 @@ Those marked **Decided** were settled with ticket 2 of M3 (issue #49), which bui
 3. **When a game was added.** `games.added` is when we first saw the game, so "Recently added" means little until the library has lived a while. Is Steam's purchase time worth finding (it is not in the files read today), or is this good enough? **Decided: good enough.** It is what this design does and what Playnite's own "Added" is (the day Playnite imported the game), so it is what the Bundle's "Recently added" meant too.
 4. **Dynamic collections.** Steam does not store their games. Skip them (this design), or evaluate the parts of a `filterSpec` we could (installed, played), which would show a Group that does not match Steam's? **Decided: skipped**, as this design.
 5. **Steam's Favourites and hidden games.** Seed our `favourite` and `hidden` once per game from Steam's `favorite` and `hidden` collections (this design), keep them in step with Steam both ways, or ignore Steam's? Seeding once means a game un-favourited in Steam later stays a favourite here. **Decided: seeded once**, as this design, with one addition so that games already in the database are not left out (5.2, "Games that were there first").
-6. **One set for Home and the tabs.** In the Bundle one flag drives both. Should Full library's tabs instead list every filter, shown on Home or not, so a Group can be kept off Home but still be a tab? **Decided (issue #49): one set**, as in the Bundle.
+6. **One set for Home and the tabs.** In the Bundle one flag drives both. Should Full library's tabs instead list every filter, shown on Home or not, so a Group can be kept off Home but still be a tab? **Decided (issue #49): one set**, as in the Bundle. Since #250 the launchers' filters are the one exception: always a tab, a Group only when shown (4.2).
 7. **Where the Groups box sits.** Personalisation's empty slot beside Who's playing today? (6.1), because Customise Home lands on that page. Or a box of its own on Theme settings beside Personalisation, Idle, Guide and Discord? Personalisation is already too tall for the screen in the Bundle ([settings.md](settings.md) open question 1); the slot chosen adds no row. **Decided (#57): Personalisation**, as recommended; until M5's boxes come it is that page's first box (6.1, "As built").
 8. **Collections' file.** Section 5.1's format is from knowledge of Steam's client, not from a file read for this spec. If the cloud-storage file proves stale or absent on the TV PC, the live copy is in the client's LevelDB (`htmlcache/Local Storage/leveldb`), which is far more work to read. Decide once the real file has been looked at. **Still open.** Ticket 2 could not look: the copy of the user's Steam files under `data/` has no `cloudstorage` folder (5.1), and the TV PC is not to be touched without being asked. The reader is built to the format of 5.1 and changes nothing when it cannot read the file, so a wrong guess costs the collection Groups and nothing else. What settles it: one look at `userdata/<id>/config/cloudstorage/` on the TV PC (is the file there, is it this format, does a collection made in Steam a minute ago show in it), or a first run there that logs `steam: the collections were not read`.
 9. **Reordering by Menu.** Move up and Move down in a menu is the least new drawing. The console itself reorders Groups by picking one up and moving it with the stick. Is the menu enough? **Decided (#57): the menu**, as designed.

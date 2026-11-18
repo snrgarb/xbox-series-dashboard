@@ -795,3 +795,16 @@ What the port does for Full library, settled as this document and [filters.md](f
 11. **What the focus log says.** `MyGames: FullLibrary: <where>; tab <n>/<tabs> "<name>", sort <Sort>[ reversed], name "<name>", <count> games`. Where is `Tabs`, `Sort`, `Name`, `Filter`, `SortList(Playtime)` or `Tile(3)`, or `Nav(Item)` with focus on the nav. The tab's place is 0, its name empty, with none lit; `reversed` marks a sort the other way up from the Sort list's. While text entry is over the page the line is text entry's.
 12. **The fly-in across tabs** is section 3.4's: the grid only, from 50 on the side of the tab lit, 120 ms; none when See all lights the tab, none under Reduce motion.
 
+
+---
+
+## 18. Decided in #250 (a tab for each launcher)
+
+Full library's tabs gain each launcher's whole library, installed or not, so that a game owned and not installed can be found and installed from the page. The filters behind them, what each launcher's source can list and why some list installed games only, are [filters.md](filters.md) section 4.2. On this page:
+
+1. **The tabs** are the Groups' as section 17.1 says, then each launcher's that has a game, in the filters' order (`Library::tabs()`): at first after every Group's tab, in the order Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net, Xbox. A launcher's tab is there whether or not it is a Group on Home. Its label is the launcher's name, drawn as every tab's (section 7.2); no mark of the launcher's is added to it.
+2. **A launcher's games** are every game of its that is not hidden, installed or not, A–Z. The Sort list, the name box and the counts act on it as on any tab (17.6, 17.7).
+3. **A game not installed** reads as one on every tab: the Download state badge at its tile's top left (section 5.3), not darkened (17.9). A on it opens its Game hub, whose action is Install; Menu or X opens its Tile menu, whose first row is Install. Either asks the launcher as Install does anywhere (where to install first, where the launcher asks: `install_where`). Once asked, the tile shows its Installing band while the Queue has it, as on every page; the game stays on the tab, as it is still the launcher's.
+4. **Stepping the tabs** is section 17.3's: the launchers' tabs are more tabs, and RB from the last Group's tab reaches the first launcher's. The focus log names them as any: `MyGames: FullLibrary: Tile(1); tab 4/4 "Epic Games", sort Name, name "", 7 games`.
+5. **Switched off in Settings > Launchers**, a launcher's tab goes with its games; a lit one goes dark as any tab that stops being one (17.1), the grid every game left. Switched on again it is back where it was.
+6. **The picture**: `crates/screens/tests/reference/my_games_full_library_launcher_tab.png`, Epic Games' tab with four games not installed, focus on one of them. The Full library pictures from before show the fake library's Steam tab at the strip's end.

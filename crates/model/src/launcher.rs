@@ -9,6 +9,20 @@ use serde::{Deserialize, Serialize};
 /// Every launcher there is a source for, by its key (`Game::source`), in the order Settings lists them.
 pub const ALL: [&str; 7] = ["steam", "epic", "gog", "ea", "ubisoft", "battlenet", "xbox"];
 
+/// A launcher's name, as Settings > Launchers and the Game hub write it, by its key; none for a key of no launcher.
+pub fn name(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "steam" => "Steam",
+        "epic" => "Epic Games",
+        "gog" => "GOG",
+        "ea" => "EA app",
+        "ubisoft" => "Ubisoft Connect",
+        "battlenet" => "Battle.net",
+        "xbox" => "Xbox",
+        _ => return None,
+    })
+}
+
 /// What was found the last time a launcher was looked for.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Found {

@@ -1,5 +1,5 @@
 //! Saved filters: which there are, the games each picks, and what the user and a sync may change of them.
-//! docs/spec/filters.md is the design; sections 3, 5 and 7 are what is here.
+//! docs/spec/filters.md is the design; sections 3, 4.2, 5 and 7 are what is here.
 //!
 //! A filter's place is `filters.position`, lowest first and `id` between equals. Places are handed out `STEP` apart
 //! so one can go between two others without moving them; when there is no room left between two, every filter is
@@ -73,7 +73,13 @@ fn kind_text(kind: FilterKind) -> &'static str {
         FilterKind::Builtin => "builtin",
         FilterKind::Collection => "collection",
         FilterKind::Custom => "custom",
+        FilterKind::Launcher => "launcher",
     }
+}
+
+/// A launcher's filter's key: `launcher.steam`.
+pub fn launcher_key(source: &str) -> String {
+    format!("launcher.{source}")
 }
 
 fn sort_text(sort: Sort) -> &'static str {
@@ -143,15 +149,24 @@ fn clauses(rule: &Rule, collection: Option<i64>, now: i64) -> (String, Vec<Value
     (clauses.join(" AND "), values)
 }
 
+/// The SQL that says a row of `filters` is listed: every filter but the filter of a launcher switched off, which is
+/// kept as it was, its place and whether it is shown, for when the launcher is switched on again.
+fn listed() -> String {
+    format!("NOT (kind = 'launcher' AND substr(key, 10) IN {})", crate::launchers::OFF)
+}
+
 /// Every filter in order, each with the games it picks at the time `now`.
 pub(crate) fn all(conn: &Connection, now: u64) -> Result<Vec<Filter>> {
-    let mut rows = conn.prepare(
-        "SELECT id, kind, key, collection, name, rule, sort, descending, shown FROM filters ORDER BY position, id",
-    )?;
+    let mut rows = conn.prepare(&format!(
+        "SELECT id, kind, key, collection, name, rule, sort, descending, shown FROM filters WHERE {}
+         ORDER BY position, id",
+        listed()
+    ))?;
     let rows = rows.query_map([], |row| {
         let kind = match row.get::<_, String>(1)?.as_str() {
             "builtin" => FilterKind::Builtin,
             "collection" => FilterKind::Collection,
+            "launcher" => FilterKind::Launcher,
             _ => FilterKind::Custom,
         };
         let filter = Filter {
@@ -290,6 +305,44 @@ pub(crate) fn sync_collections(conn: &Connection, source: &str, found: &[Collect
     Ok(())
 }
 
+/// Makes and removes the launchers' filters (docs/spec/filters.md, section 4.2): one for each launcher that has a
+/// game its source still lists, hidden or not; none for any other. A new one is "the launcher's games, by name", not
+/// shown on Home, and last in the order, those made together in the launchers' order. One that goes takes the user's
+/// choice of shown and place with it. Its name follows the launcher's. A launcher switched off keeps its filter as
+/// it is, as it keeps its games, and it is listed nowhere until the launcher is on again ([`listed`]).
+pub(crate) fn sync_launchers(conn: &Connection) -> Result<()> {
+    for source in model::launcher::ALL {
+        let key = launcher_key(source);
+        let name = model::launcher::name(source).unwrap_or(source);
+        let wanted: bool =
+            conn.query_row("SELECT EXISTS (SELECT 1 FROM games WHERE source = ?1 AND gone = 0)", [source], |row| {
+                row.get(0)
+            })?;
+        let made: Option<(i64, String)> = conn
+            .query_row("SELECT id, name FROM filters WHERE key = ?1", [&key], |row| Ok((row.get(0)?, row.get(1)?)))
+            .optional()?;
+        match (wanted, made) {
+            (true, None) => {
+                let last: Option<i64> = conn.query_row("SELECT MAX(position) FROM filters", [], |row| row.get(0))?;
+                let rule = serde_json::to_string(&Rule { sources: vec![source.to_string()], ..Rule::default() })?;
+                conn.execute(
+                    "INSERT INTO filters (kind, key, name, rule, sort, descending, shown, position)
+                     VALUES ('launcher', ?1, ?2, ?3, 'name', 0, 0, ?4)",
+                    params![key, name, rule, last.unwrap_or(0) + STEP],
+                )?;
+            }
+            (true, Some((id, was))) if was != name => {
+                conn.execute("UPDATE filters SET name = ?2 WHERE id = ?1", params![id, name])?;
+            }
+            (false, Some((id, _))) => {
+                conn.execute("DELETE FROM filters WHERE id = ?1", [id])?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 impl Database {
     /// Every filter, shown or not, in the user's order, each with the games it picks in its sort.
     pub fn filters(&self) -> Result<Vec<Filter>> {
@@ -311,14 +364,21 @@ impl Database {
     /// ends. The filters it passes each move one place the other way; no other filter's place changes.
     pub fn move_filter(&mut self, filter: i64, by: i32) -> Result<()> {
         let tx = self.conn.transaction()?;
-        let mut places = places(&tx)?;
+        // Among the filters listed: a launcher's switched off is not, and is passed over without moving.
+        let listed_places = |tx: &Connection| -> Result<Vec<Place>> {
+            let mut rows = tx.prepare(&format!("SELECT id FROM filters WHERE {}", listed()))?;
+            let ids: Vec<i64> = rows.query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
+            Ok(places(tx)?.into_iter().filter(|p| ids.contains(&p.id)).collect())
+        };
+        let mut places = listed_places(&tx)?;
         let from = places.iter().position(|p| p.id == filter).with_context(|| format!("no filter {filter}"))?;
         let to = (from as i64 + i64::from(by)).clamp(0, places.len() as i64 - 1) as usize;
         if to != from {
             let (low, high) = (from.min(to), from.max(to));
             // Places that are not all different could not be told apart once handed round.
             if places[low..=high].windows(2).any(|pair| pair[0].position == pair[1].position) {
-                renumber(&tx, &mut places)?;
+                renumber(&tx, &mut self::places(&tx)?)?;
+                places = listed_places(&tx)?;
             }
             let positions: Vec<i64> = places[low..=high].iter().map(|p| p.position).collect();
             if to > from {
@@ -349,8 +409,8 @@ impl Database {
         Ok(id)
     }
 
-    /// Changes a custom filter: its name, what it picks and how it sorts. A built-in's and a collection's are not
-    /// the user's to change, and asking is an error.
+    /// Changes a custom filter: its name, what it picks and how it sorts. A built-in's, a collection's and a
+    /// launcher's are not the user's to change, and asking is an error.
     pub fn set_filter(&self, filter: i64, name: &str, rule: &Rule, sort: Sort, descending: bool) -> Result<()> {
         let changed = self.conn.execute(
             "UPDATE filters SET name = ?2, rule = ?3, sort = ?4, descending = ?5 WHERE id = ?1 AND kind = 'custom'",
@@ -362,7 +422,7 @@ impl Database {
         Ok(())
     }
 
-    /// Deletes a custom filter. A built-in or a collection's cannot be deleted, and asking is an error.
+    /// Deletes a custom filter. A built-in, a collection's or a launcher's cannot be deleted, and asking is an error.
     pub fn delete_filter(&self, filter: i64) -> Result<()> {
         if self.conn.execute("DELETE FROM filters WHERE id = ?1 AND kind = 'custom'", [filter])? == 0 {
             bail!("filter {filter} is not a custom filter");
@@ -474,10 +534,22 @@ mod tests {
         picks(db, &rule, Sort::Name, false)
     }
 
-    /// The filters' names in order, a shown one's as it is and one not shown in brackets.
+    /// The filters' names in order, a shown one's as it is and one not shown in brackets; but the launchers', which
+    /// follow the games' sources and have tests of their own.
     fn order_of(db: &Database) -> Vec<String> {
         let filters = db.filters_at(NOW).unwrap();
+        let filters = filters.iter().filter(|f| f.kind != FilterKind::Launcher);
+        filters.map(|f| if f.shown { f.name.clone() } else { format!("({})", f.name) }).collect()
+    }
+
+    /// Every filter's name in order, the launchers' too, one not shown in brackets.
+    fn all_of(db: &Database) -> Vec<String> {
+        let filters = db.filters_at(NOW).unwrap();
         filters.iter().map(|f| if f.shown { f.name.clone() } else { format!("({})", f.name) }).collect()
+    }
+
+    fn launcher(db: &Database, source: &str) -> Option<Filter> {
+        db.filters_at(NOW).unwrap().into_iter().find(|f| f.key.as_deref() == Some(launcher_key(source).as_str()))
     }
 
     fn collection(id: &str, name: &str, appids: &[u32]) -> Collection {
@@ -790,7 +862,95 @@ mod tests {
         let first = db.filters_at(NOW).unwrap()[0].id;
         db.move_filter(first, 2).unwrap();
         let ids: Vec<i64> = db.filters_at(NOW).unwrap().iter().map(|f| f.id).collect();
-        assert_eq!(ids, [2, 3, 1, 4, 5]);
+        // The five built-ins, then Steam's and GOG's filters.
+        assert_eq!(ids, [2, 3, 1, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn each_launcher_with_games_has_a_filter_of_its_whole_library_by_name() {
+        let mut db = woods();
+        // Steam's came with its first sync, GOG's with its own, each last in the order then.
+        let order = ["Favourites", "(Installed)", "Most played", "Recently added", "(Hidden)", "(Steam)", "(GOG)"];
+        assert_eq!(all_of(&db), order);
+        let steam = launcher(&db, STEAM).unwrap();
+        assert_eq!(
+            (steam.kind, steam.key.as_deref(), steam.shown),
+            (FilterKind::Launcher, Some("launcher.steam"), false)
+        );
+        assert_eq!((&steam.rule.sources, steam.sort, steam.descending), (&vec![STEAM.to_string()], Sort::Name, false));
+        // Installed or not, by name.
+        assert_eq!(names(&db, &steam), ["Alder", "Birch", "Cedar", "The Dogwood"]);
+        assert_eq!(names(&db, &launcher(&db, "gog").unwrap()), ["Elm"]);
+        // No other launcher has a game, and none has a filter.
+        assert!(["epic", "ea", "ubisoft", "battlenet", "xbox"].iter().all(|source| launcher(&db, source).is_none()));
+
+        // A hidden game is in it no more than in any filter but Hidden; its filter stays while a game is listed.
+        db.set_hidden(id_of(&db, "Elm"), true).unwrap();
+        let gog = launcher(&db, "gog").unwrap();
+        assert!(gog.games.is_empty());
+        // Not a Group on Home until shown there, but a tab on Full library while it has a game.
+        let snapshot = db.snapshot_at(NOW).unwrap();
+        let named = |filters: Vec<&Filter>| filters.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        assert_eq!(named(snapshot.groups().collect()), ["Favourites", "Most played", "Recently added"]);
+        assert_eq!(named(snapshot.tabs().collect()), ["Favourites", "Most played", "Recently added", "Steam"]);
+        db.set_filter_shown(steam.id, true).unwrap();
+        let snapshot = db.snapshot_at(NOW).unwrap();
+        assert_eq!(named(snapshot.groups().collect()), ["Favourites", "Most played", "Recently added", "Steam"]);
+        assert_eq!(named(snapshot.tabs().collect()), ["Favourites", "Most played", "Recently added", "Steam"]);
+
+        // It moves as a built-in does, and is neither changed nor deleted.
+        db.move_filter(steam.id, -9).unwrap();
+        assert_eq!(all_of(&db)[0], "Steam");
+        let rule = Rule::default();
+        assert!(db.set_filter(steam.id, "Mine", &rule, Sort::Name, false).is_err());
+        assert!(db.delete_filter(steam.id).is_err());
+        assert_eq!(launcher(&db, STEAM).unwrap().name, "Steam");
+    }
+
+    #[test]
+    fn a_launchers_filter_follows_it_being_switched_and_its_games_coming_and_going() {
+        let mut db = woods();
+        let steam = launcher(&db, STEAM).unwrap();
+        db.set_filter_shown(steam.id, true).unwrap();
+        db.move_filter(steam.id, -9).unwrap();
+
+        // Off, it is listed nowhere: not in Settings, not a tab, not a Group.
+        db.set_launcher(STEAM, false).unwrap();
+        assert!(launcher(&db, STEAM).is_none());
+        let snapshot = db.snapshot_at(NOW).unwrap();
+        assert!(snapshot.tabs().chain(snapshot.groups()).all(|f| f.name != "Steam"));
+        // A move passes over it: Favourites moves down past nothing it cannot see.
+        let favourites = keyed(&db, FAVOURITES).id;
+        db.move_filter(favourites, -1).unwrap();
+        assert_eq!(all_of(&db)[..2], ["Favourites", "(Installed)"]);
+        // On again, it is back as it was: first, shown, its games as they were, before its launcher is even read.
+        db.set_launcher(STEAM, true).unwrap();
+        assert_eq!(launcher(&db, STEAM).unwrap(), Filter { shown: true, ..steam.clone() });
+        assert_eq!(all_of(&db)[..2], ["Steam", "Favourites"]);
+
+        // A launcher whose source lists no game any more loses its filter; its first game brings one.
+        db.sync("gog", &library(Vec::new()), NOW).unwrap();
+        assert!(launcher(&db, "gog").is_none());
+        db.sync("epic", &library(vec![game(0, "Fern", None, 0, false)]), NOW).unwrap();
+        let epic = launcher(&db, "epic").unwrap();
+        assert_eq!((epic.name.as_str(), names(&db, &epic)), ("Epic Games", vec!["Fern".to_string()]));
+        // A source that is no launcher (the games added by hand) has none.
+        db.sync("manual", &library(vec![game(0, "Gorse", None, 0, true)]), NOW).unwrap();
+        assert!(db.filters_at(NOW).unwrap().iter().all(|f| f.key.as_deref() != Some("launcher.manual")));
+    }
+
+    #[test]
+    fn a_database_from_before_the_launchers_filters_gains_them_as_it_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::FILE);
+        {
+            let mut db = Database::open(&path).unwrap();
+            db.sync(STEAM, &library(vec![game(1, "Alder", None, 0, true)]), NOW).unwrap();
+            db.conn.execute("DELETE FROM filters WHERE kind = 'launcher'", []).unwrap();
+            assert!(launcher(&db, STEAM).is_none());
+        }
+        let db = Database::open(&path).unwrap();
+        assert_eq!(names(&db, &launcher(&db, STEAM).unwrap()), ["Alder"]);
     }
 
     #[test]

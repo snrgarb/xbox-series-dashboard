@@ -474,7 +474,8 @@ fn a_new_snapshot_keeps_focus_on_its_game_and_falls_back_when_the_game_has_gone(
 // --- Full library ---
 
 /// The library with Groups to make tabs of: three favourites, a Steam collection "My Picks" of six games, then the
-/// built-ins Most played (the seven played) and Recently added (every game). Four tabs, in that order.
+/// built-ins Most played (the seven played) and Recently added (every game); and last Steam's whole library, its
+/// launcher's tab though no Group. Five tabs, in that order.
 fn tabbed() -> Library {
     let mut found = source();
     let favourites = ["Brass Meridian", "Kestrel Run", "Quiet Orbit"];
@@ -506,9 +507,9 @@ fn on(dashboard: &mut Dashboard, buttons: &[Button]) -> String {
     line.strip_prefix("FullLibrary: ").unwrap_or_else(|| panic!("Full library is not up: {line}")).to_string()
 }
 
-/// What the focus log says of Full library's state: the lit tab of the four, the sort, the name and the count.
+/// What the focus log says of Full library's state: the lit tab of the five, the sort, the name and the count.
 fn state(tab: usize, name: &str, sort: &str, typed: &str, games: usize) -> String {
-    format!("tab {tab}/4 {name:?}, sort {sort}, name {typed:?}, {games} games")
+    format!("tab {tab}/5 {name:?}, sort {sort}, name {typed:?}, {games} games")
 }
 
 #[test]
@@ -529,7 +530,7 @@ fn see_all_opens_full_library_on_its_tab_in_the_filters_own_order() {
     assert_eq!(on(&mut full_library(None), &[]), format!("Tile(0); {}", state(0, "", "Name", "", 22)));
     // A filter that is not a tab (the empty Favourites Home shows when there is no Group) lights none.
     let mut page = page_on(library(), Entry::FullLibrary { filter: Some(filter(&library(), "Favourites")) });
-    assert!(after(&mut page, &[]).ends_with("; tab 0/2 \"\", sort Name, name \"\", 22 games"));
+    assert!(after(&mut page, &[]).ends_with("; tab 0/3 \"\", sort Name, name \"\", 22 games"));
 }
 
 #[test]
@@ -544,9 +545,11 @@ fn the_tabs_step_with_left_and_right_and_the_bumpers_and_stop_at_their_ends() {
     page.take_effects();
     assert_eq!(on(&mut page, &[Right]), format!("Tabs; {}", state(3, "Most played", "Playtime", "", 7)));
     assert!(page.take_effects().is_empty(), "a tab switch is silent");
-    assert_eq!(on(&mut page, &[Right, Right]), format!("Tabs; {}", state(4, "Recently added", "Added", "", 22)));
+    assert_eq!(on(&mut page, &[Right]), format!("Tabs; {}", state(4, "Recently added", "Added", "", 22)));
+    // After the Groups' tabs, Steam's whole library, the last.
+    assert_eq!(on(&mut page, &[Right, Right]), format!("Tabs; {}", state(5, "Steam", "Name", "", 22)));
     // Left back to the first, and Left there is the nav.
-    assert_eq!(on(&mut page, &[Left, Left, Left]), format!("Tabs; {}", state(1, "Favourites", "Name", "", 3)));
+    assert_eq!(on(&mut page, &[Left, Left, Left, Left]), format!("Tabs; {}", state(1, "Favourites", "Name", "", 3)));
     assert_eq!(place(&on(&mut page, &[Left])), "Nav(FullLibrary)");
     // Right from the nav is the grid's first game: another tab's grid starts again at its top.
     assert_eq!(place(&on(&mut page, &[Right])), "Tile(0)");
@@ -564,8 +567,8 @@ fn the_tabs_step_with_left_and_right_and_the_bumpers_and_stop_at_their_ends() {
         format!("Nav(FullLibrary); {}", state(1, "Favourites", "Name", "", 3))
     );
     assert_eq!(
-        on(&mut page, &[Right, RightBumper, RightBumper, RightBumper, RightBumper]),
-        format!("Tile(0); {}", state(4, "Recently added", "Added", "", 22))
+        on(&mut page, &[Right, RightBumper, RightBumper, RightBumper, RightBumper, RightBumper]),
+        format!("Tile(0); {}", state(5, "Steam", "Name", "", 22))
     );
 
     // With no tab lit, Right on the tabs is nothing and Left the nav; RB lights the first.
@@ -698,10 +701,72 @@ fn full_librarys_focus_follows_its_game_when_the_library_changes_and_a_tab_that_
     found.games.iter_mut().for_each(|game| game.favourite = game.name == "Quiet Orbit");
     page.set_library(through(&[found]));
     // (A opens the game's hub and B closes it: focus is back where it was.)
-    assert_eq!(on(&mut page, &[A, B]), "Tile(0); tab 1/3 \"Favourites\", sort Name, name \"\", 1 games");
+    assert_eq!(on(&mut page, &[A, B]), "Tile(0); tab 1/4 \"Favourites\", sort Name, name \"\", 1 games");
     // No favourite at all: the tab is gone, no tab is lit, and the grid is every game, focus on the same game.
     page.set_library(library());
-    assert_eq!(on(&mut page, &[A, B]), "Tile(15); tab 0/2 \"\", sort Name, name \"\", 22 games");
+    assert_eq!(on(&mut page, &[A, B]), "Tile(15); tab 0/3 \"\", sort Name, name \"\", 22 games");
+}
+
+/// Seven made-up games of Epic's, by name: whether each is installed. Four are owned and not installed.
+const EPIC: [(&str, bool); 7] = [
+    ("Amber Lattice", true),
+    ("Fernlight", false),
+    ("Gull Harbour", true),
+    ("Kiteborne", true),
+    ("Pale Meridian", false),
+    ("Rusted Vigil", false),
+    ("Wexford Hollow", false),
+];
+
+/// The games of `source()` as Steam's, and `EPIC` as Epic's, every second of those with a cover, through a library
+/// database: the built-ins' tabs, then Steam's and Epic Games' (docs/spec/filters.md, 4.2).
+fn two_launchers() -> library::Database {
+    let mut database = library::Database::in_memory().unwrap();
+    database.sync("steam", &source(), now() - 500 * DAY).unwrap();
+    let games = EPIC.iter().enumerate().map(|(i, &(name, installed))| Game {
+        source_id: format!("E{i}"),
+        name: name.into(),
+        installed,
+        cover: i.is_multiple_of(2).then(|| art_dir().join(format!("{}.png", i + 1))),
+        ..Game::default()
+    });
+    database.sync("epic", &Library { games: games.collect(), ..Library::default() }, now() - 500 * DAY).unwrap();
+    database
+}
+
+#[test]
+fn each_launcher_has_a_tab_of_its_whole_library_from_which_a_game_not_installed_is_installed() {
+    let mut database = two_launchers();
+    let mut page = page_on(database.snapshot_at(now()).unwrap(), Entry::FullLibrary { filter: None });
+    let line =
+        |tab: usize, name: &str, games: usize| format!("tab {tab}/4 {name:?}, sort Name, name \"\", {games} games");
+    // After the Groups' tabs (Most played, Recently added), each launcher's, in the launchers' order.
+    assert_eq!(on(&mut page, &[RightBumper, RightBumper, RightBumper]), format!("Tile(0); {}", line(3, "Steam", 22)));
+    assert_eq!(on(&mut page, &[RightBumper]), format!("Tile(0); {}", line(4, "Epic Games", 7)));
+    assert_eq!(on(&mut page, &[RightBumper]), format!("Tile(0); {}", line(4, "Epic Games", 7)), "the last stops");
+    // Every game of Epic's, installed or not, by name: the second is Fernlight, which is not installed. Its menu's
+    // first row is Install, which asks for it.
+    assert_eq!(place(&on(&mut page, &[Right])), "Tile(1)");
+    press(&mut page, &[Menu]);
+    assert_eq!(page.focus_line(), "TileMenu: Menu(Install) of Fernlight");
+    page.take_effects();
+    press(&mut page, &[A]);
+    let fernlight = page.library().games.iter().find(|game| game.name == "Fernlight").unwrap().id;
+    assert!(asked(&mut page).contains(&Effect::Install(fernlight)), "Install asks for it");
+    assert_eq!(place(&on(&mut page, &[])), "Tile(1)");
+
+    // Epic switched off: its tab goes, the lit tab goes dark, and the grid is every game left.
+    database.set_launcher("epic", false).unwrap();
+    page.set_library(database.snapshot_at(now()).unwrap());
+    // (A opens the game's hub and B closes it: the page has the new library.)
+    assert_eq!(on(&mut page, &[A, B]), "Tile(0); tab 0/3 \"\", sort Name, name \"\", 22 games");
+    // On again, it is back, last.
+    database.set_launcher("epic", true).unwrap();
+    page.set_library(database.snapshot_at(now()).unwrap());
+    assert_eq!(
+        on(&mut page, &[RightBumper, RightBumper, RightBumper, RightBumper]),
+        format!("Tile(0); {}", line(4, "Epic Games", 7))
+    );
 }
 
 // --- What it looks like ---
@@ -942,6 +1007,18 @@ fn my_games_full_library_scrolled() {
     let mut stage = see_all("Recently added");
     stage.press(&[Down, Down, Down, Right]);
     stage.check("my_games_full_library_scrolled");
+}
+
+/// A launcher's tab (docs/spec/filters.md, 4.2): Epic Games' whole library by name, the games not installed with the
+/// Download badge, focus on one of them, Fernlight.
+#[test]
+fn my_games_full_library_launcher_tab() {
+    let library = two_launchers().snapshot_at(now()).unwrap();
+    let filter = Some(filter(&library, "Epic Games"));
+    let mut stage = Stage::new(library, Entry::FullLibrary { filter }, HD);
+    stage.press(&[Right]);
+    assert!(stage.dashboard.focus_line().ends_with("Tile(1); tab 4/4 \"Epic Games\", sort Name, name \"\", 7 games"));
+    stage.check("my_games_full_library_launcher_tab");
 }
 
 /// The Bundle's 08: Manage, focus on its Queue box.

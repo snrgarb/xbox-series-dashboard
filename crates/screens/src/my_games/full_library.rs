@@ -1,7 +1,8 @@
-//! Full library: every game, installed or not, in the grid, under a tab for each Group and the Sort and Filter row
-//! (docs/spec/my-games.md, section 7; docs/spec/filters.md, section 8).
+//! Full library: every game, installed or not, in the grid, under a tab for each Group and each launcher, and the
+//! Sort and Filter row (docs/spec/my-games.md, sections 7 and 18; docs/spec/filters.md, sections 4.2 and 8).
 //!
-//! - **The tabs** are the saved filters that are Home's Groups, in the same order. The lit one is the filter the
+//! - **The tabs** are the saved filters that are Home's Groups, in the same order, and each launcher's whole
+//!   library, installed or not, whether it is a Group or not (`Library::tabs`). The lit one is the filter the
 //!   grid shows; none is lit as the nav opens the page, and the grid is then every game by name. The tabs take no
 //!   focus themselves: focus "on the tabs" shows nothing, and Left and Right there step the lit tab, as LB and RB do
 //!   from anywhere on the page.
@@ -147,7 +148,7 @@ impl FullLibrary {
     /// The lit tab's place among the tabs, and its filter.
     fn lit<'a>(&self, library: &'a Library) -> Option<(usize, &'a Filter)> {
         let id = self.tab?;
-        library.groups().enumerate().find(|(_, filter)| filter.id == id)
+        library.tabs().enumerate().find(|(_, filter)| filter.id == id)
     }
 
     /// What the grid is ordered by, and whether downward: the sort chosen, else the lit tab's own, else by name.
@@ -241,7 +242,7 @@ impl FullLibrary {
     /// Lights the tab `step` along from the lit one, its games flying in from that side. With none lit, a step
     /// right lights the first. False where there is no tab that way.
     fn switch(&mut self, step: isize, library: &Library) -> bool {
-        let tabs: Vec<i64> = library.groups().map(|filter| filter.id).collect();
+        let tabs: Vec<i64> = library.tabs().map(|filter| filter.id).collect();
         let to = match self.lit(library) {
             Some((at, _)) => at.checked_add_signed(step),
             None => (step > 0).then_some(0),
@@ -289,7 +290,7 @@ impl FullLibrary {
         let lit = self.lit(library).map(|(at, _)| at);
         let mut left = 0.0;
         let tabs: Vec<(f32, f32, &str)> = library
-            .groups()
+            .tabs()
             .map(|filter| {
                 let width = ui.measure(&TEXT, &filter.name).width + 2.0 * TAB_SIDE;
                 let tab = (left, width, filter.name.as_str());
@@ -416,7 +417,7 @@ impl Pane for FullLibrary {
         let (at, name) = self.lit(library).map_or((0, ""), |(at, filter)| (at + 1, filter.name.as_str()));
         let (sort, _) = self.order(library);
         let reversed = if self.ticked(library).is_none() { " reversed" } else { "" };
-        let (tabs, games) = (library.groups().count(), self.games(library).len());
+        let (tabs, games) = (library.tabs().count(), self.games(library).len());
         format!("tab {at}/{tabs} {name:?}, sort {sort:?}{reversed}, name {:?}, {games} games", self.name)
     }
 

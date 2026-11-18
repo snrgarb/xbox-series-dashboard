@@ -121,22 +121,24 @@ fn the_groups_box_is_where_customise_home_lands_and_opens_a_row_for_every_filter
     assert_eq!(shell.focus(), "Settings: Games & apps: Groups");
     shell.press(&[A]);
     let mut rows = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..9 {
         rows.push(shell.focus());
         shell.press(&[Down]);
     }
     assert_eq!(
-        rows[..6],
+        rows[..7],
         [
             "Settings: Groups: Favourites; shown",
             "Settings: Groups: Installed; not shown",
             "Settings: Groups: Most played; shown",
             "Settings: Groups: Recently added; shown",
             "Settings: Groups: Hidden; not shown",
+            // Steam's whole library: a tab on Full library, and not a Group on Home until ticked.
+            "Settings: Groups: Steam; not shown",
             "Settings: Groups: New Group",
         ]
     );
-    assert_eq!(rows[6], rows[5], "the foot stops");
+    assert_eq!(rows[7], rows[6], "the foot stops");
     // Only a filter's Row has a menu, and so the hint.
     assert_eq!(shell.dashboard.hints(), hint_bar::NONE);
     shell.press(&[Up; 9]);
@@ -180,8 +182,9 @@ fn a_group_made_with_the_pad_and_moved_first_is_homes_first_group_and_the_first_
     shell.press(&[Menu]);
     assert_eq!(shell.focus(), "Settings: Groups: Menu(Move up) of Couch co-op");
     assert_eq!(shell.sounds(), [Sound::PromptOpen]);
-    // A again and again moves it up; at the top Move up goes and focus drops to the next row.
-    for _ in 0..5 {
+    // A again and again moves it up, past Steam's filter and the built-ins; at the top Move up goes and focus drops
+    // to the next row.
+    for _ in 0..6 {
         shell.press(&[A]);
         assert_eq!(shell.changes(), [FilterChange::Move { filter: id, by: -1 }]);
         assert_eq!(shell.sounds(), [Sound::GuideSelect]);
@@ -194,7 +197,7 @@ fn a_group_made_with_the_pad_and_moved_first_is_homes_first_group_and_the_first_
     assert_eq!(shell.focus(), "Settings: Groups: Favourites; shown");
 
     assert_eq!(shell.dashboard.home_groups(), ["Couch co-op", "Most played", "Recently added"]);
-    let first_tab = shell.dashboard.library().groups().next().unwrap();
+    let first_tab = shell.dashboard.library().tabs().next().unwrap();
     assert_eq!((first_tab.id, first_tab.name.as_str()), (id, "Couch co-op"));
 }
 
