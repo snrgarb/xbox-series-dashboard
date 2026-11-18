@@ -26,7 +26,9 @@
 //! `dl/progressbar.py`): `= Progress: <percent> <written>/<total>, Running for: ..., ETA: ...` once a second, its
 //! bytes counted after what its resume file (`.gogdl-resume` in the game's folder) skips; [`parse`].
 //!
-//! gogdl lists no library, so the games owned and not installed are Galaxy's database's alone (`galaxy`).
+//! gogdl lists no library of its own: the games owned and not installed are Galaxy's database's (`galaxy`), and where
+//! that is not on the PC, GOG's library service's, asked with gogdl's sign-in ([`library`], #276).
+pub mod library;
 pub mod standin;
 
 use std::collections::HashSet;

@@ -21,8 +21,8 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         }),
         // `--gog` names a folder standing for GOG's; else the registry and `%ProgramData%\GOG.com`. gogdl too (#176).
         Arc::new(match gogdl_route(args) {
-            Some(route) => source_gog::Gog::at(args.gog.clone()).with_gogdl(route),
-            None => source_gog::Gog::at(args.gog.clone()),
+            Some(route) => source_gog::Gog::at(args.gog.clone()).with_gogdl(route).with_owned(owned(args)),
+            None => source_gog::Gog::at(args.gog.clone()).with_owned(owned(args)),
         }),
         // `--ea`, `--ubisoft` and `--battlenet` name a fake store; else this machine's are read.
         Arc::new(source_ea::Ea::at(args.ea.clone())),
