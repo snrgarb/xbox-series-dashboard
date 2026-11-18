@@ -3,7 +3,8 @@
 //! and the window (which changes it as Settings does, then has Xbox read again).
 //!
 //! Where it comes from: `--gamepass <dir>` (or `DASHBOARD_GAMEPASS`) names a local catalogue, a test's; else
-//! Microsoft's, kept in the data folder's `gamepass`. A picture offscreen (`--screenshot`) with neither asks nothing.
+//! Microsoft's, kept in the data folder's `gamepass`. A picture offscreen (`--screenshot`) never asks Microsoft: only a
+//! local catalogue is read for one.
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -46,7 +47,8 @@ impl GamePass {
     fn new(args: &Args) -> Self {
         let folder =
             args.gamepass.clone().or_else(|| std::env::var_os(ENV).filter(|v| !v.is_empty()).map(PathBuf::from));
-        let data = args.data_dir.clone().or_else(|| args.screenshot.is_none().then(library::data_dir).flatten());
+        // One frame offscreen waits on no fetch, data folder or not.
+        let data = args.screenshot.is_none().then(|| args.data_dir.clone().or_else(library::data_dir)).flatten();
         let from = match (folder, data) {
             (Some(dir), _) => Some(From::Folder(dir)),
             (None, Some(data)) => {
