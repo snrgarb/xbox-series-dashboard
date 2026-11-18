@@ -127,6 +127,9 @@ pub fn run(
     // Endless animations stand where they do at this moment, the same every run.
     host.store.set_time(10.0);
     let pixels = target.still(&gpu, &mut host, |ui| dashboard.draw_all(ui));
+    if let (true, Some(line)) = (args.log_focus, dashboard.home_background_line()) {
+        eprintln!("home background: {line}");
+    }
     image::save_buffer(out, &pixels, size.0, size.1, image::ColorType::Rgba8)
         .unwrap_or_else(|e| fail(&format!("{}: {e}", out.display())));
     eprintln!("wrote {} ({}x{}) at {:.1} ms", out.display(), size.0, size.1, since_start());

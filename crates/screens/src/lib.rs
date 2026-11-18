@@ -509,6 +509,13 @@ impl Dashboard {
         home::groups::of(&self.library).iter().map(|group| group.name.to_string()).collect()
     }
 
+    /// What `--log-focus` says of the game's art behind Home as it was last drawn (`home background: 1920x620 art
+    /// drawn over 0,0 3840x2160, uv 0.213,0.000,0.787,1.000`): its decoded size, its box on the output in pixels
+    /// and the part of it that fills the box (#247). None with the swirl alone.
+    pub fn home_background_line(&self) -> Option<String> {
+        self.home.background_line().map(str::to_string)
+    }
+
     fn refresh_guide(&mut self) {
         if self.guide.is_open() {
             let around = Around {

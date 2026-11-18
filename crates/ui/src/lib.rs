@@ -116,6 +116,22 @@ pub enum Crop {
     Center,
 }
 
+/// The part of a picture `size` pixels big that fills `rect` as WPF's `UniformToFill` fills it: its left, top, right
+/// and bottom, 0 to 1 across the picture. As much of it as has the box's shape, cut alike from both sides across, and
+/// from the top or about the middle down as `crop` says.
+pub fn fill_uv(size: (u32, u32), rect: Rect, crop: Crop) -> [f32; 4] {
+    let (iw, ih) = (size.0.max(1) as f32, size.1.max(1) as f32);
+    let (mut u, mut v) = (1.0, 1.0);
+    if iw / ih > rect.w / rect.h {
+        u = (rect.w / rect.h) * ih / iw;
+    } else {
+        v = (rect.h / rect.w) * iw / ih;
+    }
+    let u0 = (1.0 - u) / 2.0;
+    let v0 = if crop == Crop::Top { 0.0 } else { (1.0 - v) / 2.0 };
+    [u0, v0, u0 + u, v0 + v]
+}
+
 /// A laid-out text's size in design units.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TextSize {
@@ -365,17 +381,12 @@ impl<'a> Ui<'a> {
 
     /// A texture filling `rect`, cropped to its shape.
     pub fn image(&mut self, rect: Rect, tex: TexId, size: (u32, u32), crop: Crop, alpha: f32, radius: f32) {
-        let (iw, ih) = (size.0.max(1) as f32, size.1.max(1) as f32);
-        // The part of the image, in its own 0-1 space, with the box's shape.
-        let (mut u, mut v) = (1.0, 1.0);
-        if iw / ih > rect.w / rect.h {
-            u = (rect.w / rect.h) * ih / iw;
-        } else {
-            v = (rect.h / rect.w) * iw / ih;
-        }
-        let u0 = (1.0 - u) / 2.0;
-        let v0 = if crop == Crop::Top { 0.0 } else { (1.0 - v) / 2.0 };
-        self.push(Quad::image(rect, tex, [u0, v0, u0 + u, v0 + v], alpha * self.alpha, radius));
+        self.push(Quad::image(rect, tex, fill_uv(size, rect, crop), alpha * self.alpha, radius));
+    }
+
+    /// Where `rect` (in design units, as drawn with the offset in force) is on the output, in pixels.
+    pub fn in_pixels(&self, rect: Rect) -> Rect {
+        self.place(rect)
     }
 
     /// Asks for a piece of art without drawing it, as a screen does for what it is about to show; true when it is
