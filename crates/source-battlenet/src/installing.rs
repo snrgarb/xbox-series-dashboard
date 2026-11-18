@@ -403,12 +403,10 @@ pub fn follow(
             };
             // `product.db` looked at each round once the Agent says the download is done, else every tenth round.
             let done = progress.says_done();
-            if done || round % LOOK_EVERY == 0 {
-                if installed() {
-                    crate::log(&format!("{code}: done: product.db says installed"));
-                    jobs.end(&code);
-                    return;
-                }
+            if (done || round.is_multiple_of(LOOK_EVERY)) && installed() {
+                crate::log(&format!("{code}: done: product.db says installed"));
+                jobs.end(&code);
+                return;
             }
             if done {
                 let since = *done_at.get_or_insert_with(Instant::now);
@@ -426,7 +424,7 @@ pub fn follow(
                 }
             }
             // Battle.net started meanwhile: the Agent the Dashboard started is left running until the install is over.
-            if session.ours() && round % LOOK_EVERY == 0 {
+            if session.ours() && round.is_multiple_of(LOOK_EVERY) {
                 let others = place.others_running(agent::ours(&place.dir));
                 if !others.is_empty() && !client_said {
                     crate::log(&format!(
@@ -541,7 +539,7 @@ mod tests {
         assert_eq!(progress.installed, Some(false));
         assert!(said.starts_with("/update/libra said {"), "{said}");
         assert_eq!(judge.live(), Some("/update/libra"));
-        let lines = judge.lines.drain(..).collect::<Vec<_>>();
+        let lines = std::mem::take(&mut judge.lines);
         assert!(lines.contains(&"lbra: /install/libra: first answer: 404 {}".to_string()), "{lines:?}");
         assert!(lines.iter().any(|l| l.starts_with("lbra: /update/libra: first answer: 200 {")), "{lines:?}");
         assert!(lines.iter().any(|l| l.starts_with("lbra: /game/libra: first answer: 200 {")), "{lines:?}");
@@ -552,7 +550,7 @@ mod tests {
         let mut there = || true;
         let at = |s: u64| begun + Duration::from_secs(s);
         assert!(matches!(judge.round(at(30), &silent, &gone, &mut there), Verdict::Going { .. }));
-        let lines = judge.lines.drain(..).collect::<Vec<_>>();
+        let lines = std::mem::take(&mut judge.lines);
         assert!(lines.contains(&"lbra: /update/libra now answers 404 {}".to_string()), "{lines:?}");
         // A minute on with the Agent there: still going, until it has been a quarter of an hour.
         assert!(matches!(judge.round(at(61), &silent, &gone, &mut there), Verdict::Going { .. }));
