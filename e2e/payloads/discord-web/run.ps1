@@ -196,7 +196,8 @@ try {
 
     # --- Restarted: still signed in, from the kept session alone.
     Close-Dashboard | Out-Null
-    $script:startMark = Get-DashboardLogLength
+    # Each start writes a new log (stderr is redirected afresh), so the restart reads it from its first line.
+    $script:startMark = 0
     Start-Test-Dashboard
     Expect-Log '^discord web: signed in$' 40 $script:startMark 'still signed in after a restart' | Out-Null
     $asked = @(Get-Content $standinLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '^.*serve-discord-web: POST /login' })

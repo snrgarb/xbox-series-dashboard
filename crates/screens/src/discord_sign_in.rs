@@ -60,9 +60,9 @@ impl Page for DiscordSignIn {
         NAME
     }
 
-    /// `DiscordSignIn: Discord's page`, then the last key the pad sent it (`DiscordSignIn: Tab`).
+    /// `Discord's page`, then the last key the pad sent it (`Tab`); the focus line puts the screen's name in front.
     fn focus(&self) -> String {
-        format!("{NAME}: {}", self.last.unwrap_or("Discord's page"))
+        self.last.unwrap_or("Discord's page").to_string()
     }
 
     /// The kind of field focus is on in Discord's page, as the session last said: `field text`, `field password`.
@@ -151,5 +151,13 @@ mod tests {
         assert_eq!(page.asks(), vec![Effect::DiscordWeb(WebAsk::Text("hunter2".into()))]);
         assert!(page.asks().is_empty(), "asked once");
         assert!(!page.focus().contains("hunter2") && !page.state().contains("hunter2"));
+    }
+
+    #[test]
+    fn the_focus_does_not_say_the_screens_name_again() {
+        let mut page = DiscordSignIn::open();
+        assert_eq!(page.focus(), "Discord's page");
+        page.last = Some("Tab");
+        assert_eq!(page.focus(), "Tab", "the focus line reads `DiscordSignIn: Tab`");
     }
 }
