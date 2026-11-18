@@ -213,7 +213,7 @@ form (discord-tab.md 4: 75 tall, its glyph at 26 dim, its text at 69, dim, up to
 | Signed out (never signed in, or Discord ended the session) | U+E77B (Contact) | "Sign in to Discord in Settings > Account > Direct Messages" | Closes the Guide and opens Settings there, as the Guide's Settings does (guide.md 3.3), focus on Sign in |
 | No WebView2 runtime | U+E7BA | "Messages need Microsoft Edge WebView2, which isn't on this PC" | Nothing |
 | Can't reach Discord (no network, Discord down) | U+E7BA | "Can't reach Discord. Trying again" | Nothing; it tries again by itself |
-| Discord's page changed (the health probe, #198, finds a selector that no longer matches) | U+E7BA | "Discord has changed its page, so Direct Messages can't be read until the Dashboard is updated" | Nothing |
+| Discord's page changed (the health probe, #198, finds a store or method of Discord's page that no longer answers) | U+E7BA | "Discord has changed its page, so Direct Messages can't be read until the Dashboard is updated" | Nothing |
 | Signed in, no DMs | U+E8BD | "No Direct Messages yet" | Nothing |
 
 All are focusable, as the tab's other lines are. The spinner shows only once a second has passed with nothing to
@@ -559,7 +559,7 @@ DMs' counts. **Places and counts, never names.**
 | A menu over it | guide.md 14's form with the title left out: `dialog Menu { prompt: false, row: 1 } (dm)`, `(message)`, `(reaction)` |
 | Text entry | `focus: TextEntry: A; 12 chars, lower letters` |
 | Toasts | `toasts: shown (DiscordDm)`, `(DiscordMention)`, `(DiscordCall)`: the kind and the queue's figures, no line |
-| The web session | `discord web: signed in`, `discord web: 25 DMs, 5 unread in 2`, `discord web: conversation open, 50 messages`, `discord web: sent in 769 ms`, `discord web: not sent: captcha` (`rate limited`, `refused`, `no answer in 15 s`), `discord web: selector "dm-row" no longer matches` (selector names are ours, not Discord's text) |
+| The web session | `discord web: signed in`, `discord web: 25 DMs, 5 unread in 2`, `discord web: conversation open, 50 messages`, `discord web: sent in 769 ms`, `discord web: not sent: captcha` (`rate limited`, `refused`, `no answer in 15 s`), `discord web: store "messages" no longer answers (getMessages)` (the store key is ours, the method name Discord's; #198 reads Discord's in-page stores, not its DOM: docs/discord-web.md, "Reading") |
 
 Never in the log: names, channel or user ids, message text, emoji used, times of messages.
 

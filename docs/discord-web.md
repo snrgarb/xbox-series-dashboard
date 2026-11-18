@@ -1,7 +1,7 @@
 # Discord messages: the web session (#197)
 
 The Dashboard's own discord.com, in a WebView2, signed in by the user on Discord's own page: what the Guide's Party
-will read DMs and notifications through (#198 to #202). Voice stays on the RPC connection (docs/discord.md), which
+will read DMs and notifications through (#198 to #202; reading: below). Voice stays on the RPC connection (docs/discord.md), which
 this does not touch. The decisions are #192's (D1 opt-in, D2 our own web session, D6 messages in memory only, D7 our
 own code); what the spike found on the TV PC is docs/research/discord-web-spike.md.
 
@@ -143,6 +143,151 @@ Decided: **shipped beside `dashboard.exe`**, not linked statically, and loaded a
   beside dashboard.exe"); `tools/package.sh` takes it from beside the exe into the zip and the installer, and the
   installer removes it on uninstall (docs/release.md). It is never committed. The runtime itself is Windows 11's own
   Evergreen WebView2: nothing of it is shipped.
+
+## Reading: Discord's own stores, pushed (#198)
+
+**Decided by the user on 2026-11-18, over the text of #198:** the Direct Messages are read from Discord's in-page Flux
+stores only, with no DOM selector and no DOM fallback. The voice spike (#292) found that this works on the real
+discord.com (docs/research/discord-web-voice.md, 0 and 4b); selectors would have been the brittle part.
+
+Code: `crates/discord_web/js/stores.js` (the search), `js/direct.js` (the reader), `src/direct.rs` (their JSON to the
+model, and the events), `src/pictures.rs` (avatars), `src/win/host.rs` (`reading`, `page`), `Session::direct`,
+`ask_direct`, `take_events`. Tests: `tests/scripts.rs` and `tests/js/run.js` (node, against the made-up Discord of
+`crates/standin/js/fake_discord.js`), the Rust unit tests, the stand-in (below).
+
+### The script
+
+`discord_web::direct_script()` is `stores.js` and `direct.js` in one function. The host installs it with
+`AddScriptToExecuteOnDocumentCreated`, so it runs in every new document of the web view before Discord's own scripts
+(not in frames: `window.top` only), and twice is once (`window.__xsdDirect`). It:
+
+1. **Waits for webpack to settle**: the module cache of every runtime stops growing for two looks half a second apart,
+   capped at 15 s.
+2. **Finds the stores** (the spike's search, ported): Discord's chunk global `webpackChunkdiscord_app` takes one probe
+   chunk, which several runtimes answer with their `require`; every loaded module's exports and their own properties are
+   candidates; a store is found by its Flux name (`getName()` or `constructor.displayName`), else by its methods, and
+   Flux's registry (`getAll()` on a store's class) adds the rest. No factory is ever run.
+3. **Retries**: up to 5 times two seconds apart, then reports; then every 30 s for as long as the page lives (it may
+   become the app later). On `/login` and `/register` it stays quiet.
+4. **Subscribes** to `addChangeListener` on each store, **coalesces** (at most one snapshot a 250 ms window,
+   trailing) and **pushes** JSON with `window.chrome.webview.postMessage`. The host takes it in
+   `add_WebMessageReceived` (`WebMessageAsJson`, only from the page's own address) as `Report::Page`.
+5. Sends **only what changed**: each kind is kept as the last JSON sent and not sent again if equal. A new message
+   resends the DM list (its last line and unread moved) but not the conversation of another DM, and a conversation
+   change does not resend the list. The whole list is the unit, not a diff: 169 DMs is about 40 KB, at most four a
+   second, and a diff would be more to get wrong.
+
+Read-only: it calls store getters, nothing else, except the page's route (`history.pushState` and a `popstate`
+event, which is how the first spike made Discord open a conversation, where a click did not) and Discord's own
+older-messages action on the host's ask. It never touches a token, anything the browser stores, a cookie, a password, a
+request header, and it makes no request: a test fails the build if either file holds the words for them or for a
+network call.
+
+### What it reads
+
+| Our key | Discord's store (by Flux name, then by shape) | Methods called | Required |
+|---|---|---|---|
+| `channels` | `ChannelStore` | `getChannel` | yes |
+| `privateSort` | `PrivateChannelSortStore` (or `ChannelListStore`) | `getPrivateChannelIds` or `getSortedPrivateChannels` | yes |
+| `users` | `UserStore` | `getUser`, `getCurrentUser` | yes |
+| `readState` | `ReadStateStore` | `getUnreadCount`; optional `getMentionCount`, `hasUnread`, `getOldestUnreadMessageId`, `ackMessageId` | yes |
+| `messages` | `MessageStore` | `getMessages` (its `toArray()` or `_array`, `ready`, `hasMoreBefore`); optional `getMessage`, `getLastMessage` | yes |
+| `calls` | `CallStore` | `getCall` or `getCalls` (`ringing`) | no: no rings without it |
+| `older` | an exports object with `fetchMessages` (found by shape) | `fetchMessages({channelId, before, limit: 50})` | no: `Older` does nothing |
+
+A required key or method missing, or a required method that throws, is the **health** `ok: false`: the session's
+`DirectState::PageChanged`, and the log says which, once (`discord web: store "readState" no longer answers
+(getUnreadCount)`, or `discord web: the page's scripts: no chunk global` when no runtime answered). Nothing is read
+until all required ones are there. The optional ones failing is not a break.
+
+### The messages
+
+Each is `{"k": ...}`; every id is a string.
+
+- `{"k":"health","ok":bool,"found":{<our key>:[<Discord's store name>, <methods found>...]},"missing":["readState.getUnreadCount",...],"older":bool,"tries":n}`
+- `{"k":"dms","dms":[{"id","name","group","members","pic","unread","mentions","last":{"at","text"?,"who","names"}|null}]}`
+  in Discord's order. `pic` is a CDN path (`avatars/<user>/<hash>.png?size=128`, `channel-icons/<channel>/<hash>.png?size=128`),
+  empty where there is no hash (the default avatar: no picture). `last.text` is there only where `MessageStore` holds
+  the channel's last message (it holds only what was loaded); `last.at` is its time, or the time of the channel's
+  `lastMessageId` snowflake, `(id >> 22) + 1420070400000`. `names` resolves the mentions in the text.
+- `{"k":"conv","id","loaded","more","older","unread_from","msgs":[...]}`, the conversation the host opened.
+  `more` is `hasMoreBefore`; `older` is Discord's fetch running; `unread_from` is the first message that was unread
+  when it was opened, fixed from `getOldestUnreadMessageId` (else the message after `ackMessageId`) **before** the
+  route changes, since the page marks it read on opening. A message: `{"id","author":{"id","name","pic"},"own","at",
+  "edited","type","text","names","state","reply":{"s":"to|deleted|none","who","tx","names"}|null,"mentioned":[names],
+  "files":[{"ct","name","voice"}],"stickers":[names],"embeds":[{"type","title","site"}],"poll":question|null,
+  "reactions":[{"id","name","count","me"}]}`.
+- `{"k":"rings","rings":[{"channel","caller","pic"}]}`: DM calls whose `ringing` holds the user's id.
+- `{"k":"reset"}`: the user is gone from the page (signed out there).
+
+`src/direct.rs` maps them: text to spans (`<@id>` to `@name` by the names the page resolved, links, `<:name:id>` to a
+server emoji); attachments by content type (all `image/*` but GIF together as `Images(n)`, `image/gif` a GIF, `video/*`
+a video, a voice-message flag a voice message, else a file by name); a `gifv` embed a GIF, an embed by its title, else
+its site; stickers, polls; types 0, 19, 20 and 23 are bubbles, 1 (added), 3 (call) and 6 (pin) are Discord's own
+lines, any other type a line with its text; a reply as the other's author and first line, or "deleted" (a reply to a
+message not loaded shows no line); the user's own messages by `state` (`SENDING`, `SEND_FAILED`).
+
+### Opening, closing, older
+
+`DirectAsk::Open(id)` (digits only: anything else is dropped, and the host puts nothing but digits in a script) calls
+`__xsdDirect.open(id)`: the unread line is fixed, then the page is routed to `/channels/@me/<id>` by `pushState` and
+`popstate`, Discord loads the channel and `MessageStore` fills, and the change listener pushes the conversation. The
+session shows it (`Direct::open`) once its messages have come, and takes no other. `Close` forgets the conversation in
+the session and routes the page to `/channels/@me`. `Older` calls Discord's own `fetchMessages` (the page has no button
+to press; scrolling a hidden page is brittle), `before` the oldest loaded message, and `loading_older` follows until
+the call settles; `at_start` is `hasMoreBefore === false`. If that action was not found, `Older` does nothing and the
+log says so once (`discord web: older messages: Discord's action was not found; reading goes on without it`).
+
+Send, Forget, React, MarkRead, Call, Answer and Decline are #201's and the voice ticket's: `Session::ask_direct`
+logs `discord web: <kind> not built yet` once each and does nothing; its last arm is the hook, and the host takes a
+`PageOp` by name.
+
+### The state, events, memory
+
+`Direct::state` follows `WebState`: Off, NoRuntime, Checking is Loading, SignedOut and SigningIn are SignedOut, Failed
+is Unreachable, SignedIn is Loading until the first list and then Ready, or PageChanged when the health says so. When
+the session turns SignedIn the page is asked to send everything again (`resend`), so nothing it pushed before the
+page was known to be signed in is lost.
+
+**Everything is in memory.** Turning the switch off, signing out, the page signing out (`reset`), a failure and the
+sign-in page opening forget every DM, message and picture. Nothing is written to a file; no name, id, text or address is
+logged (tests capture the log of a whole made-up session and look). The log lines are counts, our keys and Discord's
+method names: `discord web: stores found: channels, privateSort, ...`, `discord web: 25 DMs, 5 unread in 2`,
+`discord web: conversation open, 50 messages`, `discord web: 3 pictures could not be fetched (HTTP 404)`.
+
+**Events** (`Session::take_events`), found by comparing successive lists: a DM whose unread count rises while it is not
+the open conversation is a `Message` (its first line and, in a Group DM, the sender and the group, where the store
+holds the message; else an empty line, which the screens say as "sent you a message"); a call ringing the user that
+was not before is a `Ring`, one that is gone a `RingEnded`. Nothing is raised for what was unread when the session
+began (the first list is the baseline). **`Mention`** (a mention in a server's channel) is not raised yet: the host takes
+Discord's web notifications (`NotificationReceived`, `ICoreWebView2_24`, marked handled so Windows shows nothing; the
+notifications permission is granted for Discord's own address only, every other permission refused), and logs the
+first one's lengths, but what Discord puts in a notification's title, body and tag has not been seen, so none is
+guessed at: `Session::notification_event` is the hook, and returns nothing.
+
+**Pictures** (docs/spec/party-chats.md, 9): fetched on three threads of their own from the CDN
+(`discord_web::CDN`, or `Session::set_cdn`, the Dashboard's `--discord-cdn-url`; with the session pointed at a
+stand-in Discord and no CDN given, none), by the path the page gave and only if it is one of the CDN's two shapes, into
+memory, once each, the first 40 DMs' first, the open conversation's authors and a ringing caller's when they come.
+Never logged by address.
+
+### What breaks it
+
+Discord renaming or reshaping a store or a method, or the chunk global (`webpackChunkdiscord_app`): the log names the
+key and method, the Guide says "Discord has changed its page", and the names above are what to update. What the
+fake Discord cannot show, and the TV PC must: the real shapes of `referencedMessage`, of a message's `timestamp`,
+whether `getOldestUnreadMessageId` and `ackMessageId` are getters, whether `MessageStore` holds a last message of a
+DM nobody opened (the list then has times only), what `CallStore`'s calls hold, whether `fetchMessages` takes that
+argument, and whether the hidden page marks a conversation read on opening.
+
+### The stand-in
+
+`standin serve-discord-web`'s app page carries the same fake webpack chunk global and stores (five DMs, one Group DM,
+unread counts, a conversation of varied messages in the first), and controls for a test: `POST
+/standin/dm-message?channel=<id>&text=<words>`, `POST /standin/unread?channel=<id>&count=<n>`, `POST
+/standin/ring?channel=<id>&on=1|0`; plain pictures at `/avatars/..` and `/channel-icons/..`, so `--discord-cdn-url`
+may name the same address. The channels are 100000000000000001 to 03 (the list's links), 100000000000000010 and
+100000000000000011. Its page may call the network (to poll the controls); only our injected scripts may not.
 
 ## The terms, said plainly
 

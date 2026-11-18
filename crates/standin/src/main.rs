@@ -183,7 +183,14 @@
 //!       a session cookie, and an app page in Discord's DOM shape at /app; beside the form a made-up QR block, and
 //!       `POST /standin/qr-confirm` to play the phone that scanned it and confirmed. Says `serve-discord-web: listening on
 //!       http://127.0.0.1:<n>` and then a line a request (its method, path and whether it came signed in; never what
-//!       was typed), until it is killed.
+//!       was typed), until it is killed. The app page also carries a made-up Discord world for the Direct Messages tests
+//!       (#198; `crates/standin/js/fake_discord.js`: the page's webpack chunk global with fake stores, five DMs, one
+//!       Group DM, a conversation of varied messages), driven by controls: `POST /standin/dm-message?channel=<id>&text=<words>`
+//!       (a message arrives in that DM: its unread goes up, it moves to the top), `POST /standin/unread?channel=<id>&count=<n>`,
+//!       `POST /standin/ring?channel=<id>&on=1|0` (a DM call rings the user, or stops); and plain pictures at
+//!       `/avatars/..` and `/channel-icons/..`, so `--discord-cdn-url` may name the same address. The channels are
+//!       100000000000000001..03 (the list's links), 100000000000000010 (a Group DM) and 100000000000000011 (a named group
+//!       with 60 older messages). See crates/standin/src/discord_web.rs.
 //!   standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
 //!       A launcher's installer, and the uninstaller it leaves (`set_up`): in the test's own folder that
 //!       `STANDIN_SETUP` names, and nowhere else, writes what it was run with (`runs.txt`), the app's folder and its

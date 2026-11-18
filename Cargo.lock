@@ -515,8 +515,10 @@ version = "0.1.0"
 dependencies = [
  "log-line",
  "model",
+ "serde",
  "serde_json",
  "tempfile",
+ "ureq",
  "webview2-com",
  "windows",
  "windows-core",

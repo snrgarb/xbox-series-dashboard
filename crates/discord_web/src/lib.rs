@@ -6,6 +6,9 @@
 //! page shows it over the Dashboard ([`Session::show`]) and the pad drives it by keys. Sign out removes the session's
 //! folder, and with it everything the web view kept.
 //!
+//! Direct Messages (#198): a page script (`js/stores.js`, `js/direct.js`) reads Discord's own in-page stores and pushes
+//! what it reads; [`Session::direct`] holds it, in memory only, for the screens (docs/discord-web.md, "Reading").
+//!
 //! What this code never does: read, log or keep a token, a cookie, a password or anything typed. It asks the page
 //! only for flags (`js/state.js`: which route, whether the app's shell shows, the kind of field focus is on); text the
 //! Console keyboard kept goes into the focused field by DevTools' `Input.insertText` and is dropped. The log has
@@ -14,8 +17,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
+pub use model::discord_dms::{Direct, DirectAsk, DirectEvent, DirectState};
 pub use model::discord_web::{Web, WebAsk, WebField, WebKey, WebState};
 
+pub mod direct;
+mod pictures;
 pub mod redact;
 #[cfg(windows)]
 mod win;
@@ -23,7 +29,18 @@ mod win;
 /// Discord's own address. A test points the Dashboard at a stand-in (`--discord-web-url`, `standin serve-discord-web`).
 pub const DISCORD: &str = "https://discord.com";
 
-/// Where a Profile's session is kept: `<data>\discord-web\profile-<id>`, the web view's whole user data folder. One
+/// Discord's CDN, where the avatars and icons of the Direct Messages come from. A test points the Dashboard at a
+/// stand-in ([`Session::set_cdn`], `--discord-cdn-url`).
+pub const CDN: &str = "https://cdn.discordapp.com";
+
+/// The script the host installs in every document of the web view (`AddScriptToExecuteOnDocumentCreated`): the store
+/// search (`js/stores.js`) and the reader that pushes what the stores hold (`js/direct.js`), in one function of their
+/// own so that a second injection and the page's scripts cannot meet. See docs/discord-web.md, "Reading".
+pub fn direct_script() -> String {
+    format!("(() => {{\n{}\n{}\n}})();\n", include_str!("../js/stores.js"), include_str!("../js/direct.js"))
+}
+
+/// Where a Profile's session is kept:`<data>\discord-web\profile-<id>`, the web view's whole user data folder. One
 /// per Profile, as the account-switching research expects (docs/research/account-switching.md, Summary 1):
 /// a Profile signs in to its own person's Discord, and another Profile's sign-in never shows it.
 pub fn folder(data: &Path, profile: i64) -> PathBuf {
@@ -90,16 +107,54 @@ pub(crate) enum Command {
     Key(WebKey),
     /// Never logged.
     Text(String),
+    /// Something for the page script: Discord's Direct Messages (docs/discord-web.md, "Reading").
+    Page(PageOp),
     /// Close the web view, remove the folder, end.
     SignOut,
     /// Close the web view and end; the folder stays.
     Stop,
 }
 
+/// What the page script is asked (`window.__xsdDirect`): the host calls the method of the same name.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) enum PageOp {
+    /// Route the hidden page to this DM (digits only: the host refuses anything else) and read its messages.
+    Open(String),
+    /// Route it back to `/channels/@me`.
+    Close,
+    /// Discord's own older-messages action for the open conversation.
+    Older,
+    /// Send everything again.
+    Resend,
+}
+
+/// A web notification Discord's page raised, taken by the host (marked handled, so Windows shows nothing). Its words
+/// are private: `Debug` says lengths only.
+pub(crate) struct Notified {
+    pub title: String,
+    pub body: String,
+    pub tag: String,
+}
+
+impl std::fmt::Debug for Notified {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Notified(title {}, body {}, tag {} chars)",
+            self.title.chars().count(),
+            self.body.chars().count(),
+            self.tag.chars().count()
+        )
+    }
+}
+
 /// What the host thread says back.
 #[allow(dead_code)]
 pub(crate) enum Report {
     State(WebState),
+    /// One message the page script posted (`js/direct.js`), as JSON text: parsed by [`direct::Reader`].
+    Page(String),
+    Notified(Notified),
     Field(Option<WebField>),
     /// The host thread has ended, its window, web view and loader released; after a sign-out, whether the folder
     /// went. Always its last word.
@@ -109,7 +164,7 @@ pub(crate) enum Report {
 }
 
 /// How the host thread tells the Dashboard's thread: the report sent, and its event loop woken.
-pub(crate) type Tell = Box<dyn Fn(Report) + Send>;
+pub(crate) type Tell = Arc<dyn Fn(Report) + Send + Sync>;
 
 /// A host thread just started: what wakes it to read its commands, and the thread, joined once it has ended.
 pub(crate) struct Spawned {
@@ -207,6 +262,20 @@ pub struct Session {
     reports: Receiver<Report>,
     report: Sender<Report>,
     wake: Wake,
+    /// Discord's Direct Messages: what the page said, what the screens see of it, and what happened since they
+    /// last asked. All of it memory only, and forgotten with the session ([`Session::forget_direct`]).
+    reader: direct::Reader,
+    pictures: pictures::Pictures,
+    direct: Direct,
+    /// The change of `direct` since [`Session::pump`] last said so.
+    direct_changed: bool,
+    events: Vec<DirectEvent>,
+    /// The conversation the screens asked to open.
+    open: Option<model::discord_dms::Id>,
+    /// Kinds of ask not built yet that the log has said so of.
+    unbuilt: std::collections::BTreeSet<&'static str>,
+    older_unavailable_said: bool,
+    notifications: u32,
 }
 
 impl Session {
@@ -226,7 +295,19 @@ impl Session {
         backend: Box<dyn Backend>,
     ) -> Self {
         let (report, reports) = mpsc::channel();
+        let wake: Wake = Arc::new(wake);
+        // Discord's CDN, unless the session is pointed at a stand-in Discord: then a stand-in CDN or none.
+        let cdn = base.is_none().then(|| CDN.to_string());
         Session {
+            reader: direct::Reader::new(),
+            pictures: pictures::Pictures::new(cdn, wake.clone()),
+            direct: Direct::default(),
+            direct_changed: false,
+            events: Vec::new(),
+            open: None,
+            unbuilt: Default::default(),
+            older_unavailable_said: false,
+            notifications: 0,
             base: base.unwrap_or(DISCORD).trim_end_matches('/').to_string(),
             data: data.map(Path::to_path_buf),
             profile: None,
@@ -243,8 +324,192 @@ impl Session {
             backend,
             reports,
             report,
-            wake: Arc::new(wake),
+            wake,
         }
+    }
+
+    /// Where the Direct Messages' avatars and icons are fetched from: a stand-in CDN in a test (`--discord-cdn-url`),
+    /// None for no pictures. Unless set, Discord's own CDN, or none when the session is pointed at a stand-in Discord.
+    pub fn set_cdn(&mut self, cdn: Option<&str>) {
+        self.pictures.set_cdn(cdn.map(str::to_string));
+    }
+
+    /// Discord's Direct Messages as the web session last read them (docs/discord-web.md, "Reading").
+    pub fn direct(&self) -> &Direct {
+        &self.direct
+    }
+
+    /// What happened since this was last asked, once each: a message in a DM that is not open, a mention, a ring
+    /// beginning or ending. Nothing is raised for what was unread when the session began.
+    pub fn take_events(&mut self) -> Vec<DirectEvent> {
+        std::mem::take(&mut self.events)
+    }
+
+    /// What the screens ask of the Direct Messages. Open, Close and Older are built (#198); Send, Forget, React,
+    /// MarkRead are #201's, Call, Answer and Decline the voice ticket's: each says so once in the log, by kind only.
+    /// The hook for them is the last arm: the host already takes a [`PageOp`] by name.
+    pub fn ask_direct(&mut self, ask: DirectAsk) {
+        match ask {
+            DirectAsk::Open(id) => {
+                if !id.as_str().bytes().all(|b| b.is_ascii_digit()) || id.as_str().is_empty() {
+                    return;
+                }
+                // Another conversation's messages are not this one's.
+                if self.open.as_ref() != Some(&id) {
+                    self.reader.conv = None;
+                }
+                self.open = Some(id.clone());
+                if let Some(host) = &self.host {
+                    host.send(Command::Page(PageOp::Open(id.as_str().to_string())));
+                }
+                self.refresh_direct();
+            }
+            DirectAsk::Close => {
+                if self.open.take().is_some() {
+                    self.reader.conv = None;
+                    if let Some(host) = &self.host {
+                        host.send(Command::Page(PageOp::Close));
+                    }
+                    self.refresh_direct();
+                }
+            }
+            DirectAsk::Older => {
+                if !self.direct.open.as_ref().is_some_and(|c| !c.at_start && !c.loading_older) {
+                    return;
+                }
+                if !self.reader.older_found() {
+                    if !std::mem::replace(&mut self.older_unavailable_said, true) {
+                        say("discord web: older messages: Discord's action was not found; reading goes on without it");
+                    }
+                    return;
+                }
+                if let Some(host) = &self.host {
+                    host.send(Command::Page(PageOp::Older));
+                }
+            }
+            other => {
+                let kind = match other {
+                    DirectAsk::Send { .. } => "send",
+                    DirectAsk::Forget { .. } => "forget",
+                    DirectAsk::React { .. } => "react",
+                    DirectAsk::MarkRead(_) => "mark-read",
+                    DirectAsk::Call(_) => "call",
+                    DirectAsk::Answer(_) => "answer",
+                    DirectAsk::Decline(_) => "decline",
+                    DirectAsk::Open(_) | DirectAsk::Close | DirectAsk::Older => return,
+                };
+                if self.unbuilt.insert(kind) {
+                    say(&format!("discord web: {kind} not built yet"));
+                }
+            }
+        }
+    }
+
+    /// How the screens' `Direct` follows the web session: Off, no runtime, loading while a web view checks or the
+    /// list is not read, signed out, unreachable when it failed, the page changed when the health probe says so.
+    fn direct_state(&self) -> DirectState {
+        match self.web.state {
+            WebState::Off => DirectState::Off,
+            WebState::NoRuntime => DirectState::NoRuntime,
+            WebState::Checking => DirectState::Loading,
+            WebState::SignedOut | WebState::SigningIn => DirectState::SignedOut,
+            WebState::Failed => DirectState::Unreachable,
+            WebState::SignedIn if self.reader.page_changed() => DirectState::PageChanged,
+            WebState::SignedIn if self.reader.dms.is_some() => DirectState::Ready,
+            WebState::SignedIn => DirectState::Loading,
+        }
+    }
+
+    /// Forgets every DM, message and picture held, and the open conversation. The page's script keeps nothing the
+    /// Dashboard needs: a new session asks it to send everything again.
+    fn forget_direct(&mut self) {
+        self.reader.forget();
+        self.pictures.forget();
+        self.open = None;
+        self.events.clear();
+        self.refresh_direct();
+    }
+
+    /// Builds what the screens see from what the page said and the pictures that have come, asks for the pictures that
+    /// are wanted (the first 40 DMs', the open conversation's, a ring's) and notes a change.
+    fn refresh_direct(&mut self) {
+        use model::discord_dms::{Conversation, Dm, Id, Private, Ring};
+        const EAGER: usize = 40;
+        let state = self.direct_state();
+        let mut direct = Direct { state, ..Direct::default() };
+        if state == DirectState::Ready {
+            let dms = self.reader.dms.as_deref().unwrap_or(&[]);
+            for dm in dms.iter().take(EAGER) {
+                self.pictures.want(&dm.pic);
+            }
+            if let Some(conv) = self.reader.conv.as_ref().filter(|c| c.loaded) {
+                if let Some(dm) = self.reader.dm(&conv.id) {
+                    self.pictures.want(&dm.pic);
+                }
+                for m in &conv.msgs {
+                    self.pictures.want(&m.author.pic);
+                }
+            }
+            for r in &self.reader.rings {
+                self.pictures.want(&r.pic);
+            }
+        }
+        if state == DirectState::Ready {
+            let pic = |path: &str| self.pictures.get(path);
+            let dms = self.reader.dms.as_deref().unwrap_or(&[]);
+            direct.dms = dms
+                .iter()
+                .map(|d| Dm {
+                    id: Id(d.id.clone()),
+                    name: Private(d.name.clone()),
+                    group: d.group,
+                    members: d.members,
+                    picture: pic(&d.pic),
+                    unread: d.unread,
+                    last: d.last.as_ref().filter(|l| l.at > 0).map(|l| {
+                        let line = l.text.as_deref().map(|t| direct::first_line(t, &l.names)).unwrap_or_default();
+                        (Private(line), l.at)
+                    }),
+                })
+                .collect();
+            direct.rings = self
+                .reader
+                .rings
+                .iter()
+                .map(|r| Ring {
+                    channel: Id(r.channel.clone()),
+                    caller: Private(r.caller.clone()),
+                    picture: pic(&r.pic),
+                })
+                .collect();
+            if let Some(conv) =
+                self.reader.conv.as_ref().filter(|c| c.loaded && self.open.as_ref().is_some_and(|o| o.as_str() == c.id))
+            {
+                let dm = self.reader.dm(&conv.id);
+                direct.open = Some(Conversation {
+                    id: Id(conv.id.clone()),
+                    name: Private(dm.map(|d| d.name.clone()).unwrap_or_default()),
+                    group: dm.is_some_and(|d| d.group),
+                    picture: dm.and_then(|d| pic(&d.pic)),
+                    messages: conv.msgs.iter().map(|m| direct::message(m, &pic)).collect(),
+                    loading_older: conv.older,
+                    at_start: !conv.more,
+                    unread_from: (!conv.unread_from.is_empty()).then(|| Id(conv.unread_from.clone())),
+                });
+            }
+        }
+        if direct != self.direct {
+            self.direct = direct;
+            self.direct_changed = true;
+        }
+    }
+
+    /// A web notification the host took. Hook for the mention Toast (#202): a notification whose route is a server's
+    /// channel is a `DirectEvent::Mention { name, channel_name }`. What Discord puts in a notification's title, body and
+    /// tag has not been seen on the TV PC, so none is guessed at: nothing is raised until that is known. The host
+    /// logs each one's lengths (below) so the first run shows what there is to go on.
+    fn notification_event(&self, _notified: &Notified) -> Option<DirectEvent> {
+        None
     }
 
     /// How the session stands, for the screens.
@@ -365,8 +630,9 @@ impl Session {
         let (commands, receive) = mpsc::channel();
         let report = self.report.clone();
         let wake = self.wake.clone();
-        let tell: Tell = Box::new(move |r| {
-            let _ = report.send(r);
+        let report = std::sync::Mutex::new(report);
+        let tell: Tell = Arc::new(move |r| {
+            let _ = report.lock().unwrap_or_else(|p| p.into_inner()).send(r);
             wake();
         });
         say(&format!("discord web: opening the web view (attempt {})", self.attempts));
@@ -387,10 +653,24 @@ impl Session {
         if self.web.state != state {
             say(&format!("discord web: {}", state.word()));
             self.web.state = state;
+            match state {
+                // Nothing of Discord's is kept past the session being up: forgotten on every way out of it.
+                WebState::Off | WebState::NoRuntime | WebState::SignedOut | WebState::SigningIn | WebState::Failed => {
+                    self.forget_direct();
+                }
+                // The page may have pushed before it was known to be signed in: asked again, so nothing is missed.
+                WebState::SignedIn => {
+                    if let Some(host) = &self.host {
+                        host.send(Command::Page(PageOp::Resend));
+                    }
+                }
+                WebState::Checking => {}
+            }
         }
         if state != WebState::SigningIn {
             self.web.field = None;
         }
+        self.refresh_direct();
     }
 
     /// Shows Discord's sign-in page over `area`, or puts it away (None). Only a change is sent.
@@ -483,6 +763,36 @@ impl Session {
                         self.web.kept = true;
                     }
                 }
+                Report::Page(json) => {
+                    if self.host.is_none() {
+                        continue;
+                    }
+                    let taken = self.reader.take(&json, self.open.as_ref().map(|o| o.as_str()));
+                    for line in &taken.log {
+                        say(line);
+                    }
+                    if taken.reset {
+                        self.forget_direct();
+                    }
+                    for event in taken.events {
+                        let event = self.with_picture(event);
+                        self.events.push(event);
+                    }
+                    if taken.changed {
+                        self.refresh_direct();
+                    }
+                }
+                Report::Notified(notified) => {
+                    self.notifications += 1;
+                    if self.notifications == 1 {
+                        say(&format!(
+                            "discord web: a web notification was taken ({notified:?}); Windows shows nothing"
+                        ));
+                    }
+                    if let Some(event) = self.notification_event(&notified) {
+                        self.events.push(event);
+                    }
+                }
                 Report::Field(field) => {
                     if self.shown.is_some() && self.web.field != field {
                         // The kind of field only: what is in it is never asked.
@@ -520,7 +830,34 @@ impl Session {
                 }
             }
         }
-        before != self.web
+        if self.pictures.pump() {
+            self.refresh_direct();
+        }
+        let failed = self.pictures.take_failures();
+        if !failed.is_empty() {
+            say(&format!("discord web: {} pictures could not be fetched ({})", failed.len(), failed[0]));
+        }
+        before != self.web || std::mem::take(&mut self.direct_changed)
+    }
+
+    /// The event with the picture it names, as far as it has come.
+    fn with_picture(&self, event: DirectEvent) -> DirectEvent {
+        match event {
+            DirectEvent::Message { channel, name, group, line, .. } => {
+                let picture = self.reader.dm(channel.as_str()).and_then(|d| self.pictures.get(&d.pic));
+                DirectEvent::Message { channel, name, group, line, picture }
+            }
+            DirectEvent::Ring(mut ring) => {
+                ring.picture = self
+                    .reader
+                    .rings
+                    .iter()
+                    .find(|r| r.channel == ring.channel.as_str())
+                    .and_then(|r| self.pictures.get(&r.pic));
+                DirectEvent::Ring(ring)
+            }
+            other => other,
+        }
     }
 }
 
@@ -549,12 +886,45 @@ impl Drop for Session {
 }
 
 pub(crate) fn say(line: &str) {
+    #[cfg(test)]
+    if tests::capture(line) {
+        return;
+    }
     log_line::write_line(format_args!("{line}"));
 }
 
 #[cfg(test)]
-mod tests {
+mod direct_tests;
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
+
+    thread_local! {
+        /// The log lines this thread's `say` collects while a test captures them, instead of writing them.
+        static LINES: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// Whether a test is capturing the log: then the line is kept for it.
+    pub(crate) fn capture(line: &str) -> bool {
+        LINES.with(|lines| match lines.borrow_mut().as_mut() {
+            Some(lines) => {
+                lines.push(line.to_string());
+                true
+            }
+            None => false,
+        })
+    }
+
+    /// Starts capturing this thread's log lines.
+    pub(crate) fn capturing() {
+        LINES.with(|lines| *lines.borrow_mut() = Some(Vec::new()));
+    }
+
+    /// The lines captured so far.
+    pub(crate) fn captured() -> Vec<String> {
+        LINES.with(|lines| lines.borrow().clone().unwrap_or_default())
+    }
 
     #[test]
     fn the_sign_in_page_is_zoomed_as_far_as_keeps_the_qr_panel() {

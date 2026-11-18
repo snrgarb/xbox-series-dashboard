@@ -8,9 +8,12 @@ description = "Discord's web session (#197): discord.com in a WebView2 on a thre
 [dependencies]
 log-line = { path = "../log-line" }
 model = { path = "../model" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The Direct Messages' avatars and icons, fetched from the CDN into memory (the voice part's avatars use the same).
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 
 [target.'cfg(windows)'.dependencies]
-serde_json = "1"
 # MIT; the WebView2 COM bindings Tauri's wry uses, on windows 0.62 as the workspace is. WebView2Loader.dll is loaded
 # at run time from beside dashboard.exe (docs/discord-web.md, "The loader"), so the Dashboard starts, and says no
 # runtime, where it is missing.
