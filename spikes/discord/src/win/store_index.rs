@@ -12,8 +12,9 @@ use crate::say;
 
 const INDEX_STORE: &str = include_str!("../js/index_store.js");
 
-/// webpack's module count, from the same probe chunk the store search uses; -1 if there is none.
-const MODULE_COUNT: &str = "(() => { const r = xsdRequire(); return r && r.c ? Object.keys(r.c).length : -1; })()";
+/// The loaded modules of every webpack runtime that answers the store search's probe chunk; -1 if none answers.
+const MODULE_COUNT: &str = "(() => { const all = xsdRequires(); \
+     return all.length ? all.reduce((n, r) => n + (r.c ? Object.keys(r.c).length : 0), 0) : -1; })()";
 
 /// Waits, capped at 15 s, until webpack's module cache stops growing (the same count over 2 s); logs it once.
 fn settle(host: &Host) {
@@ -57,14 +58,34 @@ pub fn build(host: &Host, options: &Options) -> Option<Index> {
         say!("index: stores found among {} modules: {}", v["modules"], line.join("; "));
     }
     let d = &v["diag"];
+    let runtimes: Vec<String> = d["runtimes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| format!("{} cached of {} factories", r["cache"], r["factories"]))
+        .collect();
+    say!("index: {} webpack runtimes answered the probe chunk: {}", runtimes.len(), runtimes.join("; "));
     say!(
-        "index: search: {} modules ({} factories), {} exports objects or functions, {} candidates, {} named stores, Flux registry {}",
+        "index: search: {} modules, {} exports objects or functions, {} candidates, {} named stores ({} via webpack), \
+         Flux registry {}, a dispatcher {}, React fiber route {}",
         d["modules"],
-        d["factories"],
         d["exportObjects"],
         d["candidates"],
         d["named"],
-        if d["registry"].as_i64().unwrap_or(-1) < 0 { "not reached".to_string() } else { format!("lists {}", d["registry"]) }
+        d["namedViaWebpack"],
+        if d["registry"].as_i64().unwrap_or(-1) < 0 {
+            "not reached".to_string()
+        } else {
+            format!("lists {}", d["registry"])
+        },
+        if d["dispatcher"] == true { "reached" } else { "not reached" },
+        match d["fiberNodes"].as_i64().unwrap_or(-1) {
+            -1 => "not taken".to_string(),
+            n => format!(
+                "from {} over {n} nodes",
+                d["fiberRoot"].as_str().filter(|s| !s.is_empty()).unwrap_or("no root")
+            ),
+        }
     );
     if v["ok"] != true {
         let names: Vec<&str> = d["names"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();

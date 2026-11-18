@@ -236,7 +236,11 @@ cache. The first TV run searched too early and too narrowly (102 modules, no sto
 until the module cache stops growing (capped at 15 s), takes every module's exports and each of their own properties
 as candidates (each read guarded), and finds a store first by its Flux name (`getName()` or
 `constructor.displayName`: `GuildStore`, `ChannelStore`, `GuildChannelStore`, `VoiceStateStore`, ...), then by
-methods on its prototype, adding Flux's own registry (`getAll()` on a store's parent class) if reachable. On a miss
+methods on its prototype, adding Flux's own registry (`getAll()` on a store's parent class) if reachable. The second TV run still saw 102
+modules beside 8776 factories: several webpack runtimes share the chunk global, each wraps `push` and answers the
+probe chunk with its own `require`, and only the last was kept. Now every runtime's answer is kept and every cache
+searched, the largest first (no unloaded factory is ever run). If no guild store turns up, a second route walks
+React's fiber tree from `#app-mount` (capped at 50k nodes) through props, hook state and context values. On a miss
 the log gives the module count, the exports, the named stores and the first 60 store class names. By method the
 search looks for: the guild store (`getGuilds`, `getGuild`), the
 channel store (`getChannel`, `getMutableGuildChannelsForGuild`; or the guild channel store's `getChannels`), the
