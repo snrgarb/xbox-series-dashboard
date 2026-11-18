@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use library::game_pass::{From, Hosts};
-use model::game_pass::{Catalogue, Locale, Region};
+use model::game_pass::{Catalogue, Locale, Region, Subscription};
 
 use crate::Args;
 
@@ -29,6 +29,8 @@ pub struct GamePass {
     choice: Mutex<Choice>,
     /// Windows' region and language, read once.
     windows: (Option<Region>, Option<String>),
+    /// Whether the account has PC Game Pass, judged once (`source_xbox::subscription`).
+    subscription: Subscription,
 }
 
 static SHARED: OnceLock<Arc<GamePass>> = OnceLock::new();
@@ -63,7 +65,19 @@ impl GamePass {
             region.map_or("not known".to_string(), |r| r.to_string()),
             windows.language.as_deref().unwrap_or("not known")
         );
-        Self { from, choice: Mutex::new(Choice { shown: true, chosen: None }), windows: (region, windows.language) }
+        let (subscription, how) = source_xbox::subscription::judged();
+        eprintln!("gamepass: subscription: {} ({how})", subscription.line().trim_start_matches("Game Pass: "));
+        Self {
+            from,
+            choice: Mutex::new(Choice { shown: true, chosen: None }),
+            windows: (region, windows.language),
+            subscription,
+        }
+    }
+
+    /// Whether the account has PC Game Pass, as judged at start.
+    pub fn subscription(&self) -> Subscription {
+        self.subscription
     }
 
     /// Windows' own region, for Settings' list.

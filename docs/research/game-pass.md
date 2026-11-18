@@ -94,6 +94,86 @@ MARKETS`, by the page's names. The lists answer 200 for every one of them (and f
 - `GetUserPreferredUILanguages` with `MUI_LANGUAGE_NAME`: the display languages by name, the first taken as the
   catalogue's language. https://learn.microsoft.com/en-us/windows/win32/api/winnls/nf-winnls-getuserpreferreduilanguages
 
+## 7. Whether the account has PC Game Pass (the subscription check)
+
+Asked: can an unpackaged program, with no sign-in or token of its own, tell whether the Microsoft account on this PC
+has PC Game Pass or Game Pass Ultimate? **No route found tells "subscribed now" without a sign-in; none open to it
+even tells "a Game Pass licence was seen on this PC".** Ranked, with what each would prove:
+
+| # | Route | Proves | Unpackaged, no sign-in? | Verdict |
+|---|---|---|---|---|
+| 1 | Microsoft's subscriptions service, `POST https://beige.xboxservices.com/PCGAFD/entitlements/subscriptions` with the plan ids (`CFQ7TTC0KGQ8` PC, `CFQ7TTC0KHS0` Ultimate, `CFQ7TTC0K6L8` console; `status: "Active"`) **[3P]** (`uxandai/launchme`, `helpers/xbox/src/library.rs`; `playportdev/playport`, `XboxEntitlements.swift`) | subscribed now | **No**: its `authorization` is a Microsoft account ticket for `www.microsoft.com`, which launchme gets by posing as Microsoft's own licensing client (`tokens.rs`): impersonation, out of bounds | the sign-in that would be needed |
+| 2 | Xbox Live OAuth with a registered app of our own (Playnite XboxLibrary: `login.live.com/oauth20_authorize.srf`, scope `Xboxlive.signin Xboxlive.offline_access`, then `user.auth` and `xsts.auth.xboxlive.com`) **[3P]** (`JosefNemec/PlayniteExtensions`, `XboxAccountClient.cs`) | the title history; Playnite reads no subscription at all | No: a sign-in in a browser window, and an app registration | see docs/research/owned-games.md (#276) |
+| 3 | `Windows.Services.Store.StoreContext` (`GetStoreProductsAsync`, `GetUserCollectionAsync`, `GetAppLicenseAsync`) for the plan ids | would be "this account has it" | **No**: it answers for "the current app" and its add-ons only; an unpackaged process has none **[docs]** (learn.microsoft.com, `StoreContext.GetUserCollectionAsync`: "the add-ons of the current app") | the probe prints what it answers |
+| 4 | `AppInstallManager` checks (`GetIsAppAllowedToInstallAsync`, `GetIsApplicableAsync`) on a Game Pass game | policy and device, not licence **[docs]** | Yes | says nothing of a subscription; its free-entitlement calls *claim*, a change, never used |
+| 5 | Gaming Services' registry, the Xbox app's `LocalState`/`LocalCache`, ClipSVC's `tokens.dat` | at most "a licence was seen" | Registry yes (same values for bought and Game Pass games **[3P]**); the rest protected or encrypted | nothing to read |
+
+**Built**: `source_xbox::subscription::judged` answers **can't tell**, with why, in the log at start
+(`gamepass: subscription: can't tell (no route tells without a sign-in: ...)`), and Settings > Launchers shows
+**Game Pass: can't tell** beside Show Game Pass games. The three answers exist (`model::game_pass::Subscription`:
+`Active` "a Game Pass licence was seen on this PC", never "subscribed now"; `NotFound`; `Unknown`) and
+`DASHBOARD_GAMEPASS_SUBSCRIPTION` (`active`, `none`, `unknown`) stands in for them. **Nothing depends on the answer**:
+the catalogue is listed whatever it is, and Install goes to the Store's queue, which refuses a game the account has no
+licence for (`0x803F8001`); the Dashboard then opens the Store's page, where the user subscribes or buys. Decided:
+the hub's Install stays **Install**, whatever the answer; the Store says the rest.
+
+**What would change this**: the probe (`e2e/htpc/probes/gamepass.ps1`, section 8) printing a `storecontext.product.
+CFQ7TTC0KGQ8` line with `in the user's collection True` from an unpackaged PowerShell: that would make route 3 work,
+and `judged` would ask it the same way the queue is asked.
+
+## 8. Installing through the Store's queue (#173)
+
+**What an unpackaged caller may call** **[docs]** (learn.microsoft.com, `Windows.ApplicationModel.Store.Preview.
+InstallControl.AppInstallManager`): the class's requirements list `runFullTrust`, and its remarks say "Access to this
+API is protected by a private capability that is restricted to apps that are developed by Microsoft". That restriction
+is enforced through a packaged app's manifest; an unpackaged process has no manifest, and is not refused for it
+**[3P]**: Chromium's browser process calls `StartProductInstallAsync` unpackaged to install the Windows App Runtime
+(`chrome/browser/webnn/win_app_runtime_installer.cc`), WSL's `wsl.exe` installs distributions with it
+(`src/windows/common/Distribution.cpp`), and Fleet and Atlas script it from PowerShell (elevated). So it is a support
+risk (Microsoft may close it), not a technical block. `StoreContext.RequestDownloadAndInstallStorePackagesAsync` is
+the current app's own packages only **[docs]**: not a route. `PackageManager.RemovePackageAsync(fullName)` works for
+the user's own packages from a normal, unelevated process **[docs]**.
+
+**Built** (`source_xbox::store_queue`, the one place every call is): `store_queue.ps1`, run by Windows PowerShell 5.1
+(`-EncodedCommand`, no window), loads the WinRT types and answers one line a call:
+
+- Install: `AppInstallManager.StartProductInstallAsync(productId, "", "xbox-series-dashboard", "", options)`, the
+  options for this user only (`InstallForAllUsers = false`), no forced restart, no launch, `TargetVolume` the
+  `PackageVolume` of the folder's drive (the Xbox app's folder there, from `.GamingRoot`).
+- Progress: `AppInstallItems`, each `GetCurrentStatus()`: `InstallState`, `PercentComplete`, `BytesDownloaded`,
+  `DownloadSizeInBytes`, `ErrorCode`; one `watch` process writes them as JSON once a second while the Dashboard runs
+  and the queue has anything. States: Pending, Starting, AcquiringLicense, ReadyToDownload are Queued; Downloading,
+  RestoringData, Installing are Downloading; Paused* are Paused; Completed, Canceled, Error end it.
+- Pause, resume, cancel: `AppInstallManager.Pause`, `Restart`, `Cancel` by product id.
+- Uninstall: `PackageManager.FindPackagesForUser("", family)` and `RemovePackageAsync(fullName)` for each.
+- Any refusal (`refused 0x... <why>`) falls back: install to the Store's page (`ms-windows-store://pdp/?ProductId=`),
+  uninstall to Settings' installed apps; the log says which and why.
+
+Log: `xbox: 9PD5BM2Z8C4L: asking the Store's queue to install Vampire Survivors onto D:\XboxGames`,
+`xbox: store queue: start 9PD5BM2Z8C4L D:\XboxGames -> started Pending (2310 ms)`, `xbox: 9PD5BM2Z8C4L: the Store's
+queue took Vampire Survivors (Pending)`, `xbox: store queue: watching the queue`, `xbox: 9PD5BM2Z8C4L: Vampire
+Survivors is Installing... (Downloading, 4%)`, `... installed: the Store says complete`; a refusal `xbox:
+9PD5BM2Z8C4L: the Store's queue did not take Vampire Survivors (0x803F8001 ...): opening ms-windows-store://pdp/
+?ProductId=9PD5BM2Z8C4L instead`.
+
+**Still guesses** (installs.md 12, X1 to X4): whether the queue takes a Game Pass GDK game for an unpackaged caller
+(the licence step, `AcquiringLicense`); whether `TargetVolume` puts it in the Xbox app's `XboxGames` folder or the
+drive's `WindowsApps`; whether installs the Xbox app starts are listed in `AppInstallItems` (only the Dashboard's own
+are followed); whether `RemovePackageAsync` removes `XboxGames\<game>` and leaves the Xbox app saying not installed;
+whether PowerShell's WinRT loading finds every type by the names `store_queue.ps1` tries.
+
+**The probe** (`e2e/htpc/probes/gamepass.ps1`, read-only) prints `key: value` lines: `process.elevated`,
+`store.installed`, `xboxapp.installed`, `gamingservices.installed`, `service.<name>`, `xboxapp.<folder>.files` and
+`.named` (names only), `registry.<key>` (key and value names only), `clipsvc.tokens`, `xbox.games.installed`,
+`storecontext.create`, `storecontext.user`, `storecontext.products.error`, `storecontext.product.<id>`,
+`storecontext.collection.count`, `storecontext.applicense`, `appinstallmanager.create`,
+`appinstallmanager.autoupdate`, `appinstallmanager.allowed.<id>`, `appinstallmanager.items` and
+`appinstallmanager.item.<id>`, `packagemanager.create`, `packagemanager.volume`, `gamingroot.<drive>`. Answers that
+would change the code: `appinstallmanager.create` not `ok` (the queue route is dead: fall back always);
+`appinstallmanager.items` failing while `create` is ok (progress from the package manager instead);
+`storecontext.product.CFQ7TTC0KGQ8 ... in the user's collection True` (the subscription check gains a route);
+`packagemanager.volume` without the drive the Xbox app installs to (`TargetVolume` left to the Store).
+
 ## 6. What is not known
 
 - **Whether the user subscribes.** Nothing here says; the Dashboard lists the catalogue as what can be installed

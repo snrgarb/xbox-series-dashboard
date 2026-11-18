@@ -615,8 +615,10 @@ impl Store {
     /// Settings' options as the database has them: each its default until it has been set. Those that are set
     /// are said in the log, which is how a test knows a change outlived the Dashboard that made it.
     pub fn options(&self) -> Options {
-        let windows_region = crate::game_pass::get().and_then(|game_pass| game_pass.windows_region());
-        Options { windows_region, ..self.options_kept() }
+        let game_pass = crate::game_pass::get();
+        let windows_region = game_pass.as_ref().and_then(|game_pass| game_pass.windows_region());
+        let game_pass_subscription = game_pass.map(|game_pass| game_pass.subscription()).unwrap_or_default();
+        Options { windows_region, game_pass_subscription, ..self.options_kept() }
     }
 
     /// The Game Pass catalogue's region, None for Windows' (Settings > Launchers): saved, and in force for the next

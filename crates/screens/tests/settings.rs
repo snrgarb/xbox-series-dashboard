@@ -507,6 +507,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         show_game_pass: true,
         game_pass_region: None,
         windows_region: None,
+        game_pass_subscription: model::game_pass::Subscription::Unknown,
     };
     assert_eq!(dashboard.options(), left);
 
