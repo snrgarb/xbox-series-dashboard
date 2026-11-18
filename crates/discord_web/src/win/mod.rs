@@ -9,35 +9,46 @@ use model::discord_web::{WebField, WebState};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_APP};
 
-use crate::{say, Command, Report};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+
+use crate::{say, Command, Report, Spawned, Tell};
 
 mod host;
 
-pub type Tell = Box<dyn Fn(Report) + Send>;
-
 /// Starts the host thread. `Err` (no runtime) when the loader is not beside the exe or finds no WebView2 runtime:
-/// then nothing is started. What comes back wakes the thread to read its commands.
-pub fn spawn(
-    folder: PathBuf,
-    base: String,
-    commands: Receiver<Command>,
-    tell: Tell,
-) -> Result<Box<dyn Fn() + Send>, String> {
+/// then nothing is started and the loader is let go. The thread initialises COM for itself (WebView2 needs a
+/// single-threaded apartment on the thread that makes it) and uninitialises it, its window, web view and loader all
+/// released, before its last report, `Ended`.
+pub(crate) fn spawn(folder: PathBuf, base: String, commands: Receiver<Command>, tell: Tell) -> Result<Spawned, String> {
     let loader = host::Loader::load()?;
     let version = loader.runtime_version()?;
     say(&format!("discord web: WebView2 runtime {version}, loader {}", loader.path.display()));
     let (id_tx, id_rx) = mpsc::channel();
-    std::thread::Builder::new()
+    let thread = std::thread::Builder::new()
         .name("discord web".into())
         .spawn(move || {
             let _ = id_tx.send(unsafe { windows::Win32::System::Threading::GetCurrentThreadId() });
-            run(loader, folder, base, commands, tell);
+            let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+            let signed_out = if com.is_err() {
+                say(&format!("discord web: the web view could not be opened: COM: {com:?}"));
+                tell(Report::State(WebState::Failed));
+                drop(loader);
+                None
+            } else {
+                let signed_out = run(loader, folder, base, commands, &tell);
+                unsafe { CoUninitialize() };
+                signed_out
+            };
+            tell(Report::Ended { signed_out });
         })
         .map_err(|e| format!("the host thread: {e}"))?;
     let id = id_rx.recv_timeout(Duration::from_secs(5)).map_err(|e| format!("the host thread: {e}"))?;
-    Ok(Box::new(move || unsafe {
-        let _ = PostThreadMessageW(id, WM_APP, WPARAM(0), LPARAM(0));
-    }))
+    Ok(Spawned {
+        poke: Box::new(move || unsafe {
+            let _ = PostThreadMessageW(id, WM_APP, WPARAM(0), LPARAM(0));
+        }),
+        thread,
+    })
 }
 
 /// The runtime the loader finds, with nothing started: Settings' no-runtime before any web view is wanted.
@@ -49,14 +60,21 @@ pub fn runtime() -> Result<String, String> {
 const LOOK_SHOWN: Duration = Duration::from_millis(250);
 const LOOK_HIDDEN: Duration = Duration::from_millis(1500);
 
-fn run(loader: host::Loader, folder: PathBuf, base: String, commands: Receiver<Command>, tell: Tell) {
+/// The web view's life on this thread; what a sign-out removed, if it was one. Everything it made is released by
+/// the time it returns.
+fn run(
+    loader: host::Loader,
+    folder: PathBuf,
+    base: String,
+    commands: Receiver<Command>,
+    tell: &Tell,
+) -> Option<Result<(), String>> {
     let host = match host::Host::open(&loader, &folder) {
         Ok(host) => host,
         Err(e) => {
             say(&format!("discord web: the web view could not be opened: {e}"));
             tell(Report::State(WebState::Failed));
-            tell(Report::Ended { signed_out: None });
-            return;
+            return None;
         }
     };
     // The page is told it has focus whether or not its window has (the spike's lesson: keys and Enter reach a
@@ -71,8 +89,9 @@ fn run(loader: host::Loader, folder: PathBuf, base: String, commands: Receiver<C
         host::pump(Duration::from_millis(if shown { 100 } else { 500 }));
         if host::closed() {
             say("discord web: the web view's window was closed");
-            tell(Report::Ended { signed_out: None });
-            return;
+            host.close();
+            tell(Report::State(WebState::Failed));
+            return None;
         }
         loop {
             let command = match commands.try_recv() {
@@ -104,15 +123,13 @@ fn run(loader: host::Loader, folder: PathBuf, base: String, commands: Receiver<C
                 Command::Stop => {
                     host.close();
                     say("discord web: the web view is closed; the session is kept");
-                    tell(Report::Ended { signed_out: None });
-                    return;
+                    return None;
                 }
                 Command::SignOut => {
                     host.close();
                     // The browser processes let go of the folder once they have ended.
                     let removed = crate::remove(&folder, 10, Duration::from_millis(500));
-                    tell(Report::Ended { signed_out: Some(removed) });
-                    return;
+                    return Some(removed);
                 }
             }
         }

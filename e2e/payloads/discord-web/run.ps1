@@ -32,7 +32,30 @@ function Focus-Now { [string] (Focus-Lines | Select-Object -Last 1) }
 
 $Gap = 150
 
+# The guard against a web view started over and over (#291 froze the TV PC that way): more than this many attempts
+# in one run of the Dashboard, and the test kills it, and the web views of its own data folder, at once and fails.
+$MostAttempts = 5
+
+# The Dashboard and the msedgewebview2 processes of this test's own data folder (never another program's), stopped.
+function Stop-Everything {
+    Stop-Dashboard
+    Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($data) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Test-Storm {
+    $log = @(Get-DashboardLog)
+    $checking = @($log | Where-Object { $_ -match "^discord web: checking$" }).Count
+    $opening = @($log | Where-Object { $_ -match "^discord web: opening the web view" }).Count
+    if ($checking -gt $MostAttempts -or $opening -gt $MostAttempts) {
+        Stop-Everything
+        throw "a web view started over and over ($checking checking, $opening opening lines): the Dashboard was killed"
+    }
+}
+
 function Tap([string] $Button) {
+    Test-Storm
     Push-Button $Button
     Start-Sleep -Milliseconds $Gap
 }
@@ -74,8 +97,16 @@ function Walk([string] $Button, [string] $Expect, [int] $Most = 8) {
     Say "$Button until $(Focus-Now)"
 }
 
+# Waits for a log line after $Mark, looking for a storm of attempts every quarter second meanwhile.
 function Expect-Log([string] $Pattern, [double] $Seconds, [int] $Mark, [string] $What) {
-    $line = Wait-DashboardLog $Pattern $Seconds $Mark
+    $line = $null
+    $until = (Get-Date).AddSeconds($Seconds)
+    while (-not $line -and (Get-Date) -lt $until) {
+        Test-Storm
+        $line = Get-DashboardLog | Select-Object -Skip $Mark | Where-Object { $_ -match $Pattern } | Select-Object -First 1
+        if (-not $line) { Start-Sleep -Milliseconds 250 }
+    }
+    Test-Storm
     if ($line) { Say "$What`: $line" } else { $script:failures += "$What`: no line matching '$Pattern' in $Seconds s" }
     $line
 }
@@ -197,7 +228,7 @@ try {
 } finally {
     $failures | ForEach-Object { Say "failed: $_" }
     Say "result: $result"
-    Stop-Dashboard
+    Stop-Everything
     if ($fake -and -not $fake.HasExited) { Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue }
     Disconnect-Pad
 }

@@ -27,6 +27,26 @@ Dashboard's thread sends it commands over a channel and wakes it with a thread m
 session stands and wakes the Dashboard's event loop. As the spike measured it, a hidden discord.com costs about
 400 MB and under 1% of a core at rest: the price of turning it on.
 
+## A failure rests
+
+The first build of this (#291) froze the TV PC. Its host thread never initialised COM, so every web view failed to
+open. When a failed host thread ended, the session started another at once, because the sign-in page was still up.
+That made about 130 attempts a second, and each left its window, thread and loader behind until Windows ran out.
+Now:
+
+- The host thread calls `CoInitializeEx(COINIT_APARTMENTTHREADED)` before making the environment, and
+  `CoUninitialize` after. Its window is destroyed on a failed open, and its loader (`FreeLibrary`) let go, before
+  its last report.
+- **One host thread at most**, joined before another may start.
+- **Failed is a resting state.** Only the user starts another attempt: the switch turned on, or Sign in. The
+  session never retries on its own, from a frame, a report or a host ending. Only a host ended on purpose (another
+  Profile, a sign-out) is followed by a new one.
+- **A cap**: after `MOST_FAILURES` (3) failed opens in a run, nothing more is tried until the Dashboard starts again.
+  The log says so once.
+- The runtime check (no runtime) is asked once a run, and again only when the switch is turned on.
+- The log has one `discord web: opening the web view (attempt N)` line an attempt. The payload kills the Dashboard,
+  and the web views of its own data folder, if more than 5 attempts show.
+
 ## The states
 
 `model::discord_web::WebState`, shown on Settings' status line and logged as `discord web: <word>`:

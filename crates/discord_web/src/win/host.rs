@@ -31,6 +31,7 @@ type RuntimeVersion = unsafe extern "system" fn(PCWSTR, *mut PWSTR) -> HRESULT;
 /// WebView2Loader.dll, from beside dashboard.exe. Loaded by hand rather than linked, so the Dashboard starts, and
 /// says there is no runtime, on a PC without it.
 pub struct Loader {
+    module: HMODULE,
     create: CreateEnvironment,
     version: RuntimeVersion,
     pub path: PathBuf,
@@ -38,6 +39,13 @@ pub struct Loader {
 
 // The loader's two functions may be called from any thread.
 unsafe impl Send for Loader {}
+
+/// Each Loader is one LoadLibrary, let go with it: nothing is left loaded by an attempt that failed.
+impl Drop for Loader {
+    fn drop(&mut self) {
+        let _ = unsafe { FreeLibrary(self.module) };
+    }
+}
 
 impl Loader {
     pub fn load() -> Result<Loader, String> {
@@ -54,6 +62,7 @@ impl Loader {
             let version = GetProcAddress(module, s!("GetAvailableCoreWebView2BrowserVersionString"))
                 .ok_or("WebView2Loader.dll has no GetAvailableCoreWebView2BrowserVersionString")?;
             Ok(Loader {
+                module,
                 create: std::mem::transmute::<unsafe extern "system" fn() -> isize, CreateEnvironment>(create),
                 version: std::mem::transmute::<unsafe extern "system" fn() -> isize, RuntimeVersion>(version),
                 path,
@@ -142,8 +151,16 @@ pub struct Host {
 }
 
 impl Host {
+    /// The web view in a window of its own. On any failure the window is destroyed before the error comes back:
+    /// an attempt that fails leaves nothing behind.
     pub fn open(loader: &Loader, data: &Path) -> Result<Host, String> {
         let hwnd = window()?;
+        Self::open_in(hwnd, loader, data).inspect_err(|_| unsafe {
+            let _ = DestroyWindow(hwnd);
+        })
+    }
+
+    fn open_in(hwnd: HWND, loader: &Loader, data: &Path) -> Result<Host, String> {
         std::fs::create_dir_all(data).map_err(|e| format!("cannot make the session's folder: {e}"))?;
         let started = Instant::now();
         let options: ICoreWebView2EnvironmentOptions = CoreWebView2EnvironmentOptions::default().into();
