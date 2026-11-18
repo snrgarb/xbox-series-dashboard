@@ -963,12 +963,35 @@ impl App {
         self.now_playing_said = line;
     }
 
+    /// Discord as the screens are to show it: the RPC connection's, with the Call, the user, the Servers Flyout and
+    /// the Shortcuts the web session's while its voice is ready (#297, docs/discord-web.md "Voice"). The RPC
+    /// connection's settings (its application, tokens and status line) stay its own.
+    fn discord_for_screens(&self) -> model::discord::Discord {
+        let mut discord = self.discord.discord().clone();
+        if self.discord_web.voice_ready() {
+            discord.connected = true;
+            discord.connecting = false;
+            discord.retrying = false;
+            discord.needs_reconnect = false;
+            discord.user = self.discord_web.me().map(|me| me.as_str().to_string());
+            discord.voice = self.discord_web.voice().clone();
+            discord.browse = self.discord_web.browse().clone();
+            discord.shortcuts = self.discord_web.shortcuts().to_vec();
+        }
+        discord
+    }
+
+    fn push_discord(&mut self) {
+        let discord = self.discord_for_screens();
+        self.dashboard.set_discord(&discord);
+    }
+
     /// Takes in what Discord said and the time, and has the Dashboard show how the connection is now. How soon it
     /// wants another turn: its next timer (a try again, a refresh), None with none.
     fn follow_discord(&mut self) -> Option<Duration> {
         let (focus, guide) = (self.dashboard.focus_line(), self.dashboard.guide_line());
         if self.discord.pump(SystemTime::now()) {
-            self.dashboard.set_discord(self.discord.discord());
+            self.push_discord();
             self.stale = true;
             // The Discord tab on the Overlay follows the Call too.
             self.overlay_stale = true;
@@ -1002,7 +1025,10 @@ impl App {
         // The screens' asks in answer come back as `Effect::Direct` from `carry_out`.
         if pumped {
             self.dashboard.set_direct(self.discord_web.direct());
+            // The web session's voice, when it is ready, is the Discord tab's (#297).
+            self.push_discord();
             self.stale = true;
+            self.overlay_stale = true;
         }
         for event in self.discord_web.take_events() {
             self.dashboard.direct_event(&event);
@@ -1164,8 +1190,22 @@ impl App {
                 }
                 // Settings > Discord: the connection does it, and the page shows how it is after.
                 Effect::Discord(ask) => {
-                    self.discord.ask(ask, shell::clipboard::text);
-                    self.dashboard.set_discord(self.discord.discord());
+                    // Voice (the Call, joining, the Servers Flyout, Shortcuts) goes through the web session once it
+                    // is ready (#297); the application's settings and the rest stay with the RPC connection.
+                    let voice = matches!(
+                        ask,
+                        model::discord::Ask::Call(_)
+                            | model::discord::Ask::Join(_)
+                            | model::discord::Ask::RemoveShortcut(_)
+                            | model::discord::Ask::Browse(_)
+                    );
+                    if voice && self.discord_web.voice_ready() {
+                        self.discord_web.ask_voice(ask);
+                        self.follow_discord_web();
+                    } else {
+                        self.discord.ask(ask, shell::clipboard::text);
+                    }
+                    self.push_discord();
                     self.stale = true;
                 }
                 // Settings > System: done off the frame's thread, and the page shows how it stands after.
