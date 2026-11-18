@@ -16,6 +16,14 @@
 // with `world.captcha` nothing is sent and a captcha frame appears. Fake `createPendingReply`/`deletePendingReply`,
 // `addReaction`/`removeReaction`, `ack`, `deleteMessage` are exported by the same shapes as the real ones. What the fake
 // received is in `world.received` (and `world.onReceived(entry)`, for the stand-in to report).
+//
+// Voice (#297): fake GuildStore (3 made-up servers), ChannelStore's `getMutableGuildChannelsForGuild` and GuildChannelStore
+// with voice channels (some occupied), VoiceStateStore, SpeakingStore, MediaEngineStore, SelectedChannelStore,
+// RTCConnectionStore, GuildMemberStore, SortedGuildStore, PermissionStore, and the actions `selectVoiceChannel` (connects
+// `world.connectMs` later, 300), `toggleSelfMute`/`toggleSelfDeaf`, `ring`/`stopRinging`, exported by the same shapes.
+// `opts.noActions` also takes "voice", "media", "call". What the fake received of voice is in `world.received` as
+// {kind: "join"|"leave"|"mute"|"deafen"|"ring"|"stop-ringing", channel?}. Controls: world.voiceSpeak(user, on),
+// world.voiceJoin(channel, user), world.voiceLeave(user) (the signed-in user when none is named).
 function installFakeDiscord(window, opts) {
   opts = Object.assign({ seed: true, hide: [], noMethod: [], markReadOnOpen: true, noActions: [], reactForm: "positional" }, opts || {});
   const ME = "300000000000000099";
@@ -58,6 +66,17 @@ function installFakeDiscord(window, opts) {
     onReceived: null,
     onCaptcha: null,
     onDialog: null,
+    guilds: {},
+    guildOrder: [],
+    voiceStates: {},
+    speaking: new Set(),
+    selfMute: false,
+    selfDeaf: false,
+    voiceChannel: null,
+    rtcConnected: false,
+    nicks: {},
+    noConnect: [],
+    connectMs: 300,
   };
   const emit = (...names) => { for (const n of names) if (world.stores[n]) world.stores[n].emitChange(); };
   const cnt = (id) => world.read[id] || (world.read[id] = { unread: 0, mentions: 0, oldest: null, ack: null });
@@ -78,6 +97,11 @@ function installFakeDiscord(window, opts) {
   mk("ChannelStore", {
     getChannel: (id) => world.channels[id],
     hasChannel: (id) => !!world.channels[id],
+    getMutableGuildChannelsForGuild: (gid) => {
+      const out = {};
+      for (const c of Object.values(world.channels)) if (c.guild_id === gid) out[c.id] = c;
+      return out;
+    },
   });
   mk("PrivateChannelSortStore", {
     getPrivateChannelIds: () => world.order.slice(),
@@ -111,7 +135,32 @@ function installFakeDiscord(window, opts) {
     getPendingReply: (id) => (world.pending[id] ? { channelId: id, message: world.pending[id] } : undefined),
   });
   // Stores the page has that this code does not read: only there to make the registry realistic.
-  mk("GuildStore", { getGuilds: () => ({}), getGuild: () => undefined });
+  mk("GuildStore", { getGuilds: () => world.guilds, getGuild: (id) => world.guilds[id] });
+  mk("GuildChannelStore", {
+    getChannels: (gid) => {
+      const vocal = Object.values(world.channels).filter((c) => c.guild_id === gid && (c.type === 2 || c.type === 13));
+      return { SELECTABLE: [], VOCAL: vocal.sort((a, b) => a.position - b.position).map((channel) => ({ channel, comparator: channel.position })) };
+    },
+    getDefaultChannel: () => undefined,
+  });
+  mk("VoiceStateStore", {
+    getVoiceStatesForChannel: (id) => {
+      const out = {};
+      for (const s of world.voiceStates[id] || []) out[s.userId] = Object.assign({}, s);
+      return out;
+    },
+    getVoiceStateForUser: (uid) => {
+      for (const arr of Object.values(world.voiceStates)) { const s = arr.find((x) => x.userId === uid); if (s) return Object.assign({}, s); }
+      return undefined;
+    },
+  });
+  mk("SpeakingStore", { isSpeaking: (uid) => world.speaking.has(uid) });
+  mk("MediaEngineStore", { isSelfMute: () => world.selfMute, isSelfDeaf: () => world.selfDeaf });
+  mk("SelectedChannelStore", { getVoiceChannelId: () => world.voiceChannel });
+  mk("RTCConnectionStore", { isConnected: () => world.rtcConnected, getState: () => (world.rtcConnected ? "RTC_CONNECTED" : "RTC_DISCONNECTED") });
+  mk("GuildMemberStore", { getNick: (gid, uid) => (world.nicks[gid] && world.nicks[gid][uid]) || null });
+  mk("SortedGuildStore", { getFlattenedGuildIds: () => world.guildOrder.slice() });
+  mk("PermissionStore", { can: (perm, channel) => { if (typeof perm !== "bigint") throw new Error("bad permission"); return !world.noConnect.includes(channel.id); } });
   const actions = {
     fetchMessages(args) {
       world.fetchLog.push(args);
@@ -191,6 +240,66 @@ function installFakeDiscord(window, opts) {
     },
   };
 
+  // ---- voice: Discord's own functions, by the shapes the page script looks for
+  const setVoiceState = (channel, userId, flags) => {
+    for (const k of Object.keys(world.voiceStates)) {
+      world.voiceStates[k] = world.voiceStates[k].filter((s) => s.userId !== userId);
+      if (!world.voiceStates[k].length) delete world.voiceStates[k];
+    }
+    if (channel) (world.voiceStates[channel] = world.voiceStates[channel] || []).push(Object.assign({ userId, channelId: channel, selfMute: false, selfDeaf: false, mute: false, deaf: false }, flags || {}));
+  };
+  const myState = () => { for (const arr of Object.values(world.voiceStates)) { const s = arr.find((x) => x.userId === ME); if (s) return s; } return null; };
+  let connecting = 0;
+  const voiceActions = {
+    selectVoiceChannel(channelId) {
+      const my = ++connecting;
+      if (!channelId) {
+        note({ kind: "leave" });
+        world.voiceChannel = null;
+        world.rtcConnected = false;
+        setVoiceState(null, ME);
+        emit("SelectedChannelStore", "RTCConnectionStore", "VoiceStateStore");
+        return Promise.resolve();
+      }
+      if (!world.channels[channelId]) return Promise.reject(new Error("unknown channel"));
+      note({ kind: "join", channel: channelId });
+      world.voiceChannel = channelId;
+      world.rtcConnected = false;
+      emit("SelectedChannelStore", "RTCConnectionStore");
+      setTimeout(() => {
+        if (my !== connecting) return;
+        setVoiceState(channelId, ME, { selfMute: world.selfMute, selfDeaf: world.selfDeaf });
+        world.rtcConnected = true;
+        // Joining a DM that rings the user answers it: the ring ends.
+        if (world.calls[channelId]) delete world.calls[channelId];
+        emit("VoiceStateStore", "RTCConnectionStore", "CallStore");
+      }, world.connectMs);
+      return Promise.resolve();
+    },
+  };
+  const mediaActions = {
+    toggleSelfMute() {
+      world.selfMute = !world.selfMute;
+      const s = myState(); if (s) s.selfMute = world.selfMute;
+      note({ kind: "mute" });
+      emit("MediaEngineStore", "VoiceStateStore");
+    },
+    toggleSelfDeaf() {
+      world.selfDeaf = !world.selfDeaf;
+      const s = myState(); if (s) s.selfDeaf = world.selfDeaf;
+      note({ kind: "deafen" });
+      emit("MediaEngineStore", "VoiceStateStore");
+    },
+  };
+  const callActions = {
+    ring(channelId) { note({ kind: "ring", channel: channelId }); },
+    stopRinging(channelId) {
+      note({ kind: "stop-ringing", channel: channelId });
+      delete world.calls[channelId];
+      emit("CallStore");
+    },
+  };
+
   // ---- webpack: two runtimes share the global, each answers a probe chunk with its own require.
   const mod = (exports) => ({ exports });
   const big = { c: {}, m: {} };
@@ -207,6 +316,9 @@ function installFakeDiscord(window, opts) {
   if (!opts.noActions.includes("react")) big.c[++n] = mod({ Rx: reactActions });
   if (!opts.noActions.includes("ack")) big.c[++n] = mod({ Ak: ackActions });
   if (!opts.noActions.includes("forget")) big.c[++n] = mod({ Ms: messageActions });
+  if (!opts.noActions.includes("voice")) big.c[++n] = mod({ Vx: voiceActions });
+  if (!opts.noActions.includes("media")) big.c[++n] = mod({ Me: mediaActions });
+  if (!opts.noActions.includes("call")) big.c[++n] = mod({ Ca: callActions });
   const chunk = [];
   const runtimes = [big, small];
   chunk.push = function (item) {
@@ -352,12 +464,33 @@ function installFakeDiscord(window, opts) {
     else delete world.calls[channel];
     emit("CallStore");
   };
+  world.voiceSpeak = (user, on) => { if (on) world.speaking.add(user); else world.speaking.delete(user); emit("SpeakingStore"); };
+  world.voiceJoin = (channel, user) => {
+    if (user === ME) { voiceActions.selectVoiceChannel(channel); return; }
+    setVoiceState(channel, user);
+    emit("VoiceStateStore");
+  };
+  world.voiceLeave = (user) => {
+    if (!user || user === ME) {
+      world.voiceChannel = null; world.rtcConnected = false; setVoiceState(null, ME);
+      emit("SelectedChannelStore", "RTCConnectionStore", "VoiceStateStore");
+    } else { world.speaking.delete(user); setVoiceState(null, user); emit("VoiceStateStore", "SpeakingStore"); }
+  };
+  world.addGuild = (id, name, icon, channels) => {
+    world.guilds[id] = { id, name, icon: icon || null };
+    world.guildOrder.push(id);
+    for (const c of channels || []) world.channels[c.id] = Object.assign({ guild_id: id, position: 0, parent_id: null }, c);
+    emit("GuildStore", "ChannelStore", "SortedGuildStore");
+  };
   world.signOut = (gone) => { world.signedOut = gone !== false; emit("UserStore"); };
   world.apply = (cmd) => {
     switch (cmd.do) {
       case "say": world.say(cmd.channel, cmd.author || world.channels[cmd.channel].recipients[0], cmd.text); break;
       case "unread": world.setUnread(cmd.channel, cmd.count); break;
       case "ring": world.ring(cmd.channel, !!cmd.on); break;
+      case "voice-speak": world.voiceSpeak(cmd.user, !!cmd.on); break;
+      case "voice-join": world.voiceJoin(cmd.channel, cmd.user); break;
+      case "voice-leave": world.voiceLeave(cmd.user); break;
       case "send-fails": world.sendFails = !!cmd.on; world.failReason = cmd.reason || ""; break;
       case "captcha": world.setCaptcha(!!cmd.on); break;
       case "slow": world.slowMs = Math.max(0, Number(cmd.ms) || 0); break;
@@ -406,6 +539,19 @@ function installFakeDiscord(window, opts) {
     world.setUnread("100000000000000011", 0);
     world.order = ["100000000000000002", "100000000000000010", "100000000000000001", "100000000000000003", "100000000000000011"];
     emit("PrivateChannelSortStore");
+    // Voice: three made-up servers (in the user's own order, not by name), voice channels, some occupied.
+    world.addGuild("400000000000000001", "Stand-in Server", "gha", [
+      { id: "500000000000000001", name: "Lounge", type: 2, position: 0 },
+      { id: "500000000000000002", name: "Games", type: 2, position: 1 },
+      { id: "500000000000000003", name: "chat", type: 0, position: 0 },
+      { id: "500000000000000004", name: "Stage", type: 13, position: 2 },
+    ]);
+    world.addGuild("400000000000000003", "Made-up Place", "ghc", [{ id: "500000000000000021", name: "Quiet", type: 2, position: 0 }, { id: "500000000000000022", name: "Private Vault", type: 2, position: 1 }]);
+    world.addGuild("400000000000000002", "Test Guild", null, [{ id: "500000000000000011", name: "Voice 1", type: 2, position: 0 }]);
+    world.noConnect = ["500000000000000022"];
+    world.nicks["400000000000000001"] = { [a]: "Lounge Regular" };
+    world.voiceStates["500000000000000001"] = [{ userId: a, channelId: "500000000000000001", selfMute: false, selfDeaf: false, mute: false, deaf: false }];
+    world.voiceStates["500000000000000011"] = [{ userId: b, channelId: "500000000000000011", selfMute: true, selfDeaf: false, mute: false, deaf: false }];
   }
   return world;
 }

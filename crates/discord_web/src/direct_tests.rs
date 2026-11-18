@@ -254,22 +254,6 @@ fn older_does_nothing_where_discords_action_was_not_found() {
 }
 
 #[test]
-fn the_asks_not_built_yet_say_so_once_by_kind() {
-    let data = tempfile::tempdir().unwrap();
-    let (mut s, fake) = signed_in(data.path());
-    capturing();
-    fake.asked();
-    for _ in 0..2 {
-        s.ask_direct(DirectAsk::Call(ANA.into()));
-        s.ask_direct(DirectAsk::Answer(ANA.into()));
-        s.ask_direct(DirectAsk::Decline(ANA.into()));
-    }
-    let lines: Vec<String> = captured().into_iter().filter(|l| l.contains("not built yet")).collect();
-    assert_eq!(lines, ["call", "answer", "decline"].map(|k| format!("discord web: {k} not built yet")));
-    assert!(fake.asked().is_empty(), "none of them reaches the page");
-}
-
-#[test]
 fn events_are_taken_once_and_nothing_for_what_was_unread_at_the_start() {
     let data = tempfile::tempdir().unwrap();
     let (mut s, fake) = signed_in(data.path());
@@ -609,7 +593,7 @@ fn an_ask_while_the_session_is_not_up_is_not_sent_at_once() {
     assert!(captured().contains(&"discord web: not sent: not signed in".to_string()));
     s.ask_direct(DirectAsk::MarkRead(ANA.into()));
     s.ask_direct(DirectAsk::Call(ANA.into()));
-    assert!(captured().contains(&"discord web: call not built yet".to_string()));
+    assert!(captured().contains(&"discord web: join not done: not ready".to_string()));
 }
 
 #[test]
@@ -667,4 +651,349 @@ fn the_log_of_acting_has_no_text_id_emoji_or_reason() {
     }
     let shown: String = s.take_events().iter().map(|e| format!("{e:?}")).collect();
     assert!(!shown.contains("private reason"), "{shown}");
+}
+
+// ---- voice (#297)
+
+const VOICE_OK: &str = r#"{"k":"health","ok":true,"found":{"channels":["ChannelStore","getChannel"],"messages":["MessageStore","getMessages"],"voice":["VoiceStateStore","getVoiceStatesForChannel"],"media":["MediaEngineStore","isSelfMute"],"guilds":["GuildStore","getGuilds"],"voiceActions":["(by shape)","selectVoiceChannel"],"speaking":["SpeakingStore","isSpeaking"]},"missing":[],"voice_missing":[]}"#;
+
+const LOUNGE: &str = "500000000000000001";
+const PLACE: &str = "400000000000000001";
+
+/// A Call in a made-up server's channel: the user and one other, who is muted; `joined` is the user's own voice state.
+fn call_json(channel: &str, people: usize, joined: bool, mute: bool) -> String {
+    let others: Vec<String> = (0..people.saturating_sub(1))
+        .map(|i| {
+            format!(
+                r#"{{"id":"{}","name":"Pal Number{i}","avatar":"hh","muted":true,"deafened":false,"me":false}}"#,
+                1 + i
+            )
+        })
+        .collect();
+    let mut all = others;
+    if people > 0 {
+        all.push(r#"{"id":"9","name":"Me Myself","avatar":"","muted":false,"deafened":false,"me":true}"#.into());
+    }
+    format!(
+        r#"{{"k":"voice","me":"Me Myself","channel":"{channel}","title":"Secret Lounge","guild":{{"id":"{PLACE}","name":"Secret Place","icon":"gh"}},"dm":false,"people":[{}],"speaking":["1"],"mute":{mute},"deaf":false,"rtc":{joined},"in":{joined}}}"#,
+        all.join(",")
+    )
+}
+
+fn voice_session(data: &Path) -> (Session, Fake) {
+    let (mut s, fake) = signed_in(data);
+    fake.page(VOICE_OK);
+    fake.page(&list(&[]));
+    s.pump();
+    (s, fake)
+}
+
+fn done(seq: u64) -> String {
+    format!(r#"{{"k":"act","seq":{seq},"stage":"done"}}"#)
+}
+
+#[test]
+fn voice_is_ready_once_its_stores_are_found_and_a_missing_one_is_never_the_dms_break() {
+    let data = tempfile::tempdir().unwrap();
+    capturing();
+    let (mut s, fake) = signed_in(data.path());
+    fake.page(OK);
+    fake.page(&list(&[dm_json(ANA, "Ana Example", 0)]));
+    s.pump();
+    assert_eq!((s.direct().state, s.voice_ready()), (DirectState::Ready, false), "the DM stores alone: no voice");
+    fake.page(r#"{"k":"health","ok":true,"found":{"channels":["ChannelStore","getChannel"],"guilds":["GuildStore","getGuilds"]},"missing":[],"voice_missing":["voice","voiceActions.selectVoiceChannel"]}"#);
+    s.pump();
+    assert_eq!(
+        (s.direct().state, s.voice_ready()),
+        (DirectState::Ready, false),
+        "a missing voice store: never PageChanged"
+    );
+    fake.page(VOICE_OK);
+    s.pump();
+    assert!(s.voice_ready());
+    fake.say(Report::State(WebState::SignedOut));
+    s.pump();
+    assert!(!s.voice_ready());
+    let lines = captured();
+    assert!(lines.iter().any(|l| l == "discord web: voice store \"voice\" no longer answers"), "{lines:?}");
+    assert!(
+        lines.iter().any(|l| l == "discord web: voice store \"voiceActions\" no longer answers (selectVoiceChannel)"),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|l| l == "discord web: voice stores found: guilds"), "{lines:?}");
+    assert!(
+        lines.iter().any(|l| l == "discord web: voice stores found: guilds, media, speaking, voice, voiceActions"),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|l| l == "discord web: the voice stores answer again"), "{lines:?}");
+}
+
+#[test]
+fn the_call_is_the_models_with_the_user_first_and_pump_says_when_it_changed() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = voice_session(data.path());
+    assert!(s.voice().call.is_none() && s.me().is_none() && !s.voice().mute);
+    fake.page(&call_json(LOUNGE, 3, true, true));
+    assert!(s.pump(), "the Call changed");
+    let call = s.voice().call.as_ref().unwrap();
+    assert_eq!((call.id.as_str(), call.title.as_str()), (LOUNGE, "Secret Lounge"));
+    assert_eq!(
+        call.people.iter().map(|p| (p.me, p.speaking, p.muted)).collect::<Vec<_>>(),
+        [(true, false, false), (false, true, true), (false, false, true)]
+    );
+    assert!(s.voice().mute && !s.voice().deaf, "the user's own mute");
+    assert_eq!(s.me().map(|m| m.as_str()), Some("Me Myself"));
+    assert!(!s.pump(), "nothing more changed");
+    fake.page(&call_json("", 0, false, true));
+    assert!(s.pump());
+    assert!(s.voice().call.is_none() && s.voice().mute, "out of the call, the mute stays");
+}
+
+#[test]
+fn the_servers_flyout_is_answered_from_what_the_page_pushed_and_back_and_close_are_the_models() {
+    use model::discord::{Browse, BrowseAsk};
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = voice_session(data.path());
+    fake.asked();
+    s.ask_voice(Ask::Browse(BrowseAsk::Servers));
+    assert!(
+        matches!(s.browse(), Browse::Servers { loading: true, servers } if servers.is_empty()),
+        "asked before the page said"
+    );
+    fake.page(&format!(r#"{{"k":"guilds","ordered":false,"servers":[{{"id":"2","name":"beta"}},{{"id":"{PLACE}","name":"Alpha","icon":"gh"}}]}}"#));
+    s.pump();
+    match s.browse() {
+        Browse::Servers { loading: false, servers } => {
+            assert_eq!(
+                servers.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(),
+                ["Alpha", "beta"],
+                "by name ignoring case"
+            );
+            assert!(servers.iter().all(|x| x.icon.is_none()), "no CDN: no picture");
+        }
+        other => panic!("{other:?}"),
+    }
+    s.ask_voice(Ask::Browse(BrowseAsk::Server { id: "not digits".into(), name: "x".into() }));
+    assert!(matches!(s.browse(), Browse::Servers { .. }), "refused");
+    fake.asked();
+    s.ask_voice(Ask::Browse(BrowseAsk::Server { id: PLACE.into(), name: "Alpha".into() }));
+    assert_eq!(fake.asked(), ["Browse(Some(\"400000000000000001\"))"]);
+    assert!(matches!(s.browse(), Browse::Server { loading: true, channels, .. } if channels.is_empty()));
+    fake.page(r#"{"k":"server","id":"2","channels":[{"id":"7","name":"Other","type":2,"users":[]}]}"#);
+    s.pump();
+    assert!(matches!(s.browse(), Browse::Server { loading: true, .. }), "another server's channels are not this one's");
+    fake.page(&format!(
+        r#"{{"k":"server","id":"{PLACE}","channels":[{{"id":"{LOUNGE}","name":"Lounge","type":2,"users":[{{"id":"1","avatar":"hh"}},{{"id":"2","avatar":""}}]}},{{"id":"8","name":"Stage","type":13,"users":[]}}]}}"#
+    ));
+    s.pump();
+    match s.browse() {
+        Browse::Server { id, name, loading: false, channels } => {
+            assert_eq!((id.as_str(), name.as_str(), channels.len()), (PLACE, "Alpha", 2));
+            assert_eq!(channels[0].occupants.as_ref().unwrap().len(), 2);
+            assert_eq!(channels[1].occupants, Some(Vec::new()), "Empty");
+        }
+        other => panic!("{other:?}"),
+    }
+    s.ask_voice(Ask::Browse(BrowseAsk::Back));
+    assert!(matches!(s.browse(), Browse::Servers { loading: false, .. }), "back to the servers, not asked again");
+    assert_eq!(fake.asked(), ["Browse(None)"]);
+    s.ask_voice(Ask::Browse(BrowseAsk::Close));
+    assert_eq!(*s.browse(), Browse::Closed);
+}
+
+#[test]
+fn joined_calls_become_shortcuts_kept_in_a_file_of_our_own_and_removed_shortcuts_stay_removed() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = voice_session(data.path());
+    assert!(s.shortcuts().is_empty());
+    fake.page(&call_json(LOUNGE, 2, false, false));
+    s.pump();
+    assert!(s.shortcuts().is_empty(), "connecting is not joined");
+    fake.page(&call_json(LOUNGE, 2, true, false));
+    s.pump();
+    let sc = &s.shortcuts()[0];
+    assert_eq!(
+        (sc.id.as_str(), sc.name.as_str(), sc.server.as_deref(), sc.dm),
+        (LOUNGE, "Secret Lounge", Some("Secret Place"), false)
+    );
+    let file = data.path().join("discord-web").join("known-profile-7.json");
+    assert!(std::fs::read_to_string(&file).unwrap().contains("\"Secret Lounge\""), "kept in the RPC's shape");
+    // Back after a restart: read as the session signs in.
+    let (mut again, fake2) = voice_session(data.path());
+    assert_eq!(again.shortcuts().len(), 1);
+    drop(fake2);
+    // The Call going on does not bring back a removed one.
+    s.ask_voice(Ask::RemoveShortcut(LOUNGE.into()));
+    assert!(s.shortcuts().is_empty());
+    fake.page(&call_json(LOUNGE, 3, true, false));
+    s.pump();
+    assert!(s.shortcuts().is_empty());
+    assert!(!std::fs::read_to_string(&file).unwrap().contains("Secret Lounge"));
+    // Off forgets it from memory only; a sign-out removes the file.
+    again.set_on(false);
+    assert!(again.shortcuts().is_empty() && file.exists());
+    s.host = None;
+    s.ask(WebAsk::SignOut);
+    assert!(!file.exists(), "a sign-out leaves nothing");
+    drop(fake);
+}
+
+#[test]
+fn the_asks_go_to_the_page_one_at_a_time_paced_and_joining_the_call_one_is_in_does_nothing() {
+    use model::discord::CallAsk;
+    let data = tempfile::tempdir().unwrap();
+    capturing();
+    let (mut s, fake) = voice_session(data.path());
+    fake.asked();
+    s.ask_voice(Ask::Join(LOUNGE.into()));
+    s.ask_voice(Ask::Call(CallAsk::Mute));
+    assert_eq!(fake.asked(), ["Join(#1)"], "one at a time: the mute waits");
+    fake.page(&call_json(LOUNGE, 2, true, false));
+    fake.page(&done(1));
+    s.pump();
+    assert!(captured().iter().any(|l| l.starts_with("discord web: joined in ")), "{:?}", captured());
+    // The next goes no sooner than the pace after.
+    assert!(fake.asked().is_empty());
+    std::thread::sleep(crate::act::PACE + std::time::Duration::from_millis(50));
+    s.pump();
+    assert_eq!(fake.asked(), ["Mute(#2)"]);
+    fake.page(&done(2));
+    s.pump();
+    s.ask_voice(Ask::Join(LOUNGE.into()));
+    assert!(captured().iter().any(|l| l == "discord web: join: already in that call"));
+    s.ask_voice(Ask::Call(CallAsk::Leave));
+    std::thread::sleep(crate::act::PACE + std::time::Duration::from_millis(50));
+    s.pump();
+    assert_eq!(fake.asked(), ["Leave(#3)"]);
+    // RPC-only asks are ignored.
+    s.ask_voice(Ask::Connect);
+    s.ask_voice(Ask::ClientId("x".into()));
+    assert!(fake.asked().is_empty());
+}
+
+#[test]
+fn a_dms_call_rings_when_started_joins_when_answered_and_stops_the_ring_when_declined() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = voice_session(data.path());
+    fake.asked();
+    s.ask_direct(DirectAsk::Call(ANA.into()));
+    assert_eq!(fake.asked(), ["Join(#1, ring)"]);
+    fake.page(&done(1));
+    s.pump();
+    std::thread::sleep(crate::act::PACE + std::time::Duration::from_millis(50));
+    s.ask_direct(DirectAsk::Answer(BO.into()));
+    assert_eq!(fake.asked(), ["Join(#2)"]);
+    fake.page(&done(2));
+    s.pump();
+    std::thread::sleep(crate::act::PACE + std::time::Duration::from_millis(50));
+    s.ask_direct(DirectAsk::Decline(BO.into()));
+    assert_eq!(fake.asked(), ["Decline(#3)"]);
+    // A ring seen is logged as a state, and the Ring event comes from the rings the page reports.
+    capturing();
+    fake.page(&format!(r#"{{"k":"rings","rings":[{{"channel":"{BO}","caller":"Bo Example"}}]}}"#));
+    fake.page(r#"{"k":"rings","rings":[]}"#);
+    s.pump();
+    assert_eq!(captured(), ["discord web: ringing", "discord web: ring ended"]);
+}
+
+#[test]
+fn voice_asks_while_not_ready_are_not_done_and_say_so() {
+    let data = tempfile::tempdir().unwrap();
+    capturing();
+    let (mut s, fake) = signed_in(data.path());
+    fake.page(OK);
+    fake.page(&list(&[]));
+    s.pump();
+    fake.asked();
+    s.ask_voice(Ask::Join(LOUNGE.into()));
+    s.ask_direct(DirectAsk::Call(ANA.into()));
+    s.ask_direct(DirectAsk::Decline(ANA.into()));
+    assert!(fake.asked().is_empty());
+    let lines = captured();
+    assert_eq!(lines.iter().filter(|l| l.as_str() == "discord web: join not done: not ready").count(), 2, "{lines:?}");
+    assert!(lines.iter().any(|l| l == "discord web: decline not done: not ready"));
+}
+
+#[test]
+fn turning_off_forgets_the_call_the_flyout_and_who_is_signed_in() {
+    use model::discord::BrowseAsk;
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = voice_session(data.path());
+    fake.page(&call_json(LOUNGE, 2, true, false));
+    fake.page(&format!(r#"{{"k":"guilds","ordered":true,"servers":[{{"id":"{PLACE}","name":"Alpha"}}]}}"#));
+    s.pump();
+    s.ask_voice(Ask::Browse(BrowseAsk::Servers));
+    assert!(s.voice().call.is_some() && s.me().is_some() && s.browse().is_open());
+    s.set_on(false);
+    assert!(s.voice().call.is_none() && s.me().is_none() && !s.browse().is_open() && s.shortcuts().is_empty());
+    assert!(s.reader.voice.is_none() && s.reader.guilds.is_none() && !s.voice_ready());
+}
+
+#[test]
+fn closing_in_a_call_leaves_it_first() {
+    let data = tempfile::tempdir().unwrap();
+    let (mut s, fake) = voice_session(data.path());
+    fake.page(&call_json(LOUNGE, 2, true, false));
+    s.pump();
+    fake.asked();
+    let log = fake.log.clone();
+    drop(s);
+    assert_eq!(log.lock().unwrap().clone(), ["Leave(#0)", "other"], "Discord's own leave, then the web view is closed");
+}
+
+#[test]
+fn voice_pictures_are_kept_on_disk_in_the_rpc_crates_art_cache() {
+    let data = tempfile::tempdir().unwrap();
+    let (url, asked) = crate::pictures::tests::cdn(b"made-up picture");
+    let (mut s, fake) = voice_session(data.path());
+    s.set_cdn(Some(&url));
+    fake.page(&call_json(LOUNGE, 2, true, false));
+    s.pump();
+    let kept = data.path().join("art").join("discord").join("avatars").join("1").join("hh.png");
+    for _ in 0..300 {
+        s.pump();
+        if s.voice().call.as_ref().is_some_and(|c| c.people.iter().any(|p| p.avatar.as_deref() == Some(kept.as_path())))
+        {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let call = s.voice().call.as_ref().unwrap();
+    assert_eq!(call.people[1].avatar.as_deref(), Some(kept.as_path()));
+    assert_eq!(std::fs::read(&kept).unwrap(), b"made-up picture", "on disk, as the tab draws it");
+    assert!(asked.lock().unwrap().contains(&"/avatars/1/hh.png?size=64".to_string()));
+    // Used at once the next time, with no CDN.
+    let (mut again, fake2) = voice_session(data.path());
+    fake2.page(&call_json(LOUNGE, 2, true, false));
+    again.pump();
+    assert_eq!(again.voice().call.as_ref().unwrap().people[1].avatar.as_deref(), Some(kept.as_path()));
+}
+
+#[test]
+fn the_log_of_voice_has_no_name_id_or_address() {
+    use model::discord::{BrowseAsk, CallAsk};
+    let data = tempfile::tempdir().unwrap();
+    capturing();
+    let (mut s, fake) = voice_session(data.path());
+    fake.page(&call_json(LOUNGE, 3, true, true));
+    fake.page(&format!(r#"{{"k":"guilds","ordered":true,"servers":[{{"id":"{PLACE}","name":"Secret Place"}}]}}"#));
+    s.pump();
+    s.ask_voice(Ask::Join("500000000000000009".into()));
+    s.ask_voice(Ask::Call(CallAsk::Deafen));
+    s.ask_voice(Ask::Browse(BrowseAsk::Server { id: PLACE.into(), name: "Secret Place".into() }));
+    s.ask_voice(Ask::RemoveShortcut(LOUNGE.into()));
+    fake.page(&call_json("", 0, false, false));
+    s.pump();
+    fake.page(r#"{"k":"act","seq":1,"stage":"failed","why":"not connected"}"#);
+    s.pump();
+    s.set_on(false);
+    let lines = captured();
+    assert!(lines.iter().any(|l| l == "discord web: in a call, 3 people"), "{lines:?}");
+    assert!(lines.iter().any(|l| l == "discord web: left the call"), "{lines:?}");
+    assert!(lines.iter().any(|l| l == "discord web: join not done: not connected"), "{lines:?}");
+    for line in &lines {
+        for private in ["Secret", "Pal", "Me Myself", LOUNGE, PLACE, "50000", "http", "avatars"] {
+            assert!(!line.contains(private), "{private:?} is in the log line {line:?}");
+        }
+    }
 }

@@ -98,6 +98,8 @@ fn run(
     let mut next_look = Instant::now() + Duration::from_millis(500);
     // The text of a message is in the box; Enter goes at this time (a moment after, so the box has taken it).
     let mut enter_at: Option<Instant> = None;
+    // A leave was asked of the page: closing waits half a second for it to be said to Discord.
+    let mut leaving = false;
     loop {
         host::pump(Duration::from_millis(if shown || enter_at.is_some() { 100 } else { 500 }));
         if host::closed() {
@@ -150,6 +152,7 @@ fn run(
                     if matches!(op, ActOp::Cancel) {
                         enter_at = None;
                     }
+                    leaving |= matches!(op, ActOp::Leave { .. });
                     if !host.act(&op) {
                         // An ask the page did not take is a failure at once, not fifteen seconds of nothing.
                         if let Some(seq) = op.seq() {
@@ -164,11 +167,23 @@ fn run(
                     enter_at = Some(Instant::now() + ENTER_AFTER);
                 }
                 Command::Stop => {
+                    if leaving {
+                        let end = Instant::now() + Duration::from_millis(500);
+                        while Instant::now() < end {
+                            host::pump(Duration::from_millis(100));
+                        }
+                    }
                     host.close();
                     say("discord web: the web view is closed; the session is kept");
                     return None;
                 }
                 Command::SignOut => {
+                    if leaving {
+                        let end = Instant::now() + Duration::from_millis(500);
+                        while Instant::now() < end {
+                            host::pump(Duration::from_millis(100));
+                        }
+                    }
                     host.close();
                     // The browser processes let go of the folder once they have ended.
                     let removed = crate::remove(&folder, 10, Duration::from_millis(500));

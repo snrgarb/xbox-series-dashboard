@@ -27,6 +27,15 @@ pub enum Page {
     Act(Act),
     /// A conversation the host opened had unread messages: whether the page marked it read by itself.
     Opened(Opened),
+    /// The user's Call and own mute and deafen (`js/voice.js`).
+    Voice(crate::voice::RawVoice),
+    /// The user's servers.
+    Guilds {
+        ordered: bool,
+        servers: Vec<crate::voice::RawGuild>,
+    },
+    /// The voice channels of the server being browsed.
+    Server(crate::voice::RawServer),
 }
 
 /// One word from the page about the action it was asked for (#201): `typing` (the message box is focused, type now),
@@ -43,6 +52,10 @@ pub struct Act {
     pub reason: String,
     /// With `typing`: the box held a draft, to be cleared first.
     pub draft: bool,
+    /// With a mute or deafen `done`: the switch as it now stands.
+    pub on: bool,
+    /// With a join `done` that was to ring the DM: `yes`, `no` (Discord's call action was not found or threw), or empty.
+    pub ring: String,
 }
 
 #[derive(Deserialize, Default, Clone, PartialEq, Debug)]
@@ -61,6 +74,8 @@ pub struct Health {
     pub ok: bool,
     pub found: BTreeMap<String, Vec<String>>,
     pub missing: Vec<String>,
+    /// What voice lacks of its required stores and methods (`js/voice.js`): empty is ready. Never a break of the DMs.
+    pub voice_missing: Vec<String>,
     /// Discord's own older-messages action was found.
     pub older: bool,
     pub tries: u32,
@@ -424,6 +439,8 @@ pub struct Taken {
     pub reset: bool,
     /// The page's word about the action it was asked for.
     pub act: Option<Act>,
+    /// The Call, the servers or the browsed server's channels changed.
+    pub voice: bool,
 }
 
 /// What the page has said, as the session keeps it until it is forgotten.
@@ -433,6 +450,10 @@ pub struct Reader {
     pub dms: Option<Vec<RawDm>>,
     pub conv: Option<RawConv>,
     pub rings: Vec<RawRing>,
+    /// Voice (#297): the Call, the servers, and the browsed server's channels, as the page last said.
+    pub voice: Option<crate::voice::RawVoice>,
+    pub guilds: Option<(bool, Vec<crate::voice::RawGuild>)>,
+    pub server: Option<crate::voice::RawServer>,
     /// Each DM's unread count in the last list: what a rise is measured against. A rise is raised only once a list has
     /// been seen, so what was unread when the session began raises nothing.
     unread: HashMap<String, u32>,
@@ -455,6 +476,13 @@ impl Reader {
     /// Whether the health probe found a store or method missing.
     pub fn page_changed(&self) -> bool {
         self.health.as_ref().is_some_and(|h| !h.ok)
+    }
+
+    /// Whether voice can be read and acted: the page has said, and lacks nothing voice requires.
+    pub fn voice_ready(&self) -> bool {
+        self.health
+            .as_ref()
+            .is_some_and(|h| h.voice_missing.is_empty() && h.found.get("voice").is_some_and(|v| !v.is_empty()))
     }
 
     pub fn older_found(&self) -> bool {
@@ -532,6 +560,25 @@ impl Reader {
                 taken.reset = true;
                 taken.changed = true;
             }
+            Page::Voice(voice) => {
+                if self.voice.as_ref() != Some(&voice) {
+                    taken.log.extend(crate::voice::log_lines(self.voice.as_ref(), &voice));
+                    self.voice = Some(voice);
+                    taken.voice = true;
+                }
+            }
+            Page::Guilds { ordered, servers } => {
+                if self.guilds.as_ref() != Some(&(ordered, servers.clone())) {
+                    self.guilds = Some((ordered, servers));
+                    taken.voice = true;
+                }
+            }
+            Page::Server(server) => {
+                if self.server.as_ref() != Some(&server) {
+                    self.server = Some(server);
+                    taken.voice = true;
+                }
+            }
             Page::Act(act) => taken.act = Some(act),
             Page::Opened(opened) => {
                 taken.log.push(format!(
@@ -565,12 +612,22 @@ fn message_event(dm: &RawDm) -> DirectEvent {
 }
 
 /// The log lines a health report makes: the stores found when it is first seen or changes, and each that no longer
-/// answers. Our keys and Discord's method names only.
+/// answers. Our keys and Discord's method names only. Voice's stores have their own lines.
 fn health_lines(before: Option<&Health>, now: &Health) -> Vec<String> {
+    use crate::voice::is_voice_key;
     let mut out = Vec::new();
-    let keys = |h: &Health| h.found.iter().filter(|(_, v)| !v.is_empty()).map(|(k, _)| k.clone()).collect::<Vec<_>>();
-    if before.map(keys).as_ref() != Some(&keys(now)) {
-        out.push(format!("discord web: stores found: {}", keys(now).join(", ")));
+    let keys = |h: &Health, voice: bool| {
+        h.found
+            .iter()
+            .filter(|(k, v)| !v.is_empty() && is_voice_key(k) == voice)
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>()
+    };
+    if before.map(|h| keys(h, false)).as_ref() != Some(&keys(now, false)) {
+        out.push(format!("discord web: stores found: {}", keys(now, false).join(", ")));
+    }
+    if before.map(|h| keys(h, true)).unwrap_or_default() != keys(now, true) {
+        out.push(format!("discord web: voice stores found: {}", keys(now, true).join(", ")));
     }
     for m in &now.missing {
         if before.is_some_and(|b| b.missing.contains(m)) {
@@ -582,8 +639,20 @@ fn health_lines(before: Option<&Health>, now: &Health) -> Vec<String> {
             None => format!("discord web: store \"{m}\" no longer answers"),
         });
     }
+    for m in &now.voice_missing {
+        if before.is_some_and(|b| b.voice_missing.contains(m)) {
+            continue;
+        }
+        out.push(match m.split_once('.') {
+            Some((key, method)) => format!("discord web: voice store \"{key}\" no longer answers ({method})"),
+            None => format!("discord web: voice store \"{m}\" no longer answers"),
+        });
+    }
     if now.ok && before.is_some_and(|b| !b.ok) {
         out.push("discord web: the stores answer again".into());
+    }
+    if now.voice_missing.is_empty() && before.is_some_and(|b| !b.voice_missing.is_empty()) {
+        out.push("discord web: the voice stores answer again".into());
     }
     out
 }
