@@ -256,7 +256,7 @@ mod tests {
         let own = Pic::avatar("123", "abc_1").unwrap();
         assert_eq!(own.file(), PathBuf::from("avatars/123/abc_1.png"));
         assert_eq!(own.url("https://cdn.test/"), "https://cdn.test/avatars/123/abc_1.png?size=64");
-        assert_eq!(Pic::avatar("123", "").unwrap(), Pic::Default((123u64 >> 22) % 6));
+        assert_eq!(Pic::avatar("123", "").unwrap(), Pic::Default(0), "(id >> 22) % 6 of a small id");
         assert_eq!(Pic::Default(3).file(), PathBuf::from("embed/3.png"));
         assert_eq!(Pic::Default(3).url("https://c"), "https://c/embed/avatars/3.png");
         assert_eq!(Pic::icon("9", "h").unwrap().file(), PathBuf::from("icons/9/h.png"));

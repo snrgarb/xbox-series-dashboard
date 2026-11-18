@@ -779,7 +779,7 @@ fn the_servers_flyout_is_answered_from_what_the_page_pushed_and_back_and_close_a
     s.ask_voice(Ask::Browse(BrowseAsk::Server { id: PLACE.into(), name: "Alpha".into() }));
     assert_eq!(fake.asked(), ["Browse(Some(\"400000000000000001\"))"]);
     assert!(matches!(s.browse(), Browse::Server { loading: true, channels, .. } if channels.is_empty()));
-    fake.page(&format!(r#"{{"k":"server","id":"2","channels":[{{"id":"7","name":"Other","type":2,"users":[]}}]}}"#));
+    fake.page(r#"{"k":"server","id":"2","channels":[{"id":"7","name":"Other","type":2,"users":[]}]}"#);
     s.pump();
     assert!(matches!(s.browse(), Browse::Server { loading: true, .. }), "another server's channels are not this one's");
     fake.page(&format!(
@@ -916,7 +916,7 @@ fn voice_asks_while_not_ready_are_not_done_and_say_so() {
 
 #[test]
 fn turning_off_forgets_the_call_the_flyout_and_who_is_signed_in() {
-    use model::discord::{Browse, BrowseAsk};
+    use model::discord::BrowseAsk;
     let data = tempfile::tempdir().unwrap();
     let (mut s, fake) = voice_session(data.path());
     fake.page(&call_json(LOUNGE, 2, true, false));
@@ -943,7 +943,6 @@ fn closing_in_a_call_leaves_it_first() {
 
 #[test]
 fn voice_pictures_are_kept_on_disk_in_the_rpc_crates_art_cache() {
-    use model::discord::{Browse, BrowseAsk};
     let data = tempfile::tempdir().unwrap();
     let (url, asked) = crate::pictures::tests::cdn(b"made-up picture");
     let (mut s, fake) = voice_session(data.path());
@@ -968,7 +967,6 @@ fn voice_pictures_are_kept_on_disk_in_the_rpc_crates_art_cache() {
     fake2.page(&call_json(LOUNGE, 2, true, false));
     again.pump();
     assert_eq!(again.voice().call.as_ref().unwrap().people[1].avatar.as_deref(), Some(kept.as_path()));
-    let _ = (Browse::Closed, BrowseAsk::Close);
 }
 
 #[test]
