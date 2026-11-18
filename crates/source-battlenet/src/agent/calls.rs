@@ -234,9 +234,41 @@ pub fn start(uid: &str) -> (&'static str, String, Value) {
     ("POST", "/update".into(), json!({ "uid": uid, "priority": { "insert_at_head": true, "value": 699 } }))
 }
 
-/// `GET /install/<uid>`: how far it has got.
-pub fn progress(uid: &str) -> (&'static str, String) {
-    ("GET", format!("/install/{uid}"))
+/// A path the Agent names in an answer (`response_uri`, `result_uri`), where it is one of its own: `/` and a name,
+/// never another host (HSCentric's `RequestAsync` checks the same).
+fn named_path(answer: &Answer, key: &str) -> Option<String> {
+    let path = answer.text(key)?.trim();
+    (path.starts_with('/') && !path.starts_with("//") && !path.contains(' ')).then(|| path.to_string())
+}
+
+/// Where a finalized install's progress is read, in order (#172, the TV PC's real install, 2026-11-18): the
+/// `response_uri` of each answer given, the `POST /update` answer's first (`/update/<uid>`), else `/update/<uid>`
+/// itself; then `/install/<uid>`. On Agent 2.42.1.9886 `GET /install/<uid>` answered **404 `{}`** from the moment
+/// the form was finalized, as the wiki says of it ("returns 404 otherwise", when no install is going on there), while
+/// `POST /update` had answered `{"response_uri":"/update/libra","result_uri":"/game/libra"}`. barncastle's
+/// `InstallProductTask` reads the install's path and, where that gives no `progress`, the update's; HSCentric reads
+/// only `/update/<uid>`; DroidDeck and redact7 only `/install/<uid>`. All are asked; the first that says anything is
+/// read.
+pub fn progress_paths(uid: &str, answers: &[&Answer]) -> Vec<String> {
+    let mut paths: Vec<String> = answers.iter().filter_map(|answer| named_path(answer, "response_uri")).collect();
+    paths.push(format!("/update/{uid}"));
+    paths.push(format!("/install/{uid}"));
+    let mut seen = Vec::new();
+    paths.retain(|path| {
+        let new = !seen.contains(path);
+        seen.push(path.clone());
+        new
+    });
+    // The update's first: the install's own path is where the form was, and 404 once it is finalized.
+    paths.sort_by_key(|path| !path.starts_with("/update/"));
+    paths
+}
+
+/// Where the game itself is read while it downloads: the `result_uri` the answers name (`/game/<uid>` on the TV
+/// PC), else `/game/<uid>` (HSCentric reads it beside `/update/<uid>`; DroidDeck at the end; the wiki's example has
+/// `installed`, `download_complete`, `playable`, `update_progress`, `install_dir`).
+pub fn game_path(uid: &str, answers: &[&Answer]) -> String {
+    answers.iter().find_map(|answer| named_path(answer, "result_uri")).unwrap_or_else(|| format!("/game/{uid}"))
 }
 
 /// `POST /uninstall` (the wiki; DroidDeck's), with the compaction the client asks for.
@@ -244,24 +276,26 @@ pub fn uninstall(uid: &str) -> (&'static str, String, Value) {
     ("POST", "/uninstall".into(), json!({ "uid": uid, "run_compaction": true }))
 }
 
-/// Pause and resume: **a guess**, asked only with [`steer_on`]. The progress has a `paused` field and nothing is
-/// known to set it.
-pub fn pause(uid: &str, paused: bool) -> (&'static str, String, Value) {
-    ("POST", format!("/install/{uid}"), json!({ "paused": paused }))
+/// Pause and resume: **a guess**, asked only with [`steer_on`], on the path the progress is read on (`/update/<uid>`
+/// on the TV PC). Every source only reads `paused` (the wiki's example, DroidDeck's `REPORTED`); none sets it, and
+/// the wiki has no pause call.
+pub fn pause(path: &str, paused: bool) -> (&'static str, String, Value) {
+    ("POST", path.to_string(), json!({ "paused": paused }))
 }
 
-/// Cancel: **a guess**, asked only with [`steer_on`]: the install taken out of the queue (`DELETE` on it, which the
-/// wiki has only for `/repair/<uid>`, "Cancels the current Repairing process"), then what was fetched removed by
-/// [`uninstall`].
-pub fn cancel(uid: &str) -> (&'static str, String) {
-    ("DELETE", format!("/install/{uid}"))
+/// Cancel: **a guess**, asked only with [`steer_on`]: `DELETE` on the path the progress is read on, as the wiki's
+/// `DELETE /repair/<uid>` "Cancels the current Repairing process" (`POST /repair` answers a `response_uri` and a
+/// `result_uri` as `POST /update` does). What is sure is the other half of a Cancel: the Agent the Dashboard started
+/// is stopped (`DELETE /agent`, then killed), which ends its download, barncastle's and HSCentric's only way out.
+pub fn cancel(path: &str) -> (&'static str, String) {
+    ("DELETE", path.to_string())
 }
 
-/// A form the Agent took and the Dashboard will not finish (refused, or stopped before the download): the same
-/// `DELETE`, **a guess**: no source abandons a form. Then the Agent the Dashboard started is stopped ([`stop`]), which
-/// drops whatever it still held (barncastle's and HSCentric's only way out: they kill the Agent they started).
+/// A form the Agent took and the Dashboard will not finish (refused, or stopped before the download): `DELETE
+/// /install/<uid>`, a guess no source makes, which the TV PC's Agent took (200, 2026-11-18). Then the Agent the
+/// Dashboard started is stopped ([`stop`]), which drops whatever it still held.
 pub fn abandon(uid: &str) -> (&'static str, String) {
-    cancel(uid)
+    ("DELETE", format!("/install/{uid}"))
 }
 
 /// `DELETE /agent`: the Agent asked to end (the wiki: "will destroy the Agent instance and (possibly) shutdown the
@@ -309,48 +343,123 @@ pub fn meaning(error: &str) -> Option<&'static str> {
     })
 }
 
-/// What `GET /install/<uid>` says (the wiki's fields).
+/// What a progress answer says (`GET /update/<uid>`, `GET /install/<uid>`, `GET /game/<uid>`), read tolerantly: any
+/// of the shapes the sources show, each field where it is.
+///
+/// - The share, 0 to 1: `progress` (the wiki's 0.788332; barncastle prints it as a percentage of 1, redact7
+///   multiplies it by 100, HSCentric clamps it to 0..1), else `update_progress` (the wiki's `/game/<uid>`, 1.0 when
+///   done), else `playable_progress` (DroidDeck). A value above 1 and at most 100 is taken as a percentage, as is any
+///   field named `percent`.
+/// - The bytes: `download_current` and `download_total`, each a number or **an array whose parts add up** (the wiki's
+///   example: three parts, and its `download_remaining` is exactly the totals' sum less the currents' sum), else
+///   `download_total` less `download_remaining`; else, in a `download_details` object or at the top, `downloaded_bytes`
+///   and `total_bytes` or `total`; else the share times the form's `required_space`.
+/// - `download_rate` (the wiki's 6336703.5): taken as bytes a second, which no source says.
+/// - `paused`, `playable`, `download_complete`, `installed` (`/game/<uid>`), `state` (1003 under way, 1004 done:
+///   HSCentric, DroidDeck; DroidDeck also 1000 started), `extended_status.state` (DroidDeck's "phase"), `error`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Progress {
-    /// 0 to 1.
-    pub progress: f64,
-    /// Bytes downloaded, and in all, where it says: `download_current` and `download_total` are arrays of three, of
-    /// which DroidDeck takes the first.
+    /// 0 to 1, where it says.
+    pub fraction: Option<f64>,
+    /// Bytes downloaded, and in all.
     pub done: Option<u64>,
     pub total: Option<u64>,
-    /// `download_rate`: taken as bytes a second (the wiki's example, 6336703.5, says no unit).
+    /// Bytes a second.
     pub rate: Option<u64>,
     pub paused: bool,
-    /// Done as far as the Queue goes: `playable`, and the download complete (`download_complete`, or `progress`
-    /// 1), as HSCentric waits for.
     pub playable: bool,
-    /// `state`: 1003 under way, 1004 idle or done (DroidDeck, HSCentric).
+    /// `download_complete`.
+    pub complete: bool,
+    /// `installed`, where it says (`/game/<uid>`).
+    pub installed: Option<bool>,
     pub state: Option<i64>,
+    /// `extended_status.state`.
+    pub phase: Option<i64>,
+    /// `error` above 0.
+    pub error: Option<i64>,
 }
 
-pub fn read_progress(answer: &Answer) -> Progress {
+/// `state` once the Agent is done with an operation (HSCentric's `IsUpdateComplete`, DroidDeck's `DONE_STATE`).
+pub const DONE_STATE: i64 = 1004;
+
+impl Progress {
+    /// Whether it says anything of an install at all: a share, bytes, a state or whether it is installed. `{}`, the
+    /// TV PC's 404, says nothing.
+    pub fn says_anything(&self) -> bool {
+        self.fraction.is_some() || self.total.is_some() || self.state.is_some() || self.installed.is_some()
+    }
+
+    /// Whether it says the download is over: playable and complete (barncastle, HSCentric), installed, state 1004,
+    /// or all of it. Only `product.db` saying installed ends an install; this says when to look.
+    pub fn says_done(&self) -> bool {
+        (self.playable && (self.complete || self.fraction.is_some_and(|f| f >= 1.0)))
+            || self.installed == Some(true)
+            || self.state == Some(DONE_STATE)
+            || self.fraction.is_some_and(|f| f >= 1.0)
+    }
+}
+
+/// A number, from a number or a text.
+fn amount(v: &Value) -> Option<f64> {
+    v.as_f64().or_else(|| v.as_str()?.trim().parse().ok())
+}
+
+/// Bytes, from a number or an array of parts, added up.
+fn byte_count(v: &Value) -> Option<u64> {
+    let total = match v {
+        Value::Array(parts) if !parts.is_empty() => parts.iter().map(amount).sum::<Option<f64>>()?,
+        other => amount(other)?,
+    };
+    (total >= 0.0).then_some(total as u64)
+}
+
+/// `answer` read as [`Progress`]; `required` is the form's `required_space`, for an answer with a share and no bytes.
+pub fn read_progress(answer: &Answer, required: Option<u64>) -> Progress {
     let body = &answer.body;
-    let first = |v: &Value| match v {
-        Value::Array(items) => items.first().cloned(),
-        other => Some(other.clone()),
+    let details = body.get("download_details").filter(|d| d.is_object());
+    // A field at the top, else in `download_details`.
+    let field = |key: &str| body.get(key).filter(|v| !v.is_null()).or_else(|| details?.get(key));
+    let first_bytes = |keys: &[&str]| keys.iter().find_map(|key| byte_count(field(key)?));
+    let flag = |key: &str| field(key).and_then(Value::as_bool);
+    let share = |key: &str| {
+        let v = amount(field(key)?)?;
+        let v = if key.contains("percent") || (v > 1.0 && v <= 100.0) { v / 100.0 } else { v };
+        (v >= 0.0).then(|| v.min(1.0))
     };
-    let number = |key: &str| {
-        let v = first(body.get(key)?)?;
-        v.as_f64().or_else(|| v.as_str()?.parse().ok())
-    };
-    let bytes = |key: &str| number(key).filter(|v| *v >= 0.0).map(|v| v as u64);
-    let flag = |key: &str| body.get(key).and_then(Value::as_bool).unwrap_or(false);
-    let total = bytes("download_total");
-    let done = bytes("download_current").or_else(|| Some(total? - bytes("download_remaining")?.min(total?)));
-    let progress = number("progress").unwrap_or(0.0).clamp(0.0, 1.0);
+    let fraction = ["progress", "percent", "progress_percent", "update_progress", "playable_progress"]
+        .iter()
+        .find_map(|key| share(key));
+    let mut total = first_bytes(&["download_total", "total_bytes", "total"]);
+    let mut done = first_bytes(&["download_current", "downloaded_bytes", "bytes_downloaded"])
+        .or_else(|| Some(total?.saturating_sub(first_bytes(&["download_remaining", "remaining_bytes"])?)));
+    if total.is_none_or(|t| t == 0) {
+        if let (Some(f), Some(required)) = (fraction, required.filter(|&r| r > 0)) {
+            (done, total) = (Some((f * required as f64) as u64), Some(required));
+        }
+    }
+    let code = |v: &Value| v.as_i64().or_else(|| amount(v).map(|f| f as i64));
     Progress {
-        progress,
+        fraction,
         done,
         total,
-        rate: bytes("download_rate"),
-        paused: flag("paused"),
-        playable: flag("playable") && (flag("download_complete") || progress >= 1.0),
-        state: body.get("state").and_then(Value::as_i64),
+        rate: first_bytes(&["download_rate", "rate", "bytes_per_second"]),
+        paused: flag("paused").unwrap_or(false),
+        playable: flag("playable").unwrap_or(false),
+        complete: flag("download_complete").unwrap_or(false),
+        installed: flag("installed"),
+        state: body.get("state").and_then(code),
+        phase: body.get("extended_status").and_then(|e| e.get("state")).and_then(code),
+        error: body.get("error").and_then(code).filter(|&n| n > 0),
+    }
+}
+
+/// What an Agent's error code is, said for the user: `error 2421: the PC does not meet its needs, or there is not
+/// enough space`, or only the code where nothing says what it means.
+pub fn error_said(code: i64) -> String {
+    let error = format!("error {code}");
+    match meaning(&error) {
+        Some(meaning) => format!("{error}: {meaning}"),
+        None => error,
     }
 }
 
@@ -371,32 +480,89 @@ mod tests {
         );
         assert_eq!(token(&answer(401, json!({"authorization": "T"}))), None);
         assert!(refused(&answer(403, Value::Null)) && !refused(&answer(404, Value::Null)));
-        let read = read_progress(&answer(
+    }
+
+    /// The TV PC's real install of Tony Hawk's Pro Skater 3 + 4 (Agent 2.42.1.9886, 2026-11-18): the finalized post's
+    /// and `POST /update`'s answers name where the progress is, and `/install/libra` is 404 `{}` from then on.
+    #[test]
+    fn after_the_finalized_form_progress_is_read_where_the_agent_says() {
+        let finalized = answer(
             200,
-            json!({"progress": 0.25, "download_rate": 6336703.5, "download_current": [250, 0, 0],
-                   "download_total": [1000, 0, 0], "paused": false, "playable": false, "state": 1003}),
-        ));
-        assert_eq!(
-            read,
-            Progress {
-                progress: 0.25,
-                done: Some(250),
-                total: Some(1000),
-                rate: Some(6_336_703),
-                paused: false,
-                playable: false,
-                state: Some(1003)
-            }
+            json!({"form": {"finalized": true}, "response_uri": "/install/libra",
+            "result_uri": "/game/libra"}),
         );
-        // Only what is left: done worked out.
-        let read =
-            read_progress(&answer(200, json!({"download_total": 1000, "download_remaining": 100, "paused": true})));
-        assert_eq!((read.done, read.paused), (Some(900), true));
-        assert!(read_progress(&answer(200, json!({"progress": 1.0, "playable": true}))).playable);
-        assert!(!read_progress(&answer(200, json!({"progress": 0.4, "playable": true}))).playable);
-        assert!(
-            read_progress(&answer(200, json!({"progress": 0.4, "playable": true, "download_complete": true}))).playable
+        let update = answer(200, json!({"response_uri": "/update/libra", "result_uri": "/game/libra"}));
+        assert_eq!(progress_paths("libra", &[&update, &finalized]), ["/update/libra", "/install/libra"]);
+        // Asked in the other order, the update's still comes first.
+        assert_eq!(progress_paths("libra", &[&finalized, &update]), ["/update/libra", "/install/libra"]);
+        assert_eq!(game_path("libra", &[&update, &finalized]), "/game/libra");
+        // No answer named any: the uid's own.
+        assert_eq!(progress_paths("libra", &[]), ["/update/libra", "/install/libra"]);
+        assert_eq!(game_path("libra", &[&answer(200, json!({"result_uri": "http://elsewhere/x"}))]), "/game/libra");
+        // The 404 says nothing, and names no error: not an end by itself.
+        let gone = read_progress(&answer(404, json!({})), Some(57_000_000_000));
+        assert!(!gone.says_anything() && gone.error.is_none() && !gone.says_done(), "{gone:?}");
+    }
+
+    #[test]
+    fn progress_reads_in_every_shape_the_sources_show() {
+        // The wiki's `/install/<uid>` example: three parts each, added up; `download_remaining` agrees.
+        let wiki = read_progress(
+            &answer(
+                200,
+                json!({"state": 1003.0, "playable": true, "progress": 0.788332, "download_rate": 6336703.523654,
+                "download_current": [151679743.0, 4879705322.0, 241012436.0],
+                "download_total": [151679743.0, 5467787030.0, 1076909397.0], "download_remaining": 1423978669.0,
+                "paused": false}),
+            ),
+            None,
         );
+        assert_eq!((wiki.done, wiki.total), (Some(5_272_397_501), Some(6_696_376_170)));
+        assert_eq!(wiki.total.unwrap() - wiki.done.unwrap(), 1_423_978_669);
+        assert_eq!((wiki.fraction, wiki.rate, wiki.state), (Some(0.788332), Some(6_336_703), Some(1003)));
+        assert!(wiki.playable && !wiki.says_done(), "playable while downloading is not done");
+        // HSCentric's `/update/<uid>`: a share, what is left, the phase; done by state 1004 and its flags.
+        let hsc = read_progress(
+            &answer(
+                200,
+                json!({"state": 1004, "progress": 1, "download_complete": true, "playable": true,
+                "patch_application_complete": true, "download_remaining": 0, "extended_status": {"current": 3, "state": 7}}),
+            ),
+            None,
+        );
+        assert_eq!((hsc.fraction, hsc.phase), (Some(1.0), Some(7)));
+        assert!(hsc.says_done());
+        // The wiki's `/game/<uid>`: installed, `update_progress`.
+        let game = read_progress(
+            &answer(
+                200,
+                json!({"installed": true, "download_complete": true, "playable": true,
+                "update_progress": 1.0, "install_dir": "C:/Program Files (x86)/World of Warcraft"}),
+            ),
+            None,
+        );
+        assert_eq!((game.installed, game.fraction), (Some(true), Some(1.0)));
+        // A percentage, and bytes in `download_details`.
+        let percent = read_progress(
+            &answer(200, json!({"progress": 42.5, "download_details": {"downloaded_bytes": 425, "total": 1000}})),
+            None,
+        );
+        assert_eq!((percent.fraction, percent.done, percent.total), (Some(0.425), Some(425), Some(1000)));
+        assert_eq!(read_progress(&answer(200, json!({"percent": 0.5})), None).fraction, Some(0.005));
+        // A share and no bytes: the share of the form's size.
+        let share = read_progress(&answer(200, json!({"progress": 0.25, "state": 1003})), Some(57_000_000_000));
+        assert_eq!((share.done, share.total), (Some(14_250_000_000), Some(57_000_000_000)));
+        // Only what is left.
+        let left = read_progress(
+            &answer(200, json!({"download_total": 1000, "download_remaining": 100, "paused": true})),
+            None,
+        );
+        assert_eq!((left.done, left.paused), (Some(900), true));
+        // An error named.
+        let failed = read_progress(&answer(200, json!({"error": 2421.0, "state": 1003})), None);
+        assert_eq!(failed.error, Some(2421));
+        assert_eq!(error_said(2421), "error 2421: the PC does not meet its needs, or there is not enough space");
+        assert_eq!(error_said(9), "error 9");
     }
 
     /// The TV PC's Agent's first answer to `POST /install` for Tony Hawk's Pro Skater 3 + 4 (2026-11-18), as the

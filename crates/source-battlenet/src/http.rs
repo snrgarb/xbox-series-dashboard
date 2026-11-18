@@ -59,7 +59,7 @@ impl Http {
     }
 
     /// As [`call`](Http::call), said in the log only where `say` is, or where it went wrong (no answer, or a
-    /// status that is not 2xx): for the progress asked once a second, whose lines the follower says itself.
+    /// status that is not 2xx).
     pub fn call_said(
         &self,
         what: &str,
@@ -91,6 +91,12 @@ impl Http {
                 Err(why)
             }
         }
+    }
+
+    /// `method` on `path`, said nowhere: for the progress asked once a second, whose answers the follower says
+    /// itself (`installing`).
+    pub fn fetch(&self, method: &str, path: &str) -> Result<Answer, String> {
+        self.send(method, &format!("http://127.0.0.1:{}{path}", self.port), None)
     }
 
     fn send(&self, method: &str, url: &str, body: Option<&str>) -> Result<Answer, String> {

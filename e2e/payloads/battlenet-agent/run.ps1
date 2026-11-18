@@ -14,13 +14,17 @@
 #   200 {"authorization":"<token>",...,"session":"<masked>",...}`: never the token, the session or the user's names);
 #   its form as the real Agent first answers it (`POST /install -> 201`, language 704, its own folder name
 #   LarkspurHollow), filled in unfinalized with a locale of its list, posted again until sized (1005, then 1009),
-#   then finalized (`POST /install/larkspur {"finalized":true,...}`), `the Agent took the install`; the Queue's
-#   `joined, asked for` and `downloading, <n>% of 50331648 bytes`.
-# - Manage Queue, its row; Pause installation (`pause: the Agent took it`, `queue: ... paused`), Resume installation,
-#   Cancel installation after its question (`cancelled: the Agent took it`, `queue: ... dropped`, its folder gone;
-#   the Agent the Dashboard started stopped: `it exited <n> ms after DELETE /agent`).
-# - Installed to the end from its hub again: `done: product.db says installed`, `queue: Larkspur Hollow installed`,
-#   the Agent stopped again and no Agent left running.
+#   then finalized (`POST /install/larkspur {"finalized":true,...}`), `the Agent took the install`. Then, as the real
+#   Agent answered the TV PC's first real install: `/install/larkspur` 404 `{}` (logged whole, and never the end),
+#   the progress read on `/update/larkspur` (`progress read on /update/larkspur`), the bytes and speed with the answer
+#   read; the Queue's `joined, asked for` and `downloading, <n>% of 50331648 bytes`.
+# - Manage Queue, its row; Pause installation (`POST /update/larkspur {"paused":true}`, `pause: the Agent took it`,
+#   `queue: ... paused`), Resume installation, Cancel installation after its question (`DELETE /update/larkspur`,
+#   `cancelled: the Agent took it`, `queue: ... dropped`, its folder gone; the Agent the Dashboard started stopped:
+#   `it exited <n> ms after DELETE /agent`).
+# - Installed to the end from its hub again: the Agent the Dashboard started running all the while, no `stopped:`
+#   line and no Queue stop, `done: product.db says installed`, `queue: Larkspur Hollow installed`, only then the
+#   Agent stopped, and no Agent left running.
 # - Play from its hub: `Battle.net.exe --exec=launch lkh` (the stand-in Battle.net's line), the stand-in game; ended.
 # - Uninstall from its Tile menu after the Dashboard's question: `POST /uninstall`, `uninstalled: product.db no longer
 #   says installed`, `queue: Larkspur Hollow uninstalled`, its folder gone, the Agent stopped.
@@ -172,8 +176,13 @@ try {
     Expect-Logged "^battlenet: ${code}: the form filled in: locales .*size state 1009; not finalized$" $mark 'Sized' | Out-Null
     Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"finalized`":true.*\} -> 200 \{.*`"finalized`":true.*\}$" $mark 'Finalized' | Out-Null
     Expect-Logged "^battlenet: ${code}: the Agent took the install$" $mark 'Taken' | Out-Null
+    Expect-Logged "^battlenet: ${code}: its progress read on /update/$uid, /install/$uid, the game on /game/$uid$" $mark 'Where its progress is' | Out-Null
+    # As the TV PC's real Agent: /install/<uid> is 404 {} once finalized, and that is not the end.
+    Expect-Logged "^battlenet: ${code}: /install/${uid}: first answer: 404 \{\}$" $mark 'The install''s path, 404' | Out-Null
+    Expect-Logged "^battlenet: ${code}: /update/${uid}: first answer: 200 \{.+\}$" $mark 'The update''s path, whole' | Out-Null
+    Expect-Logged "^battlenet: ${code}: progress read on /update/$uid$" $mark 'Read on the update''s path' | Out-Null
     Expect-Logged "^queue: $name joined, asked for$" $mark 'The Queue' | Out-Null
-    Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second$" $mark 'The Agent''s bytes and speed' | Out-Null
+    Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second; /update/$uid said \{.+\}$" $mark 'The Agent''s bytes and speed' | Out-Null
     Expect-Logged "^queue: $name downloading, \d+% of $whole bytes$" $mark 'Its bytes in the Queue' | Out-Null
 
     # --- Manage Queue from its hub's Queue action; its row; View on it.
@@ -190,9 +199,9 @@ try {
     Walk Down "TileMenu: Menu\(Pause installation\) of $name" 2
     $mark = Get-DashboardLogLength
     Press A "$row; .+" | Out-Null
-    Expect-Logged "^battlenet: agent: pause ${code}: POST /install/$uid \{`"paused`":true\} -> 200 .+$" $mark 'Pause asked' | Out-Null
+    Expect-Logged "^battlenet: agent: pause ${code}: POST /update/$uid \{`"paused`":true\} -> 200 .+$" $mark 'Pause asked' | Out-Null
     Expect-Logged "^battlenet: ${code}: pause: the Agent took it$" $mark 'Paused, the Agent' | Out-Null
-    Expect-Logged "^battlenet: ${code}: paused at \d+ of $whole bytes$" $mark 'Paused, its bytes' | Out-Null
+    Expect-Logged "^battlenet: ${code}: paused at \d+ of $whole bytes; /update/$uid said .+$" $mark 'Paused, its bytes' | Out-Null
     Expect-Logged "^queue: $name paused(, \d+% of $whole bytes)?$" $mark 'Paused, the Queue' | Out-Null
     Expect-Logged "^focus: $row; Paused [\d.]+%$" $mark 'Paused, the row' | Out-Null
     Start-Sleep -Milliseconds 2500
@@ -204,7 +213,7 @@ try {
     $mark = Get-DashboardLogLength
     Press A "$row; .+" | Out-Null
     Expect-Logged "^battlenet: ${code}: resume: the Agent took it$" $mark 'Resumed' | Out-Null
-    Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second$" $mark 'Downloading again' | Out-Null
+    Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second; .+$" $mark 'Downloading again' | Out-Null
     Expect-Logged "^focus: $row; Installing\.\.\. [\d.]+%$" $mark 'Resumed, the row' | Out-Null
 
     # --- Cancel, after its question.
@@ -213,7 +222,7 @@ try {
     Press A "TileMenu: Prompt\(Cancel installation\) of $name" '05-cancel-question' | Out-Null
     $mark = Get-DashboardLogLength
     Press A 'ManageQueue: .+' | Out-Null
-    Expect-Logged "^battlenet: agent: cancel ${code}: DELETE /install/$uid -> 200 .+$" $mark 'Cancel asked' | Out-Null
+    Expect-Logged "^battlenet: agent: cancel ${code}: DELETE /update/$uid -> 200 .+$" $mark 'Cancel asked' | Out-Null
     Expect-Logged "^battlenet: ${code}: cancelled: the Agent took it$" $mark 'Cancelled' | Out-Null
     Expect-Logged "^queue: $name dropped$" $mark 'Cancelled, the Queue' | Out-Null
     Expect-Logged '^battlenet: agent: the Agent the Dashboard started \(pid \d+, port \d+\) stopped: it exited \d+ ms after DELETE /agent$' $mark 'Its Agent stopped' 20 | Out-Null
@@ -225,7 +234,16 @@ try {
     $mark = Get-DashboardLogLength
     Press A '.+' | Out-Null
     Expect-Logged "^queue: $name joined, asked for$" $mark 'Second install' | Out-Null
+    Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second; .+$" $mark 'Downloading' 60 | Out-Null
+    if (-not @(Get-OwnProcess Agent).Count) { throw 'no Agent running while the install is under way' }
     Expect-Logged "^battlenet: ${code}: done: product\.db says installed$" $mark 'Done' 90 | Out-Null
+    # Nothing took it for stopped, and the Agent the Dashboard started was let go only once it was done.
+    $after = @(Get-DashboardLog | Select-Object -Skip $mark)
+    $stops = @($after | Where-Object { $_ -match "^battlenet: ${code}: stopped: |^queue: $name stopped" })
+    if ($stops.Count) { throw "the install was taken for stopped: $($stops[0])" }
+    $doneAt = [array]::FindIndex([string[]] $after, [Predicate[string]] { param($l) $l -match "^battlenet: ${code}: done: " })
+    $letGoAt = [array]::FindIndex([string[]] $after, [Predicate[string]] { param($l) $l -match '^battlenet: agent: the Agent the Dashboard started \(pid' })
+    if ($letGoAt -ge 0 -and $letGoAt -lt $doneAt) { throw "the Agent the Dashboard started was stopped before the install was done: $($after[$letGoAt])" }
     Expect-Logged "^queue: $name installed$" $mark 'Installed' 60 | Out-Null
     Expect-Logged '^battlenet: agent: the Agent the Dashboard started \(pid \d+, port \d+\) stopped: it exited \d+ ms after DELETE /agent$' $mark 'Its Agent stopped' 20 | Out-Null
     if (Wait-Until { -not @(Get-OwnProcess Agent).Count } 10) { Say 'no Agent left running' } else { throw 'an Agent is left running after the install' }

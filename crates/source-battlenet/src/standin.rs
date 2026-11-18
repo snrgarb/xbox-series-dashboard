@@ -13,8 +13,14 @@
 //! `POST /install` gives it with `language.error` 704 and its list until a listed locale is posted, as the list
 //! writes it; `game_dir` with a `dirname` of its own ([`dirname`]: not the game's name), `required_space_info.state`
 //! 1005 until the second post of the choices, 1009 after, and `warning` 806; the download starts only once the
-//! form is posted finalized, and a form not finalized is taken back by `DELETE /install/<uid>`. `DELETE /agent`
-//! ends it, run as a program. Served as [`Mode::Clients`] it is Battle.net's own Agent as an outside caller finds
+//! form is posted finalized, and a form not finalized is taken back by `DELETE /install/<uid>`. Once finalized, as the
+//! TV PC's real install went (2026-11-18): the finalized post and `POST /update` answer a `response_uri` and a
+//! `result_uri` (`/update/<uid>`, `/game/<uid>`), `GET /install/<uid>` is **404 `{}`**, and the progress is on
+//! `GET /update/<uid>` in the wiki's shape (`download_current` and `download_total` arrays of three parts that add
+//! up, `progress` a share, `state` 1003 then 1004) and the game on `GET /game/<uid>` (`installed`, `playable`,
+//! `update_progress`). Pause and cancel answer the Dashboard's guesses on `/update/<uid>` (`POST {paused}`,
+//! `DELETE`); [`Served::fail`] has an install fail with an error code, as a test asks. `DELETE /agent` ends it, run
+//! as a program. Served as [`Mode::Clients`] it is Battle.net's own Agent as an outside caller finds
 //! it: 401 with no body to every request. It works only in a fake's folder: one with a `fixture.json`.
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -69,6 +75,8 @@ struct Install {
     locale: Option<String>,
     /// How many times the choices have been posted.
     posts: u32,
+    /// An error the Agent names on its progress from now on ([`Served::fail`]).
+    error: Option<i64>,
 }
 
 struct State {
@@ -97,6 +105,13 @@ impl Served {
     /// Whether it was asked to end (`DELETE /agent`).
     pub fn closed(&self) -> bool {
         lock(&self.state).closed
+    }
+
+    /// Has the install of `uid` stop with `error`, named on its progress from now on, as the Agent names one.
+    pub fn fail(&self, uid: &str, error: i64) {
+        if let Some(install) = lock(&self.state).installs.get_mut(uid) {
+            install.error = Some(error);
+        }
     }
 }
 
@@ -193,7 +208,7 @@ fn tick(state: &Mutex<State>) {
     let mut state = lock(state);
     let mut finished = Vec::new();
     for (uid, install) in state.installs.iter_mut() {
-        if install.paused || install.playable || install.dir.is_none() {
+        if install.paused || install.playable || install.dir.is_none() || install.error.is_some() {
             continue;
         }
         install.done = (install.done + STEP_BYTES).min(WHOLE);
@@ -343,16 +358,13 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
                 playable: false,
                 locale: None,
                 posts: 0,
+                error: None,
             });
             (201, form(&games, &uid, install, None, false))
         }
         ("POST", ["install", uid]) => {
             let games = state.root.join("games");
             let Some(install) = state.installs.get_mut(*uid) else { return (404, json!({ "error": 2300 })) };
-            if let Some(paused) = request.body.get("paused").and_then(Value::as_bool) {
-                install.paused = paused;
-                return (200, json!({ "paused": paused }));
-            }
             let Some(dir) = request.body.get("game_dir").and_then(Value::as_str).filter(|d| !d.is_empty()) else {
                 return (200, json!({ "error": 2302, "why": "no game_dir" }));
             };
@@ -377,26 +389,58 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
             let finalized = finalized && install.dir.is_some();
             (200, form(&games, uid, install, Some(&dir), finalized))
         }
+        // Once finalized, nothing more is said here (the TV PC's Agent: 404 `{}`); a form not finalized is the form.
         ("GET", ["install", uid]) => match state.installs.get(*uid) {
-            Some(install) => {
-                let rate = if install.paused || install.playable || install.dir.is_none() { 0 } else { STEP_BYTES };
-                (
-                    200,
-                    json!({
-                        "progress": install.done as f64 / WHOLE as f64,
-                        "download_rate": rate as f64,
-                        "download_current": [install.done, 0, 0],
-                        "download_total": [WHOLE, 0, 0],
-                        "download_remaining": WHOLE - install.done,
-                        "download_complete": install.playable,
-                        "paused": install.paused,
-                        "playable": install.playable,
-                        "state": if install.playable { 1004 } else { 1003 },
-                    }),
-                )
-            }
-            None => (404, json!({ "error": 2300 })),
+            Some(install) if install.dir.is_none() => (200, form(&state.root.join("games"), uid, install, None, false)),
+            _ => (404, json!({})),
         },
+        ("GET", ["update", uid]) => match state.installs.get(*uid) {
+            Some(install) if install.dir.is_some() => (200, progress(install)),
+            _ => (404, json!({})),
+        },
+        ("POST", ["update", uid]) => match state.installs.get_mut(*uid) {
+            Some(install) if install.dir.is_some() => match request.body.get("paused").and_then(Value::as_bool) {
+                Some(paused) => {
+                    install.paused = paused;
+                    (200, json!({ "paused": paused }))
+                }
+                None => (200, json!({ "error": 2306, "why": "nothing asked" })),
+            },
+            _ => (404, json!({})),
+        },
+        ("DELETE", ["update", uid]) => match state.installs.get(*uid).filter(|i| i.dir.is_some()).cloned() {
+            Some(install) => {
+                state.installs.remove(*uid);
+                if let Some(dir) = install.dir.filter(|_| !install.playable) {
+                    let _ = std::fs::remove_dir_all(dir);
+                }
+                (state.say)(&format!("battlenet agent: {uid}: a download taken back"));
+                (200, json!({}))
+            }
+            None => (404, json!({})),
+        },
+        ("GET", ["game", uid]) => {
+            let spec = Fixture::load(&state.root).ok();
+            let installed = spec
+                .as_ref()
+                .and_then(|spec| spec.products.iter().find(|p| p.uid == *uid && p.kind == Kind::Installed).cloned());
+            match (installed, state.installs.get(*uid)) {
+                (Some(product), _) => (
+                    200,
+                    json!({ "installed": true, "playable": true, "download_complete": true, "update_progress": 1.0,
+                            "install_dir": fixture::folder(&state.root, &product).display().to_string(),
+                            "product": product.code }),
+                ),
+                (None, Some(install)) if install.dir.is_some() => (
+                    200,
+                    json!({ "installed": false, "playable": install.playable, "download_complete": install.playable,
+                            "update_progress": install.done as f64 / WHOLE as f64,
+                            "install_dir": install.dir.clone().unwrap_or_default().display().to_string(),
+                            "product": install.code }),
+                ),
+                _ => (404, json!({})),
+            }
+        }
         ("DELETE", ["install", uid]) => match state.installs.remove(*uid) {
             Some(install) => {
                 let was = if install.dir.is_none() { "a form not finalized" } else { "a download" };
@@ -425,10 +469,15 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
                 Err(e) => (200, json!({ "error": 2304, "why": e.to_string() })),
             }
         }
-        ("POST", ["update"]) => match state.installs.get(&uid_of(&request.body)) {
-            Some(_) => (200, json!({ "response_uri": format!("/update/{}", uid_of(&request.body)) })),
-            None => (404, json!({ "error": 2300 })),
-        },
+        ("POST", ["update"]) => {
+            let uid = uid_of(&request.body);
+            match state.installs.get(&uid) {
+                Some(_) => {
+                    (200, json!({ "response_uri": format!("/update/{uid}"), "result_uri": format!("/game/{uid}") }))
+                }
+                None => (404, json!({ "error": 2300 })),
+            }
+        }
         ("DELETE", ["agent"]) => {
             state.closed = true;
             (200, json!({}))
@@ -468,5 +517,29 @@ fn form(games: &Path, uid: &str, install: &Install, game_dir: Option<&Path>, fin
             "tome_path": { "error": 0 },
         },
         "response_uri": format!("/install/{uid}"),
+        "result_uri": format!("/game/{uid}"),
     })
+}
+
+/// `GET /update/<uid>` of a download, in the wiki's shape: each of `download_current` and `download_total` three parts
+/// that add up, as its example's do.
+fn progress(install: &Install) -> Value {
+    let parts = |n: u64| json!([n / 4, n / 2, n - n / 4 - n / 2]);
+    let moving = !(install.paused || install.playable || install.error.is_some());
+    let mut body = json!({
+        "progress": install.done as f64 / WHOLE as f64,
+        "download_rate": if moving { STEP_BYTES as f64 } else { 0.0 },
+        "download_current": parts(install.done),
+        "download_total": parts(WHOLE),
+        "download_remaining": WHOLE - install.done,
+        "download_complete": install.playable,
+        "paused": install.paused,
+        "playable": install.playable,
+        "state": if install.playable { 1004 } else { 1003 },
+        "extended_status": { "current": 1, "state": if install.playable { 4 } else { 2 } },
+    });
+    if let Some(error) = install.error {
+        body["error"] = json!(error);
+    }
+    body
 }
