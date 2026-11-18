@@ -1,0 +1,367 @@
+# The Discord web session spike: discord.com in a WebView2 hosted from Rust, on the TV PC
+
+Spike for [#196](https://github.com/snrgarb/xbox-series-dashboard/issues/196), milestone M9 Full Discord. The
+decisions it works under are on [#192](https://github.com/snrgarb/xbox-series-dashboard/issues/192): D1 opt-in with
+RPC kept for voice; D2 our own web session; D3 our own screens under Party in the Guide; D4 DMs and notifications
+first; D5 no video; D6 messages in memory only; D7 our own code. The route and its risks are in
+[`discord-bridge.md`](discord-bridge.md), sections 4, 6 and 8: this is its stage S0.
+
+Written on Linux on 18 November 2026 and run by the lead on the TV PC the same day (shell mode, WebView2 runtime
+Edge 157.0.4341.60), the user signing in and naming the conversation and the word. **The results are in section 7,
+the lessons for #197 to #202 in section 8.** The raw notes are #196's comments. Sections 3 and 6 were written
+before the run: section 7 says which of their guesses held.
+
+## 1. What it is
+
+`spikes/discord` builds `discord-spike.exe`, a throwaway program of five steps, one per run. Each step appends to a
+log beside the exe and exits; the lead starts each one as a scheduled task in the signed-in desktop and reads the log.
+
+| Step | What it does | Needs the user |
+| --- | --- | --- |
+| `--probe` | The PC (Windows build, session, input desktop, shell mode, Explorer), the WebView2 runtime (registry and loader), then an environment and a controller made on a hidden window with `--data` as the user data folder; a blank page's user agent; memory. `--online` also loads discord.com/login hidden | No |
+| `--sign-in` | discord.com/login full screen, topmost; the pad mapped to keys, a keyboard for text, the pointer on the left stick. Logs where the page went and what Discord showed; waits for the quit file or `--minutes` | **Yes**: the user signs in |
+| `--dms` | The saved session, hidden; one script reads the DM list as the page shows it; counts to the log, names to a file of their own; memory, and CPU at idle after 60 s | No (signed in first) |
+| `--send` | Opens the conversation named in `--to-file`, puts the text from `--text-file` in by `Input.insertText`, presses Enter once, looks for the message in the page | **Yes**: the user names the conversation and the words |
+| `--sign-out` | Removes the session folder; says whether anything is left | No |
+
+**What it never does**: type, read, print or keep a password, a code, the token or a cookie. The sign-in is the
+user's, in Discord's own page; the pad's presses become key events, and nothing typed is logged. WebView2's own
+password saving and autofill are turned off. No script calls Discord's API or reads its storage; the DM list is read
+from the page's DOM and its accessible attributes. Addresses are logged as scheme, host and path only, with long
+numbers as `<id>` and long opaque segments as `<long>` (`spikes/discord/src/redact.rs`). Conversation names go to
+`dm-names.txt`, never the log; the message and its conversation are logged as lengths. `--send` refuses to run
+without both files.
+
+### How it is built
+
+- **`webview2-com` 0.39** (MIT; the COM bindings Tauri's `wry` uses), on `windows` 0.62, the version the workspace
+  already builds. The repository has no `deny.toml`; the licence rule is `packaging/about.toml`'s list, which has MIT.
+  The spike is not part of `dashboard.exe` or its package.
+- **WebView2Loader.dll is loaded at run time** from beside the exe (`LoadLibraryW`, then
+  `CreateCoreWebView2EnvironmentWithOptions` and `GetAvailableCoreWebView2BrowserVersionString` by
+  `GetProcAddress`), not linked: on `-gnullvm` the crate can only link the DLL's import library, and a missing DLL
+  would stop the exe before it could log. CI copies the DLL that `webview2-com-sys` ships (Microsoft's
+  redistributable loader) into the `windows` artifact beside the exes (`.github/workflows/ci.yml`). It is never
+  committed. **For #197**: `dashboard.exe` would need the same DLL beside it in the package, or a loader of our own.
+- **The host thread**: one thread made for the web view, COM single-threaded, owning the window, the environment, the
+  controller and every callback, its messages pumped by the steps' own waits. A watchdog ends the process
+  `--minutes` + 2 after it starts if a step hangs.
+- **A Windows-subsystem exe**: no console window when a task starts it; everything is in the log.
+- **Hidden** means one of two things (`--hide`): `controller` (the default: the window is never shown and the
+  controller is told `IsVisible = false`) or `offscreen` (the window is shown, never activated, at -20000,-20000,
+  and the controller thinks it is visible). A hidden web view is laid out at 1600 x 900 CSS pixels (scale 1),
+  wide enough for the DM list. `--browser-args` passes Chromium switches through, for trying
+  `--disable-features=CalculateNativeWinOcclusion` or `--disable-backgrounding-occluded-windows` if a hidden page
+  stops working.
+- **Input to the page** is DevTools' `Input.dispatchKeyEvent`, `Input.insertText` and `Input.dispatchMouseEvent`
+  through `CallDevToolsProtocolMethod`, as the research chose: trusted events, delivered whether or not the window
+  has the foreground. The left stick's pointer and the trigger's click are Windows' own `SendInput`, for what keys
+  cannot reach.
+
+### The keyboard: the spike's own pad keyboard, and why
+
+`--keyboard pad` (the default) is a 10 x 4 grid in three layers (`abc`, `ABC`, `#+=`) drawn by the spike with GDI
+along the bottom of its window, the web view shrunk above it. It opens by itself when a text field takes focus, and
+with Y. The D-pad moves over it, A types the key (`Input.insertText`), X deletes, Y is a space, LB the next layer,
+View Tab, Menu Enter, B closes it.
+
+- **Not the Dashboard's Console keyboard**: it is drawn by the `ui` and `render` crates through wgpu with the fonts
+  loaded from Windows, and steered by the `screens` crate's page stack. Bringing that into a throwaway window is
+  most of a renderer; the spike only has to answer whether text from the pad reaches Discord's fields, which the
+  stand-in answers. The real one comes in #197 and #201, inside the Dashboard, where it already is.
+- **Windows' touch keyboard** (`--keyboard tabtip`) is there to try, not the default: it is started
+  (`TabTip.exe`) and toggled through `ITipInvocation` (undocumented, as every program that shows it does). Whether it
+  comes up in shell mode, and whether its gamepad layout drives it, is a question for the TV run; the probe logs
+  whether `TextInputHost.exe` and `TabTip.exe` are running.
+- **The on-screen keyboard** (`--keyboard osk`) is started with Y; it needs a pointer, which the left stick and the
+  right trigger give.
+- **A real keyboard and mouse** work in every mode, if the window has the foreground.
+
+## 2. Getting it onto the TV
+
+From CI's `windows` artifact of the PR's run (it holds `discord-spike.exe` and `WebView2Loader.dll` beside the
+other exes):
+
+```sh
+gh run download <run id> -n windows -D target/tmp/discord-spike
+ssh htpc-win mkdir "%LOCALAPPDATA%\xsd-discord-spike"
+scp target/tmp/discord-spike/discord-spike.exe target/tmp/discord-spike/WebView2Loader.dll \
+    htpc-win:AppData/Local/xsd-discord-spike/
+```
+
+Every file is beside the exe by default: the session `session\`, the log `discord-spike.log`, the names
+`dm-names.txt`, the quit file `quit`; a relative path on the command line is taken from the exe's folder too (a task
+starts in System32, and `schtasks /tr` takes 261 characters at most). The folder is outside `%TEMP%` so the session outlives a cleanup.
+
+Each step is one scheduled task in the signed-in session (`/it`), as `e2e/htpc/run.sh` starts the Dashboard, run
+now and deleted after; the time `/st 00:00` is never reached. Over ssh (cmd expands `%LOCALAPPDATA%` when the task
+is made; the path must have no spaces):
+
+```sh
+step() {  # step '<arguments>'
+  ssh htpc-win "schtasks /create /tn xsd-discord-spike /sc once /st 00:00 /it /f /tr \"%LOCALAPPDATA%\\xsd-discord-spike\\discord-spike.exe $1\" >nul && schtasks /run /tn xsd-discord-spike"
+}
+log() { ssh htpc-win type "%LOCALAPPDATA%\\xsd-discord-spike\\discord-spike.log"; }
+done_() { ssh htpc-win schtasks /delete /tn xsd-discord-spike /f; }
+```
+
+| Step | Run | Ends |
+| --- | --- | --- |
+| 1 | `step '--probe --online'` | by itself, in about a minute |
+| 2 | `step '--sign-in'` (or `'--sign-in --keyboard tabtip'`, `'--sign-in --keyboard osk'`) | when the lead runs `ssh htpc-win 'type nul > "%LOCALAPPDATA%\xsd-discord-spike\quit"'`, the window is closed (Alt+F4), or after 20 min (`--minutes`) |
+| 3 | `step '--dms'`, then `step '--dms --hide offscreen'` | by itself, in about two minutes (90 s at most to load, 60 s idle, 30 s measured) |
+| 4 | the lead writes the user's two lines (UTF-8, one line each) to `to.txt` and `text.txt` in the folder (`scp`), then `step '--send --to-file to.txt --text-file text.txt'` | by itself; delete both files after |
+| 5 | `step '--sign-out'` | by itself |
+
+Read the log after each (`log`), then `done_`. The log is appended to, each step starting with
+`discord-spike 0.1.0 started: <step> (pid n)` and ending `done: exit <code>`. **`dm-names.txt` holds the user's
+conversations' names: it stays on the TV or in `target/tmp`, never in the repository**, and is removed with the
+folder at the end (`ssh htpc-win rmdir /s /q "%LOCALAPPDATA%\xsd-discord-spike"`).
+
+While `--sign-in` runs, the Dashboard behind it (if it is running) also reads the pad through XInput: leave it on a
+screen where presses do no harm, or out of the way.
+
+## 3. The steps, their log lines and what they mean
+
+Every line starts with the UTC time. Lines any step may write:
+
+| Line | Means |
+| --- | --- |
+| `window: full screen 3840x2160 px, topmost; foreground given: yes/no` | The sign-in window (or `--visible`). "no": Windows refused the foreground to a task's process; the pad still works (DevTools input), a real keyboard may not until the window is clicked |
+| `window: never shown, 1600x900 px; the web view is told it is not visible` / `window: shown off every screen ...` | The two hidden modes |
+| `environment: made in <ms> ms, browser <version>, user data folder <dir>` | WebView2 started a browser for our folder: an unpackaged exe can host it |
+| `controller: made in <ms> ms` | The web view exists on our window |
+| `settings: password saving and autofill off` | WebView2 will not offer to keep the password |
+| `navigation: start <scheme://host/path>`, `navigation: done <address> ok yes http 200` | A page load and how it ended (`web error n` is `COREWEBVIEW2_WEB_ERROR_STATUS`) |
+| `route: <address>` | Discord's own in-page navigation (it is one page that changes its path) |
+| `new window refused: <address>` | The page asked for a new window (a help link): refused |
+| `permission asked and refused: kind n` | `COREWEBVIEW2_PERMISSION_KIND`: 1 microphone, 2 camera, 4 notifications, ... All refused |
+| `process failed: kind n` | A web view process died (`COREWEBVIEW2_PROCESS_FAILED_KIND`) |
+| `memory (<when>): <kind> pid n: working set, private` and `... web view, n processes: ...` | Each WebView2 process (browser, renderer, gpu, utility) and their sum; `this spike` is our own |
+| `page: the app is shown after <ms> ms` / `page: Discord shows its login page: this session is not signed in` | `--dms` and `--send` reaching the app, or finding no session (exit 3) |
+| `watchdog: ... ended here` | The step hung: exit 9 |
+
+### Step 1, `--probe [--online]`
+
+| Line | Means |
+| --- | --- |
+| `windows: <ProductName> <DisplayVersion> build <n>.<ubr>` | Build 22000 and up is Windows 11 (ProductName says 10 on 11) |
+| `session: this process in session n, the console's is m; input desktop Default` | The task ran in the signed-in desktop if n = m and the desktop is `Default` |
+| `shell: dashboard.exe (this user's Winlogon Shell: shell mode yes)` | Shell mode is set |
+| `shell: explorer.exe processes n, a shell window yes/no; dashboard.exe processes n` | **Whether Explorer runs** (the Dashboard's shell mode starts it behind Start-up, `shell.md`), so whether this run answers "WebView2 without Explorer" |
+| `processes before: msedgewebview2.exe n ..., TextInputHost.exe n, TabTip.exe n` | Other programs' web views already running; the touch keyboard's hosts |
+| `runtime: registry HKLM\...\Clients\{F3017226-...}: Evergreen version <v>` | The runtime installed for the machine (or `HKCU` for the user) |
+| `runtime: no fixed version ...` | No fixed-version runtime is in play |
+| `loader: <path> loaded`, `runtime: the loader finds Evergreen <v>` | WebView2Loader.dll works and finds the runtime. `loader: WebView2Loader.dll is not beside the exe` is exit 2 |
+| `probe: environment and controller made from this unpackaged exe in <ms> ms` | **The hosting question answered: yes** |
+| `probe: a script runs (2); page visibility hidden; user agent <ua>` | ExecuteScript works; what a hidden page believes; the user agent Discord will see (an Edge one) |
+| `probe: DevTools protocol answers: <product>` | `CallDevToolsProtocolMethod` works |
+| `online: after <ms> ms: route login, login form yes, captcha no, QR yes, app no` | discord.com/login loads in our web view and shows its form (`--online`) |
+| `session folder <dir>: n files, m MB` | What the session left on disk |
+
+Exit 0, else 2 (no loader or runtime) or 4 (no web view).
+
+### Step 2, `--sign-in`
+
+The window covers the screen; a bar along the bottom says the pad's keys.
+
+| The pad | Keyboard closed | Pad keyboard open |
+| --- | --- | --- |
+| D-pad | Up Shift+Tab, Down Tab, Left/Right the arrow keys | moves over the keys (a held direction repeats) |
+| A | Enter | types the key |
+| B | Escape | closes the keyboard |
+| X | Space (a checkbox) | Backspace |
+| Y | the keyboard (`--keyboard`) | a space |
+| LB / RB | arrow up / down | LB the next layer |
+| View | Backspace | Tab |
+| Menu | | Enter |
+| Left stick, right trigger, right stick | the mouse pointer, its left button (held for a drag), the wheel | the same |
+
+| Line | Means |
+| --- | --- |
+| `pad: one is connected (XInput slot n)` / `pad: none connected (looked for once a second)` | The pad the step reads; one that connects later is taken up and logged then. `app` in `page:` is any app route (the TV went `/login` -> `/app` -> `/quest-home`): no login route, no password field, the server bar shown |
+| `page: route login, login form yes, password field yes, captcha no (0 hCaptcha frames), two-factor no, QR code yes, new-location check no, app no` | **What Discord shows**, written each time it changes (looked at every 2 s). `captcha`: an hCaptcha frame or a captcha element. `two-factor`: a one-time-code field or its words. `new-location check`: the words of Discord's "new login location" or e-mail check (English page only). `QR code`: the QR login panel |
+| `focus: a text field (email / password / text / contenteditable)` / `focus: not a text field` | Where the pad's Tab put focus: the kind of field, never its value |
+| `keyboard: the spike's pad keyboard opened (a text field took focus)` | The pad keyboard came up by itself |
+| `keyboard: touch keyboard toggled (Y): HRESULT(0x0); TabTip.exe was running ..., TextInputHost.exe ...` | `--keyboard tabtip`: whether the toggle worked (does it show?) |
+| `start: osk.exe: started / refused (n)` | `--keyboard osk` |
+| `pointer: SendInput refused (...)` | The stick's pointer cannot move (once) |
+| `sign-in: the app page is reached after n s: signed in; the session is kept in <dir>` | **Signed in** |
+| `sign-in: the quit file is there` / `the window was closed` / `20 min are up` | Why it ended |
+| `sign-in: closing; signed in yes/no; the session stays in <dir>` | The end |
+
+### Step 3, `--dms [--hide offscreen] [--visible]`
+
+| Line | Means |
+| --- | --- |
+| `dms: the page says visibility hidden/visible, focus false` | What Discord's page believes about being hidden |
+| `dms: the script took <ms> ms` | One `Runtime.evaluate` of `js/dms.js`, scrolling Discord's virtualised list a page at a time |
+| `dms: selectors matched: dm_links=n dm_links_in_guild_bar=n guild_bar_items=n guild_bar_badges=n listitem_role_dm=n dm_name_class=n dm_aria_label=n dm_number_badge=n unread_class=n private_channels_list=n` | **Which selectors work today**: each one's match count on the first screen (-1: refused by the browser). `dm_links` (`a[href^="/channels/@me/"]`) is the anchor: a route, not a class |
+| `dms: n conversations (list scroller found yes, read over p pages); names from name_ class a, aria-label b, text c` | The list's length, read whole; where names came from |
+| `dms: unread: n by any sign; in the server bar a, by an unread class b, by a heavier name c; server bar entries d` | Three ways to tell unread, side by side: a DM in the server bar (Discord shows unread DMs there), a class with "unread" in it, a bolder name than most |
+| `dms: with a count: n (row badge a, aria-label b, server bar badge c); counts sum to s` | Mention counts and where they came from |
+| `dms: n names written to <file> (not to this log)` | `dm-names.txt`: each line `name<TAB>unread flags (bar/class/weight, y or -)<TAB>count`, for the lead to compare with Discord itself |
+| `memory (app page, hidden): ...` | **Memory of the web view hidden** with Discord loaded |
+| `cpu: web view at idle over 30 s: x s of processor time, y% of one core, z% of all n threads` | **CPU at idle**, measured after 60 s of nothing |
+
+Exit 0; 3 not signed in; 5 the script failed; 8 the app did not show.
+
+### Step 4, `--send --to-file <f> --text-file <f>`
+
+Refused (exit 10, nothing sent) unless both files exist, the text is one line of at most 2,000 characters, and the
+name one line. Never retried.
+
+| Line | Means |
+| --- | --- |
+| `send: a conversation named in n characters, a message of m characters` | The files were read |
+| `send: k conversations of that name among r rows ...: nothing sent` | Not found, or not one (exit 4). The name must be as the DM list shows it; case is ignored if no exact match |
+| `send: the conversation found (name matched exactly, over p pages); covered by something else: no` | Found; nothing lay over the point to click |
+| `send: viewport WxH css px, visibility ...; the row wxh at x,y; elementFromPoint at its centre is the row: yes/no` | What a hidden web view gives the page: a 0x0 viewport or a miss means clicks cannot land (try `--hide offscreen`) |
+| `send: <way>: after <ms> ms the route is the conversation's yes/no, its message box (role textbox) present yes/no` | One line per way of opening, tried in order until one works: `history.pushState + popstate` (the page's own router), `Navigate to the address` (a full load of `/channels/@me/<id>`), `a DevTools click on the row`. The first TV run's click alone did not open it (exit 5) |
+| `send: opened by <way>; it shows n messages` | The way that worked |
+| `send: the history settled at n messages after <ms> ms` | The conversation's history loaded (the count held still 1.5 s) before anything is typed |
+| `send: the newest message is already this text, s s old: not sent again` | A run less than a minute after one that sent: exit 0, nothing sent |
+| `send: focus emulation on` | DevTools' `Emulation.setFocusEmulationEnabled`: the hidden page believes it has focus; the controller is also given focus (`MoveFocus`) |
+| `send: the message box has focus after DOM.focus / a DevTools click / the box's focus(): yes` | Tried in that order; none: exit 5, nothing sent |
+| `send: the box held a draft: cleared by select all + delete: yes` | Discord keeps drafts (the second TV run's text was still there): Ctrl+A and Backspace by DevTools; "no": exit 6, nothing sent |
+| `send: the message box holds exactly the text: yes` | `Input.insertText` put the text in; "no": Enter is not pressed, exit 7, nothing sent (the text stays as a draft in the spike's session) |
+| `send: before Enter: document.hasFocus() true, activeElement div[role=textbox], it is the box yes` | Where the key will go |
+| `send: Enter pressed (once: rawKeyDown, char \r, keyUp)` | The full key sequence, each event waited for. The second TV run's single `keyDown` with text left the text in the box |
+| `send: after <ms> ms: the newest message is the text yes, still marked sending no, marked failed no, box empty yes; ...` | **Whether the message appeared in the page** |
+| `send: the message appeared in the page` | Exit 0. Otherwise exit 7: look in Discord itself |
+
+### Step 5, `--sign-out`
+
+| Line | Means |
+| --- | --- |
+| `sign-out: <dir> holds n files, m MB` | What the session was |
+| `sign-out: attempt n: <error>` | A file held (a web view still running): tried 5 times, 2 s apart |
+| `sign-out: nothing is left: <dir> is gone` | **The PC is signed out** |
+| `sign-out: Discord still lists this session under User Settings > Devices until it is logged out there` | Removing the folder does not end the session on Discord's side |
+
+## 4. The questions each step answers, for #197 to #202
+
+| Question | Step and line | For |
+| --- | --- | --- |
+| Is the WebView2 runtime on the TV, which version, Evergreen or fixed? | 1: `runtime:` lines | #197 (no-runtime state) |
+| Does it host from an unpackaged Rust exe, with a user data folder of ours? | 1: `environment:`, `controller:` | #197 |
+| Does it work in shell mode? Is Explorer running when it does? | 1: `shell:` lines beside `probe: environment and controller made` | #197 |
+| How long do the environment and controller take to make? | 1, 2, 3: `made in` | #197 (when to start it) |
+| Does WebView2Loader.dll need shipping? | 1: `loader:` | #197 (packaging) |
+| Does discord.com/login load in our web view, and does Discord accept it (user agent)? | 1 `--online`, 2: `page:` | #197 |
+| Can the user sign in with the pad: focus by Tab, Enter, the keyboard's text in the fields? | 2: `focus:`, `page:`, the user's own account of it | #197, #201 |
+| Which keyboard: the pad keyboard (stand-in for the Console keyboard), the touch keyboard in shell mode, osk? | 2: `keyboard:` lines, and what the user saw | #201 |
+| What does Discord put in the way: captcha, new-location e-mail, two-factor, QR? | 2: `page:` lines | #197 (what the sign-in page must allow), #201 (captcha said plainly) |
+| Does a captcha frame take the pad (Tab into it) or need the pointer? | 2: `page:` and the user | #197 |
+| Does the sign-in window steal or need the foreground? | 2: `window: ... foreground given` | #197 |
+| Is the session kept, and what is in the folder? | 2: `sign-in: closing`, `session folder`; 3 finding the app | #197 |
+| Does a hidden web view keep Discord working: does the page load, does the list render, which hidden mode? | 3: `dms:` with `--hide controller` and `offscreen`; `visibility` | #198 |
+| Which selectors match Discord's DM list today; how is unread best told; how are counts read? | 3: `selectors matched`, `unread`, `with a count` | #198 (our selectors file and its health probe) |
+| Is the list virtualised, and does paging through it by scrolling work hidden? | 3: `scroller found`, `pages` | #198 |
+| What does it cost hidden: memory, CPU at idle? | 3: `memory`, `cpu` | #197 (always on or on demand), #202 (a session kept for notifications) |
+| Do DevTools input events open a conversation and send, hidden, with no foreground? | 4: `viewport`, each way of opening, `has focus`, `holds exactly the text`, `appeared` | #201 |
+| Does Discord accept a message sent that way, or answer with a captcha or refusal? | 4: `marked failed`, and Discord itself | #201 |
+| Does sign-out leave nothing, and what stays on Discord's side? | 5 | #197 |
+| Do Discord's web notifications reach the web view? | **Not tested**: every permission is refused here. A follow-up for #202 if wanted | #202 |
+| How do the screens look? | Not this spike: our own screens (D3), #199 and #200 | |
+
+## 5. Discord's terms: the risk, plainly
+
+Discord's [Terms of Service](https://discord.com/terms) (effective 29 September 2025; quoted in
+[`discord-bridge.md`](discord-bridge.md) section 4, read 2026-11-17), under "Don't use the services to do harm to
+Discord", forbid "scraping our services without our written consent, including by using any robot, spider,
+crawler, scraper, or other automatic device, process, or software", and "using any unauthorized software designed
+to modify the services". Discord's support article
+[Automated user accounts (self-bots)](https://support.discord.com/hc/articles/115002192352) says that automating a
+normal user account outside the OAuth2/bot API is forbidden and can get the account terminated (that page refuses
+automated fetches; its wording is from its indexed copies, as the research says).
+
+What this spike does against that:
+
+- It **reads Discord's page by script** (the DM list) and **sends a message by program** (DevTools input events, the
+  user's words, once, to a conversation the user names). That is a program acting on a user account: what the
+  self-bot article and the "automatic ... software" clause speak to. No document of Discord's allows it.
+- It does not modify Discord's software, call its API, read its token or storage, or act in bulk: one page, one
+  list read, one message, each started by the lead with the user's go-ahead.
+- Discord sees a second signed-in client (a new device, an Edge user agent) and may answer with a captcha, a
+  new-location e-mail, or worse. The sign-in and the one message are the user's own; **the risk to the account is
+  the user's, and running steps 2 to 4 is the user's decision** (D1 was answered "opt-in"; this spike is the first
+  time it touches the real account).
+
+## 6. What could not be checked without Windows (before the run)
+
+Everything that runs: the code compiles and passes clippy for `x86_64-pc-windows-gnullvm` and its pure parts are
+tested on Linux (`cargo test -p discord-spike`: the command line, redaction, the pad's presses and pointer, the
+keyboard's grid, the log's time). In particular, not yet seen working:
+
+- that `-gnullvm` links `webview2-com` (CI's Windows job builds it) and the loaded DLL makes an environment;
+- that DevTools' `Input.dispatchKeyEvent` Tab moves focus in Discord's form, and `Input.insertText` fills its fields
+  and its message box (a Slate editor);
+- that a controller told it is hidden still runs Discord's page (Chromium may throttle it), and that the off-screen
+  window is not treated as occluded;
+- every selector in `js/state.js`, `js/dms.js`, `js/find.js`, `js/composer.js` and `js/sent.js`: written from
+  Discord's page as the research describes it and what is known of its markup (`data-list-id="guildsnav"`,
+  `a[href^="/channels/@me/"]`, `[class*="name_"]`, `[class*="numberBadge"]`, `li[id^="chat-messages-"]`,
+  `[id^="message-content-"]`, `[role="textbox"][data-slate-editor="true"]`), never a saved real page. The `--dms`
+  log is there to say which match;
+- the touch keyboard's toggle under shell mode, and whether `SendInput` (the stick's pointer) is allowed to a task's
+  process;
+- the GDI help bar and keyboard's look at 4K.
+
+## 7. Results: the TV PC, 18 November 2026
+
+Shell mode, WebView2 runtime Edge 157.0.4341.60 (Evergreen), PR #288's builds; the lead ran each step as a
+scheduled task, the user signed in and named the conversation and the word. From #196's comments.
+
+| Step | Build | Exit | What happened |
+| --- | --- | --- | --- |
+| 1 `--probe --online` | first | 0 | Environment and controller made from the unpackaged exe in 221 ms; a script runs hidden (`visibility hidden`); DevTools protocol 1.3 answers; discord.com/login loads hidden in about 14 s: login form yes, QR code yes, captcha no. Session folder 21.7 MB |
+| 2 `--sign-in` (pad keyboard) | first | 0 | The user signed in in about 70 s on the full-screen page. No captcha, two-factor or new-location check. Discord went `/login` -> `/app` -> `/quest-home`, so the first build's "signed in" test (a `/channels/` route) said **no** though the user was in: fixed to "no login route, no password field, the server bar shown". `pad: none connected` at the start: the pad was not seen (the next build looks for one once a second) |
+| 2 `--sign-in --keyboard tabtip` | | not run | |
+| 3 `--dms` (controller hidden) | first | 0 | App up 2.3 s after start with the saved session, page `visibility hidden, focus false`. **25 conversations** read over 12 scrolled pages in 11.9 s; names by the `name_` class (25), the list items' roles (25), `aria-label` 0. 0 unread at the time |
+| 3 `--dms --hide offscreen` | | not run | Not needed: the never-shown window worked |
+| 4 `--send`, try 1 | first | 4 | A name not in the list: nothing sent, as it should |
+| 4 `--send`, try 2 | first | 5 | Found the row exactly, nothing over it, but a DevTools click on it **did not open** the conversation while hidden: nothing sent |
+| 4 `--send`, try 3 | 9644d39 | 7 | Opened by `history.pushState` + `popstate` in 278 ms, message box present; `DOM.focus` gave it focus; `Input.insertText` put the text in; **a single Enter `keyDown` did not send** (the text stayed as a draft) |
+| 4 `--send`, try 4 | 1d5b2ad | 0 | Opened by pushState in 257 ms; history settled at 30; **focus emulation on**; the draft of try 3 cleared by select all + delete; Enter as `rawKeyDown`, `char \r`, `keyUp`: the message appeared 769 ms later, 31 messages, not marked sending or failed, box empty |
+| 5 `--sign-out` | 1d5b2ad | 0 | 1258 files, 74.3 MB removed: nothing left. Discord still lists the session under Devices until the user logs it out there |
+
+| Question | Answer |
+| --- | --- |
+| WebView2 runtime present, version, Evergreen or fixed | Yes, Evergreen, Edge 157.0.4341.60 |
+| Present and working under shell mode | Yes (Explorer is started behind Start-up in shell mode, so "with no Explorer at all" stays untested) |
+| Environment + controller from the unpackaged exe | Yes, 221 ms, user data folder of ours |
+| Sign-in on the full-screen page | Yes, by the user, about 70 s. **Not proven: a pad-typed sign-in** (the pad was not seen at the start) |
+| Keyboard that worked | Not proven: neither the pad keyboard nor the touch keyboard under shell mode was exercised |
+| What Discord showed | Login form and QR code; no captcha, no two-factor, no new-location mail on this account and PC |
+| DM list read hidden | Yes, 25 conversations, names right. **Not proven: unread marks and counts** (no unread DM during any run) |
+| Selectors that matched | `a[href^="/channels/@me/"]`, `[class*="name_"]`, list items' roles; `aria-label` on the rows: none |
+| Memory hidden (web view total) | Blank page 114 MB private (5 processes); login page 342 MB (7); the app 405 MB private, 564 MB working set (6), 417 MB after a minute idle |
+| CPU at idle | 0.89% of one core |
+| Message sent and seen in the page | Yes, on the fourth try's build, once |
+| Sign-out left nothing | Yes on the PC; Discord's Devices list keeps the session until logged out there |
+
+## 8. Lessons for #197 to #202
+
+- **Hidden hosting works** (#197, #198): a never-shown window with the controller told it is not visible runs
+  Discord's page, scripts and DevTools; no off-screen window or Chromium switch was needed.
+- **Signed in is the app's shell, not a route** (#197): Discord lands on `/app`, `/quest-home` or elsewhere. Test
+  for no login or register route, no password field, and the server bar (`[data-list-id="guildsnav"]`) shown.
+- **Open by route, not by click** (#198, #201): a DevTools click on a list row does nothing while hidden;
+  `history.pushState` to the row's own `href` plus a `popstate` event lets Discord's router open it (under 300 ms).
+- **Input needs focus emulation** (#201): with the page hidden, `document.hasFocus()` is false and Enter is ignored.
+  `Emulation.setFocusEmulationEnabled` on, then `DOM.focus` on the box, `Input.insertText`, and Enter as the full
+  `rawKeyDown` / `char "\r"` / `keyUp` sequence sends. Discord keeps drafts: clear the box first, and confirm a
+  send by the newest message being the text and not marked sending or failed. One Enter per send.
+- **Wait for the history** before acting in a conversation (#198, #201): it loads after the route changes (0 to 30
+  messages here).
+- **Cost** (#197, #202): about 405-430 MB private and 0.9% of one core at idle while signed in and hidden; 114 MB
+  for a blank page. Keeping the session up all the time for notifications is a real memory cost on the TV; start
+  it on demand unless #202 needs it running.
+- **WebView2Loader.dll** (#197): the exe needs it beside it (the spike loads it at run time; CI copies the one
+  `webview2-com-sys` ships into the artifact). `dashboard.exe` must ship it in its package and installer, or
+  replace it.
+- **Sign-out** (#197): removing the folder signs the PC out completely; the session stays on Discord's Devices list
+  until logged out there, which Settings should say.
+- **Still to prove** (#197, #198, #201): unread marks and counts; typing the sign-in with the pad and a keyboard
+  on screen; Windows' touch keyboard in shell mode; Discord's web notifications reaching the web view (#202).

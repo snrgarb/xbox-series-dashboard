@@ -1,0 +1,36 @@
+[package]
+name = "discord-spike"
+version.workspace = true
+publish.workspace = true
+edition = "2021"
+description = "Spike (#196): discord.com in a WebView2 hosted from Rust, signed in with the pad on the TV PC. Throwaway."
+
+[[bin]]
+name = "discord-spike"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+serde_json = "1"
+# MIT; the WebView2 COM bindings Tauri's wry uses. 0.39 is on windows 0.62, the version the workspace already builds.
+# Its WebView2Loader.dll is loaded at run time from beside the exe (docs/research/discord-web-spike.md, 2), so the
+# exe starts and logs even where it is missing.
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_StationsAndDesktops",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_XboxController",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
