@@ -88,8 +88,8 @@ person's avatar on a disc, #4A4A4A with Discord's mark (34 across, dimmed) under
 decoded at 144.
 
 Text that does not fit is cut short with an ellipsis. **Pictures** are fetched off the frame and kept (discord.md,
-"Avatars"); until one is there the stand-in shows. Discord's mark is the project's own drawing of chat, two speech bubbles (guide.md 10.1), as on the tab strip: no
-Discord logo is copied.
+"Avatars"); until one is there the stand-in shows. Discord's mark is Discord's own logo, the Bundle's `DiscordLogo` path (guide.md 10.1, NOTICE.md), as on the tab
+strip.
 
 ## 5. The Servers Flyout
 
@@ -156,5 +156,5 @@ is made up; none is Discord's or anyone's.
 - **Closing the Guide with the Flyout open** does not tell the browser, which the Bundle's closing does. Answers that
   come after are kept rather than dropped: the next Servers shows them at once (and asks afresh) instead of the
   spinner.
-- **Discord's mark** everywhere is the project's own drawing of chat (`marks::discord_mark`, guide.md 10.1); a server's icon and everyone's
+- **Discord's mark** everywhere is Discord's own logo, as the Bundle ships it (`marks::discord_mark`, guide.md 10.1, NOTICE.md); a server's icon and everyone's
   avatar are fetched from Discord's CDN at run time, never shipped.

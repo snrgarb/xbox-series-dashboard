@@ -18,6 +18,7 @@ These are third-party material. They remain the property of their owners. They a
 | `crates/screens/src/path_data.rs`, `marks::BATTLE_NET` | The Battle.net logo, as vector path data | Blizzard Entertainment | Simple Icons 16.38.0, `battledotnet` |
 | `crates/screens/src/path_data.rs`, `marks::EA` | The EA logo, as vector path data | Electronic Arts | Simple Icons 16.38.0, `ea` |
 | `crates/screens/src/path_data.rs`, `marks::UBISOFT` | The Ubisoft logo, as vector path data | Ubisoft | Simple Icons 16.38.0, `ubisoft` |
+| `crates/screens/src/path_data.rs`, `marks::DISCORD` | The Discord logo, as vector path data | Discord | The Xbox Series Theme's own path (`DiscordLogo`), which is Simple Icons' `discord` (the same from 5.0.0 to 16.38.0) |
 | `crates/screens/tests/reference/*.png` | The screenshot tests' reference pictures, where they show the logos above | The logos' owners, as above | Drawn by the Dashboard |
 
 The path data comes from [Simple Icons](https://simpleicons.org) (CC0 1.0) and [Kenney's Input Prompts](https://kenney.nl/assets/input-prompts) (CC0 1.0), through the [Xbox Series Theme](https://github.com/snrgarb/xbox-series-theme) where it has them. Their CC0 dedication covers their drawing of each path; the marks themselves remain their owners' trademarks.

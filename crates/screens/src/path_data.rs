@@ -90,8 +90,9 @@ pub fn parse(data: &str) -> sk::Path {
     path.finish().unwrap_or_else(|| panic!("path data draws nothing: {data}"))
 }
 
-/// The marks of the stores and of the console, white on the Dashboard, as the Bundle draws its two (Steam's and
-/// the Xbox sphere) and Simple Icons (CC0 1.0, simpleicons.org) the rest. Each is its owner's trademark.
+/// The marks of the stores, of the console and of Discord, white on the Dashboard, as the Bundle draws its three
+/// (Steam's, the Xbox sphere and Discord's) and Simple Icons (CC0 1.0, simpleicons.org) the rest. Each is its owner's
+/// trademark.
 pub mod marks {
     /// Steam's mark, Valve's: the Bundle's own path (`E/HomeTiles.xaml` SourceSteam), which is Simple Icons' `steam`
     /// (the same in 9.21.0 and 16.38.0). 24 x 24.
@@ -193,6 +194,26 @@ pub mod marks {
         3.579-9.951 6.08-12.91-2.82-2.813-4.216-3.245-4.806-3.245-.131 0-.223.021-.281.046v-.002zM12 3.551S9.055 \
         1.828 6.755 1.746c-.903-.033-1.454.295-1.521.339C7.379.646 9.659 0 11.984 0H12c2.334 0 4.605.646 6.766 \
         2.085-.068-.046-.615-.372-1.52-.339C14.946 1.828 12 3.545 12 3.545v.006z";
+
+    /// Discord's mark, Discord Inc.'s: the Bundle's own path (`E/OverlayWindow.xaml` DiscordLogo), which is Simple
+    /// Icons' `discord` written out with spaces (the same numbers in every release from 5.0.0 to 16.38.0; this is
+    /// 16.38.0's). 24 wide, 18.3 high, on the 24 grid's middle.
+    pub const DISCORD: &str = "M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 \
+        00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 \
+        0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 \
+        1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 \
+        00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 \
+        00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 \
+        00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 \
+        01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 \
+        1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 \
+        12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 \
+        1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 \
+        00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 \
+        15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 \
+        1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 \
+        0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 \
+        0 1.3332-.946 2.4189-2.1568 2.4189Z";
 
     /// The Xbox sphere as the Bundle's idle pad draws it on the Guide button (`E/IdleCardControl.xaml`, Canvas
     /// "Guide"): Kenney's Input Prompts' `xbox_guide.svg` (CC0 1.0, kenney.nl), on a 64 grid centred on (32, 32),
@@ -416,6 +437,7 @@ mod tests {
             (marks::BATTLE_NET, 24.0),
             (marks::EA, 24.0),
             (marks::UBISOFT, 24.0),
+            (marks::DISCORD, 24.0),
             (marks::XBOX, 24.0),
             (sphere.as_str(), 64.0),
         ] {
