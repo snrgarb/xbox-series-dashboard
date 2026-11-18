@@ -32,6 +32,36 @@ non-zero sample. Cost during the probe: 585-730 MB private, 3-8% of one core. `-
 focus emulation, read `hidden`). That is likely why nothing throttles; it also means the product's session, which
 turns focus emulation on (#197), runs as a visible page would.
 
+## 0. Result and recommendation (19 November 2026)
+
+**Recommendation: move voice to the web session.** The web session becomes the one Discord integration (text,
+notifications and voice); the RPC route (`crates/discord`), the user's own developer application and the need for
+the Discord app are retired once the product's web voice has run on the TV PC. D1 of #192 is overturned, as the user
+asked on 2026-11-18.
+
+What the TV PC showed (PR #293 at 1f93923, the web view hidden and never shown, focus emulation on):
+
+| Question | Result |
+| --- | --- |
+| Microphone hidden, no prompt | Yes: granted by the host, `getUserMedia` ok in 43 ms; 3 inputs, 4 outputs, `setSinkId` there |
+| Audio and timers hidden | AudioContext ran 60.0 s of 60.0 s; a 1 s timer on time for 120 s in a call: no throttling (the page believes it is visible) |
+| A DM call | Start Voice Call pressed, "Voice Connected" 3.1 s later, held 90 s, left cleanly; **the user heard audio both ways** |
+| A server's voice channel | By id from the index, the page's own Join Voice pressed, connected in 1.6 s (1 peer connection, mic track live), left cleanly |
+| Who is there, who speaks, mute and deafen | Read from Discord's stores (VoiceStateStore, SpeakingStore, MediaEngineStore), not the DOM |
+| The index | From Discord's stores in 47 ms (13 ms on refresh): 18 servers, 908 channels (61 voice), 169 DMs. 4 webpack runtimes answer the probe: search them all |
+| Cost in a call | 690-970 MB private over 6 processes, 8-18% of one core |
+| Dropped (the user: stores only) | Telling voice channels from the DOM, paging the virtual channel list |
+
+**Not yet seen, and carried into the product's own TV run** (they need a second account or a long game session, and
+none of them is a reason to keep two integrations): incoming audio measured while someone speaks, mute and deafen
+pressed, an incoming call seen, answered and declined, a game in front for 7 minutes and more, the memory levers.
+If the 7-minute hold fails under every hiding, section 9's "if it fails" stands and RPC is kept; the RPC crate is
+therefore removed last, after that run.
+
+**For the product:** everything is read from Discord's stores (section 4b), pushed to the host on the stores' change
+events; actions go by id (a route, then the page's own button by trusted input; a store's action only where the page
+has no button). What is lost against the app is section 8: system-wide push to talk first of all.
+
 ## 1. What the spike adds
 
 Five steps in `spikes/discord` (`discord-spike.exe`), one per run, each appending to `discord-spike.log` beside the
