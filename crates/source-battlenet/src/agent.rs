@@ -16,8 +16,8 @@
 //! said with why. Nor is one started while `Battle.net.exe`, or an `Agent.exe` of this folder that answers on no
 //! port, runs. Only where nothing of Battle.net's runs does the Dashboard start the Agent itself (`--internalclienttools`,
 //! no window: barncastle's and HSCentric's way), find it by its own process's port, and **stop it** once nothing
-//! of the Dashboard's uses it: `DELETE /agent` (barncastle's end), then killed if it has not gone 5 s on. An install
-//! it took holds it until the install is over (`installing`): never while a download is under way, which stopping it
+//! of the Dashboard's uses it: `DELETE /agent` (barncastle's end), then killed if it has not gone 5 s on (30 s once
+//! an install it did is over: [`GRACE_AFTER_INSTALL`]). An install it took holds it until the install is over (`installing`): never while a download is under way, which stopping it
 //! would end. On Windows it is in a job object that kills it when the Dashboard's process ends, however it ends (and
 //! with it any download it had: docs/sources.md, "When the Dashboard ends mid-download"). An Agent the Dashboard did
 //! not start is never stopped.
@@ -139,6 +139,9 @@ struct Owned {
     child: Child,
     port: u16,
     users: usize,
+    /// How long it is given to go by itself after `DELETE /agent` before it is killed ([`GRACE`], or
+    /// [`GRACE_AFTER_INSTALL`] once an install it did is over).
+    grace: Duration,
     /// The job object that kills it with the Dashboard (Windows), closed once it is stopped.
     #[cfg(windows)]
     job: Option<windows_sys::Win32::Foundation::HANDLE>,
@@ -194,7 +197,18 @@ pub fn alive(dir: &Path) -> Option<bool> {
     Some(matches!(agent.child.try_wait(), Ok(None)))
 }
 
-/// Stops an Agent the Dashboard started: `DELETE /agent`, then killed where it has not gone within 5 s.
+/// How long an Agent the Dashboard started is given to go by itself after `DELETE /agent` before it is killed:
+/// where nothing it did is to be kept (a form abandoned, a download cancelled, an uninstall seen done).
+pub const GRACE: Duration = Duration::from_secs(5);
+
+/// The same once an install it did is over (#172). On the TV PC the Agent was still running 5 s after `DELETE
+/// /agent` both times, and was killed; after the first real install the client then showed the game as not
+/// installed. Whether the kill cut off a last write is not known (the client's uid, not this, is what is proven), but
+/// what the Agent does after the download (product.db, the Uninstall key, shortcuts, `aggregate.json`) is its own,
+/// and half a minute lets it finish while still never leaving it running. The log says how long it took.
+pub const GRACE_AFTER_INSTALL: Duration = Duration::from_secs(30);
+
+/// Stops an Agent the Dashboard started: `DELETE /agent`, then killed where it has not gone within its grace.
 fn stop_owned(mut agent: Owned) {
     let pid = agent.child.id();
     let (method, path) = calls::stop();
@@ -203,7 +217,7 @@ fn stop_owned(mut agent: Owned) {
         .and_then(|session| session.http.call("stop", method, path, None));
     let begun = Instant::now();
     let mut gone = None;
-    while begun.elapsed() < Duration::from_secs(5) {
+    while begun.elapsed() < agent.grace {
         if let Ok(Some(status)) = agent.child.try_wait() {
             gone = Some(status);
             break;
@@ -214,7 +228,7 @@ fn stop_owned(mut agent: Owned) {
         (Some(_), Ok(_)) => format!("it exited {} ms after DELETE /agent", begun.elapsed().as_millis()),
         (Some(_), Err(why)) => format!("it had exited (DELETE /agent: {why})"),
         (None, _) => match agent.child.kill().and_then(|()| agent.child.wait()) {
-            Ok(_) => "killed: still running 5 s after DELETE /agent".to_string(),
+            Ok(_) => format!("killed: still running {} s after DELETE /agent", agent.grace.as_secs()),
             Err(e) => format!("could not be killed: {e}"),
         },
     };
@@ -349,6 +363,7 @@ pub fn connect(place: &Place) -> Result<Session, String> {
             child,
             port: 0,
             users: 0,
+            grace: GRACE,
             #[cfg(windows)]
             job: None,
         });
@@ -382,6 +397,7 @@ fn keep(place: &Place, child: Child, port: u16) -> Lease {
         child,
         port,
         users: 1,
+        grace: GRACE,
         #[cfg(windows)]
         job,
     };
@@ -458,6 +474,15 @@ impl Session {
     /// Whether the Dashboard started the Agent this session is with.
     pub fn ours(&self) -> bool {
         self.lease.is_some()
+    }
+
+    /// An install the Agent the Dashboard started did is over: when it is stopped, it is given
+    /// [`GRACE_AFTER_INSTALL`] to go by itself.
+    pub fn install_over(&self) {
+        let Some(lease) = &self.lease else { return };
+        if let Some(agent) = owned().as_mut().and_then(|agents| agents.get_mut(&lease.dir)) {
+            agent.grace = agent.grace.max(GRACE_AFTER_INSTALL);
+        }
     }
 
     /// One call, again once with a new token where the Agent says the old one is no good (401, 403).

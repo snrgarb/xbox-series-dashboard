@@ -107,6 +107,13 @@ pub trait Source: Send + Sync {
     /// How to start the game, one of this source's. None when it can't be started from here.
     fn start(&self, game: &Game) -> Option<Start>;
 
+    /// Why the installed game can't be started now, in the user's words, where the source knows its store would
+    /// not start it (Battle.net with the game under a uid its client does not know: #172): the shell says it in a
+    /// Toast instead of starting it. None, the default: started as `start` says.
+    fn cant_start(&self, _game: &Game) -> Option<String> {
+        None
+    }
+
     /// What asks the store's client to install or uninstall the game (Steam's `steam://install/440`, a client's
     /// command, the game's own uninstaller), None when there is nothing to ask.
     fn ask(&self, game: &Game, ask: Ask) -> Option<Start>;

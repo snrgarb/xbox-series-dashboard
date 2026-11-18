@@ -1380,6 +1380,15 @@ impl Dashboard {
         self.toast(Toast { game: Some(stopped.game), art, ..toast });
     }
 
+    /// A game its store would not start now (`Source::cant_start`): a Toast with its cover and what to do, in the
+    /// store's own words, in place of the Launch screen.
+    pub fn tell_cant_start(&mut self, game: i64, why: String) {
+        let Some(found) = self.library.games.iter().find(|found| found.id == game) else { return };
+        let art = Some(Box::new(found.clone()));
+        let toast = Toast::new(ToastKind::Notification, why, self.options.use_guide);
+        self.toast(Toast { game: Some(game), art, ..toast });
+    }
+
     /// The name of the page that has the pad, if one is up over Home.
     pub fn page(&self) -> Option<&'static str> {
         self.pages.top().map(|page| page.name())

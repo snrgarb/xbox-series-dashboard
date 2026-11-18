@@ -859,7 +859,18 @@ fn battlenet(args: &[String]) -> i32 {
     match (battlenet_asked(args), dir) {
         (Some(("launch", code)), Some(dir)) => {
             note(&format!("battlenet: asked to launch {code}: {}", args.join(" ")));
-            run_game("battlenet", game_of(&source_battlenet::BattleNet::at(Some(dir)), &code).as_ref(), &code)
+            // As the real client: by its own view of what is installed, product.db under the uid it knows the game
+            // by, never the Dashboard's (#172: a game installed under another uid shows Install, and nothing starts).
+            match source_battlenet::fixture::client_sees(&dir, &code) {
+                Ok(folder) => {
+                    let game = model::Game { install_dir: Some(folder), ..model::Game::default() };
+                    run_game("battlenet", Some(&game), &code)
+                }
+                Err(why) => {
+                    note(&format!("battlenet: {why}"));
+                    1
+                }
+            }
         }
         (Some((verb, id)), _) => {
             note(&format!("battlenet: asked for {verb} {id}: {}", args.join(" ")));
