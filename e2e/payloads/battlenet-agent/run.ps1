@@ -27,7 +27,8 @@
 #   Agent stopped, and no Agent left running. Installed under the uid the fake client knows it by (its
 #   Battle.net.config's Games: `the client knows it as larkspur`), with the account's country from its CachedData.db
 #   (`NZL`, `NZ`); `done: product.db says installed, playable, update complete, ...`, then `the Agent is done with it`.
-# - Play from its hub: `Battle.net.exe --exec=launch lkh` (the stand-in Battle.net's line), the stand-in game; ended.
+# - Play from its hub, Battle.net closed: the stand-in Battle.net started on its own, then, once up, `Battle.net.exe
+#   --exec=launch lkh` handed to it (#172), the stand-in game; ended, and the stand-in Battle.net closed.
 #   The stand-in Battle.net starts it by its own view (product.db under its uid), so a wrong uid fails here (#172).
 # - Uninstall from its Tile menu after the Dashboard's question: `POST /uninstall`, `uninstalled: product.db no longer
 #   says installed`, `queue: Larkspur Hollow uninstalled`, its folder gone, the Agent stopped.
@@ -266,6 +267,9 @@ try {
     Start-Sleep -Milliseconds 150
     Push-Button A
     Expect-Logged "^launch: $name \($code\) asked of Battle\.net, Launch screen up at \d+ ms$" $mark 'Play' 15 | Out-Null
+    # Battle.net closed (#172): started on its own, and asked once it is up, as it drops a launch given as it starts.
+    Expect-Logged "^battlenet: ${code}: Battle\.net is not running: started on its own .+" $mark 'Battle.net started first' 15 | Out-Null
+    Expect-Standin "battlenet: launch $code handed to the running client" $standinMark 'Asked once it was up'
     Expect-Standin "battlenet: asked to launch $code" $standinMark 'Started through Battle.net'
     # The stand-in client starts it by its own view: product.db under the uid it knows the game by. An install under
     # another uid (#172, the TV PC's `libra`) shows Install there and starts nothing.
@@ -278,6 +282,9 @@ try {
     Save-Screen '07-playing'
     Stop-StandInGame
     Expect-Logged '^launch: the game has ended, Home back at \d+ ms$' $mark 'Ended' 20 | Out-Null
+    # The stand-in Battle.net Play started is closed, as the user closes it: the Agent's route is for a PC where
+    # Battle.net is closed.
+    Get-OwnProcess 'Battle.net' | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 1500
     In-Front
 

@@ -205,6 +205,8 @@ mod win {
         found: (HWND, u32),
         /// Whether waiting for the game behind another window in front has been said.
         waiting_said: bool,
+        /// Whether the store said it was still getting ready to start the game at the last look.
+        getting_ready: bool,
     }
 
     fn log(message: &str) {
@@ -238,7 +240,7 @@ mod win {
                 dir.push('\\');
             }
             // Home has the foreground, and with it the right to let the store and the game take it.
-            if let Err(why) = addresses.open(&start) {
+            if let Err(why) = source.launch(game, &start, addresses) {
                 eprintln!("launch: {} didn't take {start} ({why})", source.name());
                 return None;
             }
@@ -273,6 +275,7 @@ mod win {
                 store_since: None,
                 found: (std::ptr::null_mut(), 0),
                 waiting_said: false,
+                getting_ready: false,
             })
         }
 
@@ -335,6 +338,15 @@ mod win {
                     }
                     // Nothing of the game's has shown yet (the Launch screen stepped aside for a window that wanted
                     // the user): over once its store and the desktop have shown nothing of it for a while.
+                    // A process of a program in the game's folder with no window yet (Battle.net's games start a
+                    // small switcher, `Base.exe`, which starts the game itself: #172) is the game on its way.
+                    if !self.seen {
+                        let under = crate::freeze::running_under(&self.prefixes);
+                        if !under.is_empty() {
+                            log(&format!("no window of the game's yet, its processes running: {}", under.join(", ")));
+                            self.seen = true;
+                        }
+                    }
                     if !self.seen {
                         // While the window that stepped the Launch screen aside (a store's client still starting the
                         // game: Battle.net's took 5 s, #172) is still in front, the game is waited for, up to
@@ -476,7 +488,22 @@ mod win {
             // counted in looks that came on time, a fifth of a second each, and not by the clock: on a machine that
             // is not keeping up a launcher that would be gone in a moment stays for many, and that is no question
             // put to the user. A look that came late, or a window that is not answering Windows, counts for nothing.
-            if foreground.is_null() || foreground == self.home || unsafe { IsWindowVisible(foreground) } == 0 {
+            // While the store is still getting ready to start the game (Battle.net's client starting, #172), its
+            // window in front is the store's own on its way to the game, and the Launch screen stays over it.
+            let getting_ready = self.source.getting_ready(&self.playing);
+            if getting_ready != self.getting_ready {
+                self.getting_ready = getting_ready;
+                log(&if getting_ready {
+                    format!("{} getting ready to start the game: the Launch screen stays up", self.source.name())
+                } else {
+                    format!("{} ready, or no longer getting ready", self.source.name())
+                });
+            }
+            if foreground.is_null()
+                || foreground == self.home
+                || unsafe { IsWindowVisible(foreground) } == 0
+                || getting_ready
+            {
                 self.other = None;
             } else if self.other.map(|o| o.0) != Some(foreground) {
                 self.other = Some((foreground, Duration::ZERO));

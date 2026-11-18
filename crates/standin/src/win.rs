@@ -453,3 +453,58 @@ pub fn steam_windows(debugger: &source_steam::debugger::Debugger, seconds: u64) 
         }
     }
 }
+
+/// 0x00BBGGRR: the stand-in Battle.net's main window, a plain blue (0, 116, 224).
+pub const BATTLENET_COLOUR: u32 = 0x00E0_7400;
+
+/// The stand-in Battle.net client's main window, titled "Battle.net" as the real one's (#172), shown and brought to
+/// the front as the real client shows its own once it is up; then `each` every 100 ms, messages answered between,
+/// for `seconds`.
+pub fn battlenet_window(seconds: u64, mut each: impl FnMut()) {
+    unsafe {
+        SetProcessDPIAware();
+        let instance = GetModuleHandleW(null());
+        let (width, height) = (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
+        let class = wide("StandInBattleNet");
+        let mut wc: WNDCLASSW = std::mem::zeroed();
+        wc.lpfnWndProc = Some(DefWindowProcW);
+        wc.hInstance = instance;
+        wc.hCursor = LoadCursorW(null_mut(), IDC_ARROW);
+        wc.hbrBackground = CreateSolidBrush(BATTLENET_COLOUR);
+        wc.lpszClassName = class.as_ptr();
+        RegisterClassW(&wc);
+        let (w, h) = (width * 60 / 100, height * 60 / 100);
+        let title = wide("Battle.net");
+        let window = CreateWindowExW(
+            0,
+            class.as_ptr(),
+            title.as_ptr(),
+            WS_OVERLAPPEDWINDOW,
+            (width - w) / 2,
+            (height - h) / 2,
+            w,
+            h,
+            null_mut(),
+            null_mut(),
+            instance,
+            null(),
+        );
+        if window.is_null() {
+            note("battlenet: window: its main window could not be made");
+        } else {
+            ShowWindow(window, SW_SHOWNORMAL);
+            let took = SetForegroundWindow(window) != 0;
+            note(&format!("battlenet: window: Battle.net shown; SetForegroundWindow -> {took}"));
+        }
+        let until = std::time::Instant::now() + Duration::from_secs(seconds);
+        let mut message: MSG = std::mem::zeroed();
+        while std::time::Instant::now() < until {
+            while PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            each();
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}

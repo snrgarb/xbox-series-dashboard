@@ -82,6 +82,8 @@ What a test judges each moment by: `launch:` lines, each ending `at <ms> ms` sin
 | Line | When |
 |---|---|
 | `launch: backdrop up at <ms> ms` | Home's window has drawn the game's backdrop; once a launch |
+| `launch: <store> getting ready to start the game: the Launch screen stays up at <ms> ms` | The store said it is still getting ready (Battle.net's client starting, #172): a window of its own in front does not step the Launch screen aside; `<store> ready, or no longer getting ready` when that ends |
+| `launch: no window of the game's yet, its processes running: <names> at <ms> ms` | After the Launch screen stepped aside with nothing of the game's shown, a process of a program in its folder runs (Battle.net's `Base.exe`, which starts the game): the game is followed as one that has started |
 | `launch: game window seen at <ms> ms` | A window of a program in the game's folder has come after none, its launcher's included |
 | `launch: game gone, Launch screen showing at <ms> ms` | The last such window went while the Launch screen was up |
 | `launch: game gone, backdrop showing at <ms> ms` | The last such window went after the Launch screen had gone: the backdrop is what shows |

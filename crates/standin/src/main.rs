@@ -115,10 +115,13 @@
 //!       The stand-in Ubisoft Connect, registered as the `uplay://` handler for the fake at <dir>: starts the game's
 //!       `game.exe` from its install folder and waits for it; asked to install or uninstall, says so in the log and
 //!       does nothing more. Exits 1, having done nothing, when the game isn't installed.
-//!   Battle.net.exe --exec="launch <code>" | --game=<uid>
-//!       The stand-in Battle.net, when this program is named `Battle.net.exe` in a fake Battle.net's folder: starts
-//!       the game with that product code from its install folder and waits for it; asked for a game's page, says so
-//!       in the log.
+//!   Battle.net.exe [--exec="launch <code>"] | --game=<uid>
+//!       The stand-in Battle.net, when this program is named `Battle.net.exe` in a fake Battle.net's folder. As the
+//!       real client (#172): where none runs, it becomes the client, drops a launch given to it as it starts, and
+//!       comes up `STANDIN_BATTLENET_READY_MS` (2500) later with its main window, titled "Battle.net", and two
+//!       helpers (`Battle.net.exe --type=helper`); a launch given to another `Battle.net.exe` while it is up is
+//!       handed to it, and it starts the game with that product code from its install folder. Asked for a game's
+//!       page, says so in the log.
 //!   Agent.exe [--internalclienttools] [--seconds <n>]
 //!       The stand-in Battle.net Agent (#172, `source_battlenet::standin`), when this program is named `Agent.exe` in
 //!       a fake Battle.net's `Agent/Agent.<build>` folder, as make-battlenet writes it and the Dashboard starts it:
@@ -220,6 +223,8 @@ mod win;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use source_steam::fixture::{self, Fixture};
 
@@ -855,33 +860,159 @@ fn uplay_url(dir: &Path, url: &str) -> i32 {
     }
 }
 
-/// The stand-in Battle.net, as this program is named in a fake Battle.net's folder, which it reads.
+/// The stand-in Battle.net client's word in its fake's folder: `<pid> starting` or `<pid> up`, written again every
+/// half second while it runs, so that one killed is seen gone a few seconds on.
+const CLIENT_STATE: &str = "standin-client.txt";
+/// What a second `Battle.net.exe` hands the running client, a line each (`launch <code>`).
+const CLIENT_ASKS: &str = "standin-client.asks";
+/// How old the client's word may be and it still run.
+const CLIENT_FRESH: Duration = Duration::from_secs(3);
+/// How long the stand-in client runs.
+const CLIENT_SECONDS: u64 = 1800;
+
+/// The running stand-in client of the fake at `dir`: its pid, and whether it is up.
+fn client_state(dir: &Path) -> Option<(u32, bool)> {
+    let path = dir.join(CLIENT_STATE);
+    let age = std::fs::metadata(&path).ok()?.modified().ok()?.elapsed().unwrap_or_default();
+    if age > CLIENT_FRESH {
+        return None;
+    }
+    let text = std::fs::read_to_string(&path).ok()?;
+    let mut words = text.split_whitespace();
+    let pid = words.next()?.parse().ok()?;
+    Some((pid, words.next() == Some("up")))
+}
+
+fn say_client_state(dir: &Path, up: bool) {
+    let state = format!("{} {}", std::process::id(), if up { "up" } else { "starting" });
+    let _ = std::fs::write(dir.join(CLIENT_STATE), state);
+}
+
+/// Hands `launch <code>` to the running client.
+fn hand_over(dir: &Path, code: &str) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(dir.join(CLIENT_ASKS))?;
+    writeln!(file, "launch {code}")
+}
+
+/// What was handed to the client since it last looked, each code once taken.
+fn take_asks(dir: &Path) -> Vec<String> {
+    let taking = dir.join(format!("{CLIENT_ASKS}.taking"));
+    if std::fs::rename(dir.join(CLIENT_ASKS), &taking).is_err() {
+        return Vec::new();
+    }
+    let text = std::fs::read_to_string(&taking).unwrap_or_default();
+    let _ = std::fs::remove_file(&taking);
+    text.lines().filter_map(|line| line.trim().strip_prefix("launch ")).map(|code| code.trim().to_string()).collect()
+}
+
+/// The stand-in Battle.net, as this program is named in a fake Battle.net's folder, which it reads. As the real one
+/// (#172): one client at a time; started, it takes `STANDIN_BATTLENET_READY_MS` (2500) to come up, then shows its
+/// main window with two helpers (`Battle.net.exe --type=helper`) beside it, and a launch given to it before then is
+/// dropped; a launch given to another `Battle.net.exe` once it is up is handed to it, which starts the game.
 fn battlenet(args: &[String]) -> i32 {
-    let dir = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.to_path_buf()));
-    match (battlenet_asked(args), dir) {
-        (Some(("launch", code)), Some(dir)) => {
+    let Some(dir) = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.to_path_buf())) else {
+        note("battlenet: its folder is not known");
+        return 2;
+    };
+    if args.iter().any(|arg| arg.starts_with("--type=")) {
+        return battlenet_helper(&dir);
+    }
+    let running = client_state(&dir);
+    match (battlenet_asked(args), running) {
+        (Some(("launch", code)), Some((pid, up))) => {
             note(&format!("battlenet: asked to launch {code}: {}", args.join(" ")));
-            // As the real client: by its own view of what is installed, product.db under the uid it knows the game
-            // by, never the Dashboard's (#172: a game installed under another uid shows Install, and nothing starts).
-            match source_battlenet::fixture::client_sees(&dir, &code) {
-                Ok(folder) => {
-                    let game = model::Game { install_dir: Some(folder), ..model::Game::default() };
-                    run_game("battlenet", Some(&game), &code)
-                }
-                Err(why) => {
-                    note(&format!("battlenet: {why}"));
-                    1
-                }
+            if !up {
+                note(&format!(
+                    "battlenet: the client (pid {pid}) is not up yet: launch {code} dropped, as the real client drops it"
+                ));
+            } else if let Err(e) = hand_over(&dir, &code) {
+                note(&format!("battlenet: launch {code} not handed to the client (pid {pid}): {e}"));
+                return 1;
+            } else {
+                note(&format!("battlenet: launch {code} handed to the running client (pid {pid})"));
             }
+            0
         }
-        (Some((verb, id)), _) => {
+        (Some((verb, id)), _) if verb != "launch" => {
             note(&format!("battlenet: asked for {verb} {id}: {}", args.join(" ")));
             0
         }
-        (None, _) => {
-            note(&format!("battlenet: not a command the stand-in Battle.net knows: {args:?}"));
-            2
+        (asked, None) => {
+            if let Some((_, code)) = asked {
+                note(&format!("battlenet: asked to launch {code}: {}", args.join(" ")));
+                note(&format!(
+                    "battlenet: launch {code} dropped: the client is only starting, as the real one drops a launch \
+                     given to it as it starts"
+                ));
+            }
+            battlenet_client(&dir)
         }
+        (_, Some((pid, _))) => {
+            note(&format!("battlenet: the client is already running (pid {pid}): {args:?}"));
+            0
+        }
+    }
+}
+
+/// The stand-in client itself: comes up, shows its window, and starts the games handed to it.
+fn battlenet_client(dir: &Path) -> i32 {
+    let ready = std::env::var("STANDIN_BATTLENET_READY_MS").ok().and_then(|ms| ms.parse().ok()).unwrap_or(2500);
+    note(&format!("battlenet: client starting (pid {}), up in {ready} ms", std::process::id()));
+    let _ = std::fs::remove_file(dir.join(CLIENT_ASKS));
+    let up = std::sync::Arc::new(AtomicBool::new(false));
+    let (beat_dir, beat_up) = (dir.to_path_buf(), up.clone());
+    std::thread::spawn(move || loop {
+        say_client_state(&beat_dir, beat_up.load(Ordering::Relaxed));
+        std::thread::sleep(Duration::from_millis(500));
+    });
+    say_client_state(dir, false);
+    std::thread::sleep(Duration::from_millis(ready));
+    let mut helpers = Vec::new();
+    for _ in 0..2 {
+        match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).arg("--type=helper").spawn()) {
+            Ok(child) => helpers.push(child.id().to_string()),
+            Err(e) => note(&format!("battlenet: a helper not started: {e}")),
+        }
+    }
+    up.store(true, Ordering::Relaxed);
+    say_client_state(dir, true);
+    note(&format!("battlenet: client up (pid {}), its helpers pids {}", std::process::id(), helpers.join(", ")));
+    let looked = dir.to_path_buf();
+    battlenet_window(CLIENT_SECONDS, move || {
+        for code in take_asks(&looked) {
+            note(&format!("battlenet: the client launches {code}"));
+            let dir = looked.clone();
+            std::thread::spawn(move || match source_battlenet::fixture::client_sees(&dir, &code) {
+                // As the real client: by its own view of what is installed, product.db under the uid it knows the
+                // game by, never the Dashboard's (#172: a game installed under another uid shows Install).
+                Ok(folder) => {
+                    let game = model::Game { install_dir: Some(folder), ..model::Game::default() };
+                    run_game("battlenet", Some(&game), &code);
+                }
+                Err(why) => note(&format!("battlenet: {why}")),
+            });
+        }
+    });
+    let _ = std::fs::remove_file(dir.join(CLIENT_STATE));
+    0
+}
+
+/// A helper of the stand-in client's: there while the client is.
+fn battlenet_helper(dir: &Path) -> i32 {
+    let until = std::time::Instant::now() + Duration::from_secs(CLIENT_SECONDS);
+    while std::time::Instant::now() < until && client_state(dir).is_some() {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    0
+}
+
+/// Anywhere but Windows the stand-in Battle.net has no window: `each` every 100 ms for `seconds`.
+#[cfg(not(windows))]
+fn battlenet_window(seconds: u64, mut each: impl FnMut()) {
+    let until = std::time::Instant::now() + Duration::from_secs(seconds);
+    while std::time::Instant::now() < until {
+        each();
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -926,7 +1057,7 @@ fn steam_windows(_: &source_steam::debugger::Debugger, seconds: u64) {
 }
 
 #[cfg(windows)]
-use win::{game, steam_url, steam_windows, toast, wake};
+use win::{battlenet_window, game, steam_url, steam_windows, toast, wake};
 
 fn run(args: &[String]) -> i32 {
     let parsed_game = |args: &[String]| match GameArgs::parse(args) {
@@ -1861,6 +1992,27 @@ mod tests {
         assert_eq!(uplay_url(&root, "uplay://launch/90410"), 1);
         assert_eq!(uplay_url(&root, "uplay://install/90410"), 0);
         assert_eq!(uplay_url(&root, "uplay://store/90410"), 2);
+    }
+
+    #[test]
+    fn the_stand_in_battle_net_client_is_seen_running_while_its_word_is_fresh_and_takes_what_is_handed_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(client_state(dir.path()), None, "no client");
+        say_client_state(dir.path(), false);
+        assert_eq!(client_state(dir.path()), Some((std::process::id(), false)), "starting: a launch is dropped");
+        say_client_state(dir.path(), true);
+        assert_eq!(client_state(dir.path()), Some((std::process::id(), true)), "up: a launch is handed over");
+        // Word gone stale: a client killed is not running.
+        let stale = std::time::SystemTime::now() - CLIENT_FRESH - Duration::from_secs(1);
+        let file = std::fs::File::options().write(true).open(dir.path().join(CLIENT_STATE)).unwrap();
+        file.set_modified(stale).unwrap();
+        assert_eq!(client_state(dir.path()), None);
+
+        assert!(take_asks(dir.path()).is_empty());
+        hand_over(dir.path(), "emb").unwrap();
+        hand_over(dir.path(), "jnv").unwrap();
+        assert_eq!(take_asks(dir.path()), ["emb", "jnv"]);
+        assert!(take_asks(dir.path()).is_empty(), "each taken once");
     }
 
     #[test]

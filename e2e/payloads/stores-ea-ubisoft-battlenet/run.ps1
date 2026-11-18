@@ -6,6 +6,12 @@
 # way of starting it (EA: the game's own program; Ubisoft: uplay://, the stand-in Ubisoft Connect; Battle.net: the
 # stand-in Battle.net.exe, --exec="launch <code>"); it is ended, and Home comes back.
 #
+# Battle.net twice (#172): first with its client closed, which drops a launch given to it as it starts, as the real one
+# does: the Dashboard starts it on its own, waits for it to come up (its main window and helpers), keeps the Launch
+# screen up meanwhile and asks it then (`battlenet: jnv: Battle.net is not running: started on its own ...`, `...
+# Battle.net is up ...`, `asked: ...`; the stand-in's `launch jnv handed to the running client`). Then again with it
+# open, asked at once (`Battle.net is running ...: asked at once`).
+#
 # Judged by the Dashboard's log lines and --log-focus's after each press, a press at a time. No position in a row or on
 # the keyboard is counted: a walk goes until the log names the key or the game. Passes when every store's games were
 # read, each of the three games launched, booted, ended with Home back, and the Dashboard stayed up. The screenshots of
@@ -20,7 +26,8 @@ $failures = @()
 $stores = @(
     @{ Store = 'ea'; Make = 'Initialize-FakeEa'; Name = 'EA app'; Root = (Get-FakeRoot 'ea'); Game = 'Vantage Reef'; Letter = 'V'; Row = 'Z' },
     @{ Store = 'ubisoft'; Make = 'Initialize-FakeUbisoft'; Name = 'Ubisoft Connect'; Root = (Get-FakeRoot 'ubisoft'); Game = 'Oxbow Frontier'; Letter = 'X'; Row = 'Z' },
-    @{ Store = 'battlenet'; Make = 'Initialize-FakeBattleNet'; Name = 'Battle.net'; Root = (Get-FakeRoot 'battlenet'); Game = 'Juniper Vault'; Letter = 'J'; Row = 'A' }
+    @{ Store = 'battlenet'; Make = 'Initialize-FakeBattleNet'; Name = 'Battle.net'; Root = (Get-FakeRoot 'battlenet'); Game = 'Juniper Vault'; Letter = 'J'; Row = 'A' },
+    @{ Store = 'battlenet'; Again = $true; Name = 'Battle.net'; Root = (Get-FakeRoot 'battlenet'); Game = 'Juniper Vault'; Letter = 'J'; Row = 'A' }
 )
 $dashboardTitle = 'Xbox Series Dashboard'
 
@@ -97,6 +104,7 @@ try {
     Initialize-FakeSteam | Out-Null
     $arguments = @('--log-focus')
     foreach ($store in $stores) {
+        if ($store.Again) { continue }
         $library = & $store.Make $store.Root
         $store.Games = @($library.games).Count
         $game = @($library.games | Where-Object { $_.name -eq $store.Game }) | Select-Object -First 1
@@ -114,6 +122,11 @@ try {
 
     # Each store read, with as many games as its reader read from the fake when it was made.
     foreach ($store in $stores) {
+        if ($store.Again) {
+            $first = $stores | Where-Object { $_.Store -eq $store.Store -and -not $_.Again } | Select-Object -First 1
+            $store.Id = $first.Id; $store.Dir = $first.Dir; $store.Games = $first.Games
+            continue
+        }
         $line = Wait-DashboardLog "^$($store.Store): $($store.Games) games from $([regex]::Escape($store.Root)) in \d+ ms`$" 60
         if ($line) { Say "read: $line" } else {
             $said = @(Get-DashboardLog | Where-Object { $_ -match "^$($store.Store): " }) -join ' | '
@@ -164,7 +177,32 @@ try {
         # The stand-in game, from the game's folder; through the store's stand-in where it has one.
         switch ($store.Store) {
             'ubisoft' { $by = Wait-StandIn "uplay-url: $($store.Id) running" }
-            'battlenet' { $by = Wait-StandIn "battlenet: $($store.Id) running" }
+            'battlenet' {
+                $id = [regex]::Escape($store.Id)
+                if ($store.Again) {
+                    $at = Wait-DashboardLog "^battlenet: ${id}: Battle\.net is running \(\d+ Battle\.net\.exe processes\): asked at once$" 10 $mark
+                    if ($at) { Say "client open: $at" } else { $failures += 'with Battle.net open, it was not asked at once' }
+                } else {
+                    foreach ($want in @(
+                            "^battlenet: ${id}: Battle\.net is not running: started on its own .+",
+                            '^launch: Battle\.net getting ready to start the game: the Launch screen stays up at \d+ ms$',
+                            "^battlenet: ${id}: Battle\.net is up, \d+ ms after it was started: .+",
+                            "^battlenet: ${id}: asked: .+Battle\.net\.exe `"--exec=launch $id`"$")) {
+                        $got = Wait-DashboardLog $want 40 $mark
+                        if ($got) { Say "client closed: $got" } else { $failures += "with Battle.net closed, no line '$want'" }
+                    }
+                }
+                # One hand-over a round: the second round's is the log's second.
+                $log = Join-Path $env:E2E_OUT 'standin.log'
+                $rounds = if ($store.Again) { 2 } else { 1 }
+                $handed = Wait-Until { if ((Test-Path $log) -and @(Get-Content $log | Where-Object { $_ -match "battlenet: launch $id handed to the running client" }).Count -ge $rounds) { $true } } 40
+                if (-not $handed) { $failures += 'the stand-in Battle.net was never handed the launch' }
+                $by = Wait-StandIn "battlenet: $id running" 30
+                if (-not $store.Again) {
+                    $over = Wait-DashboardLog "^battlenet: ${id}: the game's process is up \(.+\), \d+ ms after Battle\.net was started, after one ask$" 20 $mark
+                    if ($over) { Say "followed: $over" } else { $failures += "the Dashboard did not see $($store.Game)'s process after one ask" }
+                }
+            }
             default { $by = 'its own game.exe' }
         }
         if (-not $by) { $failures += "the stand-in $($store.Name) did not start $($store.Game)" } else { Say "started by: $by" }

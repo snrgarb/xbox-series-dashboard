@@ -107,6 +107,21 @@ pub trait Source: Send + Sync {
     /// How to start the game, one of this source's. None when it can't be started from here.
     fn start(&self, game: &Game) -> Option<Start>;
 
+    /// Asks the store for the game, `start` being what [`start`](Source::start) gave for it: opened with `open`, the
+    /// default. A store whose client drops a start given to it while it is itself starting (Battle.net's: #172)
+    /// starts its client here and gives it the start once it is up, on a thread of its own (`open.detached()`), and
+    /// says so in the log. An error, the opener's, when the store did not take it.
+    fn launch(&self, _game: &Game, start: &Start, open: &mut dyn crate::Opener) -> Result<(), String> {
+        open.open(start)
+    }
+
+    /// Whether the store is still getting ready to start the game it was asked for by [`launch`](Source::launch)
+    /// (Battle.net's client starting, #172): while it is, a window of its own that keeps the foreground is not taken
+    /// for one that wants the user, and the Launch screen stays up over it. False, the default.
+    fn getting_ready(&self, _game: &Game) -> bool {
+        false
+    }
+
     /// Why the installed game can't be started now, in the user's words, where the source knows its store would
     /// not start it (Battle.net with the game under a uid its client does not know: #172): the shell says it in a
     /// Toast instead of starting it. None, the default: started as `start` says.
