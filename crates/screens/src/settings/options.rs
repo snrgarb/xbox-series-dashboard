@@ -38,10 +38,17 @@ pub enum Setting {
     /// Settings > Account > Discord messages (#197, docs/discord-web.md): the Dashboard's own discord.com session.
     /// Off by default: nothing of it starts until the user turns it on, beside the terms said plainly.
     DiscordMessages,
+    /// Settings > Account > Direct Messages > Notifications (docs/spec/party-chats.md, 8.2): a Toast for a direct
+    /// message; with Show what they say off it names the sender and not the words; a mention in a server's channel; an
+    /// incoming call. The Toasts (#202) read them.
+    NotifyDirectMessages,
+    NotifyShowWhatTheySay,
+    NotifyMentions,
+    NotifyIncomingCalls,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 12] = [
+    pub const ALL: [Setting; 16] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
@@ -54,6 +61,10 @@ impl Setting {
         Setting::DailyUpdateCheck,
         Setting::ShowGamePass,
         Setting::DiscordMessages,
+        Setting::NotifyDirectMessages,
+        Setting::NotifyShowWhatTheySay,
+        Setting::NotifyMentions,
+        Setting::NotifyIncomingCalls,
     ];
 
     /// The option's key in the settings table. Never changed: a database has it.
@@ -72,12 +83,55 @@ impl Setting {
             Setting::DailyUpdateCheck => "updates.daily_check",
             Setting::ShowGamePass => model::game_pass::SHOWN_KEY,
             Setting::DiscordMessages => "discord.messages",
+            Setting::NotifyDirectMessages => "discord.notify.messages",
+            Setting::NotifyShowWhatTheySay => "discord.notify.text",
+            Setting::NotifyMentions => "discord.notify.mentions",
+            Setting::NotifyIncomingCalls => "discord.notify.calls",
         }
     }
 
     /// What the option is until it is set.
     pub fn default(self) -> bool {
         !matches!(self, Setting::ReduceMotion | Setting::DailyUpdateCheck | Setting::DiscordMessages)
+    }
+}
+
+/// The settings row that holds Settings > Account > Direct Messages' While playing: a [`WhilePlaying::key`].
+pub const DISCORD_WHILE_PLAYING: &str = "discord.notify.while_playing";
+
+/// Which of Discord's Toasts show while a game is running (docs/spec/party-chats.md, 7.4 and 8.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WhilePlaying {
+    /// Messages, mentions and calls (decision 11).
+    #[default]
+    ShowAll,
+    CallsOnly,
+    None,
+}
+
+impl WhilePlaying {
+    pub const ALL: [WhilePlaying; 3] = [WhilePlaying::ShowAll, WhilePlaying::CallsOnly, WhilePlaying::None];
+
+    /// The dropdown's choice.
+    pub fn name(self) -> &'static str {
+        match self {
+            WhilePlaying::ShowAll => "Show all",
+            WhilePlaying::CallsOnly => "Calls only",
+            WhilePlaying::None => "None",
+        }
+    }
+
+    /// The value as the settings table holds it.
+    pub fn key(self) -> &'static str {
+        match self {
+            WhilePlaying::ShowAll => "all",
+            WhilePlaying::CallsOnly => "calls",
+            WhilePlaying::None => "none",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|choice| choice.key() == key.trim())
     }
 }
 
@@ -155,6 +209,17 @@ pub struct Options {
     /// Discord's web session as the executable last found it (Settings > Account > Discord messages, #197): not an
     /// option, but how the session stands, and the kind of field focus is on in its sign-in page.
     pub discord_web: model::discord_web::Web,
+    /// Direct Messages as the web session last said, for Settings' status line and focus log (not an option):
+    /// `Dashboard::set_direct` keeps it.
+    pub direct_state: model::discord_dms::DirectState,
+    /// Discord's Toasts, as Settings > Account > Direct Messages > Notifications has them (docs/spec/party-chats.md,
+    /// 8.2): Direct Messages, Show what they say, Mentions, Incoming Calls, and While playing. The Toasts (#202)
+    /// read them; kept as the rows `Setting::key` and [`DISCORD_WHILE_PLAYING`].
+    pub notify_messages: bool,
+    pub notify_text: bool,
+    pub notify_mentions: bool,
+    pub notify_calls: bool,
+    pub while_playing: WhilePlaying,
     /// The Boot video chosen (docs/spec/start-up.md), which plays as the Dashboard starts if it is found.
     pub boot_video: BootVideo,
     /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
@@ -193,6 +258,12 @@ impl Default for Options {
             windows_region: None,
             game_pass_subscription: model::game_pass::Subscription::Unknown,
             discord_web: model::discord_web::Web::default(),
+            direct_state: model::discord_dms::DirectState::Off,
+            notify_messages: of(Setting::NotifyDirectMessages),
+            notify_text: of(Setting::NotifyShowWhatTheySay),
+            notify_mentions: of(Setting::NotifyMentions),
+            notify_calls: of(Setting::NotifyIncomingCalls),
+            while_playing: WhilePlaying::ShowAll,
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),
@@ -219,6 +290,9 @@ impl Options {
             options.boot_video = video;
         }
         options.idle = crate::idle::Times::read(&stored);
+        if let Some(playing) = stored(DISCORD_WHILE_PLAYING).as_deref().and_then(WhilePlaying::from_key) {
+            options.while_playing = playing;
+        }
         options.game_pass_region =
             stored(model::game_pass::REGION_KEY).as_deref().and_then(model::game_pass::Region::parse);
         options
@@ -238,6 +312,10 @@ impl Options {
             Setting::DailyUpdateCheck => self.daily_update_check,
             Setting::ShowGamePass => self.show_game_pass,
             Setting::DiscordMessages => self.discord_messages,
+            Setting::NotifyDirectMessages => self.notify_messages,
+            Setting::NotifyShowWhatTheySay => self.notify_text,
+            Setting::NotifyMentions => self.notify_mentions,
+            Setting::NotifyIncomingCalls => self.notify_calls,
         }
     }
 
@@ -255,6 +333,10 @@ impl Options {
             Setting::DailyUpdateCheck => &mut self.daily_update_check,
             Setting::ShowGamePass => &mut self.show_game_pass,
             Setting::DiscordMessages => &mut self.discord_messages,
+            Setting::NotifyDirectMessages => &mut self.notify_messages,
+            Setting::NotifyShowWhatTheySay => &mut self.notify_text,
+            Setting::NotifyMentions => &mut self.notify_mentions,
+            Setting::NotifyIncomingCalls => &mut self.notify_calls,
         } = on;
     }
 }

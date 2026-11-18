@@ -58,6 +58,50 @@ impl std::fmt::Debug for Painter {
     }
 }
 
+/// Pictures that are only ever in memory (a person's avatar, which is never written to disk): the encoded bytes are
+/// registered, and the key made from them names them by a number that is never reused. The decoding thread finds the
+/// bytes by that name while something still holds them; the registry itself holds them weakly, so it keeps nothing
+/// alive.
+pub mod memory {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex, Weak};
+
+    use super::{ArtKey, Kind};
+
+    const PREFIX: &str = "memory/";
+    type Registry = (u64, Vec<(u64, Weak<[u8]>)>);
+    /// The last id given, and (id, bytes) for each picture still held.
+    static REGISTRY: Mutex<Registry> = Mutex::new((0, Vec::new()));
+
+    /// The key of this encoded picture, decoded to at most `max` wide: the same key for the same bytes while they
+    /// are held.
+    pub fn key(bytes: &Arc<[u8]>, max: u32) -> ArtKey {
+        let mut registry = REGISTRY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        registry.1.retain(|(_, weak)| weak.strong_count() > 0);
+        let known = registry.1.iter().find(|(_, weak)| std::ptr::eq(weak.as_ptr(), Arc::as_ptr(bytes)));
+        let id = match known {
+            Some(&(id, _)) => id,
+            None => {
+                registry.0 += 1;
+                let id = registry.0;
+                registry.1.push((id, Arc::downgrade(bytes)));
+                id
+            }
+        };
+        ArtKey { path: PathBuf::from(format!("{PREFIX}{id}")), kind: Kind::Thumb(max) }
+    }
+
+    pub(super) fn is_memory(path: &Path) -> bool {
+        path.to_str().is_some_and(|path| path.starts_with(PREFIX))
+    }
+
+    pub(super) fn lookup(path: &Path) -> Option<Arc<[u8]>> {
+        let id: u64 = path.to_str()?.strip_prefix(PREFIX)?.parse().ok()?;
+        let registry = REGISTRY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        registry.1.iter().find(|(found, _)| *found == id)?.1.upgrade()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArtKey {
     pub path: PathBuf,
@@ -320,7 +364,12 @@ fn decode(key: &ArtKey) -> image::ImageResult<Vec<RgbaImage>> {
         return Ok(vec![paint()]);
     }
     // Steam stores some PNGs under a .jpg name, so go by content, not extension.
-    let image = image::ImageReader::open(&key.path)?.with_guessed_format()?.decode()?.into_rgba8();
+    let image = match memory::lookup(&key.path) {
+        Some(bytes) => image::ImageReader::new(std::io::Cursor::new(&bytes[..])).with_guessed_format()?.decode()?,
+        None if memory::is_memory(&key.path) => return Ok(Vec::new()),
+        None => image::ImageReader::open(&key.path)?.with_guessed_format()?.decode()?,
+    }
+    .into_rgba8();
     let fit = |image: RgbaImage, max: u32, filter| {
         if image.width() <= max {
             return image;

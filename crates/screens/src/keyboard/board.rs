@@ -278,6 +278,15 @@ impl Board {
 
     /// The text with a bar where the caret is, Shift, and the layer, for the focus log: `"Ha|" lower letters`.
     /// A secret's characters are stars.
+    pub fn state_of(&self, masked: bool, private: bool) -> String {
+        if !private {
+            return self.state(masked);
+        }
+        let case = if self.shift { "upper" } else { "lower" };
+        let layer = if self.symbols { "symbols" } else { "letters" };
+        format!("{} chars, {case} {layer}", self.len())
+    }
+
     pub fn state(&self, masked: bool) -> String {
         let (before, after) = self.around_caret();
         let shown = |text: String| if masked { "*".repeat(text.chars().count()) } else { text };

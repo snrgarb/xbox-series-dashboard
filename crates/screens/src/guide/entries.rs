@@ -1,6 +1,7 @@
 //! A tab's entries: which they are, where each is, and what each looks like (docs/spec/guide.md, sections 2.4 to
 //! 2.7).
 use model::discord::Discord;
+use model::discord_dms::Direct;
 use model::Library;
 use ui::{Color, HAlign, Rect, Ui, VAlign};
 
@@ -55,7 +56,7 @@ impl Entry {
 
     /// Whether the Menu button opens a menu on it: the running game's, and a Shortcut's (Remove shortcut).
     pub fn has_menu(&self) -> bool {
-        matches!(self.kind, Kind::Running(_) | Kind::Discord(discord::Item::Shortcut(_)))
+        matches!(self.kind, Kind::Running(_) | Kind::Discord(discord::Item::Shortcut(_) | discord::Item::DM(_)))
     }
 
     /// The box's height, and the room under it.
@@ -75,10 +76,10 @@ impl Entry {
 const TOTALS: f32 = 14.0 + 1.0 + 26.0 + 34.58 + 12.0;
 
 /// The tab's entries, top to bottom.
-pub fn of(tab: Tab, around: Around, discord: &Discord) -> Vec<Entry> {
+pub fn of(tab: Tab, around: Around, discord: &Discord, direct: &Direct) -> Vec<Entry> {
     match tab {
         Tab::Landing => landing(around.library, around.playing),
-        Tab::Discord => discord::entries(discord),
+        Tab::Discord => discord::entries(discord, direct),
         Tab::ProfileAndSystem => profile_and_system(around),
     }
 }
@@ -159,6 +160,8 @@ pub struct Placed {
     pub rect: Rect,
     /// Where the achievements' totals under it start, if they stand under it.
     pub totals: Option<f32>,
+    /// Whether the section's "Direct Messages" line stands over it (the first of the section, in its row's place).
+    pub heading: bool,
 }
 
 /// Lays the entries out down the panel. The Discord tab's Shortcuts stand in rows of three, each tile 9 in from
@@ -167,7 +170,53 @@ pub fn layout(tab: Tab, entries: &[Entry]) -> Vec<Placed> {
     let mut y = first_top(tab);
     // The row of tiles being filled: its top (its divider's included) and its tiles' top.
     let mut row = (0.0, 0.0);
+    // The Direct Messages section's: its top, its discs' top and its foot.
+    let mut section = (0.0, 0.0, 0.0);
+    let mut before: Option<Kind> = None;
     let place = |entry: &Entry| {
+        let previous = before.replace(entry.kind);
+        if let Kind::Discord(item @ (discord::Item::DM(_) | discord::Item::AllDMs | discord::Item::DMsState(_))) =
+            entry.kind
+        {
+            let continues = matches!(previous, Some(Kind::Discord(discord::Item::DM(_))))
+                && !matches!(item, discord::Item::DMsState(_));
+            let at = match item {
+                discord::Item::DM(at) => at,
+                // The sixth circle follows the discs it has.
+                _ => entries
+                    .iter()
+                    .take_while(|other| other.kind != entry.kind)
+                    .filter(|other| matches!(other.kind, Kind::Discord(discord::Item::DM(_))))
+                    .count(),
+            };
+            let heading = !continues;
+            let divider = (heading && entry.divider).then_some(y + 14.0);
+            if heading {
+                section.0 = y;
+                if entry.divider {
+                    y += 41.0;
+                }
+                section.1 = y + discord::DISCS_DOWN;
+                let foot = if matches!(item, discord::Item::DMsState(_)) {
+                    discord::height(item).0 + 3.0
+                } else {
+                    discord::DISC_SIZE + discord::NAME_GAP + discord::HEADING_LINE + 3.0
+                };
+                y = section.1 + foot;
+                section.2 = y;
+            }
+            let rect = if matches!(item, discord::Item::DMsState(_)) {
+                Rect::new(PANEL.x + 9.0, section.1, PANEL.w - 18.0, discord::height(item).0)
+            } else {
+                Rect::new(
+                    PANEL.x + 28.0 + at as f32 * discord::DISC_PITCH,
+                    section.1,
+                    discord::DISC_SIZE,
+                    discord::DISC_SIZE,
+                )
+            };
+            return Placed { divider, extent: (section.0, section.2), rect, totals: None, heading };
+        }
         if let Kind::Discord(discord::Item::Shortcut(at)) = entry.kind {
             let column = at % discord::PER_ROW;
             let divider = entry.divider.then_some(y + 14.0);
@@ -177,7 +226,7 @@ pub fn layout(tab: Tab, entries: &[Entry]) -> Vec<Placed> {
             }
             let x = PANEL.x + column as f32 * discord::TILE_COLUMN + 9.0;
             let rect = Rect::new(x, row.1, discord::TILE, discord::TILE);
-            return Placed { divider, extent: (row.0, y), rect, totals: None };
+            return Placed { divider, extent: (row.0, y), rect, totals: None, heading: false };
         }
         let top = y;
         // A divider is 1 high, 14 under what is above it and 26 over the box.
@@ -192,7 +241,7 @@ pub fn layout(tab: Tab, entries: &[Entry]) -> Vec<Placed> {
         if entry.totals {
             y += TOTALS;
         }
-        Placed { divider, extent: (top, y), rect, totals }
+        Placed { divider, extent: (top, y), rect, totals, heading: false }
     };
     entries.iter().map(place).collect()
 }
@@ -220,6 +269,8 @@ pub struct Faces<'a> {
     pub profile: &'a model::Profile,
     /// Discord as it last said: the Discord tab's entries' faces.
     pub discord: &'a Discord,
+    /// The Direct Messages part of the Discord tab's faces.
+    pub direct: discord::DirectFace<'a>,
 }
 
 /// Draws one entry at `placed`.
@@ -229,7 +280,14 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
     }
     let rect = placed.rect;
     if let Kind::Discord(item) = entry.kind {
-        discord::draw(ui, item, entry, rect, focused, faces.discord);
+        if matches!(
+            item,
+            discord::Item::Answer | discord::Item::DMsState(_) | discord::Item::DM(_) | discord::Item::AllDMs
+        ) {
+            discord::draw_direct(ui, item, entry, rect, focused, placed.heading, &faces.direct);
+        } else {
+            discord::draw(ui, item, entry, rect, focused, faces.discord);
+        }
         return;
     }
     let (_, cy) = rect.center();
@@ -363,6 +421,7 @@ mod tests {
                 now_playing: None,
             },
             &Discord::default(),
+            &Direct::default(),
         );
         let placed = layout(Tab::Landing, &entries);
         let tops: Vec<(f32, f32)> = placed.iter().map(|p| (p.rect.y, p.rect.bottom())).collect();
@@ -390,6 +449,7 @@ mod tests {
                 now_playing: None,
             },
             &Discord::default(),
+            &Direct::default(),
         );
         let placed = layout(Tab::ProfileAndSystem, &entries);
         let near = |a: f32, b: f32| (a - b).abs() < 0.01;
@@ -412,10 +472,13 @@ mod tests {
             |name: &str| Unlock { game: 1, achievement: Achievement { name: name.into(), ..Default::default() } };
         library.achievements.recent = ["Five", "Four", "Three", "Two", "One"].map(unlock).to_vec();
         // No totals: no section and no unlocks, as the Bundle has none without them.
-        assert_eq!(of(Tab::ProfileAndSystem, around(&library, &audio), &Discord::default()).len(), 4);
+        assert_eq!(
+            of(Tab::ProfileAndSystem, around(&library, &audio), &Discord::default(), &Direct::default()).len(),
+            4
+        );
 
         library.achievements.totals = Some(Totals { score: 12_345, unlocked: 56, of: 80, games: 3 });
-        let entries = of(Tab::ProfileAndSystem, around(&library, &audio), &Discord::default());
+        let entries = of(Tab::ProfileAndSystem, around(&library, &audio), &Discord::default(), &Direct::default());
         let kinds: Vec<Kind> = entries.iter().map(|e| e.kind).collect();
         assert_eq!(
             kinds,

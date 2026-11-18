@@ -1133,6 +1133,12 @@ impl App {
                     self.discord_web.ask(ask);
                     self.follow_discord_web();
                 }
+                // What the Guide's Direct Messages ask of the web session (#200): wired by the data source's ticket.
+                Effect::Direct(_) => {}
+                // Settings > Account > Direct Messages > While playing: saved; the Toasts (#202) read it.
+                Effect::DiscordWhilePlaying(choice) => {
+                    self.store.set_text(screens::settings::DISCORD_WHILE_PLAYING, choice.key());
+                }
                 // Settings > Discord: the connection does it, and the page shows how it is after.
                 Effect::Discord(ask) => {
                     self.discord.ask(ask, shell::clipboard::text);

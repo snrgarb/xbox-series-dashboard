@@ -21,17 +21,24 @@ pub struct Entry {
     pub caption: &'static str,
     /// A secret: the field shows a dot for each character and never the text.
     pub masked: bool,
+    /// What is typed is somebody's message: the field shows it, but the focus log says how long it is and nothing
+    /// of what it says (docs/spec/party-chats.md, 9.3).
+    pub private: bool,
     /// The most characters that may be typed, if there is a most.
     pub limit: Option<usize>,
 }
 
 impl Entry {
     pub const fn new(caption: &'static str) -> Self {
-        Self { caption, masked: false, limit: None }
+        Self { caption, masked: false, private: false, limit: None }
     }
 
     pub const fn masked(self) -> Self {
         Self { masked: true, ..self }
+    }
+
+    pub const fn private(self) -> Self {
+        Self { private: true, ..self }
     }
 
     pub const fn limit(self, characters: usize) -> Self {
@@ -72,12 +79,24 @@ pub struct TextEntry {
     start: String,
     /// What the page under it has not been told yet.
     says: Option<Event>,
+    /// A caption made as it was opened ("Message @Ana"), where the entry's own is not enough.
+    caption: Option<String>,
 }
 
 impl TextEntry {
     /// Over `text`, the caret at its end; Shift on only if it is empty; focus on Q.
     pub fn open(entry: Entry, text: String) -> Self {
-        Self { entry, board: Board::over(&text).limited(entry.limit), start: text, says: None }
+        Self { entry, board: Board::over(&text).limited(entry.limit), start: text, says: None, caption: None }
+    }
+
+    /// With this caption in place of the entry's.
+    pub fn captioned(self, caption: String) -> Self {
+        Self { caption: Some(caption), ..self }
+    }
+
+    /// The text as it is now.
+    pub fn text(&self) -> String {
+        self.board.text()
     }
 
     fn answer(&mut self, outcome: Outcome) -> Option<PageAction> {
@@ -106,7 +125,7 @@ impl Page for TextEntry {
 
     /// The text with the caret in it, Shift and the layer: `"Ha|" lower letters`. A secret is stars.
     fn state(&self) -> String {
-        self.board.state(self.entry.masked)
+        self.board.state_of(self.entry.masked, self.entry.private)
     }
 
     /// Every button is text entry's: what the keyboard has no use for is swallowed, and nothing reaches the page.
@@ -162,9 +181,10 @@ impl Page for TextEntry {
         let keys = Board::rect(ui);
         let field = Rect::new(keys.x, keys.y - FIELD_OVER_KEYS - FIELD_HEIGHT, keys.w, FIELD_HEIGHT);
         let text = Rect::new(field.x + FIELD_INSET, field.y, field.w - 2.0 * FIELD_INSET, field.h);
-        let line = ui.measure(&CAPTION, self.entry.caption).height;
+        let caption_text = self.caption.as_deref().unwrap_or(self.entry.caption);
+        let line = ui.measure(&CAPTION, caption_text).height;
         let caption = Rect::new(text.x, field.y - CAPTION_OVER_FIELD - line, text.w, line);
-        ui.paragraph(caption, self.entry.caption, &CAPTION, HAlign::Left, VAlign::Bottom, 1);
+        ui.paragraph(caption, caption_text, &CAPTION, HAlign::Left, VAlign::Bottom, 1);
         ui.fill(field, FIELD, FIELD_HEIGHT / 2.0);
         // The caret is always shown: the keyboard is always up. It does not blink.
         self.board.draw_text(ui, text, self.entry.masked, true);

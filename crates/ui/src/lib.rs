@@ -19,7 +19,7 @@ pub mod snap;
 use std::hash::Hash;
 
 pub use anim::{Ease, Store};
-pub use art::{Art, ArtCache, ArtKey, ArtTiming, Kind, Painter};
+pub use art::{memory as memory_art, Art, ArtCache, ArtKey, ArtTiming, Kind, Painter};
 pub use host::{FrameCost, Host};
 pub use input::{Battery, Button, PadEvent, PadStatus, Press, Repeat};
 pub use render::{Font, Gradient, HAlign, Rect, TexId};
