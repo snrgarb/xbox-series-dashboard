@@ -122,7 +122,8 @@ jobs:
       - name: WebView2Loader.dll beside the Discord spike
         run: |
           release=target/x86_64-pc-windows-gnullvm/release
-          loader="$(ls -t "$release"/build/webview2-com-sys-*/out/x64/WebView2Loader.dll | head -1)"
+          loader="$(find "$release/build" -path '*webview2-com-sys*/out/x64/WebView2Loader.dll' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
+          test -n "$loader" || { echo "no WebView2Loader.dll in webview2-com-sys's build" >&2; exit 1; }
           cp "$loader" "$release/"
       - uses: actions/upload-artifact@v4
         with:
