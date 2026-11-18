@@ -489,7 +489,7 @@ function New-FakeStore([string] $Command, [string] $Root, [string] $Json, [strin
     $standin = Join-Path $script:Payload 'standin.exe'
     if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
     $json = Join-Path $script:Out $Json
-    $made = Start-Process $standin -ArgumentList (@($Command, "`"$Root`"", '--json', "`"$json`"") + $Extra) -Wait -PassThru
+    $made = Start-Process $standin -ArgumentList (@($Command, "`"$Root`"", '--json', "`"$json`"") + @($Extra | Where-Object { $_ })) -Wait -PassThru
     if ($made.ExitCode -ne 0) {
         $why = Get-Content (Join-Path (Split-Path $Root -Parent) 'standin-error.txt') -Raw -ErrorAction SilentlyContinue
         throw "standin $Command exited with $($made.ExitCode): $why"
@@ -519,7 +519,10 @@ function Register-UrlHandler([string] $Scheme, [string] $Command) {
 # name, each with source_id (its AppName), name, installed, install_dir. With -Owning, the account also owns a game of
 # that name, not installed: the same game in two launchers, for "Install from" (#249).
 function Initialize-FakeEpic([string] $Root = (Get-FakeRoot 'epic'), [string] $Owning = '') {
-    $extra = if ($Owning) { @('--owning', "`"$Owning`"") } else { @() }
+    # Not `$extra = if ... else { @() }`: PowerShell 5.1 makes an empty array out of an `if` into $null, which
+    # Start-Process's ArgumentList refuses.
+    [string[]] $extra = @()
+    if ($Owning) { $extra = @('--owning', "`"$Owning`"") }
     $library = New-FakeStore 'make-epic' $Root 'fake-epic.json' $extra
     $standin = Join-Path $script:Payload 'standin.exe'
     Register-Fake 'epic' $Root 'epic'
