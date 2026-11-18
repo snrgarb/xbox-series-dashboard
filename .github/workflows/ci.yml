@@ -116,10 +116,10 @@ jobs:
           cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnullvm
       - name: Build
         run: cargo build --release --target x86_64-pc-windows-gnullvm
-      # The Discord spike (#196, spikes/discord) loads WebView2Loader.dll from beside its exe: Microsoft's
-      # redistributable loader, as webview2-com-sys ships it, copied from that crate's build next to the exes. Never
-      # committed; dashboard.exe does not use it.
-      - name: WebView2Loader.dll beside the Discord spike
+      # Discord messages (#197, docs/discord-web.md) and the Discord spike (#196) load WebView2Loader.dll from beside
+      # their exe: Microsoft's redistributable loader, as webview2-com-sys ships it, copied from that crate's build next
+      # to the exes. Never committed; tools/package.sh ships it beside dashboard.exe.
+      - name: WebView2Loader.dll beside dashboard.exe
         run: |
           release=target/x86_64-pc-windows-gnullvm/release
           loader="$(find "$release/build" -path '*webview2-com-sys*/out/x64/WebView2Loader.dll' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"

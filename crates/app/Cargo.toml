@@ -29,6 +29,8 @@ shell = { path = "../shell" }
 audio = { path = "../audio" }
 media = { path = "../media" }
 discord = { path = "../discord" }
+# Discord messages (#197): the Dashboard's own discord.com session, off until Settings turns it on.
+discord_web = { path = "../discord_web" }
 shell-mode = { path = "../shell-mode" }
 # Updates (docs/spec/updates.md): the release asked for, downloaded, checked and put in place.
 update = { path = "../update" }

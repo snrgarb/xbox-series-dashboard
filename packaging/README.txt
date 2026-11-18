@@ -10,6 +10,8 @@ What is in this folder
 ----------------------
 
   dashboard.exe               the Dashboard
+  WebView2Loader.dll          Microsoft's WebView2 loader, for Settings > Account > Discord messages (off unless
+                              you turn it on). It uses Microsoft Edge WebView2, which Windows 11 has.
   README.txt                  this file
   THIRD-PARTY-LICENSES.txt    the open-source parts it is built from, and their licences
   uninstall.exe               (installed copy only) removes it again

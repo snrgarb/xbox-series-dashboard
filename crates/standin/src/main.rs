@@ -177,6 +177,12 @@
 //!       stand-in gogdl's account owns the GOG fixture's three games and Quarrel Fen, two a page; any other sign-in
 //!       is refused. Says `serve-gog-web: listening on http://127.0.0.1:<n>` and then a line a request (its path and
 //!       whether it came with the stand-in's sign-in), until it is killed.
+//!   standin serve-discord-web [--port <n>]
+//!       A stand-in discord.com (`discord_web::Web`, #197) on 127.0.0.1 at <n>, for the Dashboard's
+//!       `--discord-web-url http://127.0.0.1:<n>`: a made-up sign-in form at /login that takes any e-mail and password,
+//!       a session cookie, and an app page in Discord's DOM shape at /app. Says `serve-discord-web: listening on
+//!       http://127.0.0.1:<n>` and then a line a request (its method, path and whether it came signed in; never what
+//!       was typed), until it is killed.
 //!   standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
 //!       A launcher's installer, and the uninstaller it leaves (`set_up`): in the test's own folder that
 //!       `STANDIN_SETUP` names, and nowhere else, writes what it was run with (`runs.txt`), the app's folder and its
@@ -223,6 +229,7 @@
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod discord_web;
 mod media;
 mod set_up;
 #[cfg(windows)]
@@ -252,6 +259,7 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
        standin serve-helpers --table <file> [--port <n>] [--clients <file> --sandbox <dir>]
        standin serve-gog-web [--port <n>]
+       standin serve-discord-web [--port <n>]
        standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
        legendary.exe | gogdl.exe [--version | <args>...]
        standin discord --pipe <name> [--port <n>]
@@ -1163,6 +1171,7 @@ fn run(args: &[String]) -> i32 {
         Some("serve-updates") => serve_updates(&args[1..]),
         Some("serve-helpers") => serve_helpers(&args[1..]),
         Some("serve-gog-web") => serve_gog_web(&args[1..]),
+        Some("serve-discord-web") => serve_discord_web(&args[1..]),
         Some("discord") => serve_discord(&args[1..]),
         Some("discord-say") => match &args[1..] {
             [name, words @ ..] if !words.is_empty() => match discord::fake::say_to(name, &words.join(" ")) {
@@ -1631,6 +1640,41 @@ fn serve_gog_web(args: &[String]) -> i32 {
         for (path, signed) in &asked[said..] {
             let key = if *signed { "the stand-in's sign-in" } else { "no sign-in of the stand-in's" };
             note(&format!("serve-gog-web: {path} ({key})"));
+        }
+        said = asked.len();
+    }
+}
+
+/// `serve-discord-web`: the stand-in discord.com, until killed (#197).
+fn serve_discord_web(args: &[String]) -> i32 {
+    let port = match args {
+        [] => 0,
+        [flag, value] if flag == "--port" => match value.parse() {
+            Ok(port) => port,
+            Err(_) => {
+                note("serve-discord-web: bad --port");
+                return 2;
+            }
+        },
+        _ => {
+            note(USAGE);
+            return 2;
+        }
+    };
+    let web = match discord_web::Web::start(port) {
+        Ok(web) => web,
+        Err(e) => {
+            note(&format!("serve-discord-web: port {port}: {e}"));
+            return 1;
+        }
+    };
+    note(&format!("serve-discord-web: listening on {}", web.base()));
+    let mut said = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let asked = web.asked.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        for line in &asked[said..] {
+            note(&format!("serve-discord-web: {line}"));
         }
         said = asked.len();
     }

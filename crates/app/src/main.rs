@@ -135,6 +135,9 @@ pub struct Args {
     /// Discord's own, `--discord-token-url` its token endpoint and `--discord-cdn-url` where avatars come from. With
     /// a pipe and no endpoint or CDN there is none: a test never reaches the real Discord.
     discord: discord::Place,
+    /// `--discord-web-url`: where Discord's web session goes in place of discord.com (#197): a test's stand-in
+    /// (`standin serve-discord-web`), which a test never leaves.
+    discord_web_url: Option<String>,
     /// Started by shell mode's --shell process (docs/spec/shell-mode.md, 6): the log goes to the data folder, the
     /// two events are set, and Start-up stays over everything.
     from_shell: bool,
@@ -194,6 +197,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
                  [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
+                 [--discord-web-url <url>]
                  [--from-shell] [--dry-shell] [--log-file <file>]
                  [--update-source <url>] [--pretend-version <x.y.z>] [--helper-table <file>]
                  [--helper-home <dir>] [--client-table <file>] [--setup-registry <file>]
@@ -290,6 +294,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--discord-pipe" => args.discord.pipe = Some(value()?),
             "--discord-token-url" => args.discord.token_url = Some(value()?),
             "--discord-cdn-url" => args.discord.cdn_url = Some(value()?),
+            "--discord-web-url" => args.discord_web_url = Some(value()?),
             "--from-shell" => args.from_shell = true,
             "--dry-shell" => args.dry_shell = true,
             "--log-file" => args.log_file = Some(value()?.into()),

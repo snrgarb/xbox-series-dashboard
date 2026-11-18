@@ -148,8 +148,10 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
 
-    // Account: Profiles and Who's playing today?, Discord under Profiles.
+    // Account: Profiles and Who's playing today?, Discord under Profiles and Discord messages beside it (#197).
     press(&mut dashboard, &[Down, Right, Right, Down]);
+    assert_eq!(dashboard.focus_line(), "Settings: Account: Discord messages");
+    press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Account: Discord");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Rail: Account");
@@ -505,6 +507,8 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         daily_update_check: false,
         updates: model::update::Updates::Unchecked,
         show_game_pass: true,
+        discord_messages: false,
+        discord_web: model::discord_web::Web::default(),
         game_pass_region: None,
         windows_region: None,
         game_pass_subscription: model::game_pass::Subscription::Unknown,
@@ -1439,6 +1443,69 @@ fn settings_discord() {
 }
 
 /// What the Dashboard asked of the shell since last time, but its sounds.
+/// Account > Discord messages (#197; docs/spec/settings.md 16.12, docs/discord-web.md): off by default with the terms
+/// said under the switch; on, Sign in opens Discord's sign-in page, where the pad sends keys and A on a field opens
+/// the Console keyboard, whose text goes to the session alone; signed in, the page closes itself; Sign out asks the
+/// session.
+#[test]
+fn settings_discord_messages() {
+    use model::discord_web::{Web, WebAsk, WebField, WebKey, WebState};
+    let mut stage = settings_stage();
+    stage.press(&[Down, Right, Right, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord messages");
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Use Discord messages; off, off");
+    stage.check("settings-discord-messages-off");
+    // Off, there is nothing under the switch to go to.
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Use Discord messages; off, off");
+
+    // On: saved, and the session tells how it stands.
+    stage.press(&[A]);
+    let on = screens::settings::Change { setting: screens::settings::Setting::DiscordMessages, on: true };
+    assert_eq!(asked(&mut stage), [Effect::Set(on)]);
+    let set = |stage: &mut Stage, web: Web| {
+        stage.dashboard.set_options(screens::Options { discord_web: web, ..stage.dashboard.options() })
+    };
+    set(&mut stage, Web { state: WebState::SignedOut, ..Web::default() });
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Sign in; on, signed out");
+    stage.check("settings-discord-messages-signed-out");
+
+    // Sign in: the sign-in page over Settings, shown while it has the pad.
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.page(), Some("DiscordSignIn"));
+    assert!(stage.dashboard.discord_sign_in_shown() && stage.dashboard.discord_sign_in_open());
+    stage.check("discord-sign-in");
+    stage.press(&[Down, Up, X]);
+    let keys = [WebKey::Tab, WebKey::ShiftTab, WebKey::Space].map(|key| Effect::DiscordWeb(WebAsk::Key(key)));
+    assert_eq!(asked(&mut stage), keys);
+    // A on a password field: the Console keyboard, the web view put away under it, the text to the session alone.
+    set(&mut stage, Web { state: WebState::SigningIn, field: Some(WebField::Password), kept: false });
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.page(), Some("TextEntry"));
+    assert!(!stage.dashboard.discord_sign_in_shown() && stage.dashboard.discord_sign_in_open());
+    assert!(stage.dashboard.typed(screens::keyboard::Typed::Text("hunter2")));
+    assert!(!stage.dashboard.focus_line().contains("hunter2"), "{}", stage.dashboard.focus_line());
+    stage.press(&[Menu]);
+    let effects = asked(&mut stage);
+    assert_eq!(effects, [Effect::DiscordWeb(WebAsk::Text("hunter2".into()))]);
+    assert!(!format!("{effects:?}").contains("hunter2"));
+    assert!(stage.dashboard.discord_sign_in_shown());
+
+    // Signed in: the page closes itself, back on Discord messages.
+    set(&mut stage, Web { state: WebState::SignedIn, field: None, kept: true });
+    stage.dashboard.discord_signed_in();
+    assert!(!stage.dashboard.discord_sign_in_open());
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord messages: Sign in; on, signed in, kept");
+    stage.check("settings-discord-messages-signed-in");
+    // Sign in does nothing now; Sign out asks the session.
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.page(), Some("Settings"));
+    stage.press(&[Right, A]);
+    assert_eq!(asked(&mut stage), [Effect::DiscordWeb(WebAsk::SignOut)]);
+}
+
 fn asked(stage: &mut Stage) -> Vec<Effect> {
     stage.dashboard.take_effects().into_iter().filter(|e| !matches!(e, Effect::Sound(_))).collect()
 }

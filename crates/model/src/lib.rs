@@ -5,6 +5,7 @@ pub mod art_picker;
 pub mod audio;
 pub mod by_hand;
 pub mod discord;
+pub mod discord_web;
 pub mod game_pass;
 pub mod helper;
 pub mod installer;

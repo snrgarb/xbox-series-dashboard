@@ -65,6 +65,8 @@ pub enum Open {
     /// A licence agreement a store's install asks the user to accept, over whatever is up (#230,
     /// `Dashboard::ask_agreement`).
     Agreement(crate::agreement::Entry),
+    /// Discord's sign-in page, over Settings > Account > Discord messages (#197, `discord_sign_in`).
+    DiscordSignIn,
 }
 
 impl Open {
@@ -89,6 +91,7 @@ impl Open {
             Open::Achievements(entry) => Box::new(crate::achievements::Achievements::open(entry, around)?),
             Open::ArtPicker(entry) => Box::new(art_picker::ArtPicker::open(entry, around)?),
             Open::Agreement(entry) => Box::new(crate::agreement::AgreementPrompt::open(entry)),
+            Open::DiscordSignIn => Box::new(crate::discord_sign_in::DiscordSignIn::open()),
         })
     }
 }
@@ -297,6 +300,11 @@ impl Stack {
 
     pub fn is_empty(&self) -> bool {
         self.pages.is_empty()
+    }
+
+    /// Whether a page of this name is up, on top or under another.
+    pub fn has(&self, name: &str) -> bool {
+        self.pages.iter().any(|page| page.name() == name)
     }
 
     /// How many pages are up.

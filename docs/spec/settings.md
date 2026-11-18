@@ -759,7 +759,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 | Category | Boxes | Layout |
 |---|---|---|
 | **General** | Personalisation (0, 0), Idle (1, 0), Guide (0, 1), **Boot video** (1, 1) | rows; the Bundle's Theme settings' first three at their places, Boot video in Discord's |
-| **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1) | rows |
+| **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1), **Discord messages** (1, 1; #197, 16.12) | rows |
 | **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers, Set up this PC ([set-up.md](set-up.md), #178) | sections |
 | **System** | System (0, 0), About (1, 0) | rows |
 
@@ -962,5 +962,33 @@ The user, 2026-11-18: "remove all the text paragraphs underneath setting heading
 | Add an app | "The Microsoft Store apps on this PC show up here once Windows has listed them."; "There are no Microsoft Store apps on this PC." | how things stand |
 | Picture (a Profile's) | "Add images to the Gamerpics folder to choose from more." with at most one picture | how things stand, and what to do |
 | Discord | the four numbered steps, the portal's address under its code, the values ("Not set", "Saved") and the status line | what the user cannot connect without, and how things stand |
+| Discord messages | "Discord's terms don't allow other programs to use your account, and Discord says it can close an account for it. With this on, the Dashboard signs in to discord.com as you and reads the page for you." under the switch; the status line; once a session is kept, "Signing out here removes the session from this PC. Discord lists it under Devices until you log it out there." | the risk the user takes by turning it on, which they must know first (#192, D1; docs/research/discord-bridge.md, 4); how things stand; what Sign out does not do |
 | System | the line under the checkbox (Off, On, refused, failed); "Getting to the desktop" and "If the Dashboard won't start" with their text | how things stand; the way out of shell mode, which no control on the page does |
 | About | the version; where updates stand once checked; "Third-party licences" and "Sounds and boot videos" with their text | how things stand; where the licences are, and where the media files go |
+
+### 16.12 Discord messages (the port's own; #197)
+
+Account's fourth box, beside Discord at (1, 1): **Discord messages** (icon U+E8BD), the Dashboard's own discord.com
+session that the Guide's Party reads DMs and notifications through (#198 on; docs/discord-web.md). Voice stays on
+Discord's page (6.9), whose connection this page never touches. Laid out as System's (16.9): the label "Discord
+messages", the checkbox row **Use Discord messages** 14 under it, the terms line under the row (kept, 16.11), then
+"Status" and the session's line, and, while the switch is on, the buttons **Sign in** and **Sign out** side by side,
+with the Devices line under them once a session is kept.
+
+- **The switch** is off until the user turns it on (`discord.messages` in the settings table, default false). Off,
+  nothing of the session runs. On with no session kept, nothing runs either: the status says Not signed in, or "This
+  PC doesn't have Microsoft Edge WebView2, which Discord's page needs." where the loader or the runtime is missing.
+- **The status line**: Off, Not signed in, Signing in..., Checking..., Signed in, no runtime, and "Discord's page
+  couldn't be opened." when the web view failed (the log says why).
+- **Sign in** (while signed out) opens the **sign-in page**: Discord's own discord.com/login over the whole screen,
+  but a band 110 high at its foot where the Dashboard says what the pad does. Up and Down step through the page's
+  fields and buttons (Shift+Tab, Tab); A on a text field opens the Console keyboard (9.6), as dots on a password
+  field, and what it keeps takes the field's place; A elsewhere and Menu press Enter; X is Space; View is Escape; B
+  closes the page. The QR code Discord shows is left as Discord shows it, for a phone. Signed in, the page closes by
+  itself, back on Discord messages. Closed before signing in, nothing is kept.
+- **Sign out** removes the Profile's session folder (`<data>\discord-web\profile-<id>`), and with it everything the
+  web view kept: nothing of it is left on the PC. Discord's own record of the session stays under its Devices.
+- **Focus**: the switch, then (Down, while on) Sign in and (Right) Sign out. B, or Left from the switch or Sign in,
+  goes back to Account's boxes. The focus log: `Settings: Discord messages: Use Discord messages; on, signed in, kept`
+  (the switch, the session's word, `kept` while a session is on the PC); on the sign-in page `DiscordSignIn: Tab`,
+  the last key sent, and `DiscordSignIn: keyboard` as text entry opens. The session's own lines start `discord web:`.

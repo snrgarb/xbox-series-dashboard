@@ -234,6 +234,8 @@ struct App {
     idle_after: Option<screens::idle::Times>,
     /// The Discord connection (docs/discord.md): Discord's own pipe, or with --discord-pipe a test's.
     discord: discord::Connection,
+    /// Discord messages' web session (#197, docs/discord-web.md): nothing runs until Settings turns it on.
+    discord_web: discord_web::Session,
     /// Settings > About's updates and the daily check (docs/spec/updates.md).
     updater: crate::updates::Updater,
     /// Settings > Helpers, carried out.
@@ -452,6 +454,16 @@ pub fn run(
     });
     discord.start();
     dashboard.set_discord(discord.discord());
+    // Discord messages' own session, the Profile signed in's, started only with Settings' switch on.
+    let mut discord_web = discord_web::Session::new(args.discord_web_url.as_deref(), data_dir.as_deref(), {
+        let wake = std::sync::Mutex::new(event_loop.create_proxy());
+        move || {
+            let _ = wake.lock().map(|proxy| proxy.send_event(()));
+        }
+    });
+    discord_web.set_profile(Some(dashboard.profile().id));
+    discord_web.set_on(dashboard.options().discord_messages);
+    dashboard.set_options(screens::Options { discord_web: discord_web.web(), ..dashboard.options() });
     for button in args.focus_presses() {
         dashboard.press(Press { button, repeat: false });
     }
@@ -590,6 +602,7 @@ pub fn run(
         input_clock: shell::idle::system(),
         idle_after: args.idle_after,
         discord,
+        discord_web,
         updater,
         helpers,
         set_up,
@@ -962,6 +975,33 @@ impl App {
         Some(next.duration_since(SystemTime::now()).unwrap_or(Duration::ZERO))
     }
 
+    /// Discord messages' session (#197): the Profile signed in's, its sign-in page shown while that page has the pad
+    /// and nothing is over it, and how it stands given to Settings. A sign-in done closes the page.
+    fn follow_discord_web(&mut self) {
+        self.discord_web.set_profile(Some(self.dashboard.profile().id));
+        self.discord_web.set_signing_in(self.dashboard.discord_sign_in_open());
+        let area = self.dashboard.discord_sign_in_shown().then_some(()).and(self.state.as_ref()).and_then(|state| {
+            let at = state.window.inner_position().ok()?;
+            let size = state.window.inner_size();
+            let band = screens::discord_sign_in::BAND * ui::scale_for((size.width, size.height));
+            let height = (size.height as f32 - band).round() as i32;
+            Some(discord_web::Area { x: at.x, y: at.y, width: size.width as i32, height })
+        });
+        self.discord_web.show(area);
+        let was = self.dashboard.options().discord_web;
+        if self.discord_web.pump() || was != self.discord_web.web() {
+            let web = self.discord_web.web();
+            self.dashboard.set_options(screens::Options { discord_web: web, ..self.dashboard.options() });
+            if web.state == discord_web::WebState::SignedIn && was.state != web.state {
+                self.dashboard.discord_signed_in();
+            }
+            if self.log_focus {
+                eprintln!("focus: {}", self.dashboard.focus_line());
+            }
+            self.stale = true;
+        }
+    }
+
     fn carry_out(&mut self, event_loop: &ActiveEventLoop) {
         for effect in self.dashboard.take_effects() {
             match effect {
@@ -1036,6 +1076,11 @@ impl App {
                         self.store.set_game_pass(change.on, options.game_pass_region);
                         self.update_launchers(Some(vec!["xbox".to_string()]));
                     }
+                    // Settings > Account > Discord messages: on starts the session, off ends it (#197).
+                    if change.setting == Setting::DiscordMessages {
+                        self.discord_web.set_on(change.on);
+                        self.follow_discord_web();
+                    }
                     // Settings > Art's Download art online: off stops a lookup under way; on starts one.
                     if change.setting == Setting::DownloadArtOnline {
                         self.art = None;
@@ -1082,6 +1127,11 @@ impl App {
                     if self.art_started {
                         self.start_art();
                     }
+                }
+                // Settings > Account > Discord messages and its sign-in page: the session does it (#197).
+                Effect::DiscordWeb(ask) => {
+                    self.discord_web.ask(ask);
+                    self.follow_discord_web();
                 }
                 // Settings > Discord: the connection does it, and the page shows how it is after.
                 Effect::Discord(ask) => {
@@ -2013,6 +2063,7 @@ impl ApplicationHandler for App {
         let audio_wants = self.follow_audio();
         self.follow_media();
         let discord_wants = self.follow_discord();
+        self.follow_discord_web();
         // The Guide closed by a press keeps the foreground until the button is up, so the window that gets it back
         // never sees the press; or for a second, if no release is seen (docs/spec/guide.md, 3.5).
         let mut release_wants = None;

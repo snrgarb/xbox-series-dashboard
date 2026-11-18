@@ -5,6 +5,7 @@
 #   <stage>\run.ps1 and the rest of payloads/<test>/
 #   <stage>\lib\E2E.psm1, lib\Nefarius.ViGEm.Client.dll
 #   <stage>\dashboard.exe, standin.exe, and whatever other .exe was built beside them (the spikes')
+#   <stage>\WebView2Loader.dll, when it was built beside dashboard.exe (Discord messages, #197)
 #
 #   stage_payload <test> <dashboard.exe> <standin.exe> <stage dir>
 #
@@ -28,6 +29,8 @@ stage_payload() {
     # And whatever was built beside the Dashboard under test (CI's build, downloaded), which wins over a local build.
     cp "$(dirname "$exe")"/*.exe "$stage/" 2>/dev/null || true
     cp "$exe" "$stage/dashboard.exe"
+    # Discord messages' loader (#197), which dashboard.exe looks for beside itself.
+    cp "$(dirname "$exe")/WebView2Loader.dll" "$stage/" 2>/dev/null || true
     cp "$standin" "$stage/standin.exe"
 
     # The ViGEm client the tests drive their virtual pad with: managed, netstandard2.0, loaded by PowerShell 5.1.

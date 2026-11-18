@@ -12,6 +12,7 @@ pub mod agreement;
 mod app_tile;
 pub mod art_picker;
 pub mod date;
+pub mod discord_sign_in;
 pub mod drawn;
 pub mod game_hub;
 pub mod guide;
@@ -169,6 +170,10 @@ pub enum Effect {
     /// Settings > Discord: a Client ID or Secret typed, a Paste, Connect or Disconnect (docs/discord.md). The
     /// connection answers with how it is now (`Dashboard::set_discord`). Its `Debug` never shows what was typed.
     Discord(model::discord::Ask),
+    /// Settings > Account > Discord messages and its sign-in page (#197, docs/discord-web.md): show or put away
+    /// Discord's sign-in page, a key from the pad, text the Console keyboard kept, Sign out. The session answers with
+    /// how it stands (`Options::discord_web`). Its `Debug` never shows the text.
+    DiscordWeb(model::discord_web::WebAsk),
     /// Settings > System: turn shell mode on (the user has said yes) or off (docs/spec/shell-mode.md). The
     /// executable answers with how it is then, in `Options::shell`.
     ShellMode(bool),
@@ -680,6 +685,8 @@ impl Dashboard {
             self.idle.set_times(options.idle, self.now);
         }
         self.options = options;
+        // A page whose focus log says how the executable's things stand follows them at once.
+        self.tick_page();
         self.home.set_background_delay(options.background_delay);
         self.home.set_play_history(options.show_play_history, &self.library);
         self.home.set_recent_launcher(options.show_recent_launcher);
@@ -1395,6 +1402,25 @@ impl Dashboard {
         let art = Some(Box::new(found.clone()));
         let toast = Toast::new(ToastKind::Notification, why, self.options.use_guide);
         self.toast(Toast { game: Some(game), art, ..toast });
+    }
+
+    /// Whether Discord's sign-in page shows now (#197): its page has the pad and nothing is over it, not text entry,
+    /// not the Guide. The executable shows the web view then, and puts it away otherwise.
+    pub fn discord_sign_in_shown(&self) -> bool {
+        self.page() == Some(discord_sign_in::NAME) && !self.guide.is_open() && !self.starting_up()
+    }
+
+    /// Whether Discord's sign-in page is up, shown or under text entry (#197): the session's web view is wanted.
+    pub fn discord_sign_in_open(&self) -> bool {
+        self.pages.has(discord_sign_in::NAME)
+    }
+
+    /// Discord's session has signed in: its sign-in page goes, if it has the pad, back to Discord messages.
+    pub fn discord_signed_in(&mut self) {
+        if self.page() == Some(discord_sign_in::NAME) {
+            self.close_page();
+            self.tick_page();
+        }
     }
 
     /// The name of the page that has the pad, if one is up over Home.

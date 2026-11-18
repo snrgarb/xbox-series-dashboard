@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Packages a Windows build of the Dashboard (docs/release.md): the portable zip and the per-user installer, from
-# dashboard.exe, the README and the third-party licences, and nothing else.
+# dashboard.exe, WebView2Loader.dll, the README and the third-party licences, and nothing else.
 #
 #   tools/package.sh <dashboard.exe> <out dir>
 #
+# WebView2Loader.dll is taken from beside <dashboard.exe>, where the Windows build puts it (CI copies it there from
+# webview2-com-sys's build): Microsoft's redistributable WebView2 loader, which Discord messages loads at run time
+# (#197, docs/discord-web.md). It is never committed.
+#
 # Writes into <out dir>:
-#   XboxSeriesDashboard-<version>-portable.zip   a folder XboxSeriesDashboard-<version>\ with the three files
+#   XboxSeriesDashboard-<version>-portable.zip   a folder XboxSeriesDashboard-<version>\ with the four files
 #   XboxSeriesDashboard-<version>-setup.exe      the installer (packaging/installer.nsi)
 #   SHA256SUMS.txt
 # and the folder they were made from, stage\XboxSeriesDashboard-<version>\.
@@ -26,6 +30,8 @@ makensis="${MAKENSIS:-makensis}"
 cargo_about="${CARGO_ABOUT:-cargo-about}"
 
 [[ -f "$exe" ]] || { echo "no $exe" >&2; exit 2; }
+loader="$(dirname "$exe")/WebView2Loader.dll"
+[[ -f "$loader" ]] || { echo "no WebView2Loader.dll beside $exe" >&2; exit 2; }
 version="$(awk '/^\[workspace\.package\]/ { section = 1; next } /^\[/ { section = 0 }
     section && $1 == "version" { gsub(/"/, "", $3); print $3 }' "$repo/Cargo.toml")"
 # The installer's version resource takes four numbers: a version with anything after x.y.z can't be packaged as is.
@@ -39,6 +45,7 @@ rm -rf "$out/stage" "$out/$name-portable.zip" "$out/$name-setup.exe" "$out/SHA25
 mkdir -p "$stage"
 
 cp "$exe" "$stage/dashboard.exe"
+cp "$loader" "$stage/WebView2Loader.dll"
 # Windows' line ends, for Notepad.
 sed "s/@VERSION@/$version/g; s/\$/\r/" "$repo/packaging/README.txt" >"$stage/README.txt"
 # The licences of every crate dashboard.exe is built from, its Windows dependencies included; a licence
@@ -47,10 +54,10 @@ sed "s/@VERSION@/$version/g; s/\$/\r/" "$repo/packaging/README.txt" >"$stage/REA
     --config "$repo/packaging/about.toml" --output-file "$stage/THIRD-PARTY-LICENSES.txt" "$repo/packaging/about.hbs"
 sed -i 's/$/\r/' "$stage/THIRD-PARTY-LICENSES.txt"
 
-# What ships is exactly these three: no font, no sound or video, no picture of anyone's mark.
+# What ships is exactly these four: no font, no sound or video, no picture of anyone's mark.
 shipped="$(cd "$stage" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ')"
-if [[ "$shipped" != "README.txt THIRD-PARTY-LICENSES.txt dashboard.exe " ]]; then
-    echo "the package would hold more or less than dashboard.exe, README.txt and THIRD-PARTY-LICENSES.txt: $shipped" >&2
+if [[ "$shipped" != "README.txt THIRD-PARTY-LICENSES.txt WebView2Loader.dll dashboard.exe " ]]; then
+    echo "the package would hold more or less than dashboard.exe, WebView2Loader.dll, README.txt and THIRD-PARTY-LICENSES.txt: $shipped" >&2
     exit 1
 fi
 
