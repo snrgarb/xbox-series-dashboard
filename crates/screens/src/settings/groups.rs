@@ -19,10 +19,8 @@ use crate::menu_panel::{self, icon, Answer, MenuPanel, Row, DIM, FLY};
 use crate::pages::{Around, Dialog, PageAction};
 use crate::Effect;
 
-/// The line over the Rows.
-const ABOUT: &str = "Choose which Groups show on Home and in Full library, and in what order.";
-/// The first Row's top: under the line (34.58) and 26 more.
-const ROWS_TOP: f32 = 270.58;
+/// The first Row's top: the page's, with no line over the Rows (#261).
+const ROWS_TOP: f32 = BOXES_TOP;
 /// The last Row's name, and the name a Group made by it starts with.
 pub const NEW_GROUP: &str = "New Group";
 
@@ -357,7 +355,6 @@ impl Pane for Groups {
         let focused_row = Self::row(at);
         let filters = &self.filters;
         controls::scrolled(ui, &mut self.scroll, BOXES_TOP, focused_row.y, focused_row.bottom(), |ui| {
-            controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT);
             let draw = |ui: &mut Ui, i: usize, focused: bool| match filters.get(i) {
                 Some(filter) => {
                     controls::row_marked(ui, Self::row(i), &filter.name, filter.shown.then_some(glyph::TICK), focused)

@@ -1,7 +1,8 @@
 //! System > System (docs/spec/shell-mode.md, 2): "Start with Windows as the shell", which puts the
 //! Dashboard in place of the Windows desktop at sign-in, with what to know before turning it on. The Bundle has no
 //! such page (its Boot shell is set up from a terminal): its words are the port's own, laid out as the Bundle's
-//! Discord page is (docs/spec/settings.md, 6.9): a label, its description, the control, then the next group 40 under.
+//! Discord page is (docs/spec/settings.md, 6.9): a label, the control 14 under, then the next group 40 under. What
+//! to do to get to the desktop, and if the Dashboard won't start, stay as text: no control does it (#261).
 //!
 //! The page asks before turning it on, never before turning it off. It shows shell mode as the executable last found
 //! it (`Options::shell`) and asks for a change with `Effect::ShellMode`; the executable answers with how it is then.
@@ -19,9 +20,6 @@ use crate::Effect;
 
 pub const TITLE: &str = "System";
 const LABEL: &str = "Start with Windows";
-const ABOUT: &str = "Starts the Dashboard in place of the Windows desktop when you sign in, as a console starts. The \
-                     desktop still starts behind it once the Boot video ends. A change takes effect the next time you \
-                     sign in.";
 pub const SHELL: &str = "Start with Windows as the shell";
 const BACK_LABEL: &str = "Getting to the desktop";
 const BACK_ABOUT: &str = "Choose Exit to desktop in the Guide's Power, or hold View and Menu for 5 seconds. Press the \
@@ -146,8 +144,7 @@ impl Pane for System {
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool) {
         let shell = around.options.shell;
         let mut y = TOP;
-        y += controls::label(ui, LEFT, y, LABEL) + 4.0;
-        y += controls::description(ui, LEFT, y, ROW_WIDTH, ABOUT) + 18.0;
+        y += controls::label(ui, LEFT, y, LABEL) + 14.0;
         let row = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
         controls::checkbox_row(ui, row, SHELL, shell == ShellMode::On, focused && self.prompt.is_none());
         y += FIELD_HEIGHT + 12.0;

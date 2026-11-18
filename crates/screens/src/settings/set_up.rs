@@ -21,9 +21,6 @@ use crate::Effect;
 
 /// The box on Games & apps, and the page's header.
 pub const TITLE: &str = "Set up this PC";
-const ABOUT: &str = "Install the apps your games come from, or remove them. Each app's installer comes from its \
-                     maker's own address and is checked before it runs. Windows asks for permission on screen \
-                     each time: answer it with a mouse or keyboard, as the controller can't.";
 const NONE: &str = "There are no apps to set up.";
 const INSTALL: &str = "Install";
 const REMOVE: &str = "Remove";
@@ -93,17 +90,12 @@ fn games_of(key: &str) -> &'static str {
     mark(key).map_or("its", Source::name)
 }
 
-/// The line under the Rows, of the app focus is on: what A does to it, or why the last thing asked failed.
-fn detail(client: &Client, around: Around) -> String {
-    match &client.state {
+/// The line under the Rows, of the app focus is on: how it stands, or why the last thing asked failed. None for one
+/// not installed: its question says where it comes from and its size (#261).
+fn detail(client: &Client, around: Around) -> Option<String> {
+    let said = match &client.state {
         ClientState::Failed { why, .. } => why.clone(),
-        ClientState::NotInstalled => format!(
-            "A installs {} {} from {}'s own address ({}).",
-            client.name,
-            client.version,
-            client.vendor,
-            setup::size(client.size)
-        ),
+        ClientState::NotInstalled => return None,
         ClientState::Installed => {
             format!("{} {}", count(games(around, &client.key), games_of(&client.key)), client.removing)
         }
@@ -117,7 +109,8 @@ fn detail(client: &Client, around: Around) -> String {
         ClientState::Removing => "Its uninstaller is running. Answer Windows' prompt with a mouse or keyboard if one \
                                   shows."
             .into(),
-    }
+    };
+    Some(said)
 }
 
 /// The question Install asks: the vendor, the address and the size in front of the user before anything is
@@ -193,9 +186,9 @@ impl SetUp {
         })
     }
 
-    /// The Rows' top, under the description: as drawn.
-    fn rows_top(ui: &mut Ui) -> f32 {
-        BOXES_TOP + ui.measure_wrapped(&BODY, ABOUT, ROW_WIDTH, 0).height + 26.0
+    /// The Rows' top: the page's, with no line over them (#261).
+    fn rows_top(_ui: &mut Ui) -> f32 {
+        BOXES_TOP
     }
 }
 
@@ -321,7 +314,7 @@ impl Pane for SetUp {
         let focused_rect = row(self.at);
         let detail_text = match (&self.note, self.clients.get(self.at)) {
             (Some(note), _) => Some((note.clone(), Color::WHITE)),
-            (None, Some(client)) => Some((detail(client, around), TEXT_DIM)),
+            (None, Some(client)) => detail(client, around).map(|said| (said, TEXT_DIM)),
             (None, None) => None,
         };
         let detail_height =
@@ -334,7 +327,6 @@ impl Pane for SetUp {
             focused_rect.y,
             focused_rect.bottom().max(below + detail_height),
             |ui| {
-                controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT);
                 if clients.is_empty() {
                     controls::description(ui, LEFT, rows_top, ROW_WIDTH, NONE);
                 }

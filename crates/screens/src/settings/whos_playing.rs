@@ -1,7 +1,7 @@
-//! Account > Who's playing today? (docs/spec/settings.md, 6.4; docs/spec/start-up.md, section 6): a line,
-//! then two Rows, Ask every time and Sign in the last profile, the one in force ticked. A sets a Row at once and
-//! saved; the tick moves, focus stays. It is the Bundle's page (E/PersonalisationPane.xaml:289-294,
-//! E/PersonalisationPane.xaml.cs:194-200, 367-392), its line naming the Dashboard where the Bundle's names Playnite.
+//! Account > Who's playing today? (docs/spec/settings.md, 6.4; docs/spec/start-up.md, section 6): two Rows, Ask
+//! every time and Sign in the last profile, the one in force ticked. A sets a Row at once and saved; the tick moves,
+//! focus stays. It is the Bundle's page (E/PersonalisationPane.xaml:289-294,
+//! E/PersonalisationPane.xaml.cs:194-200, 367-392) without the Bundle's line over the Rows (#261).
 use ui::{Button, Press, Rect, Ui};
 
 use super::controls::{self, BOXES_TOP, LEFT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH};
@@ -9,9 +9,6 @@ use super::options::{Change, Setting};
 use super::{Pane, Step};
 use crate::pages::{Around, PageAction};
 use crate::Effect;
-
-/// The line over the Rows.
-pub const ABOUT: &str = "Choose who's playing as the Dashboard starts and wakes from sleep.";
 
 /// The Rows, top down: what each says, and whether choosing it has Who's playing today? ask.
 const ROWS: [(&str, bool); 2] = [("Ask every time", true), ("Sign in the last profile", false)];
@@ -78,7 +75,7 @@ impl Pane for WhosPlayingPage {
     }
 
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool) {
-        let top = BOXES_TOP + controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT) + 26.0;
+        let top = BOXES_TOP;
         let ticked = Self::ticked(around);
         let row = |i: usize| Rect::new(LEFT, top + ROW_PITCH * i as f32, ROW_WIDTH, ROW_HEIGHT);
         for (i, (name, _)) in ROWS.iter().enumerate() {

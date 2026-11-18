@@ -2,7 +2,8 @@
 //! game is looked up with, "Clear downloaded art", "Refresh all art and details" (#190), which forgets everything
 //! downloaded and fetches it again in the background, and "Download art online", which turns every download of art
 //! off and on. The Bundle has no such page (Playnite's metadata sources did this); it is laid out as the Bundle's Discord
-//! page is (section 6.9): a label, its description, a value with its pane buttons, then the next group 40 under.
+//! page is (section 6.9): a label, its control 14 under, then the next group 40 under; only the key keeps a line, the
+//! one place a key is made (#261).
 //!
 //! The key is typed on the Console keyboard, shown as dots, and goes to the shell as `Effect::ArtKey` the moment it
 //! is kept. Nothing here ever has it again: the page shows dots while there is one, "Not set" while there is not.
@@ -27,25 +28,15 @@ use crate::theme::{BODY, TEXT_DIM};
 use crate::{Effect, Secret};
 
 const KEY_LABEL: &str = "SteamGridDB key";
-const KEY_ABOUT: &str = "Art that no store has for a game comes from SteamGridDB, with your own API key: make one at \
-                         steamgriddb.com, under Preferences and API. Only a game's store id or name is sent.";
+/// Where a key is made: the one line the page cannot do without.
+const KEY_ABOUT: &str = "Make one at steamgriddb.com, under Preferences and API.";
 const ART_LABEL: &str = "Downloaded art";
-const ART_ABOUT: &str = "Art and details downloaded for your games are kept on this PC. Clearing removes them; \
-                         refreshing fetches them all again. A store's own art, and your games, play time and Groups, \
-                         stay.";
 const CLEAR_ART: &str = "Clear downloaded art";
 const REFRESH: &str = "Refresh all art and details";
-/// The line under the two buttons, as a refresh goes.
-const REFRESH_IDLE: &str = "A refresh goes on in the background: Home can be used meanwhile.";
+/// The line under the two buttons, as a refresh goes: none at rest.
 const REFRESH_PAUSED: &str = "Refresh paused: it goes on once Download art online is on.";
 const ONLINE_LABEL: &str = "Art online";
-const ONLINE_ABOUT: &str =
-    "Downloads art for games that have none on this PC, from the game's own store and the sources below. \
-                            Turn it off to use only what is on this PC.";
 const SOURCES_LABEL: &str = "Art sources";
-const SOURCES_ABOUT: &str = "Each picture a game lacks is looked for in this order, the first source that has it \
-                             giving it. Only a game's name or store id is sent. A turns a source on or off; Menu \
-                             moves it.";
 const ONLINE: &str = "Download art online";
 /// What the value reads while a key is kept: as many dots whatever its length.
 pub const DOTS: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}";
@@ -122,55 +113,47 @@ struct Layout {
     key_about: f32,
     key_row: f32,
     art_label: f32,
-    art_about: f32,
     buttons: f32,
     line: f32,
     line_height: f32,
     online_label: f32,
-    online_about: f32,
     online: f32,
     sources_label: f32,
-    sources_about: f32,
     rows: f32,
 }
 
 impl Layout {
-    /// The key: its label, the description 4 under it, and its row 30 under that; 40 on, what was downloaded: its
-    /// label, description, the buttons 18 under and the line 24 under them; 40 on, Art online: its label,
-    /// description, and the checkbox 18 under; 40 on, the sources: label, description, and the Rows 26 under.
+    /// The key: its label, where a key is made 4 under it, and its row 30 under that; 40 on, what was downloaded:
+    /// its label, the buttons 14 under and, once a refresh has been asked for, the line 24 under them; 40 on, Art
+    /// online: its label and the checkbox 14 under; 40 on, the sources: label, and the Rows 14 under.
     fn of(ui: &mut Ui, refresh: ArtRefresh) -> Self {
-        fn tall(ui: &mut Ui, text: &str) -> f32 {
-            ui.measure_wrapped(&BODY, text, ROW_WIDTH, 0).height
-        }
         let label = ui.measure(&BODY, KEY_LABEL).height;
         let key_label = TOP;
         let key_about = key_label + label + 4.0;
-        let key_row = key_about + tall(ui, KEY_ABOUT) + 30.0;
+        let key_row = key_about + ui.measure_wrapped(&BODY, KEY_ABOUT, ROW_WIDTH, 0).height + 30.0;
         let art_label = key_row + FIELD_HEIGHT + 40.0;
-        let art_about = art_label + label + 4.0;
-        let buttons = art_about + tall(ui, ART_ABOUT) + 18.0;
-        let line = buttons + FIELD_HEIGHT + LINE_UNDER;
-        let line_height = ui.measure_wrapped(&BODY, &refresh_line(refresh).0, ROW_WIDTH, 1).height;
+        let buttons = art_label + label + 14.0;
+        let (line, line_height) = match refresh_line(refresh) {
+            Some((said, _)) => {
+                (buttons + FIELD_HEIGHT + LINE_UNDER, ui.measure_wrapped(&BODY, &said, ROW_WIDTH, 1).height)
+            }
+            None => (buttons + FIELD_HEIGHT, 0.0),
+        };
         let online_label = line + line_height + 40.0;
-        let online_about = online_label + label + 4.0;
-        let online = online_about + tall(ui, ONLINE_ABOUT) + 18.0;
+        let online = online_label + label + 14.0;
         let sources_label = online + FIELD_HEIGHT + 40.0;
-        let sources_about = sources_label + label + 4.0;
-        let rows = sources_about + tall(ui, SOURCES_ABOUT) + 26.0;
+        let rows = sources_label + label + 14.0;
         Self {
             key_label,
             key_about,
             key_row,
             art_label,
-            art_about,
             buttons,
             line,
             line_height,
             online_label,
-            online_about,
             online,
             sources_label,
-            sources_about,
             rows,
         }
     }
@@ -202,16 +185,17 @@ enum Confirm {
     Cancel,
 }
 
-/// What the line under Clear downloaded art and Refresh says of a refresh, and its colour: white once one has been
-/// asked for.
-fn refresh_line(refresh: ArtRefresh) -> (String, Color) {
-    match refresh {
-        ArtRefresh::Idle => (REFRESH_IDLE.into(), TEXT_DIM),
-        ArtRefresh::Working { done, of } => (format!("Refreshing: {done} of {of} {}...", games(of)), Color::WHITE),
-        ArtRefresh::Paused => (REFRESH_PAUSED.into(), Color::WHITE),
-        ArtRefresh::Done { pictures: 1 } => ("Refreshed: 1 picture downloaded.".into(), Color::WHITE),
-        ArtRefresh::Done { pictures } => (format!("Refreshed: {pictures} pictures downloaded."), Color::WHITE),
-    }
+/// What the line under Clear downloaded art and Refresh says of a refresh, and its colour; nothing while none has
+/// been asked for.
+fn refresh_line(refresh: ArtRefresh) -> Option<(String, Color)> {
+    let said = match refresh {
+        ArtRefresh::Idle => return None,
+        ArtRefresh::Working { done, of } => format!("Refreshing: {done} of {of} {}...", games(of)),
+        ArtRefresh::Paused => REFRESH_PAUSED.into(),
+        ArtRefresh::Done { pictures: 1 } => "Refreshed: 1 picture downloaded.".into(),
+        ArtRefresh::Done { pictures } => format!("Refreshed: {pictures} pictures downloaded."),
+    };
+    Some((said, Color::WHITE))
 }
 
 fn games(n: usize) -> &'static str {
@@ -498,30 +482,29 @@ impl Pane for Art {
             ui.paragraph(value_box, value, &BODY.color(colour), HAlign::Left, VAlign::Center, 1);
             let type_box = Rect::new(TYPE_X, y, BUTTON_WIDTH, FIELD_HEIGHT);
             let clear_box = Rect::new(CLEAR_X, y, BUTTON_WIDTH, FIELD_HEIGHT);
-            // What was downloaded: its label, description, and the two buttons.
+            // What was downloaded: its label and the two buttons.
             controls::label(ui, LEFT, layout.art_label, ART_LABEL);
-            controls::description(ui, LEFT, layout.art_about, ROW_WIDTH, ART_ABOUT);
             let y = layout.buttons;
             let clear_art_box = Rect::new(LEFT, y, controls::pane_button_width(ui, CLEAR_ART), FIELD_HEIGHT);
             let refresh_x = clear_art_box.right() + BUTTONS_APART;
             let refresh_box = Rect::new(refresh_x, y, controls::pane_button_width(ui, REFRESH), FIELD_HEIGHT);
-            // How a refresh goes, one line under the two: a spinner before it while it works.
-            let (said, colour) = refresh_line(around.library.art_refresh);
-            let (y, height) = (layout.line, layout.line_height);
-            let mut line = Rect::new(LEFT, y, ROW_WIDTH, height);
-            if let ArtRefresh::Working { .. } = around.library.art_refresh {
-                crate::spinner::spinner(ui, LEFT + 16.0, y + height / 2.0, 32.0);
-                line = Rect::new(LEFT + 48.0, y, ROW_WIDTH - 48.0, height);
+            // How a refresh goes, one line under the two once one has been asked for: a spinner before it while it
+            // works.
+            if let Some((said, colour)) = refresh_line(around.library.art_refresh) {
+                let (y, height) = (layout.line, layout.line_height);
+                let mut line = Rect::new(LEFT, y, ROW_WIDTH, height);
+                if let ArtRefresh::Working { .. } = around.library.art_refresh {
+                    crate::spinner::spinner(ui, LEFT + 16.0, y + height / 2.0, 32.0);
+                    line = Rect::new(LEFT + 48.0, y, ROW_WIDTH - 48.0, height);
+                }
+                ui.paragraph(line, &said, &BODY.color(colour), HAlign::Left, VAlign::Center, 1);
             }
-            ui.paragraph(line, &said, &BODY.color(colour), HAlign::Left, VAlign::Center, 1);
-            // Art online: its label, description, and the checkbox.
+            // Art online: its label and the checkbox.
             controls::label(ui, LEFT, layout.online_label, ONLINE_LABEL);
-            controls::description(ui, LEFT, layout.online_about, ROW_WIDTH, ONLINE_ABOUT);
             let online = Rect::new(LEFT, layout.online, FIELD_WIDTH, FIELD_HEIGHT);
             controls::checkbox_row(ui, online, ONLINE, around.options.art_online, has(Focus::Online));
-            // The sources: label, description, and a Row each in their order, ticked while on.
+            // The sources: label, and a Row each in their order, ticked while on.
             controls::label(ui, LEFT, layout.sources_label, SOURCES_LABEL);
-            controls::description(ui, LEFT, layout.sources_about, ROW_WIDTH, SOURCES_ABOUT);
             let source_row = |ui: &mut Ui, i: usize, focused: bool| {
                 let (source, on) = order.0[i];
                 let row = layout.row(i);

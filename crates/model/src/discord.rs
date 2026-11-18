@@ -9,9 +9,6 @@ use std::path::PathBuf;
 /// Discord's developer portal, where the user makes the application: the page names it and shows it as a QR code.
 pub const PORTAL_URL: &str = "https://discord.com/developers/applications";
 
-/// The line over the checklist.
-pub const INTRO: &str = "Connect your own Discord application, so the Guide can show you on Discord.";
-
 /// The Connect checklist, in order.
 pub const STEPS: [&str; 4] = [
     "Create an application at discord.com/developers/applications.",

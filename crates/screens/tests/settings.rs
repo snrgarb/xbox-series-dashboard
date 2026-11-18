@@ -654,13 +654,13 @@ fn settings_page_header_names_the_category_then_the_page() {
     stage.check("settings-idle-header");
 }
 
-/// The Bundle's picture 31: Personalisation, focus on Background delay, its info text beside it.
+/// The Bundle's picture 31: Personalisation, focus on Background delay; with no info text beside it since #261.
 #[test]
 fn settings_personalisation_checkbox_focused() {
     let mut stage = settings_stage();
     stage.press(&[Right, A]);
     stage.check("settings-personalisation-checkbox");
-    // Another box, turned over: its info moves with focus, and nothing else does.
+    // Another box, turned over: the ring moves with focus, and nothing else does.
     stage.press(&[Down, Down, A]);
     stage.check("settings-personalisation-play-history-off");
 }
@@ -832,8 +832,8 @@ fn settings_dropdown_closed_and_open() {
     stage.check_pane("settings-dropdown-open-last", Box::new(idle));
 }
 
-/// The controls no page of M3 has yet: Rows, as Boot video's page has them (the Bundle's picture 32), and pane
-/// buttons, as Discord's (36).
+/// The controls no page of M3 has yet: Rows, as Boot video's page has them (the Bundle's picture 32, without its line
+/// over the Rows since #261), and pane buttons, as Discord's (36).
 struct RowsAndButtons;
 
 impl Pane for RowsAndButtons {
@@ -851,8 +851,6 @@ impl Pane for RowsAndButtons {
 
     fn draw(&mut self, ui: &mut Ui, _around: Around, focused: bool) {
         let mut y = controls::BOXES_TOP;
-        y +=
-            controls::description(ui, LEFT, y, ROW_WIDTH, "Plays as the Dashboard starts. Any button skips it.") + 26.0;
         let long = "A console whose name is far too long for its row and so is cut short with an ellipsis at its end";
         let rows = ["Off", "Xbox (2001)", "Xbox 360 (2005)", long];
         // The focused Row last, over its neighbours.
@@ -879,13 +877,11 @@ fn settings_rows_and_pane_buttons() {
 
 /// Personalisation as it will be with the boxes of later milestones over its checkbox boxes: seven rows, which
 /// run off a 1080 screen. Nothing moves until focus is on a box that does not show whole; then the pane has
-/// scrolled just far enough to show it with its info text, and its first rows are cut under the header's row.
+/// scrolled just far enough to show it, and its first rows are cut under the header's row.
 #[test]
 fn a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box() {
     let opens = |icon, name| Item::Opens { icon, name, pane: |_| Box::new(RowsAndButtons) };
-    let check = |name| vec![Item::Check { setting: Setting::ReduceMotion, name, info: INFO }];
-    const INFO: &str = "Shows how much charge is left beside the controller's battery, and this PC's on a laptop or \
-                        handheld. Turn it off to show the batteries alone.";
+    let check = |name| vec![Item::Check { setting: Setting::ReduceMotion, name }];
     let mut boxes = Boxes::new(
         "Personalisation",
         vec![
@@ -904,13 +900,13 @@ fn a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box() {
         let Stage { gpu, host, target, .. } = stage;
         target.still(gpu, host, |ui| boxes.draw(ui, around(&library), true));
     };
-    // Down to the fifth row, the last that shows whole with its info text: nothing has moved.
+    // Down to the fifth row, the last that shows whole: nothing has moved.
     for _ in 0..4 {
         boxes.press(Press { button: Down, repeat: false }, around(&library));
         draw(&mut stage, &mut boxes);
         assert_eq!(boxes.scroll(), 0.0, "{}", boxes.focus());
     }
-    // The sixth is cut by the screen's foot where it rests: the pane has risen to show it and its info, 32 clear.
+    // The sixth is cut by the screen's foot where it rests: the pane has risen to show it, 32 clear.
     boxes.press(Press { button: Down, repeat: false }, around(&library));
     draw(&mut stage, &mut boxes);
     assert_eq!(boxes.focus(), "Personalisation: Show battery percentages");

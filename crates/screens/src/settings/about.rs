@@ -21,8 +21,6 @@ const UPDATES_LABEL: &str = "Updates";
 pub const CHECK: &str = "Check for updates";
 pub const INSTALL: &str = "Install";
 pub const DAILY: &str = "Check for updates every day";
-const DAILY_ABOUT: &str = "Once a day while the Dashboard runs, it asks for the newest version and downloads it. \
-                           You're told when it's ready, never during a game.";
 const LICENCES_LABEL: &str = "Third-party licences";
 const LICENCES: &str = "The Dashboard is built from open-source parts. Their licences are in \
                         THIRD-PARTY-LICENSES.txt, beside dashboard.exe.";
@@ -69,7 +67,8 @@ impl Default for Build {
 /// What the line under Updates says of where they stand; `playing`, a game is running.
 pub fn status(updates: Updates, playing: bool) -> String {
     match updates {
-        Updates::Unchecked => "Check to see whether there's a newer version.".into(),
+        // Nothing to say before the first check (#261): the button says it.
+        Updates::Unchecked => String::new(),
         Updates::Checking => "Checking for updates...".into(),
         Updates::UpToDate(_) => "This is the latest version.".into(),
         Updates::NotPublic => "Updates can't be checked yet: the Dashboard's releases aren't public.".into(),
@@ -170,11 +169,17 @@ impl Pane for About {
         y += controls::label(ui, LEFT, y, NAME) + 4.0;
         y += controls::description(ui, LEFT, y, ROW_WIDTH, &self.build.says()) + 40.0;
         // Updates: where they stand, the two buttons, then the daily check.
-        y += controls::label(ui, LEFT, y, UPDATES_LABEL) + 4.0;
-        let style = BODY.color(TEXT_DIM);
         let line = status(updates, around.playing.is_some());
-        y += ui.paragraph(Rect::new(LEFT, y, ROW_WIDTH, 2000.0), &line, &style, HAlign::Left, VAlign::Top, 0).height
-            + 18.0;
+        if line.is_empty() {
+            // Not checked yet: the buttons 14 under the label, as a control under its label.
+            y += controls::label(ui, LEFT, y, UPDATES_LABEL) + 14.0;
+        } else {
+            y += controls::label(ui, LEFT, y, UPDATES_LABEL) + 4.0;
+            let style = BODY.color(TEXT_DIM);
+            y +=
+                ui.paragraph(Rect::new(LEFT, y, ROW_WIDTH, 2000.0), &line, &style, HAlign::Left, VAlign::Top, 0).height
+                    + 18.0;
+        }
         let check = Rect::new(LEFT, y, controls::pane_button_width(ui, CHECK), FIELD_HEIGHT);
         let install = Rect::new(check.right() + 18.0, y, controls::pane_button_width(ui, INSTALL), FIELD_HEIGHT);
         let ready = matches!(updates, Updates::Ready(_)) && around.playing.is_none();
@@ -187,8 +192,7 @@ impl Pane for About {
         let daily = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
         let on = around.options.daily_update_check;
         controls::checkbox_row(ui, daily, DAILY, on, focused && self.at == Control::Daily);
-        y += FIELD_HEIGHT + 12.0;
-        y += controls::description(ui, LEFT, y, ROW_WIDTH, DAILY_ABOUT) + 40.0;
+        y += FIELD_HEIGHT + 40.0;
         y += controls::label(ui, LEFT, y, LICENCES_LABEL) + 4.0;
         y += controls::description(ui, LEFT, y, ROW_WIDTH, LICENCES) + 40.0;
         y += controls::label(ui, LEFT, y, MEDIA_LABEL) + 4.0;

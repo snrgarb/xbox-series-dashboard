@@ -122,44 +122,18 @@ fn system() -> Boxes {
     Boxes::new(Category::System.name(), vec![vec![system, about]])
 }
 
-/// Personalisation's boxes: the five checkbox boxes, a row each, the second column's place kept for the focused
-/// one's info. Its boxes that opened pages are in General (Boot video), Account (Profiles, Who's playing today?) and
-/// Games & apps (Groups) now.
+/// Personalisation's boxes: the five checkbox boxes, a row each, with no text beside them (#261). Its boxes that
+/// opened pages are in General (Boot video), Account (Profiles, Who's playing today?) and Games & apps (Groups) now.
 pub fn personalisation() -> Boxes {
-    let check = |setting, name, info| vec![Item::Check { setting, name, info }];
+    let check = |setting, name| vec![Item::Check { setting, name }];
     Boxes::new(
         "Personalisation",
         vec![
-            check(
-                Setting::BackgroundDelay,
-                "Background delay",
-                "Waits a moment on a game before Home's background shows its art. Turn it off to change the \
-                 background as you move along your recent games.",
-            ),
-            check(
-                Setting::ReduceMotion,
-                "Reduce motion",
-                "Shows pages, rows and tiles in place and holds the background still. Turn it on if the Dashboard \
-                 feels slow on this PC.",
-            ),
-            check(
-                Setting::ShowPlayHistory,
-                "Show Play history",
-                "Ends Home's recent games with the Play history tile. Turn it off to show another recent game in \
-                 its place; Play history stays in My games & apps.",
-            ),
-            check(
-                Setting::ShowRecentLauncher,
-                "Show launcher icons",
-                "Marks each of Home's recent games with the launcher it comes from, at the tile's foot. Turn it \
-                 off to show the covers alone.",
-            ),
-            check(
-                Setting::ShowBatteryPercent,
-                "Show battery percentages",
-                "Shows how much charge is left beside the controller's battery, and this PC's on a laptop or \
-                 handheld. Turn it off to show the batteries alone.",
-            ),
+            check(Setting::BackgroundDelay, "Background delay"),
+            check(Setting::ReduceMotion, "Reduce motion"),
+            check(Setting::ShowPlayHistory, "Show Play history"),
+            check(Setting::ShowRecentLauncher, "Show launcher icons"),
+            check(Setting::ShowBatteryPercent, "Show battery percentages"),
         ],
     )
 }

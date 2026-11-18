@@ -19,7 +19,7 @@ use crate::Effect;
 /// From one control's name to the next: the name's line, 4, the control, and 40.
 const PITCH: f32 = 34.58 + 4.0 + FIELD_HEIGHT + 40.0;
 const UNDER_NAME: f32 = 34.58 + 4.0;
-/// The Store apps' heading is this far under Add, its line under it, and their Rows 26 under that.
+/// The Store apps' heading is this far under Add, and their Rows 26 under it; a line under it while there are none.
 const STORE_UNDER: f32 = 56.0;
 
 /// What the page adds.
@@ -149,8 +149,9 @@ impl Add {
         Self::name_top(3) + FIELD_HEIGHT + STORE_UNDER
     }
 
+    /// The Store apps' first Row: 26 under their heading, with no line between while there are apps (#261).
     fn store_top() -> f32 {
-        Self::store_heading() + 34.58 + 4.0 + 2.0 * 34.58 + 26.0
+        Self::store_heading() + 34.58 + 26.0
     }
 }
 
@@ -272,12 +273,15 @@ impl Pane for Add {
             if this.what == What::App {
                 let heading = Self::store_heading();
                 ui.label(LEFT, heading, "Microsoft Store apps", &BODY);
+                // How the list stands while there is nothing to tick; nothing over the Rows once there are some.
                 let line = match &around.library.store_apps {
-                    None => "The Microsoft Store apps on this PC show up here once Windows has listed them.",
-                    Some(apps) if apps.is_empty() => "There are no Microsoft Store apps on this PC.",
-                    Some(_) => "Tick the ones to start from My games & apps.",
+                    None => Some("The Microsoft Store apps on this PC show up here once Windows has listed them."),
+                    Some(apps) if apps.is_empty() => Some("There are no Microsoft Store apps on this PC."),
+                    Some(_) => None,
                 };
-                controls::description(ui, LEFT, heading + 34.58 + 4.0, ROW_WIDTH, line);
+                if let Some(line) = line {
+                    controls::description(ui, LEFT, heading + 34.58 + 4.0, ROW_WIDTH, line);
+                }
             }
         });
         self.scroll = scroll;

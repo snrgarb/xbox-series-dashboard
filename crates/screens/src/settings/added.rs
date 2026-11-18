@@ -22,11 +22,8 @@ use crate::Effect;
 
 /// The box on the Games & apps category, and the page's header.
 pub const TITLE: &str = "Games & apps";
-/// The line over the Rows.
-const ABOUT: &str = "Add games that no store brings in, and apps to start from My games & apps. Press A on one to \
-                     rename or remove it.";
-/// The first Row's top: under the line's two lines and 26 more.
-const ROWS_TOP: f32 = BOXES_TOP + 2.0 * 34.58 + 26.0;
+/// The first Row's top: the page's, with no line over the Rows (#261).
+const ROWS_TOP: f32 = BOXES_TOP;
 /// The name text entry asks for.
 pub const NAME: keyboard::Entry = keyboard::Entry::new("Name").limit(60);
 /// The glyphs of a game's Row and an App's.
@@ -348,7 +345,6 @@ impl Pane for Added {
         let focused_row = Self::row(at);
         let lines = &self.lines;
         controls::scrolled(ui, &mut self.scroll, BOXES_TOP, focused_row.y, focused_row.bottom(), |ui| {
-            controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT);
             let draw = |ui: &mut Ui, i: usize, focused: bool| {
                 let (name, mark) = lines[i].face();
                 controls::row_marked(ui, Self::row(i), name, Some(mark), focused);

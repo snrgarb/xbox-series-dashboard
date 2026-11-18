@@ -1,11 +1,12 @@
 //! Account > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): connecting the user's own
-//! Discord application. The intro and the four steps, the developer portal's QR code with its address under it, the
-//! Client ID and Client Secret rows with Type and Paste, Connect and Disconnect, and the status line.
+//! Discord application. The four steps (the Bundle's intro line over them is gone, #261), the developer portal's QR
+//! code with its address under it, the Client ID and Client Secret rows with Type and Paste, Connect and Disconnect,
+//! and the status line.
 //!
 //! The page keeps nothing of the connection: what it shows is `around.discord`, and what a button does goes to the
 //! shell as `Effect::Discord`. The Secret is typed from empty and shown as dots; the page shows only whether one is
 //! saved ("Saved"), never what it is.
-use model::discord::{Ask, Field, INTRO, PORTAL_URL, STEPS};
+use model::discord::{Ask, Field, PORTAL_URL, STEPS};
 use ui::{Button, Color, HAlign, Press, Rect, Ui, VAlign};
 
 use super::controls::{self, FIELD_HEIGHT, LEFT, RIGHT, TOP};
@@ -26,9 +27,7 @@ const ID_ENTRY: keyboard::Entry = keyboard::Entry::new(CLIENT_ID).limit(32);
 /// The Secret from empty, shown as dots; Discord's are 32 characters.
 const SECRET_ENTRY: keyboard::Entry = keyboard::Entry::new(CLIENT_SECRET).masked().limit(64);
 
-/// The intro, then the steps and QR 30 under it (the code at y 255, as in the Bundle's picture); a step's number in a
-/// 40-wide column, 16 between steps.
-const STEPS_GAP: f32 = 30.0;
+/// The steps and the QR code from the page's top; a step's number in a 40-wide column, 16 between steps.
 const NUMBER_WIDTH: f32 = 40.0;
 const STEP_GAP: f32 = 16.0;
 /// The QR code's column at the right edge (x 1530..1750), the code 200 square in it, the address under it.
@@ -231,9 +230,8 @@ impl Pane for Discord {
         let discord = around.discord;
         let dim = BODY.color(TEXT_DIM);
         let text = BODY.color(Color::WHITE);
-        // The intro, and 36 under it the steps on the left and the code on the right.
+        // The steps on the left and the code on the right.
         let mut y = TOP;
-        y += controls::description(ui, LEFT, y, RIGHT - LEFT, INTRO) + STEPS_GAP;
         let block = y;
         let steps_width = QR_X - 10.0 - LEFT - NUMBER_WIDTH;
         for (n, step) in STEPS.iter().enumerate() {

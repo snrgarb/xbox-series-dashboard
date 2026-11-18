@@ -19,9 +19,6 @@ use crate::Effect;
 pub const TITLE: &str = "Helpers";
 pub const ADD: &str = "Add";
 pub const REMOVE: &str = "Remove";
-const ABOUT: &str = "Some stores install games through a helper program. It isn't part of the Dashboard: it's \
-                     free software from its own project, downloaded from there only when you add it, checked, and \
-                     kept in the Dashboard's data folder until you remove it.";
 const NONE: &str = "There are no helpers to add.";
 
 /// The answers to the questions.
@@ -211,7 +208,6 @@ impl Pane for Helpers {
 
     fn draw(&mut self, ui: &mut Ui, _around: Around, focused: bool) {
         let mut y = TOP;
-        y += controls::description(ui, LEFT, y, ROW_WIDTH, ABOUT) + 40.0;
         if self.helpers.is_empty() {
             controls::description(ui, LEFT, y, ROW_WIDTH, NONE);
         }

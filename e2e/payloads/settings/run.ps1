@@ -161,7 +161,7 @@ try {
     Walk-ToEdge Up 'Settings: Rail: General'
     Press Right 'Settings: General: Guide'
 
-    # Personalisation: a checkbox box a row, the focused one's info beside it. Background delay off, Reduce motion on.
+    # Personalisation: a checkbox box a row, no info text beside it (#261). Background delay off, Reduce motion on.
     Press Up 'Settings: General: Personalisation'
     Press A 'Settings: Personalisation: Background delay' '31-settings-personalisation-checkbox'
     Turn-Over 'home.background_delay' 'false' '31-background-delay-off'

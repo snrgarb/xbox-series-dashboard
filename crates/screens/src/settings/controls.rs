@@ -1,5 +1,5 @@
 //! Settings' controls, as the Bundle draws them (docs/spec/settings.md, sections 4 and 5): the Box and the checkbox
-//! box with its info text, the Row, the pane button, the dropdown box and its list, and the checkbox row; the
+//! box (without the Bundle's info text, #261), the Row, the pane button, the dropdown box and its list, and the checkbox row; the
 //! focus ring and glow they share; and the grid a pane of boxes is laid out and steered on.
 //!
 //! Each is a function that draws the control in a rectangle from what it is told, with or without focus: a pane
@@ -41,8 +41,6 @@ pub const ROW_PITCH: f32 = 74.0;
 /// A dropdown box and a checkbox row, and a pane button's height.
 pub const FIELD_WIDTH: f32 = 560.0;
 pub const FIELD_HEIGHT: f32 = 58.0;
-/// The info text beside a checkbox box wraps at this.
-pub const INFO_WIDTH: f32 = 400.0;
 
 /// The icon font's glyphs the controls use.
 pub mod glyph {
@@ -80,12 +78,11 @@ fn line(ui: &mut Ui, rect: Rect, text: &str, color: Color) {
 
 /// What a Box shows beside its name.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Face<'a> {
+pub enum Face {
     /// A glyph of the icon font: a box that opens a page, or acts.
     Icon(char),
-    /// A checkbox at the right, and the text that shows beside the box while it has focus, in the second
-    /// column's place. A turns the checkbox over.
-    Checkbox { on: bool, info: &'a str },
+    /// A checkbox at the right. A turns it over.
+    Checkbox { on: bool },
 }
 
 /// A Box: 437 x 131 as the grid has it, square, its name on one line and never a second saying what it is set to.
@@ -97,24 +94,15 @@ pub fn settings_box(ui: &mut Ui, rect: Rect, name: &str, face: Face, focused: bo
             ui.icon(rect.x + 50.0, cy, glyph, 34.0, Color::WHITE);
             line(ui, Rect::new(rect.x + 100.0, rect.y, rect.w - 124.0, rect.h), name, Color::WHITE);
         }
-        Face::Checkbox { on, info } => {
+        Face::Checkbox { on } => {
             line(ui, Rect::new(rect.x + 30.0, rect.y, rect.w - 104.0, rect.h), name, Color::WHITE);
             let glyph = if on { glyph::CHECKBOX_TICKED } else { glyph::CHECKBOX };
             ui.icon(rect.right() - 24.0 - 17.0, cy, glyph, 34.0, Color::WHITE);
-            if focused {
-                let at = Rect::new(rect.right() + BOX_GAP + 30.0, rect.y + 8.0, INFO_WIDTH, 2000.0);
-                ui.paragraph(at, info, &BODY, HAlign::Left, VAlign::Top, 0);
-            }
         }
     }
     if focused {
         focus_ring(ui, rect, RING_BOX);
     }
-}
-
-/// How far below a checkbox box's top its info text ends: what a pane that scrolls keeps in view with the box.
-pub fn info_height(ui: &mut Ui, info: &str) -> f32 {
-    8.0 + ui.measure_wrapped(&BODY, info, INFO_WIDTH, 0).height
 }
 
 /// A Row: a choice in a list, the one set now ticked.
@@ -339,7 +327,8 @@ pub enum Move {
 }
 
 /// The grid a pane of boxes is laid out on, two wide from (520, 210), and where focus is on it. The rows may
-/// differ in length; a checkbox box has a row to itself, the second column's place kept for its info text.
+/// differ in length; a checkbox box has a row to itself, as the Bundle's (which kept the second column for its info
+/// text).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grid {
     /// How many boxes each row has.
@@ -389,13 +378,12 @@ impl Grid {
         Rect::new(LEFT + across * column as f32, BOXES_TOP + down * row as f32, BOX_WIDTH, BOX_HEIGHT)
     }
 
-    /// Draws the pane's boxes with `body`, scrolled so that the focused box shows whole with its ring, and what
-    /// reaches `below` its top (its info text) with it: only as far as that takes, and at once. A pane that fits
-    /// the screen never moves. `body` draws each box where [`Grid::rect`] says.
-    pub fn scrolled(&mut self, ui: &mut Ui, below: f32, body: impl FnOnce(&mut Ui)) {
+    /// Draws the pane's boxes with `body`, scrolled so that the focused box shows whole with its ring: only as far
+    /// as that takes, and at once. A pane that fits the screen never moves. `body` draws each box where
+    /// [`Grid::rect`] says.
+    pub fn scrolled(&mut self, ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
         let focused = Self::rect(self.row, self.column);
-        let bottom = focused.y + below.max(focused.h);
-        scrolled(ui, &mut self.scroll, BOXES_TOP, focused.y, bottom, body);
+        scrolled(ui, &mut self.scroll, BOXES_TOP, focused.y, focused.bottom(), body);
     }
 
     /// How far the pane has scrolled.
