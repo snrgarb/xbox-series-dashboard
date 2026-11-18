@@ -1,11 +1,11 @@
-# Parties & chats: Discord's conversations in the Guide
+# Direct Messages in the Guide, in the manner of the console's Parties & chats
 
-**Draft for the user's approval (#199, M9 Full Discord).** How Discord's direct messages show in the Guide, in the
+**Approved by the user on 2026-11-18 (#199, M9 Full Discord); section 12.** How Discord's Direct Messages show in the Guide, in the
 manner of the console's Parties & chats tab, drawn with the Guide's own measures and parts. The decisions it rests
 on are #192's (D1 opt-in with RPC kept for voice; D2 our own web session; D3 our own screens under Party in the
 Guide; D4 DMs and notifications first; D5 no video; D6 memory only; D7 our own code). What the web session can do is
 #196's spike: read the DM list by name with unread marks and counts, open a conversation, read its messages, send
-text. Section 12 lists what is the user's to approve; section 13 has sketches of the three views.
+text. Section 12 has the decisions as approved, section 12.1 the wording, section 13 sketches of the three views.
 
 Read with: [guide.md](guide.md) (the panel, entries, Flyouts, dialogs, Toasts: every measure here not given is
 its), [discord-tab.md](discord-tab.md) (the tab as built: voice, the Call, Shortcuts, Servers),
@@ -112,18 +112,18 @@ open". This spec takes these as its starting point and marks every choice that h
 
 ## 2. Where it sits
 
-### 2.1 Recommended: one tab, "Parties & chats", in the Discord tab's place
+### 2.1 One tab, the Discord tab (approved)
 
 The console has one tab for parties and chats; the Dashboard already has the tab "in the console's Parties & chats
-slot" (discord-tab.md, CONTEXT.md **Discord tab**). **The chats join that tab** as its own section, between the Call
-and the voice parts the tab has now:
+slot" (discord-tab.md, CONTEXT.md **Discord tab**). **Direct Messages join that tab** as its own section, between
+the Call and the voice parts the tab has now. The layout is the console's; the words are Discord's (12.1):
 
 | | Value |
 |---|---|
 | Place in the strip | Second, between the landing tab and Profile & system, as now (guide.md 2.2): x 183..267 |
-| Mark | Discord's mark, 36 wide, `#FF8C8C8C` or white, as now (guide.md 10.1). With any unread chat, a dot 12 across in the accent at the mark's top right, its centre 20 right of and 20 above the tab's centre (the console's figure there (est.) is a count; the Guide has no type under 26, so a dot) |
-| Heading | **"Parties & chats"** (Bahnschrift 33, guide.md 2.4), the console's name and the user's word (D3: "Party"). Decision 2 |
-| When it is there | Signed in to the voice connection or tokens saved (as now, `Discord::has_tab()`), **or** Messages switched on (section 8). Either alone is enough; each part of the tab says for itself when it can't show (section 3.5) |
+| Mark | Discord's mark, 36 wide, `#FF8C8C8C` or white, as now (guide.md 10.1). With any unread DM, a dot 12 across in the accent at the mark's top right, its centre 20 right of and 20 above the tab's centre (the console's figure there (est.) is a count; the Guide has no type under 26, so a dot) |
+| Heading | **"Discord"** (Bahnschrift 33, guide.md 2.4), as now: the user kept Discord's words (decision 2) |
+| When it is there | Signed in to the voice connection or tokens saved (as now, `Discord::has_tab()`), **or** Direct Messages switched on (section 8). Either alone is enough; each part of the tab says for itself when it can't show (section 3.5) |
 | Code name | The tab stays `Tab::Discord`, and `--log-focus` keeps `Discord` (section 10), so the payloads written for the tab stand |
 
 **Why one tab** (D1): voice and text come over two connections, RPC and the web session, which are up and down on
@@ -131,101 +131,101 @@ their own. In one tab each section says its own state and the other goes on work
 party and the chats together. Two tabs would show or hide a whole tab as a connection comes and goes, add a bumper
 press between the landing tab and Profile & system, and split what the console keeps together.
 
-### 2.2 The alternative: two tabs
+### 2.2 The alternative that was not chosen: two tabs
 
-"Discord" (voice, exactly as discord-tab.md) then **"Chats"** (mark: `theme::glyph::CHAT`, U+E8BD at 33, the
-console's speech bubbles in the icon font), at x 267..351, Profile & system moving to x 351..435. The Chats tab
+"Discord" (voice, exactly as discord-tab.md) then **"Direct Messages"** (mark: `theme::glyph::CHAT`, U+E8BD at 33,
+the console's speech bubbles in the icon font), at x 267..351, Profile & system moving to x 351..435. That tab
 holds sections 3.2 to 3.5 alone, with the conversation rows of section 4 straight on the tab instead of the avatar
 row. Simpler drawing; the cost is above.
 
 ---
 
-## 3. The tab, with chats
+## 3. The tab, with Direct Messages
 
 ### 3.1 What it lists, top to bottom
 
-With Messages off the tab is exactly discord-tab.md's. With Messages on:
+With Direct Messages off the tab is exactly discord-tab.md's. With Direct Messages on:
 
 | # | Section | When | Entries |
 |---|---|---|---|
 | 1 | **Answer** | A DM call is ringing (section 7.3) | One entry, as the Bundle's ring (CONTEXT.md: Answer atop the tab): 96 tall, the caller's avatar 60 across 18 in, "Answer" at 96 in, under it dim "{caller} is calling" |
 | 2 | **The Call** | In a Call | discord-tab.md 2 and 4, unchanged: its heading, the people, a divider, Mute, Deafen, Leave. The console's party entry |
 | 2' | Voice's line | The voice connection can't show (`Connecting to Discord`, `Discord isn't running`, `Reconnect Discord in settings`) | discord-tab.md's line, unchanged |
-| 3 | **Chats** | Always, with Messages on | A divider (only with something above), the "Chats" line, the avatar row, the name line (3.2) |
+| 3 | **Direct Messages** | Always, with Direct Messages on | A divider (only with something above), the "Direct Messages" line, the avatar row, the name line (3.2) |
 | 4 | **Shortcuts** and **Servers** | Signed in to the voice connection | As built (discord-tab.md 2), under a divider |
 
-Out of a Call, the account entry and "You're not in a voice channel" are not shown while Messages is on: the
-console's tab has neither, and the Chats section is what stands first. Decision 3 has the other order.
+Out of a Call, the account entry and "You're not in a voice channel" are not shown while Direct Messages is on: the
+console's tab has neither, and the Direct Messages section is what stands first. Decision 3, approved.
 
-### 3.2 The Chats section (the console's gamerpic row)
+### 3.2 The Direct Messages section (the console's gamerpic row)
 
 | Part | Value |
 |---|---|
-| Divider | guide.md 2.5's: 1 high `#33FFFFFF`, x 108..584, 14 above and 26 below. Not drawn when Chats is the first section |
-| "Chats" | Segoe UI 26 white, at x 106 (the heading's x), one line, 34.6 tall; 12 under it the row. The console's "Chats" (est. x 109) |
-| Avatar row | Up to **5 chats**, Discord's DM list order (most recent first, as Discord orders it), then a sixth circle. Each a disc **64 across** (est., the console's), from x 106, **80 apart** (x 106, 186, 266, 346, 426, 506; the last ends at 570, inside the panel's 605): 16 between discs so two neighbours' rings (8 outside each, guide.md 2.5) meet and do not cross |
-| A chat's disc | The avatar, cut round, over a `#4A4A4A` disc; without one yet, the first letter of the name (Segoe UI semibold 26, white, centred); a group DM with no icon of its own: U+E716 (People) at 26, dim |
+| Divider | guide.md 2.5's: 1 high `#33FFFFFF`, x 108..584, 14 above and 26 below. Not drawn when Direct Messages is the first section |
+| "Direct Messages" | Segoe UI 26 white, at x 106 (the heading's x), one line, 34.6 tall; 12 under it the row. In the console's "Chats" place (est. x 109), with Discord's word |
+| Avatar row | Up to **5 DMs**, Discord's DM list order (most recent first, as Discord orders it), then a sixth circle. Each a disc **64 across** (est., the console's), from x 106, **80 apart** (x 106, 186, 266, 346, 426, 506; the last ends at 570, inside the panel's 605): 16 between discs so two neighbours' rings (8 outside each, guide.md 2.5) meet and do not cross |
+| A DM's disc | The avatar, cut round, over a `#4A4A4A` disc; without one yet, the first letter of the name (Segoe UI semibold 26, white, centred); a Group DM with no icon of its own: U+E716 (People) at 26, dim |
 | Unread | A dot 16 across, the accent, ringed 3 in the panel's colour, at the disc's top right (its centre 27 right of and 27 above the disc's centre). The count is on the name line. Discord's DMs carry a count for every unread conversation (#198 reads it) |
-| The sixth circle | A ring 2 wide `#80FFFFFF` (the drop box's border, guide.md 5.3), 64 across, no fill. With more than 5 chats it reads "+{n}" (the rest; Segoe UI 26 white, centred), as the console's "+33" (seen, 2019); with 5 or fewer, U+E8BD (Chat) at 26. A on it opens **All chats** (section 4) |
-| Name line | 20 under the discs (clear of a ring), x 106..586, one line, ellipsis. With focus on a chat: its name, white, then dim " · {n} unread" when unread ("· 1 unread"). With focus on the sixth circle: "All chats" white, then dim " · {n} unread in {m}" when any. With focus elsewhere: dim "{n} unread" over all chats, or nothing at none |
+| The sixth circle | A ring 2 wide `#80FFFFFF` (the drop box's border, guide.md 5.3), 64 across, no fill. With more than 5 DMs it reads "+{n}" (the rest; Segoe UI 26 white, centred), as the console's "+33" (seen, 2019); with 5 or fewer, U+E8BD (Chat) at 26. A on it opens **All Direct Messages** (section 4) |
+| Name line | 20 under the discs (clear of a ring), x 106..586, one line, ellipsis. With focus on a DM: its name, white, then dim " · {n} unread" when unread ("· 1 unread"). With focus on the sixth circle: "All Direct Messages" white, then dim " · {n} unread in {m}" when any. With focus elsewhere: dim "{n} unread" over all DMs, or nothing at none |
 | Focus | The Guide's ring round the disc (4 thick, 4 clear, so its outer edge 8 outside the disc), with the glow; no fill (a disc is not a box) |
-| Height | 34.6 + 12 + 64 + 20 + 34.6 = **about 165** from the "Chats" line's top to the name line's foot |
+| Height | 34.6 + 12 + 64 + 20 + 34.6 = **about 165** from the "Direct Messages" line's top to the name line's foot |
 
 **Why a row of pictures and not rows with names**: it is what the console's tab draws (seen, 2019 and 2020), and it
 keeps the tab short enough that Shortcuts and Servers are still on it. The names, the last messages and the times
-are one press away, in All chats. Decision 4 is the other way.
+are one press away, in All Direct Messages. Decision 4, approved.
 
 ### 3.3 Where focus goes
 
 guide.md 3.2 and discord-tab.md 3, with:
 
-- **Showing the tab**: ringing, Answer; in a Call, Mute (as now); else the **first chat** (the first disc); with no
-  chats, the sixth circle.
+- **Showing the tab**: ringing, Answer; in a Call, Mute (as now); else the **first DM** (the first disc); with no
+  DMs, the sixth circle.
 - **Up and Down** move between sections as between entries: Down from the last entry above the row lands on the
   first disc; Down from anywhere on the row goes to the entry under the section (the first Shortcut); Up from the row
   to the entry above it (Leave, or nothing at the tab's top); Up from the first Shortcut lands on the **disc focus
   last left** in the row (else the first).
 - **Left and Right** move along the row, held at its ends; on the other entries they do as now.
-- **As chats change** while the tab shows: focus stays on the same conversation (by Discord's channel id) as it
+- **As DMs change** while the tab shows: focus stays on the same conversation (by Discord's channel id) as it
   moves along the row, even off it (then onto the sixth circle); it never jumps because a message came.
 
 ### 3.4 Buttons on the tab
 
-| Button | On a chat's disc | On the sixth circle | Elsewhere |
+| Button | On a DM's disc | On the sixth circle | Elsewhere |
 |---|---|---|---|
-| A | Opens the conversation (section 5), the Guide's select sound | Opens All chats (section 4) | As now |
-| Menu | The chat's menu (3.6) | Nothing | As now (a Shortcut's menu) |
+| A | Opens the conversation (section 5), the Guide's select sound | Opens All Direct Messages (section 4) | As now |
+| Menu | The DM's menu (3.6) | Nothing | As now (a Shortcut's menu) |
 | Left / Right | Along the row | Left back along the row | As now |
 | X, Y, View, triggers | Nothing | Nothing | Nothing |
 | B, Guide, LB/RB | As the Guide everywhere (guide.md 3.1) | | |
 
-The hints beside the panel add "More options" (the Menu glyph) with focus on a chat, as on a Running game
+The hints beside the panel add "More options" (the Menu glyph) with focus on a DM, as on a Running game
 (guide.md 3.6).
 
 ### 3.5 Section states
 
-Each is one entry in the Chats section in the row's place, under the "Chats" line, in the "can't show it" entry's
+Each is one entry in the Direct Messages section in the row's place, under the "Direct Messages" line, in the "can't show it" entry's
 form (discord-tab.md 4: 75 tall, its glyph at 26 dim, its text at 69, dim, up to two lines):
 
 | State | Glyph | Text | A |
 |---|---|---|---|
-| Starting (the web session coming up, the list not yet read) | the Guide's spinner, 36 across, its middle 36 in | "Loading chats" | Nothing |
-| Signed out (never signed in, or Discord ended the session) | U+E77B (Contact) | "Sign in to Discord in Settings > Account > Discord messages" | Closes the Guide and opens Settings there, as the Guide's Settings does (guide.md 3.3), focus on Sign in |
+| Starting (the web session coming up, the list not yet read) | the Guide's spinner, 36 across, its middle 36 in | "Loading Direct Messages" | Nothing |
+| Signed out (never signed in, or Discord ended the session) | U+E77B (Contact) | "Sign in to Discord in Settings > Account > Direct Messages" | Closes the Guide and opens Settings there, as the Guide's Settings does (guide.md 3.3), focus on Sign in |
 | No WebView2 runtime | U+E7BA | "Messages need Microsoft Edge WebView2, which isn't on this PC" | Nothing |
 | Can't reach Discord (no network, Discord down) | U+E7BA | "Can't reach Discord. Trying again" | Nothing; it tries again by itself |
-| Discord's page changed (the health probe, #198, finds a selector that no longer matches) | U+E7BA | "Discord has changed its page, so chats can't be read until the Dashboard is updated" | Nothing |
-| Signed in, no DMs | U+E8BD | "No chats yet" | Nothing |
+| Discord's page changed (the health probe, #198, finds a selector that no longer matches) | U+E7BA | "Discord has changed its page, so Direct Messages can't be read until the Dashboard is updated" | Nothing |
+| Signed in, no DMs | U+E8BD | "No Direct Messages yet" | Nothing |
 
 All are focusable, as the tab's other lines are. The spinner shows only once a second has passed with nothing to
 show (the Servers Flyout's rule, discord-tab.md 5), so a quick start never flashes it.
 
-### 3.6 A chat's menu
+### 3.6 A DM's menu
 
-The Guide's menu panel (guide.md 6.1), titled with the chat's name:
+The Guide's menu panel (guide.md 6.1), titled with the DM's name:
 
 | Option | Icon | When | Does |
 |---|---|---|---|
-| Mark as read | U+E8FB (Accept) | Unread | Asks the page to mark it read (#201); the dot goes when the page shows it read |
+| Mark As Read | U+E8FB (Accept) | Unread | Asks the page to mark it read (#201); the dot goes when the page shows it read |
 | Call | U+E717 (Phone) | Signed in to the voice connection | Asks Discord over RPC to join the DM's call (`Ask::Join`, as a DM Shortcut does); the Call shows when Discord says so |
 | Cancel | U+E72B | Always | Closes the menu |
 
@@ -233,9 +233,9 @@ The Guide's menu panel (guide.md 6.1), titled with the chat's name:
 
 ---
 
-## 4. All chats (a Flyout)
+## 4. All Direct Messages (a Flyout)
 
-The Guide's Flyout (guide.md 5.1: x 155..691, y 33..1080, `#1F1F1F`, the panel dimmed under it), titled **"Chats"**.
+The Guide's Flyout (guide.md 5.1: x 155..691, y 33..1080, `#1F1F1F`, the panel dimmed under it), titled **"Direct Messages"**.
 Its rows are the console's conversation list (seen, 2019) in the Guide's entry:
 
 | Part | Value |
@@ -244,28 +244,28 @@ Its rows are the console's conversation list (seen, 2019) in the Guide's entry:
 | Avatar | 60 across, 18 in, centred, as the Profile entry (guide.md 2.5); the stand-ins of 3.2 |
 | Name | From 96 in to the time's left less 16, Segoe UI 26 white, one line, ellipsis; **semibold** (`BODY_SEMIBOLD`) while unread |
 | Time | The last message's time when the page gives it (#198 to find out; Discord's DM list shows none today): dim, right-aligned 24 in from the box's right, on the name's line. "21:40" today, "Yesterday", a weekday within 7 days, else the short date, in the user's locale (as the clock, guide.md 2.3) |
-| Second line | Dim, one line, ellipsis: the last message's text when the page gives it (the console's preview); else for a group DM "{n} members"; else none, and the name is centred in the row |
+| Second line | Dim, one line, ellipsis: the last message's text when the page gives it (the console's preview); else for a Group DM "{n} members"; else none, and the name is centred in the row |
 | Unread | A pill at the right of the second line: at least 34 wide, **34 high**, radius 17, the accent, the count in Segoe UI 26 white, padding 10 each side, right edge 24 in from the box's right. (The Utility's badge is 24 high and its 26 figure overflows it, guide.md open question 14: this one is sized to fit.) With unread but no count, a 12 dot in the accent there |
 | Order | Discord's, as the page lists it |
 | More | The page loads more as it is scrolled (#196: 25 over 12 pages). With focus within 3 rows of the end and more to load, a row "Loading" with the spinner (36) is added at the end until they come; focus stays where it was |
 
 Buttons: Up and Down along the rows (held at the ends, repeating at the Guide's pace); **A opens the conversation in
-this Flyout's place** (as a server opens onto its channels, discord-tab.md 5); Menu opens the chat's menu (3.6); B
-closes the Flyout, focus back on the sixth circle. Focus starts on the first row, or on the chat that had focus on
+this Flyout's place** (as a server opens onto its channels, discord-tab.md 5); Menu opens the DM's menu (3.6); B
+closes the Flyout, focus back on the sixth circle. Focus starts on the first row, or on the DM that had focus on
 the tab if it is in the list. States: section 3.5's lines at x 183 under the title.
 
 ---
 
 ## 5. The conversation
 
-### 5.1 Where it opens: a Flyout, the Guide's width (recommended)
+### 5.1 Where it opens: a Flyout, the Guide's width (approved)
 
 A conversation opens as the Guide's Flyout (x 155..691, y 33..1080, 536 wide; guide.md 5.1), from the tab or in All
-chats' place. B goes back to where it was opened from, focus on that chat.
+Direct Messages' place. B goes back to where it was opened from, focus on that DM.
 
 **Why the Guide's width**: the Flyout is the Guide's one way to open a level beside the panel (Audio, Notifications,
 Servers), Microsoft's picture of the tab has the console's panel at this width, and a 480 text column holds about 30
-characters a line at 26, enough for chat. No source says whether the console widens (section 1.2). **The
+characters a line at 26, enough for a DM. No source says whether the console widens (section 1.2). **The
 alternative** (decision 5): a wide panel x 78..1062 (984 wide, the panel's left and radius, over the hints), with
 bubbles up to 640.
 
@@ -273,33 +273,33 @@ bubbles up to 640.
 
 | Part | Value |
 |---|---|
-| Title | The chat's avatar, 48 across, at x 183, its middle level with the title's; the name 16 after it (x 247), Bahnschrift 33 white, top y 69, one line, ellipsis, to x 663. A group DM: its name, else its members' names joined by ", " |
+| Title | The DM's avatar, 48 across, at x 183, its middle level with the title's; the name 16 after it (x 247), Bahnschrift 33 white, top y 69, one line, ellipsis, to x 663. A Group DM: its name, else its members' names joined by ", " |
 | Divider | 1 high `#33FFFFFF`, x 183..663, at y 133 |
 | Message view | y 134 to 970, clipped. Content column x 183..663 (480). The ring of a focused bubble is never cut: the view is drawn 8 wider each side and keeps a focused bubble 12 inside its top and foot (guide.md 2.4's room for a ring) |
-| Reply box | x 183..663, y 986..1040: Search's pill (`#2E3136`, radius 27, 54 high; search.md 10.2). From 28 in, Segoe UI 26: the draft, white, one line, showing its end with an ellipsis at the start when long; with no draft, dim "Message {name}". Focus: the Guide's ring round the pill (radius 35). While a reply is set (6.2), a line over it, y 948..982: a bar 3 wide `#80FFFFFF` at x 183, then dim "Replying to {name}" at x 199, ellipsis; the view ends over it (y 940) |
+| Reply box | x 183..663, y 986..1040: Search's pill (`#2E3136`, radius 27, 54 high; search.md 10.2). From 28 in, Segoe UI 26: the draft, white, one line, showing its end with an ellipsis at the start when long; with no draft, dim "Message @{name}" (a Group DM: "Message {group}"), Discord's own placeholder. Focus: the Guide's ring round the pill (radius 35). While a reply is set (6.2), a line over it, y 948..982: a bar 3 wide `#80FFFFFF` at x 183, then dim "Replying to {name}" at x 199, ellipsis; the view ends over it (y 940) |
 
 ### 5.3 A message
 
-**Theirs** stand at the left, **one's own** at the right, as the console (recollection) and every chat program.
+**Theirs** stand at the left, **one's own** at the right, as the console (recollection) and every messaging program.
 
 | Part | Theirs | Own |
 |---|---|---|
-| Bubble | From x 183 (a group DM: x 231, after a 36 avatar at x 183 level with the run's first bubble's top) | Its right edge at x 663 |
+| Bubble | From x 183 (a Group DM: x 231, after a 36 avatar at x 183 level with the run's first bubble's top) | Its right edge at x 663 |
 | Fill | `#2E2E2E` (the Guide's list box) | `#107C10` (the console's green, the Toast's card) |
 | Shape | Radius 12, padding 16 left and right, 10 top and bottom | The same |
-| Width | As wide as its text, at most **400** (a group DM's theirs: 384) | At most 400 |
+| Width | As wide as its text, at most **400** (a Group DM's theirs: 384) | At most 400 |
 | Text | Segoe UI 26 white, wraps at the bubble's width, 34.6 a line, every line shown (a long message is long; the view scrolls) | The same |
 
 - **A run** is one author's messages within 7 minutes of each other (Discord's grouping): 4 between its bubbles, 16
-  between runs. In a group DM the name stands over a run of theirs, dim, at the bubble's x, 4 above it.
+  between runs. In a Group DM the name stands over a run of theirs, dim, at the bubble's x, 4 above it.
 - **The time** under a run's last bubble, dim, 4 under it, at the bubble's side ("21:40", the short time format).
-  "Edited" follows it, dim, after " · ", on an edited message's run (Discord marks edits per message: on the message,
+  "(edited)" follows it, dim, Discord's mark, on an edited message's run (Discord marks edits per message: on the message,
   it shows on the last of the run with any edited).
 - **A day divider** before the first message of each day: the day centred, dim ("Today", "Yesterday", a weekday
   within 7 days, else the short date), with a 1-high `#33FFFFFF` line either side out to x 183 and x 663, 24 above
   and below.
 - **The unread line**, before the first message that was unread when the conversation opened: a 2-high line in the
-  accent from x 183 to x 663, with "New" in the accent, Segoe UI semibold 26, at its right end over a 12 gap. It
+  accent from x 183 to x 663, with "New" in the accent (Discord's "NEW", not upper-cased: no text is, settings.md 13.1), Segoe UI semibold 26, at its right end over a 12 gap. It
   stays where it is while the conversation is open, as Discord's does, and is gone when it is opened again.
 - **A reply** (a message answering another): inside the bubble, over its text, a line: a bar 3 wide `#80FFFFFF`,
   then 8 after it the other message's author and first line, dim, one line, ellipsis ("Ana: are you on tonight?"),
@@ -328,8 +328,8 @@ bubbles up to 640.
   Glyph code points are to be checked against Microsoft's list in #200 (guide.md 10.1's link).
 - **Discord's own lines** (a call started, someone added to a group, a pin): centred, dim, no bubble, with U+E717,
   U+E8FA or U+E718 at 26 before them ("Ana started a call", "Bo added Cy", "Ana pinned a message").
-- **One's own message going out**: drawn at once, opacity 0.6, with "Sending" dim as its time; as the page shows it,
-  it is drawn whole with its time. **Not sent**: U+E783 at 26 in Discord's red, then "Not sent" white, as its time
+- **One's own message going out**: drawn at once, opacity 0.6, with no time until it is sent (Discord greys a message going out and says nothing); as the page shows it,
+  it is drawn whole with its time. **Not sent**: U+E783 at 26 in Discord's red, then "Message failed to send" white, as its time
   (6.4).
 
 ### 5.4 Focus, scroll and paging
@@ -347,14 +347,13 @@ bubbles up to 640.
   (guide.md 2.4), not animated. A bubble taller than the view is shown from its top.
 - **Older messages**: with focus on the oldest loaded message, the page is asked for older ones (#198); meanwhile a
   row at the view's top, 60 tall, the spinner 36 centred. When they come, focus stays on the same message and the
-  view stays where it was. At the start of the conversation, a dim centred line over the first message: "This is the
-  start of your messages with {name}".
+  view stays where it was. At the start of the conversation, a dim centred line over the first message: "This is the beginning of your direct message history with @{name}." (Discord's line).
 - **New messages while open**: added at the foot. With focus on the reply box (the newest in view) the view follows
   them. With focus higher up, the view stays and a pill shows at the view's foot, 12 over the reply box, centred:
-  36 high, radius 18, the accent, "{n} new" white with U+E74B (Down) at 20; RT or Down to the reply box takes it
+  36 high, radius 18, the accent, "{n} new messages" white with U+E74B (Down) at 20; RT or Down to the reply box takes it
   away. Messages edited or deleted change in place; focus on a deleted one moves to the next newer.
 - **Read**: the conversation open in the page is read as Discord counts it (the page marks what it shows); whether
-  the hidden page does so is for #198 and #201 to establish, and Mark as read (3.6) covers it if not.
+  the hidden page does so is for #198 and #201 to establish, and Mark As Read (3.6) covers it if not.
 
 ### 5.5 Buttons in the conversation
 
@@ -363,9 +362,9 @@ bubbles up to 640.
 | A | The message's menu (6.3) | Opens the keyboard (6.1) |
 | Menu | The message's menu | **Sends the draft**, if any (the console's Menu to send; with none, nothing) |
 | X | Reply to it (6.2) | Clears the reply being set, if any |
-| Y | React to it (6.3's React) | Nothing |
+| Y | Add Reaction to it (6.3) | Nothing |
 | Up / Down, LT / RT | 5.4 | 5.4 |
-| B | Closes the conversation, the draft kept (6.1), back to where it was opened, focus on its chat | The same |
+| B | Closes the conversation, the draft kept (6.1), back to where it was opened, focus on its DM | The same |
 | View, LB / RB, stick clicks | Nothing | Nothing |
 | Guide | Closes the Guide; the conversation and its draft are not reopened next time (guide.md 3.2: the Guide opens on the landing tab), but the draft is kept for when it is opened again | |
 
@@ -385,7 +384,7 @@ readable over the caption through the dim's lighter part (35% black to y 432).
 
 | | Value |
 |---|---|
-| Caption | "Message {name}", or "Reply to {name}" while a reply is set |
+| Caption | "Message @{name}" (a Group DM: "Message {group}"), or "Replying to {name}" while a reply is set |
 | Starts with | The draft |
 | Limit | 2000 characters (Discord's for a message) |
 | Typing | Each change is the draft at once (`Event::Typed`) |
@@ -402,7 +401,7 @@ box when it is opened again; closing the Guide keeps it; it is never written any
 ### 6.2 Replies
 
 X on a message, or Reply in its menu: the reply is set (the line over the reply box, 5.2), focus moves to the reply
-box and the keyboard comes up at once with "Reply to {name}". Sent, the message goes as a reply to that one. B on the
+box and the keyboard comes up at once with "Replying to {name}". Sent, the message goes as a reply to that one. B on the
 keyboard keeps the reply set with the draft; X on the reply box clears it.
 
 ### 6.3 A message's menu, and reactions
@@ -412,12 +411,12 @@ The menu panel (guide.md 6.1), titled with the message's first line, cut short:
 | Option | Icon | When |
 |---|---|---|
 | Reply | U+E97A (Reply) | Always |
-| React | U+E76E (Emoji) | Always |
-| Try again | U+E72C (Refresh) | One's own, Not sent |
+| Add Reaction | U+E76E (Emoji) | Always |
+| Retry | U+E72C (Refresh) | One's own, failed |
 | Delete | U+E74D | One's own, Not sent: drops it from the view (it was never sent) |
 | Cancel | U+E72B | Always |
 
-**React** (and Y on a message) opens a second menu panel in the first's place, titled "React", with **six
+**Add Reaction** (and Y on a message) opens a second menu panel in the first's place, titled "Add Reaction", with **six
 reactions** (decision 9): 👍 Thumbs up, ❤️ Heart, 😂 Laughing, 😮 Surprised, 😢 Sad, 🔥 Fire, each a row with the
 emoji at 22 in the icon's box and its name; a reaction the user has already made reads "Remove {name}". A asks the
 page; the pill shows (or goes) once the page shows it (#201: shown done only when Discord's page shows it). B goes
@@ -428,13 +427,13 @@ back to the message's menu.
 - A message sent shows at once as Sending (5.3). The web session sends **one action at a time**, each paced (#201;
   discord-bridge.md 4: at most one action per 0.7 s, as the bridge paces itself) and counted done only when the
   page shows it. Several sent quickly wait their turn, each shown Sending.
-- **Not sent** (the page shows it failed, or nothing shows within 15 s): the bubble stays, "Not sent" as its time;
-  its menu has Try again and Delete. The draft is not put back: the text is in the bubble.
+- **Message failed to send** (the page shows it failed, or nothing shows within 15 s): the bubble stays, "Message failed to send" as its time;
+  its menu has Retry and Delete. The draft is not put back: the text is in the bubble.
 - **Discord asks for a check** (a captcha) or **refuses** (rate limit, blocked, not allowed): the message is Not sent
   and a prompt (guide.md 6.1, 6.4) says so plainly, once: "Discord wants to check it's you" / "Sign in again in
-  Settings > Account > Discord messages to carry on.", or "Discord didn't send it" / "{Discord's own reason, as the
+  Settings > Account > Direct Messages to carry on.", or "Discord didn't send it" / "{Discord's own reason, as the
   page shows it}", with one option, OK.
-- **Mark as read** is 3.6's; a conversation is otherwise read as the page counts it (5.4).
+- **Mark As Read** is 3.6's; a conversation is otherwise read as the page counts it (5.4).
 
 ---
 
@@ -447,18 +446,18 @@ guide.md 9: the banner, its queue, its 5 s, the text cycle, the Guide button's t
 | Part | Value |
 |---|---|
 | Tile | The sender's avatar, round, 80 across, bare on the card (as the greeting's picture, guide.md 9.2); without one, Discord's mark on the lighter square (the Call kind's) |
-| Line | "{name}: {text}" (the message's first line), one line, ellipsis at the card's 640. A group DM: "{name} in {group}: {text}". With Show what they say off (8.2): "{name} sent you a message" / "{name} in {group}" |
+| Line | "{name}: {text}" (the message's first line), one line, ellipsis at the card's 640. A Group DM: "{name} in {group}: {text}". With Show what they say off (8.2): "{name} sent you a message" / "{name} in {group}" |
 | Not text | The line uses 5.3's word: "Ana: Image" |
 | Prompt | "Press (Guide) to view", as every Toast (guide.md 9.2) |
-| Tap of the Guide button | Opens the Guide on Parties & chats **with that conversation open**, focus on the reply box (the console's "hold to open"; ours is the Guide's tap, guide.md 9.5) |
+| Tap of the Guide button | Opens the Guide on the Discord tab **with that conversation open**, focus on the reply box (the console's "hold to open"; ours is the Guide's tap, guide.md 9.5) |
 | Several | A DM Toast waiting in the queue for the same conversation is replaced by the newer one, which says "{name}: {n} new messages" when more than one is waiting: the user sees one Toast for a burst |
-| None | While that conversation is open in the Guide; while Messages' Toasts are off; per 7.4 in a game |
+| None | While that conversation is open in the Guide; while the Direct Messages Toasts are off; per 7.4 in a game |
 
 ### 7.2 A mention
 
 A mention of the user in a server channel (the page raises it; channels themselves are #203): "{name} mentioned you
-in #{channel}", Discord's mark on the lighter square. The tap opens the Guide on Parties & chats (no channel view
-until #203). Decision 10 has the other way: no mention Toasts until #203.
+in #{channel}", Discord's mark on the lighter square. The tap opens the Guide on the Discord tab (no channel view
+until #203). Decision 10, approved.
 
 ### 7.3 An incoming call
 
@@ -477,57 +476,56 @@ the conversation, and there is no Answer. A ring seen by both connections is one
 - Discord's own **Do Not Disturb** status: the page raises no notification then, and so no Toast shows (Discord's
   rule, to be checked in #202).
 - What the log says of these Toasts: section 10.
-- **Not added to the Notifications Flyout's list** (guide.md 9.7): the chats have their own unread marks, and the
+- **Not added to the Notifications Flyout's list** (guide.md 9.7): Direct Messages have their own unread marks, and the
   list would hold message text for as long as the Dashboard runs (decision 12).
 
 ---
 
-## 8. Settings > Account > Discord messages
+## 8. Settings > Account > Direct Messages
 
-### 8.1 Where (recommended: a box of its own)
+### 8.1 Where: a box of its own (approved)
 
-Account (settings.md 16.1) gets a fourth box, **Discord messages**, at (1, 1) beside Discord; its glyph U+E8BD. The
+Account (settings.md 16.1) gets a fourth box, **Direct Messages**, at (1, 1) beside Discord; its glyph U+E8BD. The
 Discord box and its page stay as built (the voice connection). #197 says "Settings > Discord gets the switch";
-**the recommendation is a page of its own** (decision 13), since the Discord page is full (its status line ends near
+**a page of its own** (decision 13, approved), since the Discord page is full (its status line ends near
 y 830) and the two connections are separate things for the user to set up. The alternative: the same rows under the
 Discord page's, the page scrolling as 16.2 does.
 
 ### 8.2 The page
 
-Rows from y 190 at x 520, the Guide page's controls (settings.md 4.4, 4.5, 4.7), the header "**Account** Discord
-messages" (16.1):
+Rows from y 190 at x 520, the Guide page's controls (settings.md 4.4, 4.5, 4.7), the header "**Account** Direct Messages" (16.1):
 
 | # | Row | Control | Default |
 |---|---|---|---|
-| 1 | **Messages from discord.com** | Checkbox row | **Off** (D1: opt-in) |
+| 1 | **Direct Messages from discord.com** | Checkbox row | **Off** (D1: opt-in) |
 | | Under it, 14 down, MutedText, wrapping to x 1750: **"This signs in to discord.com as you, then reads and sends your messages for you. Discord's terms don't allow programs to do that with a user account, and Discord could close your account for it."** | text | Always shown (settings.md 16.11 keeps text that says what the user cannot do without) |
 | 2 | **Sign in** / **Sign out** | Pane buttons, 20 apart | Dimmed while row 1 is off |
 | | The status line under them (Text): "Not signed in", "Starting...", "Signed in as {name}", "Discord signed you out", "Microsoft Edge WebView2 isn't on this PC", "Can't reach Discord", "Discord has changed its page" | text | |
 | 3 | "Notifications" (the section title, Bahnschrift 30) | | |
-| 4 | **Messages** | Checkbox row | On |
-| 5 | **Show what they say** | Checkbox row | On (decision 11: off for a shared living room) |
+| 4 | **Direct Messages** | Checkbox row | On |
+| 5 | **Show what they say** | Checkbox row | On (decision 11) |
 | 6 | **Mentions** | Checkbox row | On |
-| 7 | **Calls** | Checkbox row | On |
+| 7 | **Incoming Calls** | Checkbox row | On |
 | 8 | **While playing** | Dropdown: Show all, Calls only, None | Show all |
 
 - **Sign in** shows Discord's own login page full screen with the pad (#197); **Sign out** removes the session folder
   and says, on the status line, "Signed out. Discord lists this PC under Devices until you log it out there" (#196:
-  the spike's sign-out left the session listed). Turning row 1 off stops the web session and forgets every chat,
+  the spike's sign-out left the session listed). Turning row 1 off stops the web session and forgets every DM,
   message and draft in memory, and **keeps the sign-in** (decision 14): on again, no sign-in is asked.
 - The risk line's sources: Discord's [Terms of Service](https://discord.com/terms) ("scraping our services ...
   including by using any robot, spider, crawler, scraper, or other automatic device, process, or software") and the
   support article [Automated user accounts (self-bots)](https://support.discord.com/hc/articles/115002192352), as
   read in discord-bridge.md section 4.
-- Focus and B as settings.md 9.4 and 16.1; the log: `Settings: Discord messages: <row>; messages <on|off>,
+- Focus and B as settings.md 9.4 and 16.1; the log: `Settings: Direct Messages: <row>; dms <on|off>,
   <signed in|signed out|starting|no runtime|unreachable|page changed>` (no name, section 10).
 
 ---
 
 ## 9. Privacy: memory only (D6)
 
-1. **Nothing of a message is written to disk by the Dashboard**: not text, names, avatars of people chatted with,
+1. **Nothing of a message is written to disk by the Dashboard**: not text, names, avatars of people messaged,
    drafts, unread counts, conversation lists or times. Not in the library database, the settings table, the art
-   folder or any cache. The voice part's avatars stay as built (`<data>/art/discord/avatars`); a chat's avatars are
+   folder or any cache. The voice part's avatars stay as built (`<data>/art/discord/avatars`); a DM's avatars are
    fetched into memory only and dropped with the web session (decision 15).
 2. **Nothing of a message or a name reaches the log**, `--log-focus` included: counts, positions and states only
    (section 10). Types that carry message text or names write themselves in `Debug` as their size (`Text(24 chars)`),
@@ -547,21 +545,21 @@ messages" (16.1):
 
 ## 10. The log
 
-`--log-focus`'s `guide:` line on the tab (discord-tab.md 7), with chats: the entry, then what Discord says, then the
-chats' counts. **Places and counts, never names.**
+`--log-focus`'s `guide:` line on the tab (discord-tab.md 7), with Direct Messages: the entry, then what Discord says, then the
+DMs' counts. **Places and counts, never names.**
 
 | Where | Line |
 |---|---|
-| A chat on the row | `guide: Discord Chat(1) of 25, unread 3; not in a call; mute off, deafen off; chats 25, unread 5 in 2` |
-| The sixth circle | `guide: Discord AllChats; ...; chats 25, unread 5 in 2` |
-| A section state | `guide: Discord ChatsState(SignedOut)` (`Loading`, `NoRuntime`, `Unreachable`, `PageChanged`, `Empty`) |
+| A DM on the row | `guide: Discord DM(1) of 25, unread 3; not in a call; mute off, deafen off; dms 25, unread 5 in 2` |
+| The sixth circle | `guide: Discord AllDMs; ...; dms 25, unread 5 in 2` |
+| A section state | `guide: Discord DMsState(SignedOut)` (`Loading`, `NoRuntime`, `Unreachable`, `PageChanged`, `Empty`) |
 | Answer | `guide: Discord Answer; ringing` |
-| All chats | `..., flyout Chats Chat(7) of 25` (`, unread 2`, `, group`), `..., flyout Chats loading` |
+| All Direct Messages | `..., flyout DirectMessages DM(7) of 25` (`, unread 2`, `, group`), `..., flyout DirectMessages loading` |
 | The conversation | `..., flyout Conversation Message(3) of 50, theirs` (counted from the newest, 0; `, own`, `, unread line above`, `, sending`, `, not sent`), `..., flyout Conversation ReplyBox; draft 12 chars` (`, replying`), `..., flyout Conversation loading`, `..., 2 new below` |
-| A menu over it | guide.md 14's form with the title left out: `dialog Menu { prompt: false, row: 1 } (chat)`, `(message)`, `(react)` |
+| A menu over it | guide.md 14's form with the title left out: `dialog Menu { prompt: false, row: 1 } (dm)`, `(message)`, `(reaction)` |
 | Text entry | `focus: TextEntry: A; 12 chars, lower letters` |
-| Toasts | `toasts: shown (DiscordMessage)`, `(DiscordMention)`, `(DiscordCall)`: the kind and the queue's figures, no line |
-| The web session | `discord web: signed in`, `discord web: 25 chats, 5 unread in 2`, `discord web: conversation open, 50 messages`, `discord web: sent in 769 ms`, `discord web: not sent: captcha` (`rate limited`, `refused`, `no answer in 15 s`), `discord web: selector "dm-row" no longer matches` (selector names are ours, not Discord's text) |
+| Toasts | `toasts: shown (DiscordDm)`, `(DiscordMention)`, `(DiscordCall)`: the kind and the queue's figures, no line |
+| The web session | `discord web: signed in`, `discord web: 25 DMs, 5 unread in 2`, `discord web: conversation open, 50 messages`, `discord web: sent in 769 ms`, `discord web: not sent: captcha` (`rate limited`, `refused`, `no answer in 15 s`), `discord web: selector "dm-row" no longer matches` (selector names are ours, not Discord's text) |
 
 Never in the log: names, channel or user ids, message text, emoji used, times of messages.
 
@@ -570,7 +568,7 @@ Never in the log: names, channel or user ids, message text, emoji used, times of
 ## 11. Not in this version
 
 - **Servers' text channels, threads and forums**: #203, after DMs have lived through a Discord page change (D4).
-- **New chat** and **message requests**: the console has both; they need Discord's friend list and requests read,
+- **A new DM** and **Message Requests**: the console has both (its New chat and Chat requests); they need Discord's friend list and requests read,
   which #198 does not. Decision 16.
 - Video, screen share, streams (D5); voice messages, GIFs, stickers, uploads sent; editing or deleting a sent
   message; pins; search; typing ("Ana is typing"); presence dots; profiles; blocking and reporting (Discord's page
@@ -579,31 +577,63 @@ Never in the log: names, channel or user ids, message text, emoji used, times of
 
 ---
 
-## 12. Decisions for the user
+## 12. Decisions, approved 2026-11-18
 
-Each with the recommendation first, then the other way in a line.
+The user, on #199, verbatim: **"Keep it discord themed with the wording but that all sounds great to me all
+recommended"**. Every recommendation stands **except the wording**, which follows Discord's own words rather than
+the console's. The lead's reading of that (it is a reading, not the user's words): the layout stays the console's
+manner; every label, heading and line the user reads is Discord's where Discord has one (12.1). So decision 2 is
+the one that flips.
 
-1. **One tab.** Chats join the Discord tab as a section. *Or:* a second tab, "Chats", after Discord (2.2).
-2. **The tab's heading reads "Parties & chats"**, the mark stays Discord's. *Or:* the heading stays "Discord".
-3. **Order on the tab: Answer, the Call, Chats, then Shortcuts and Servers**; out of a Call, Chats first and the
-   account entry hidden. *Or:* voice first as now (account, Shortcuts, Servers), Chats under them.
-4. **On the tab, a row of 5 avatars and a "+n" circle** (the console's), names in All chats. *Or:* rows with name,
-   last message and unread count straight on the tab (All chats' rows), 5 of them.
-5. **A conversation opens as a Flyout, the Guide's width (536).** *Or:* a wide panel, 984, over the hints.
-6. **B on the keyboard keeps the draft**; Menu sends. *Or:* B drops what was typed, as every other text entry.
-7. **No "Open in the Discord app"** in a chat's menu. *Or:* offer it (it brings the app in front of a game).
-8. **A draft per conversation, kept while the Dashboard runs**, in memory. *Or:* one draft, dropped when the
-   conversation closes.
-9. **Six reactions**: 👍 ❤️ 😂 😮 😢 🔥. *Or:* another six, or Discord's frequently used if the page gives them.
-10. **Mention Toasts now**, opening the tab. *Or:* none until server channels (#203).
-11. **Toasts show the message's text, and show during games**, both switchable. *Or:* names only and Calls only
-    while playing by default, for a shared living-room screen.
-12. **Discord Toasts are not added to the Notifications list.** *Or:* added, text and all, for the Dashboard's run.
-13. **Settings > Account > Discord messages, a page of its own.** *Or:* the same rows under Settings > Account >
-    Discord (as #197's wording), the page scrolling.
-14. **Turning Messages off keeps the sign-in.** *Or:* off also signs out.
-15. **Avatars of people chatted with are kept in memory only.** *Or:* on disk with the voice avatars.
-16. **No New chat or message requests in M9.** *Or:* a ticket for them after #198, reading Discord's friend list.
+| # | Decision | Outcome |
+|---|---|---|
+| 1 | One tab with sections, or two tabs | **One tab**, the Discord tab, with a Direct Messages section (2.1) |
+| 2 | The tab's heading | **"Discord", as now** (flipped from "Parties & chats" by the wording rule) |
+| 3 | Order on the tab | **Answer, the Call, Direct Messages, then Shortcuts and Servers**; out of a Call, Direct Messages first and the account entry hidden (3.1) |
+| 4 | Avatars or rows on the tab | **A row of 5 avatars and a "+n" circle**, names in All Direct Messages (3.2) |
+| 5 | Where a conversation opens | **A Flyout, the Guide's width (536)** (5.1) |
+| 6 | B on the keyboard | **Keeps the draft**; Menu sends (6.1) |
+| 7 | "Open in the Discord app" | **Not offered** (3.6) |
+| 8 | Drafts | **One per conversation, in memory while the Dashboard runs** (6.1) |
+| 9 | Reactions | **Six**: 👍 ❤️ 😂 😮 😢 🔥 (6.3) |
+| 10 | Mention Toasts | **Now**, opening the tab (7.2) |
+| 11 | Toasts' text and games | **The message's text shown, and Toasts during games**, both switchable (7.4, 8.2) |
+| 12 | The Notifications list | **Discord's Toasts are not added to it** (7.4) |
+| 13 | Where the settings are | **Settings > Account > Direct Messages, a page of its own** (8.1) |
+| 14 | Switching off | **Keeps the sign-in** (8.2) |
+| 15 | Avatars of people messaged | **Memory only** (9) |
+| 16 | New DM and Message Requests | **Not in M9** (11) |
+
+### 12.1 The wording: Discord's, and where it comes from
+
+Discord's own words wherever Discord has one, **with Discord's capitals** ("Mark As Read", "Add Reaction",
+"Direct Messages", "Group DM"): they are names of Discord's things, as "Who's playing today?" is the console's, and
+the user asked for them. The sentence case of settings.md 13.1 ("Names are sentence case") stays for the
+Dashboard's own words ("Show what they say", "While playing", "Loading Direct Messages"), and nothing is
+upper-cased (13.1's "No text is upper-cased"): where Discord's client shows a word in capitals by styling
+("NEW" on its unread line) the port writes it as typed ("New").
+
+| Where | Discord's word | Instead of | Source |
+|---|---|---|---|
+| The tab's heading | Discord | Parties & chats | the tab as built (discord-tab.md) |
+| The section, the Flyout's title, the Settings box | Direct Messages | Chats | Discord's DM list header; [Inbox FAQ](https://support.discord.com/hc/en-us/articles/360045027712-Inbox-FAQ) |
+| A conversation of several | Group DM | group chat | [Group Chat and Calls](https://support.discord.com/hc/en-us/articles/223657667-Group-Chat-and-Calls) |
+| The full list | All Direct Messages | All chats | the port's, built from Discord's term (Discord has no such list) |
+| The reply box | Message @{name} (a Group DM: Message {group}) | Message {name} | Discord's message box placeholder |
+| Writing a reply | Replying to {name} | Reply to {name} | Discord's reply bar |
+| A DM's menu | Mark As Read, Call | Mark as read | Discord's DM menu; Inbox FAQ ("Mark ... As Read") |
+| A message's menu | Reply, Add Reaction, Retry, Delete | React, Try again | Discord's message menu and failed-message actions |
+| A failed message | Message failed to send | Not sent | Discord's client |
+| The unread line | New | | Discord's "NEW" divider, not upper-cased |
+| The jump pill | {n} new messages | {n} new | Discord's new-messages bar |
+| An edit | (edited) | Edited | Discord's client |
+| The start of a conversation | This is the beginning of your direct message history with @{name}. | | Discord's client |
+| Settings rows | Direct Messages, Mentions, Incoming Calls | Messages, Calls | Discord's notification settings |
+| The ring | {caller} is calling | | the Bundle's (`ExtensionCore.DiscordRing.cs`), kept: the call Toast is the Bundle's |
+
+Discord's client strings are as the user sees them in Discord's app and page on 2026-11-18; Discord's support site
+refuses automated fetches (discord-bridge.md 4), so only the two articles linked were found by search. #198's
+fixture pages and #200's tests use these strings; a Discord rewording changes only these lines.
 
 ---
 
@@ -612,15 +642,15 @@ Each with the recommendation first, then the other way in a line.
 At the Guide's proportions: one column is 16 px, so the panel (x 78..614) is columns 5 to 38; the y of each line on
 the left. `#` marks focus, `( )` a round picture, `[ ]` a glyph, `.` dim text.
 
-### 13.1 The tab, out of a Call, focus on the first chat
+### 13.1 The tab, out of a Call, focus on the first DM
 
 ```
  y      0    5    10        20        30   38  42        52        62
    33      .--------------------------------.
            |  [Xbox]  [Disc]• (pic)          |
   133      |           =====                 |
-  161      |  Parties & chats                |    [X] Hold for power options
-  213      |  Chats                          |    [=] More options
+  161      |  Discord                        |    [X] Hold for power options
+  213      |  Direct Messages                |    [=] More options
   260      | #(A)#  (B)  (C)  (G)  (E)  (+20)|
   344      |  Ana  . 3 unread                |
   393      |  ------------------------------ |
@@ -656,7 +686,7 @@ the left. `#` marks focus, `( )` a round picture, `[ ]` a glyph, `.` dim text.
            |////| #'----------------------'#     |
            |////|  (👍 2) (😂 1)                  |
   940      |////|  .09:38                         |
-  986      |////| ( Message Ana                 ) |
+  986      |////| ( Message @Ana                ) |
  1080      '----'--------------------------------'
 ```
 
@@ -671,7 +701,7 @@ the left. `#` marks focus, `( )` a round picture, `[ ]` a glyph, `.` dim text.
            |////|  | look at this          |       |
            |////|  '----------------------'       |
   556      |////|  .09:38                         |
-  570      |////|                 Reply to Ana
+  570      |////|                 Replying to Ana
   620      |////|              ( nice, where is that|                                         )
   710      |////|              [?123][1][2][3][4][5][6][7][8][9][0][<X ]
            |////|              [ <  ][q][w][e][r][t][y][u][i][o][p][ > ]
