@@ -28,8 +28,12 @@ pub fn all(args: &Args) -> Vec<Arc<dyn Source>> {
         Arc::new(source_ea::Ea::at(args.ea.clone())),
         Arc::new(source_ubisoft::Ubisoft::at(args.ubisoft.clone())),
         Arc::new(source_battlenet::BattleNet::at(args.battlenet.clone())),
-        // `--xbox` names a fake drive of Xbox games; else this machine's drives and the user's packages.
-        Arc::new(source_xbox::Xbox::at(args.xbox.clone())),
+        // `--xbox` names a fake drive of Xbox games; else this machine's drives and the user's packages. With the PC
+        // Game Pass catalogue of the region Settings names (#277).
+        Arc::new(source_xbox::Xbox::at(args.xbox.clone()).with_game_pass({
+            let game_pass = crate::game_pass::shared(args);
+            Arc::new(move || game_pass.catalogue())
+        })),
         // The games added by hand, which are the database's own (docs/spec/apps.md).
         Arc::new(library::by_hand::Manual),
     ]

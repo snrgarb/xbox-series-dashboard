@@ -1024,6 +1024,12 @@ impl App {
                 // In force already: saved, so that it is still so the next time.
                 Effect::Set(change) => {
                     self.store.set(change);
+                    // Settings > Launchers' Show Game Pass games (#277): Xbox read again, with or without them.
+                    if change.setting == Setting::ShowGamePass {
+                        let options = self.dashboard.options();
+                        self.store.set_game_pass(change.on, options.game_pass_region);
+                        self.update_launchers(Some(vec!["xbox".to_string()]));
+                    }
                     // Settings > Art's Download art online: off stops a lookup under way; on starts one.
                     if change.setting == Setting::DownloadArtOnline {
                         self.art = None;
@@ -1055,6 +1061,13 @@ impl App {
                     if key.is_some() && self.art_started {
                         self.start_art();
                     }
+                }
+                // Settings > Launchers' Game Pass region (#277): saved, and Xbox read again with that region's
+                // catalogue.
+                Effect::GamePassRegion(region) => {
+                    let shown = self.dashboard.options().show_game_pass;
+                    self.store.set_game_pass(shown, region);
+                    self.update_launchers(Some(vec!["xbox".to_string()]));
                 }
                 // Settings > Art's sources: saved, and a lookup under way started again in the new order.
                 Effect::ArtOrder(order) => {

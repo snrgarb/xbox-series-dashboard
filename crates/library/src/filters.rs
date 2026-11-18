@@ -19,6 +19,9 @@ pub const INSTALLED: &str = "installed";
 pub const MOST_PLAYED: &str = "most-played";
 pub const RECENTLY_ADDED: &str = "recently-added";
 pub const HIDDEN: &str = "hidden";
+/// The Game Pass tab's key (#277): a filter of the `launcher` kind, made while a game of the PC Game Pass catalogue is
+/// in the library, and listed only while Xbox is switched on.
+pub const GAME_PASS: &str = "gamepass";
 
 /// How far apart places are handed out.
 const STEP: i64 = 1000;
@@ -142,6 +145,9 @@ fn clauses(rule: &Rule, collection: Option<i64>, now: i64) -> (String, Vec<Value
     if let Some(collection) = collection {
         clause("id IN (SELECT game FROM collection_games WHERE collection = ?)", collection);
     }
+    if let Some(game_pass) = rule.game_pass {
+        clause("game_pass = ?", game_pass.into());
+    }
     if !rule.sources.is_empty() {
         clauses.push(format!("source IN ({})", vec!["?"; rule.sources.len()].join(", ")));
         values.extend(rule.sources.iter().cloned().map(Value::Text));
@@ -152,7 +158,8 @@ fn clauses(rule: &Rule, collection: Option<i64>, now: i64) -> (String, Vec<Value
 /// The SQL that says a row of `filters` is listed: every filter but the filter of a launcher switched off, which is
 /// kept as it was, its place and whether it is shown, for when the launcher is switched on again.
 fn listed() -> String {
-    format!("NOT (kind = 'launcher' AND substr(key, 10) IN {})", crate::launchers::OFF)
+    let off = crate::launchers::OFF;
+    format!("NOT (kind = 'launcher' AND (substr(key, 10) IN {off} OR (key = '{GAME_PASS}' AND 'xbox' IN {off})))")
 }
 
 /// Every filter in order, each with the games it picks at the time `now`.
@@ -339,6 +346,35 @@ pub(crate) fn sync_launchers(conn: &Connection) -> Result<()> {
             }
             _ => {}
         }
+    }
+    sync_game_pass(conn)
+}
+
+/// Makes and removes the Game Pass tab (#277; docs/spec/filters.md, 4.2): "the Xbox games of the PC Game Pass
+/// catalogue, by name", installed or not, made while the library has one and removed when it has none, as a
+/// launcher's filter is. It follows the launchers' filters at first, not shown on Home.
+fn sync_game_pass(conn: &Connection) -> Result<()> {
+    let wanted: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM games WHERE source = 'xbox' AND game_pass = 1 AND gone = 0)",
+        [],
+        |row| row.get(0),
+    )?;
+    let made: Option<i64> =
+        conn.query_row("SELECT id FROM filters WHERE key = ?1", [GAME_PASS], |row| row.get(0)).optional()?;
+    match (wanted, made) {
+        (true, None) => {
+            let last: Option<i64> = conn.query_row("SELECT MAX(position) FROM filters", [], |row| row.get(0))?;
+            let rule = Rule { sources: vec!["xbox".into()], game_pass: Some(true), ..Rule::default() };
+            conn.execute(
+                "INSERT INTO filters (kind, key, name, rule, sort, descending, shown, position)
+                 VALUES ('launcher', ?1, 'Game Pass', ?2, 'name', 0, 0, ?3)",
+                params![GAME_PASS, serde_json::to_string(&rule)?, last.unwrap_or(0) + STEP],
+            )?;
+        }
+        (false, Some(id)) => {
+            conn.execute("DELETE FROM filters WHERE id = ?1", [id])?;
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -711,6 +747,7 @@ mod tests {
             min_playtime_hours: Some(10),
             sources: vec![STEAM.to_string()],
             hidden: false,
+            game_pass: None,
         };
         db.set_filter(id, "Lately", &rule, Sort::LastPlayed, true).unwrap();
         // docs/spec/filters.md, section 7.
@@ -937,6 +974,44 @@ mod tests {
         // A source that is no launcher (the games added by hand) has none.
         db.sync("manual", &library(vec![game(0, "Gorse", None, 0, true)]), NOW).unwrap();
         assert!(db.filters_at(NOW).unwrap().iter().all(|f| f.key.as_deref() != Some("launcher.manual")));
+    }
+
+    #[test]
+    fn the_game_pass_tab_is_xboxs_catalogue_games_while_there_are_any() {
+        let mut db = woods();
+        let xbox = |name: &str, installed: bool, game_pass: bool| Game {
+            source: "xbox".into(),
+            source_id: format!("MadeUp.{name}_0000000000000"),
+            game_pass,
+            ..game(0, name, None, 0, installed)
+        };
+        let catalogue = vec![xbox("Ivy", true, true), xbox("Juniper", false, true), xbox("Larch", true, false)];
+        db.sync("xbox", &library(catalogue.clone()), NOW).unwrap();
+        let tab = keyed(&db, GAME_PASS);
+        assert_eq!((tab.kind, tab.name.as_str(), tab.shown), (FilterKind::Launcher, "Game Pass", false));
+        assert_eq!(tab.rule, Rule { sources: vec!["xbox".into()], game_pass: Some(true), ..Rule::default() });
+        // Installed or not, by name; not the Xbox game that is not in the catalogue.
+        assert_eq!(names(&db, &tab), ["Ivy", "Juniper"]);
+        // After Xbox's own tab, made with it.
+        assert_eq!(all_of(&db)[all_of(&db).len() - 2..], ["(Xbox)", "(Game Pass)"]);
+        let snapshot = db.snapshot_at(NOW).unwrap();
+        assert!(snapshot.tabs().any(|f| f.name == "Game Pass"));
+        assert!(snapshot.games.iter().any(|g| g.name == "Juniper" && g.game_pass && !g.installed));
+
+        // Xbox off: listed nowhere.
+        db.set_launcher("xbox", false).unwrap();
+        assert!(db.filters_at(NOW).unwrap().iter().all(|f| f.key.as_deref() != Some(GAME_PASS)));
+        db.set_launcher("xbox", true).unwrap();
+        assert!(db.filters_at(NOW).unwrap().iter().any(|f| f.key.as_deref() == Some(GAME_PASS)));
+
+        // The catalogue switched off: its game not installed gone, the installed one no longer marked, the tab gone.
+        let without = vec![xbox("Ivy", true, false), xbox("Larch", true, false)];
+        let synced = db.sync("xbox", &library(without), NOW).unwrap();
+        assert_eq!((synced.gone, synced.updated), (1, 1));
+        assert!(db.filters_at(NOW).unwrap().iter().all(|f| f.key.as_deref() != Some(GAME_PASS)));
+        // On again: the same rows back.
+        db.sync("xbox", &library(catalogue), NOW).unwrap();
+        assert_eq!(names(&db, &keyed(&db, GAME_PASS)), ["Ivy", "Juniper"]);
     }
 
     #[test]

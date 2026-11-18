@@ -5,6 +5,7 @@ pub mod art_picker;
 pub mod audio;
 pub mod by_hand;
 pub mod discord;
+pub mod game_pass;
 pub mod helper;
 pub mod installer;
 pub mod launcher;
@@ -126,6 +127,10 @@ pub struct Game {
     /// (docs/spec/art-picker.md). Only a snapshot says; a source reads none.
     #[serde(default)]
     pub art: art_picker::GameArt,
+    /// The game is in the PC Game Pass catalogue of the region Settings names (an Xbox game: docs/sources.md,
+    /// "Xbox"; #277). Only what Microsoft's public catalogue lists: whether the user has a subscription is not known.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub game_pass: bool,
 }
 
 /// What a store's client on this PC says of the game's own art online: the id its public catalogue knows the game by
@@ -336,6 +341,10 @@ pub struct Rule {
     /// The hidden games, and only those: the built-in Hidden filter's rule, which Settings does not offer.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// In the PC Game Pass catalogue (`Game::game_pass`): the Game Pass tab's rule (#277), which Settings does not
+    /// offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_pass: Option<bool>,
 }
 
 /// A saved filter with the games it picks: a Group on Home and a tab on Full library while it is shown and has a

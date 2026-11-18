@@ -815,6 +815,8 @@ Open question 6. Settings are rows of the library database's `settings` table, a
 | Who's playing today? (start-up.md 9) | `startup.ask_whos_playing` | on: Ask every time; off is Sign in the last profile |
 | About's Check for updates every day (updates.md 3) | `updates.daily_check` | off |
 | Launchers > a launcher ([launchers.md](launchers.md) 3) | `launcher.<key>` (`launcher.steam`, `launcher.epic`, ...) | on; saved by `Effect::Launcher`, read by the library itself, never by `Options` |
+| Launchers > Show Game Pass games ([launchers.md](launchers.md) 8, #277) | `gamepass.shown` | on |
+| Launchers > Game Pass region ([launchers.md](launchers.md) 8) | `gamepass.region` | none: Windows' own region; a market's code, saved by `Effect::GamePassRegion` |
 
 The library keeps `launcher.<key>.found` (`installed`, `not installed`, `failed`) and `launcher.<key>.read` (Unix seconds) beside them, what the launcher's last read found and when: launchers.md, 2.
 

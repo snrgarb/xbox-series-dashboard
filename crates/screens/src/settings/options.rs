@@ -33,10 +33,12 @@ pub enum Setting {
     /// Settings > About's Check for updates every day (docs/spec/updates.md): off by default, while the
     /// repository's releases are not public.
     DailyUpdateCheck,
+    /// Settings > Launchers' Show Game Pass games (#277): the PC Game Pass catalogue's games are listed with Xbox's.
+    ShowGamePass,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 10] = [
+    pub const ALL: [Setting; 11] = [
         Setting::BackgroundDelay,
         Setting::ReduceMotion,
         Setting::ShowPlayHistory,
@@ -47,6 +49,7 @@ impl Setting {
         Setting::DownloadArtOnline,
         Setting::AskWhosPlaying,
         Setting::DailyUpdateCheck,
+        Setting::ShowGamePass,
     ];
 
     /// The option's key in the settings table. Never changed: a database has it.
@@ -63,6 +66,7 @@ impl Setting {
             Setting::DownloadArtOnline => "art.online",
             Setting::AskWhosPlaying => "startup.ask_whos_playing",
             Setting::DailyUpdateCheck => "updates.daily_check",
+            Setting::ShowGamePass => model::game_pass::SHOWN_KEY,
         }
     }
 
@@ -130,6 +134,14 @@ pub struct Options {
     pub ask_whos_playing: bool,
     /// Settings > About checks for updates once a day: off by default.
     pub daily_update_check: bool,
+    /// The PC Game Pass catalogue's games are listed (Settings > Launchers, #277): on by default.
+    pub show_game_pass: bool,
+    /// The region whose PC Game Pass catalogue is listed, as chosen (`model::game_pass::REGION_KEY`); None is
+    /// Windows' own.
+    pub game_pass_region: Option<model::game_pass::Region>,
+    /// Windows' own region, as the executable read it as it started: not an option, but what "Windows' region"
+    /// stands for in the list. None where it could not be read.
+    pub windows_region: Option<model::game_pass::Region>,
     /// The Boot video chosen (docs/spec/start-up.md), which plays as the Dashboard starts if it is found.
     pub boot_video: BootVideo,
     /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
@@ -162,6 +174,9 @@ impl Default for Options {
             art_order: model::ArtOrder::default(),
             ask_whos_playing: of(Setting::AskWhosPlaying),
             daily_update_check: of(Setting::DailyUpdateCheck),
+            show_game_pass: of(Setting::ShowGamePass),
+            game_pass_region: None,
+            windows_region: None,
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),
@@ -188,6 +203,8 @@ impl Options {
             options.boot_video = video;
         }
         options.idle = crate::idle::Times::read(&stored);
+        options.game_pass_region =
+            stored(model::game_pass::REGION_KEY).as_deref().and_then(model::game_pass::Region::parse);
         options
     }
 
@@ -203,6 +220,7 @@ impl Options {
             Setting::DownloadArtOnline => self.art_online,
             Setting::AskWhosPlaying => self.ask_whos_playing,
             Setting::DailyUpdateCheck => self.daily_update_check,
+            Setting::ShowGamePass => self.show_game_pass,
         }
     }
 
@@ -218,6 +236,7 @@ impl Options {
             Setting::DownloadArtOnline => &mut self.art_online,
             Setting::AskWhosPlaying => &mut self.ask_whos_playing,
             Setting::DailyUpdateCheck => &mut self.daily_update_check,
+            Setting::ShowGamePass => &mut self.show_game_pass,
         } = on;
     }
 }
@@ -249,6 +268,17 @@ mod tests {
         assert_eq!(options.art_order, model::ArtOrder::default(), "Steam, Xbox, PlayStation, SteamGridDB, all on");
         // The port's own: no update check of its own accord until it is turned on.
         assert!(!options.daily_update_check);
+        // The port's own (#277): the Game Pass catalogue's games listed, for Windows' own region.
+        assert!(options.show_game_pass && options.game_pass_region.is_none());
+    }
+
+    #[test]
+    fn the_game_pass_region_is_a_market_code_and_none_is_windows() {
+        let read = |value: &'static str| {
+            Options::read(move |key| (key == model::game_pass::REGION_KEY).then(|| value.to_string())).game_pass_region
+        };
+        assert_eq!(read("gb").map(|r| r.to_string()), Some("GB".into()));
+        assert_eq!(read("Great Britain"), None);
     }
 
     #[test]

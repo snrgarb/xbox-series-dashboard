@@ -72,7 +72,7 @@ From [../sources.md](../sources.md), "The stores". What a launcher does not keep
 | EA app | Installed only | Yes | No | No | No (online lookup only) | No |
 | Ubisoft Connect | Owned (its cache) and installed | Yes | No | No | Its cache | No |
 | Battle.net | Installed, and a built-in catalogue's others (ownership unknown until the Agent answers) | Yes | No | No | No (online lookup only) | No |
-| Xbox | Installed only, no sign-in | Yes | No | No | The package's own logos | No |
+| Xbox | Installed, and the PC Game Pass catalogue's (section 8), no sign-in | Yes | No | No | The package's own logos; the catalogue's pictures online | No |
 
 ## 6. Focus and the log
 
@@ -106,9 +106,31 @@ launchers: update: already under way
 launchers: update: no library database to update
 ```
 
+## 8. Game Pass (#277)
+
+Under Update now, the PC Game Pass catalogue's two controls, as the Guide page lays a label and its control out (settings.md 16.1): no line says what they are for (16.11).
+
+| Element | y | Notes |
+|---|---|---|
+| "Game Pass" (Text) | 40 under Update now | |
+| Checkbox row **Show Game Pass games** (560 wide) | 14 under | `gamepass.shown`, on until turned off (`Setting::ShowGamePass`) |
+| "Game Pass region" (Text) | 48 under the checkbox | |
+| A dropdown (settings.md 4.5, 4.6) showing the region: "Windows' region (United Kingdom)" until one is chosen, else the market's name | 14 under | `gamepass.region`, a market's code; no row is Windows' |
+
+The page scrolls to keep the focused control whole (it does from the checkbox on, at 1080), and with the region's list open as much of the list as six choices. The list: **Windows' region (<its name>)** first ("Windows' region" where Windows did not say), then the 85 markets where PC Game Pass is sold, by name (`model::game_pass::MARKETS`, from Xbox's own regions page: docs/research/game-pass.md), the one set ticked; Up and Down move, A chooses, B closes it unchanged.
+
+- **Either change reads Xbox again at once** (`Effect::Set` for the checkbox, `Effect::GamePassRegion` for the region, then the launchers' update for Xbox alone), with the new region's catalogue (fetched if none of that region is kept from the last day) or none. The summary beside Update now says what came and went ("Updated: 3 new games, 1 game gone.").
+- **Off** marks the catalogue's games that are not installed gone (kept, with their history, for when it is on again) and drops the mark from the installed ones; the Game Pass tab goes with them.
+- **The subscription is not known.** Nothing on the page or anywhere says whether the user has PC Game Pass: the catalogue is what can be installed with it.
+
+Focus lines: `focus: Settings: Launchers: Show Game Pass games; 17 games from 3 launchers; ready; Game Pass on, GB (Windows')`, `focus: Settings: Launchers: Game Pass region; ...; Game Pass on, US`, and with its list open `focus: Settings: Launchers: Game Pass region, list on "United Kingdom"; ...`. The log: `settings: gamepass.shown = false`, `settings: gamepass.region = GB` (`= Windows'` when Windows' is chosen again), and the read's own `gamepass:` line, then `xbox: <n> games from ... and the PC Game Pass catalogue for GB (4 games: 1 installed, 3 not) in <ms> ms`. At start: `gamepass: Windows' region is GB, its language en-GB`.
+
+Picture: `settings-launchers-game-pass.png` (focus on the region, its list open), under `crates/screens/tests/reference/`.
+
 ## 7. Tests
 
 - `crates/library/src/launchers/tests.rs`: off hides from every query and the Queue, on gives back the same snapshot, an off launcher is not read, the read state is kept, the summary's wording.
 - `crates/screens/tests/settings.rs`: the walk, a launcher switched off and on through a real (in-memory) database, the refusal while a game plays, Update now once while it works, and the pictures.
 - `crates/source-steam/src/fixture.rs`: `fixture::change`, which the end-to-end test drives with `standin steam-change <dir> add-game | played <appid> <minutes>`.
+- `crates/library/src/game_pass/tests.rs` (made-up answers in the real shapes; a stand-in on 127.0.0.1: once a day, kept, the kept copy on a failure, an hour before a new try; one ignored live test that prints counts for US and GB), `crates/source-xbox/src/lib.rs` (the catalogue's games listed, the installed one once, by family or Store id; off lists none), and `e2e/payloads/gamepass/run.ps1` (section 8 by pad on the TV PC).
 - `e2e/payloads/launchers/run.ps1` (the TV PC, safe mode): the page opened with the pad; Epic switched off and on, its games leaving Home and Search and coming back with their play time; a game added to the fake Steam and another's play time changed; Update now bringing both in with its summary line.

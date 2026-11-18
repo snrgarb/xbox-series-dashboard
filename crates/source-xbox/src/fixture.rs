@@ -236,6 +236,57 @@ fn config(game: &FixtureGame) -> String {
     )
 }
 
+/// A market's games: product id, name and package identity each.
+pub type Market = (&'static str, &'static [(&'static str, &'static str, &'static str)]);
+
+/// The fake PC Game Pass catalogue's games, by market: (product id, name, the identity its family name is made of).
+/// Tidewater Trials is the fake drive's own installed game (`9ZZZMADEUP01`), so it is listed once; GB's list has one
+/// game more than US's, so a change of region shows. Every name and id is made up.
+pub const GAME_PASS: &[Market] = &[
+    (
+        "US",
+        &[
+            ("9ZZZMADEUP01", "Tidewater Trials", "MadeUpStudio.TidewaterTrials"),
+            ("9ZZZGPASS101", "Saltmarsh Run", "MadeUpStudio.SaltmarshRun"),
+            ("9ZZZGPASS102", "Ember Orchard", "MadeUpStudio.EmberOrchard"),
+        ],
+    ),
+    (
+        "GB",
+        &[
+            ("9ZZZMADEUP01", "Tidewater Trials", "MadeUpStudio.TidewaterTrials"),
+            ("9ZZZGPASS101", "Saltmarsh Run", "MadeUpStudio.SaltmarshRun"),
+            ("9ZZZGPASS102", "Ember Orchard", "MadeUpStudio.EmberOrchard"),
+            ("9ZZZGPASS103", "Kestrel Line", "MadeUpStudio.KestrelLine"),
+        ],
+    ),
+];
+
+/// Writes a local PC Game Pass catalogue at `dir` (`--gamepass <dir>`, `standin make-gamepass`): for each market of
+/// [`GAME_PASS`], `<dir>/<CC>/sigl.json` and `products.json`, the two answers in the real ones' shapes
+/// (`library::game_pass`), with no pictures.
+pub fn write_game_pass(dir: &Path) -> io::Result<()> {
+    for (market, games) in GAME_PASS {
+        let at = dir.join(market);
+        std::fs::create_dir_all(&at)?;
+        let mut sigl = vec![
+            r#"{"siglId":"made-up","title":"All PC Games","description":"","requiresShuffling":"False","imageUrl":""}"#
+                .to_string(),
+        ];
+        let mut products = Vec::new();
+        for (id, name, identity) in games.iter() {
+            sigl.push(format!(r#"{{"id":"{id}"}}"#));
+            let family = crate::family::family_name(identity, PUBLISHER);
+            products.push(format!(
+                r#"{{"ProductId":"{id}","ProductKind":"Game","LocalizedProperties":[{{"ProductTitle":"{name}","DeveloperName":"Made Up Studio","PublisherName":"Made Up Studio","Images":[]}}],"MarketProperties":[{{"OriginalReleaseDate":"2024-05-01T00:00:00.0000000Z"}}],"Properties":{{"PackageFamilyName":"{family}"}},"DisplaySkuAvailabilities":[]}}"#
+            ));
+        }
+        std::fs::write(at.join("sigl.json"), format!("[{}]", sigl.join(",")))?;
+        std::fs::write(at.join("products.json"), format!(r#"{{"Products":[{}]}}"#, products.join(",")))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

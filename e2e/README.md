@@ -236,7 +236,11 @@ by one word, a Steam install through the Queue to Recently installed, and an Uni
 each), `launchers` (Settings > Launchers on the fake Steam and Epic, docs/spec/launchers.md: Steam switched off with
 the pad, its games gone from Home's Recent row and Search and the page's count line, then on again with them back in
 their play order; a game added to the fake Steam and another's play time changed by `standin steam-change`, and Update
-now bringing both in with its summary line), `refresh-art` (#190, on the fake Steam and `standin serve-art`: with no
+now bringing both in with its summary line), `gamepass` (#277: the fake Xbox drive and a local PC Game Pass catalogue,
+`standin make-gamepass`, with `--gamepass` and `DASHBOARD_WINDOWS_REGION=US`: its games listed, the installed one once;
+the region changed to the United Kingdom by pad in Settings > Launchers and its catalogue read; Show Game Pass games off
+and on; a catalogue game's Game hub Install asking the stand-in for `ms-windows-store://pdp/?ProductId=9ZZZGPASS101`.
+Every run is given an empty `--gamepass` by `Start-Dashboard`, so no test asks Microsoft's real catalogue), `refresh-art` (#190, on the fake Steam and `standin serve-art`: with no
 square anywhere a Recent tile shows its cover whole, never cropped; a key typed in and SteamGridDB's yellow squares on
 the Recent row; Settings > Art's Refresh all art and details asked and confirmed, the cache emptied, the page saying how
 far it has got, the Dashboard killed part way and the refresh going on at the next start until the cache is full again

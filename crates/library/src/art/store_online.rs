@@ -386,7 +386,13 @@ fn steam_picture(answer: &Value, cdn: &str, kind: Kind) -> Option<String> {
 /// The display catalogue's `Products[0].LocalizedProperties[0].Images`, the first of the kind's purposes, at the
 /// width a screen needs (the store's images take `w`). Its addresses start `//`: the catalogue's own scheme goes on.
 fn microsoft_picture(answer: &Value, catalogue: &str, kind: Kind) -> Option<String> {
-    let images = answer.pointer("/Products/0/LocalizedProperties/0/Images")?.as_array()?;
+    microsoft_product_picture(answer.pointer("/Products/0")?, catalogue, kind)
+}
+
+/// One display catalogue product's picture of this kind (`LocalizedProperties[0].Images`), as
+/// [`microsoft_picture`] takes it: the Game Pass catalogue's games take theirs the same way (`crate::game_pass`).
+pub(crate) fn microsoft_product_picture(product: &Value, catalogue: &str, kind: Kind) -> Option<String> {
+    let images = product.pointer("/LocalizedProperties/0/Images")?.as_array()?;
     let (purposes, width): (&[&str], u32) = match kind {
         Kind::Cover => (&["Poster"], 600),
         Kind::Hero => (&["SuperHeroArt"], 1920),

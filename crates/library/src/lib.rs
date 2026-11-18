@@ -33,6 +33,7 @@ pub mod art;
 pub mod by_hand;
 pub mod choices;
 pub mod filters;
+pub mod game_pass;
 pub mod history;
 pub mod launchers;
 pub mod profiles;
@@ -134,6 +135,8 @@ const MIGRATIONS: &[&str] = &[
     choices::MIGRATION,
     // 10: Steam's games' last played taken again from Steam at its next sync (`RETAKE`, #237).
     "INSERT OR REPLACE INTO settings (key, value) VALUES ('steam.last_played', 'retake');",
+    // 11: the games of the PC Game Pass catalogue (`Game::game_pass`, #277).
+    "ALTER TABLE games ADD COLUMN game_pass INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// What a sync changed.
@@ -262,6 +265,7 @@ impl Database {
             size_on_disk: i64,
             critic_score: Option<i64>,
             community_score: Option<i64>,
+            game_pass: bool,
         }
 
         let tx = self.conn.transaction()?;
@@ -270,7 +274,7 @@ impl Database {
             let mut by_id: HashMap<i64, String> = HashMap::new();
             let mut rows = tx.prepare(
                 "SELECT id, source_id, name, installed, install_dir, last_played, playtime_minutes, gone,
-                        released, developers, publishers, size_on_disk, critic_score, community_score
+                        released, developers, publishers, size_on_disk, critic_score, community_score, game_pass
                  FROM games WHERE source = ?1",
             )?;
             let mut rows = rows.query([source])?;
@@ -291,6 +295,7 @@ impl Database {
                         size_on_disk: row.get(11)?,
                         critic_score: row.get(12)?,
                         community_score: row.get(13)?,
+                        game_pass: row.get(14)?,
                     },
                 };
                 by_id.insert(id, source_id.clone());
@@ -324,7 +329,7 @@ impl Database {
             tx.execute(
                 "UPDATE games
                  SET released = ?2, developers = ?3, publishers = ?4, size_on_disk = ?5, critic_score = ?6,
-                     community_score = ?7
+                     community_score = ?7, game_pass = ?8
                  WHERE id = ?1",
                 params![
                     game,
@@ -333,7 +338,8 @@ impl Database {
                     facts.publishers,
                     facts.size_on_disk,
                     facts.critic_score,
-                    facts.community_score
+                    facts.community_score,
+                    facts.game_pass
                 ],
             )?;
             Ok(())
@@ -369,6 +375,7 @@ impl Database {
                     size_on_disk: game.size_on_disk as i64,
                     critic_score: game.critic_score.map(i64::from),
                     community_score: game.community_score.map(i64::from),
+                    game_pass: game.game_pass,
                 },
             };
             match known.get_mut(&source_id) {
@@ -440,7 +447,8 @@ impl Database {
         }
         for known in known.values().filter(|k| !k.seen && !k.state.gone) {
             tx.execute(
-                "UPDATE games SET installed = 0, install_dir = NULL, size_on_disk = 0, gone = 1 WHERE id = ?1",
+                "UPDATE games SET installed = 0, install_dir = NULL, size_on_disk = 0, game_pass = 0, gone = 1
+                 WHERE id = ?1",
                 [known.id],
             )?;
             synced.gone += 1;
@@ -550,7 +558,7 @@ impl Database {
         let mut rows = self.conn.prepare(&format!(
             "SELECT id, source, source_id, name, installed, install_dir, last_played, playtime_minutes, favourite,
                     added, hidden, released, developers, publishers, size_on_disk, critic_score, community_score,
-                    (SELECT COUNT(*) FROM play_sessions WHERE play_sessions.game = games.id)
+                    (SELECT COUNT(*) FROM play_sessions WHERE play_sessions.game = games.id), game_pass
              FROM games WHERE {filter} ORDER BY last_played DESC, sort_name, name, id {limit}"
         ))?;
         let mut rows = rows.query(values)?;
@@ -585,6 +593,7 @@ impl Database {
                 critic_score: score(15)?,
                 community_score: score(16)?,
                 play_count: row.get::<_, i64>(17)?.clamp(0, u32::MAX as i64) as u32,
+                game_pass: row.get(18)?,
                 cover: None,
                 hero: None,
                 header: None,
