@@ -163,7 +163,9 @@ manner as remembered, the wording guessed where marked.
 5. **The log.** Steam is asked through its own client (#171): `steam client: pause <appid>: asking Steam's client
    over its CEF debugger ...`, a line a call, then `steam client: pause <appid>: Steam's client took it` or `not
    taken: <why>` (docs/sources.md, "Steam's own calls"); `store: Steam can't pause <game>'s install from here` where
-   it cannot; then the Queue's own `queue: <game> paused, 50% of 100 bytes`.
+   it cannot; then the Queue's own `queue: <game> paused, 50% of 100 bytes`. Battle.net's Agent (#172) offers them
+   only with `DASHBOARD_BATTLENET_STEER=1`, its calls for them being guesses: `battlenet: <code>: pause: the Agent
+   took it` (docs/sources.md, "Battle.net through its Agent").
 6. **Which folder.** Where the game's store has more than one folder and can be told which, Install asks "Where do
    you want to install X?", focus on the default Settings > Storage gives (storage.md, section 5; #179); else the
    install goes to that default. Steam's own default is the library Steam itself marks default, asked of its client

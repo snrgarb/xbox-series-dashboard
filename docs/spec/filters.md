@@ -206,10 +206,10 @@ The user (2026-11-18): "add full library filters for different game libraries to
 | GOG | Yes, once Galaxy was signed in on the PC: Galaxy's database (`ProductPurchaseDates`, GOG's own release keys). gogdl lists no library | Installed games only | Galaxy (`/command=installGame`) where it is installed, or gogdl where it is signed in |
 | EA app | **No**: installed games only (the Uninstall keys). No local file lists what the account owns | | |
 | Ubisoft Connect | Yes, once the client was signed in on the PC: its cache (`cache\configuration\configurations`) | Installed games only, named by their folders | `uplay://install/<id>` |
-| Battle.net | **No**: installed games only (`Agent\product.db`) | | |
+| Battle.net | **No**: no local file lists them. Its tab lists the installed games and, while the client is installed, a built-in catalogue's others, not installed; **whether the account owns one is not known until the Agent answers its install** (docs/sources.md, "Battle.net through its Agent"; #172) | Installed and the catalogue's | Its Agent, else the client's page |
 | Xbox | **No**: installed games only (the packages on the PC). What the account owns and Game Pass are Xbox's servers' to say, with a sign-in | | |
 
-So the tabs of EA app, Battle.net and Xbox are their installed games, the same as Games' for those launchers: they are there so that every launcher's library is one press away, and they gain games not installed if their sources ever read them.
+So the tabs of EA app and Xbox are their installed games (Battle.net's, its installed games and its catalogue's), the same as Games' for those launchers: they are there so that every launcher's library is one press away, and they gain games not installed if their sources ever read them.
 
 **Decided** (#250):
 

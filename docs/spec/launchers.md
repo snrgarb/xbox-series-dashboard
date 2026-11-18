@@ -71,7 +71,7 @@ From [../sources.md](../sources.md), "The stores". What a launcher does not keep
 | GOG | Installed; owned too with Galaxy | Yes | With Galaxy | No | With Galaxy, its cache | No |
 | EA app | Installed only | Yes | No | No | No (online lookup only) | No |
 | Ubisoft Connect | Owned (its cache) and installed | Yes | No | No | Its cache | No |
-| Battle.net | Installed only | Yes | No | No | No (online lookup only) | No |
+| Battle.net | Installed, and a built-in catalogue's others (ownership unknown until the Agent answers) | Yes | No | No | No (online lookup only) | No |
 | Xbox | Installed only, no sign-in | Yes | No | No | The package's own logos | No |
 
 ## 6. Focus and the log
