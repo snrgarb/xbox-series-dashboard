@@ -88,7 +88,8 @@ impl InstallFrom {
             return None;
         }
         let pressed = copies.iter().position(|copy| copy.is(&entry.game)).unwrap_or(0);
-        let rows = copies.iter().enumerate().map(|(at, copy)| Row::marked(home::game_mark(copy), &store_name(copy), at));
+        let rows =
+            copies.iter().enumerate().map(|(at, copy)| Row::marked(home::game_mark(copy), &store_name(copy), at));
         let mut panel = MenuPanel::prompt("Install from", Some(&game.name), rows.collect());
         panel.set_focus(pressed);
         Some(Self {

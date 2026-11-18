@@ -49,7 +49,12 @@ fn storage() -> Storage {
         choose: false,
         default: 0,
     };
-    Storage { drives: vec![system(), games()], stores: vec![steam, battlenet], ring: Some(system()), ..Storage::default() }
+    Storage {
+        drives: vec![system(), games()],
+        stores: vec![steam, battlenet],
+        ring: Some(system()),
+        ..Storage::default()
+    }
 }
 
 /// The fake library as the library database gives it, its games Steam's, with Storage as the shell would carry it.

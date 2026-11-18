@@ -295,7 +295,12 @@ impl<T: Copy> MenuPanel<T> {
             let middle = top + ROW / 2.0;
             match row.mark {
                 Some(mark) => {
-                    drawn::draw(ui, Rect::new(x + 44.0 - MARK / 2.0, middle - MARK / 2.0, MARK, MARK), mark, Color::WHITE);
+                    drawn::draw(
+                        ui,
+                        Rect::new(x + 44.0 - MARK / 2.0, middle - MARK / 2.0, MARK, MARK),
+                        mark,
+                        Color::WHITE,
+                    );
                 }
                 None => {
                     ui.icon(x + 44.0, middle, row.icon, 22.0, Color::WHITE);
