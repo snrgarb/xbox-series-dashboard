@@ -142,6 +142,9 @@ pub struct Options {
     /// Windows' own region, as the executable read it as it started: not an option, but what "Windows' region"
     /// stands for in the list. None where it could not be read.
     pub windows_region: Option<model::game_pass::Region>,
+    /// Whether the account has PC Game Pass, as the executable judged it as it started (#173 follow-up): not an
+    /// option, but Settings > Launchers' status line.
+    pub game_pass_subscription: model::game_pass::Subscription,
     /// The Boot video chosen (docs/spec/start-up.md), which plays as the Dashboard starts if it is found.
     pub boot_video: BootVideo,
     /// Which boot videos the media folder has: not an option, but what Settings' Boot video lists. The executable
@@ -177,6 +180,7 @@ impl Default for Options {
             show_game_pass: of(Setting::ShowGamePass),
             game_pass_region: None,
             windows_region: None,
+            game_pass_subscription: model::game_pass::Subscription::Unknown,
             boot_video: BootVideo::DEFAULT,
             boot_videos: Found::NONE,
             idle: crate::idle::Times::default(),

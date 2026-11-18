@@ -47,10 +47,13 @@ macro_rules! eprintln {
 pub mod family;
 pub mod fixture;
 pub mod gaming_root;
+pub mod installing;
 pub mod manifest;
 #[cfg(windows)]
 mod packaged;
 pub mod region;
+pub mod store_queue;
+pub mod subscription;
 
 use std::path::{Path, PathBuf};
 
@@ -58,7 +61,11 @@ use anyhow::{bail, Result};
 use std::sync::Arc;
 
 use model::game_pass::Catalogue;
-use model::{Ask, Found, Game, Library, OnlineArt, Source, Start};
+use model::{
+    Ask, Can, Folder, Found, Game, Install, InstallState, Installer, Library, OnlineArt, Opener, Refusal, Source,
+    Start, Steer,
+};
+use store_queue::StoreQueue;
 
 use manifest::{asset, plain};
 
@@ -67,6 +74,9 @@ pub const SOURCE: &str = "xbox";
 
 /// Where a drive's packaged games may be that `.GamingRoot` does not name.
 const MODIFIABLE: [&str; 2] = ["Program Files", "ModifiableWindowsApps"];
+
+/// `DASHBOARD_XBOX_QUEUE=off`: no install through the Store's queue, only its page.
+pub const QUEUE_SWITCH: &str = "DASHBOARD_XBOX_QUEUE";
 
 /// What gives the Game Pass catalogue to list: None while it is switched off or there is none.
 pub type GamePass = Arc<dyn Fn() -> Option<Catalogue> + Send + Sync>;
@@ -77,11 +87,18 @@ pub struct Xbox {
     /// A fake drive to read in place of this machine's.
     fake: Option<PathBuf>,
     game_pass: Option<GamePass>,
+    /// The Store's install queue (#173): Windows' own, the stand-in on a fake drive, none where neither is.
+    queue: Option<Arc<dyn StoreQueue>>,
+    jobs: installing::Jobs,
 }
 
 impl std::fmt::Debug for Xbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Xbox").field("fake", &self.fake).field("game_pass", &self.game_pass.is_some()).finish()
+        f.debug_struct("Xbox")
+            .field("fake", &self.fake)
+            .field("game_pass", &self.game_pass.is_some())
+            .field("queue", &self.queue.is_some())
+            .finish()
     }
 }
 
@@ -96,8 +113,23 @@ pub struct Registered {
 
 impl Xbox {
     /// This machine's packages, or with `Some(dir)` the fake drive at `dir` (`--xbox`).
+    ///
+    /// Installs go through the Store's queue: on a fake drive, its stand-in ([`store_queue::Fake`]); on Windows,
+    /// Windows' own unless `DASHBOARD_XBOX_QUEUE=off`, which leaves the Store's page as the only way.
     pub fn at(fake: Option<PathBuf>) -> Self {
-        Self { fake, game_pass: None }
+        let off = std::env::var(QUEUE_SWITCH).is_ok_and(|v| v.eq_ignore_ascii_case("off"));
+        let queue: Option<Arc<dyn StoreQueue>> = match &fake {
+            _ if off => None,
+            Some(dir) => Some(Arc::new(store_queue::Fake::on(dir))),
+            None if cfg!(windows) => Some(Arc::new(store_queue::Windows::default())),
+            None => None,
+        };
+        Self { fake, game_pass: None, queue, jobs: installing::Jobs::default() }
+    }
+
+    /// With the Store's queue given (a test's own stand-in), or none.
+    pub fn with_queue(self, queue: Option<Arc<dyn StoreQueue>>) -> Self {
+        Self { queue, ..self }
     }
 
     /// With the PC Game Pass catalogue `game_pass` gives at each read (#277).
@@ -128,14 +160,18 @@ pub fn with_catalogue(games: &mut Vec<Game>, catalogue: &Catalogue) -> (usize, u
     let mut marked = 0;
     let mut added = Vec::new();
     for product in &catalogue.products {
-        let same = |game: &Game| {
-            let family = product.family.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(&game.source_id));
+        let by_family =
+            |game: &Game| product.family.as_deref().is_some_and(|f| f.eq_ignore_ascii_case(&game.source_id));
+        let by_id = |game: &Game| {
             let id = game.online.product.as_deref().is_some_and(|id| {
                 id.eq_ignore_ascii_case(&product.id) || product.bundled.iter().any(|b| b.eq_ignore_ascii_case(id))
             });
-            family || id || game.source_id.eq_ignore_ascii_case(&product.id)
+            id || game.source_id.eq_ignore_ascii_case(&product.id)
         };
-        if let Some(game) = games.iter_mut().find(|game| same(game)) {
+        let same = |game: &Game| by_family(game) || by_id(game);
+        // The family name first, whichever game comes first: a Store id is only where no family name answers.
+        let at = games.iter().position(by_family).or_else(|| games.iter().position(by_id));
+        if let Some(game) = at.map(|at| &mut games[at]) {
             if !game.game_pass {
                 game.game_pass = true;
                 marked += 1;
@@ -272,6 +308,11 @@ fn drives() -> Vec<PathBuf> {
     (b'A'..=b'Z').map(|letter| PathBuf::from(format!("{}:\\", letter as char))).filter(|d| d.is_dir()).collect()
 }
 
+#[cfg(not(windows))]
+fn drives() -> Vec<PathBuf> {
+    Vec::new()
+}
+
 /// This machine's games: the drives' package folders and the package manager's list.
 #[cfg(windows)]
 fn read_machine() -> Result<Option<Found>> {
@@ -364,6 +405,41 @@ impl Source for Xbox {
         }
     }
 
+    /// The installs the Dashboard asked the Store's queue for, while there is a queue.
+    fn installs(&self) -> Option<Vec<Install>> {
+        self.queue.as_ref()?;
+        Some(self.jobs.installs())
+    }
+
+    /// The games installed now, while an install the Dashboard asked for is under way or lately ended: so a game the
+    /// Store has just registered, or an uninstall has just removed, is read at once. None at other times: reading
+    /// every package is not cheap, and a game installed in the Store's own app is found at the next read.
+    fn installed_now(&self) -> Option<Vec<String>> {
+        if self.queue.is_none() || !self.jobs.lately() {
+            return None;
+        }
+        let found = match &self.fake {
+            Some(dir) => {
+                let (roots, _) = package_roots(dir);
+                games(roots.into_iter().map(|root| (root, None)))
+            }
+            None => read_machine().ok()??.library.games,
+        };
+        let mut ids: Vec<String> = found.into_iter().filter(|g| g.installed).map(|g| g.source_id).collect();
+        ids.sort();
+        ids.dedup();
+        Some(ids)
+    }
+
+    /// Through the queue, removing the package is all an uninstall takes.
+    fn uninstalls_by_itself(&self) -> bool {
+        self.queue.is_some()
+    }
+
+    fn installer(&self) -> Option<&dyn Installer> {
+        self.queue.as_ref().map(|_| self as &dyn Installer)
+    }
+
     /// Whether a process of this session runs as the game's package.
     fn running(&self, game: &Game) -> bool {
         #[cfg(windows)]
@@ -373,6 +449,155 @@ impl Source for Xbox {
         let _ = game;
         false
     }
+}
+
+/// Xbox's installer (#173): the Store's own queue, `AppInstallManager` for this user, asked on a thread of its own
+/// (the Dashboard's window never waits on the Store), falling back to the Store's page, said in the log, where the
+/// queue does not take it: an unpackaged caller may be refused, and a game the account has no licence for is
+/// (`0x803F8001`). Uninstall removes the package for this user (`PackageManager.RemovePackageAsync`), falling back
+/// to Settings' installed apps.
+impl Installer for Xbox {
+    fn can(&self) -> Can {
+        if self.queue.is_none() {
+            return Can::NOTHING;
+        }
+        Can { pause: true, cancel: true, choose_folder: self.folders().len() > 1, quiet_uninstall: true }
+    }
+
+    /// The drives whose `.GamingRoot` names an Xbox games folder, the system drive's the default (or the first): the
+    /// Store installs onto a drive (`AppInstallOptions.TargetVolume`), into the folder the Xbox app set there.
+    fn folders(&self) -> Vec<Folder> {
+        if self.queue.is_none() {
+            return Vec::new();
+        }
+        let roots: Vec<PathBuf> = match &self.fake {
+            Some(dir) => vec![dir.clone()],
+            None => drives(),
+        };
+        let mut folders: Vec<Folder> = roots
+            .into_iter()
+            .filter_map(|drive| {
+                let named =
+                    std::fs::read(drive.join(gaming_root::FILE)).ok().and_then(|b| gaming_root::parse(&b).ok())?;
+                let folder = drive.join(named.first()?);
+                Some(Folder { path: folder, free: None, default: false })
+            })
+            .collect();
+        let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into()).to_ascii_uppercase();
+        let at = folders.iter().position(|f| f.path.to_string_lossy().to_ascii_uppercase().starts_with(&system));
+        if let Some(first) = folders.get_mut(at.unwrap_or(0)) {
+            first.default = true;
+        }
+        folders
+    }
+
+    fn install(&self, game: &Game, folder: Option<&Folder>, open: &mut dyn Opener) -> Result<(), Refusal> {
+        let queue = self.queue.clone().ok_or(Refusal::Unsupported)?;
+        let Some(product) = store_id(game) else {
+            log(&format!("{}: no Store product to ask the queue for: the Store's page instead", game.name));
+            return Err(Refusal::Unsupported);
+        };
+        let Some(mut detached) = open.detached() else { return Err(Refusal::Unsupported) };
+        if !self.jobs.begin(&product, &game.source_id, &game.name) {
+            log(&format!("{product}: {} is under way already", game.name));
+            return Ok(());
+        }
+        let folder = folder.map(|f| f.path.clone());
+        let fallback = self.ask(game, Ask::Install);
+        let jobs = self.jobs.clone();
+        let name = game.name.clone();
+        let onto = folder.as_ref().map_or("the Store's default drive".to_string(), |f| f.display().to_string());
+        log(&format!("{product}: asking the Store's queue to install {name} onto {onto}"));
+        std::thread::spawn(move || match queue.start(&product, folder.as_deref()) {
+            Ok(state) => {
+                log(&format!("{product}: the Store's queue took {name} ({state})"));
+                jobs.follow(queue);
+            }
+            Err(why) => {
+                jobs.end(&product);
+                fall_back(
+                    &product,
+                    &format!("the Store's queue did not take {name} ({why})"),
+                    fallback,
+                    &mut *detached,
+                );
+            }
+        });
+        Ok(())
+    }
+
+    fn uninstall(&self, game: &Game, open: &mut dyn Opener) -> Result<(), Refusal> {
+        let queue = self.queue.clone().ok_or(Refusal::Unsupported)?;
+        if !game.installed || store_queue::family_name(&game.source_id).is_none() {
+            return Err(Refusal::Unsupported);
+        }
+        let Some(mut detached) = open.detached() else { return Err(Refusal::Unsupported) };
+        let family = game.source_id.clone();
+        let name = game.name.clone();
+        let fallback = self.ask(game, Ask::Uninstall);
+        let jobs = self.jobs.clone();
+        log(&format!("{family}: removing {name}'s package for this user"));
+        std::thread::spawn(move || {
+            // Watched for a while, so the read that finds it gone comes at once.
+            jobs.watch();
+            match queue.remove(&family) {
+                Ok(0) => {
+                    fall_back(&family, &format!("no package of {name} was found to remove"), fallback, &mut *detached)
+                }
+                Ok(n) => log(&format!("{family}: {name} uninstalled ({n} package{})", if n == 1 { "" } else { "s" })),
+                Err(why) => {
+                    fall_back(&family, &format!("{name}'s package was not removed ({why})"), fallback, &mut *detached)
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Only an install the Dashboard asked for: the Store's own are the Store's to steer.
+    fn steer(&self, game: &Game, steer: Steer, _open: &mut dyn Opener) -> Result<(), Refusal> {
+        let queue = self.queue.clone().ok_or(Refusal::Unsupported)?;
+        let product = store_id(game).filter(|p| self.jobs.has(p)).ok_or(Refusal::Unsupported)?;
+        if steer == Steer::Resume && !self.jobs.paused(&product) {
+            return Ok(());
+        }
+        let jobs = self.jobs.clone();
+        let name = game.name.clone();
+        std::thread::spawn(move || match queue.steer(&product, steer) {
+            Ok(()) => {
+                log(&format!("{product}: {} {name}: the Store's queue took it", steer.verb()));
+                match steer {
+                    Steer::Pause => {
+                        let (done, total) = jobs.installs_bytes(&product);
+                        jobs.set(&product, InstallState::Paused { done, total });
+                    }
+                    Steer::Resume => {
+                        let (done, total) = jobs.installs_bytes(&product);
+                        jobs.set(&product, InstallState::Downloading { done, total });
+                    }
+                    Steer::Cancel => jobs.end(&product),
+                }
+            }
+            Err(why) => log(&format!("{product}: {} {name}: the Store's queue refused ({why})", steer.verb())),
+        });
+        Ok(())
+    }
+}
+
+/// Asks the store's own way where the queue did not take it, saying so.
+fn fall_back(what: &str, why: &str, fallback: Option<Start>, open: &mut dyn Opener) {
+    match fallback {
+        Some(start) => {
+            log(&format!("{what}: {why}: opening {start} instead"));
+            if let Err(e) = open.open(&start) {
+                log(&format!("{what}: that could not be opened either: {e}"));
+            }
+        }
+        None => log(&format!("{what}: {why}, and there is no other way here")),
+    }
+}
+
+fn log(line: &str) {
+    eprintln!("xbox: {line}");
 }
 
 /// The game's product in the Store: its config's `StoreId` where it is installed, else the catalogue's product id.
@@ -512,6 +737,75 @@ mod tests {
             })
             .collect();
         Catalogue { market: market.into(), language: "en-GB".into(), fetched: 1, products, ..Catalogue::default() }
+    }
+
+    /// An opener that keeps what it was asked, and gives a copy of itself to a thread.
+    #[derive(Clone, Default)]
+    struct Kept(Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl Opener for Kept {
+        fn open(&mut self, start: &Start) -> Result<(), String> {
+            self.0.lock().unwrap().push(start.to_string());
+            Ok(())
+        }
+
+        fn detached(&self) -> Option<Box<dyn Opener + Send>> {
+            Some(Box::new(self.clone()))
+        }
+    }
+
+    fn until(what: &str, mut done: impl FnMut() -> bool) {
+        let begun = std::time::Instant::now();
+        while !done() {
+            assert!(begun.elapsed() < std::time::Duration::from_secs(10), "never: {what}");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn a_catalogue_game_installs_through_the_queue_and_one_it_refuses_opens_the_stores_page() {
+        let dir = tempfile::tempdir().unwrap();
+        fixture::write(dir.path(), &Fixture::standard()).unwrap();
+        let queue: Arc<dyn StoreQueue> = Arc::new(store_queue::Fake::taking(dir.path(), 1.5));
+        let us = catalogue("US");
+        let xbox = Xbox::at(Some(dir.path().into()))
+            .with_game_pass(Arc::new(move || Some(us.clone())))
+            .with_queue(Some(queue));
+        let installer = xbox.installer().expect("an installer with a queue");
+        let can = installer.can();
+        assert!(can.pause && can.cancel && can.quiet_uninstall && !can.choose_folder);
+        let folders = installer.folders();
+        assert_eq!(folders, [Folder { path: dir.path().join("XboxGames"), free: None, default: true }]);
+        let game =
+            |name: &str| xbox.read().unwrap().unwrap().library.games.into_iter().find(|g| g.name == name).unwrap();
+        let saltmarsh = game("Saltmarsh Run");
+        assert!(!saltmarsh.installed && saltmarsh.game_pass);
+        assert_eq!(xbox.installs(), Some(Vec::new()));
+        assert_eq!(xbox.installed_now(), None, "nothing under way: not watched");
+
+        let opened = Kept::default();
+        installer.install(&saltmarsh, folders.first(), &mut opened.clone()).unwrap();
+        until("downloading in the Queue", || {
+            xbox.installs().unwrap().iter().any(|i| i.source_id == saltmarsh.source_id && i.state.downloading())
+        });
+        installer.steer(&saltmarsh, Steer::Pause, &mut opened.clone()).unwrap();
+        until("paused", || xbox.installs().unwrap().iter().any(|i| i.state.paused()));
+        installer.steer(&saltmarsh, Steer::Resume, &mut opened.clone()).unwrap();
+        until("installed", || xbox.installs().unwrap().is_empty());
+        let installed = game("Saltmarsh Run");
+        assert!(installed.installed && installed.game_pass, "{installed:?}");
+        assert_eq!(installed.source_id, saltmarsh.source_id, "the same row, installed");
+        assert_eq!(store_id(&installed).as_deref(), Some("9ZZZGPASS101"));
+        assert!(xbox.installed_now().unwrap().contains(&saltmarsh.source_id), "watched after an install");
+
+        installer.uninstall(&installed, &mut opened.clone()).unwrap();
+        until("uninstalled", || !game("Saltmarsh Run").installed);
+
+        // Refused by the queue: the Store's page, through the detached opener.
+        installer.install(&game("Ember Orchard"), None, &mut opened.clone()).unwrap();
+        until("the page opened", || !opened.0.lock().unwrap().is_empty());
+        assert_eq!(*opened.0.lock().unwrap(), ["ms-windows-store://pdp/?ProductId=9ZZZGPASS102"]);
+        assert_eq!(xbox.installs(), Some(Vec::new()));
     }
 
     #[test]

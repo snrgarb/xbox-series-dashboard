@@ -143,6 +143,8 @@ try {
     if (Test-Path $data) { Remove-Item $data -Recurse -Force }
     New-Item -ItemType Directory $data -Force | Out-Null
     $env:DASHBOARD_WINDOWS_REGION = 'US en-US'
+    # Install as the Store's page, the route this test is for: the Store's queue (#173) is xbox-install's.
+    $env:DASHBOARD_XBOX_QUEUE = 'off'
     $arguments = @('--log-focus', '--data-dir', "`"$data`"", '--xbox', "`"$xboxRoot`"", '--gamepass', "`"$catalogue`"",
                    '--open-addresses-with', "`"$(Join-Path $PSScriptRoot 'standin.exe')`"")
     $script:dashboard = Start-Dashboard $arguments
@@ -193,7 +195,7 @@ try {
 
     # --- Install: the Store's page by its product id, the stand-in taking it.
     Search-Count 'Saltmarsh Run' -Open | Out-Null
-    Press A 'GameHub: \d+ Hub Install' '07-game-hub-install' | Out-Null
+    Press A 'GameHub: \S+ Hub Install' '07-game-hub-install' | Out-Null
     $mark = Get-DashboardLogLength
     Press A '.+' | Out-Null
     Expect-Logged '^store: asked Xbox to install Saltmarsh Run: ms-windows-store://pdp/\?ProductId=9ZZZGPASS101$' $mark 'Install' | Out-Null
@@ -211,7 +213,7 @@ try {
     Say "result: $result"
     Stop-Dashboard
     Disconnect-Pad
-    Remove-Item Env:\DASHBOARD_WINDOWS_REGION -ErrorAction SilentlyContinue
+    Remove-Item Env:\DASHBOARD_WINDOWS_REGION, Env:\DASHBOARD_XBOX_QUEUE -ErrorAction SilentlyContinue
     if (Test-Path $data) { Remove-Item $data -Recurse -Force -ErrorAction SilentlyContinue }
 }
 exit $(if ($result -eq 'PASS') { 0 } else { 1 })

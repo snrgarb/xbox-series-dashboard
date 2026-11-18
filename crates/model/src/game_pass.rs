@@ -153,6 +153,39 @@ pub fn markets() -> impl Iterator<Item = Region> {
     MARKETS.iter().filter_map(|(code, _)| Region::parse(code))
 }
 
+/// Whether the account on this PC has PC Game Pass, as far as the Dashboard can judge with no sign-in of its own
+/// (docs/research/game-pass.md 7). `Active` is "a Game Pass licence was seen on this PC", never "subscribed now";
+/// `NotFound` is "looked where it would be, and it was not there". Settings > Launchers shows it beside the Game Pass
+/// rows; nothing else depends on it: the catalogue is listed and Install asks the Store whatever it says.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Subscription {
+    Active,
+    NotFound,
+    #[default]
+    Unknown,
+}
+
+impl Subscription {
+    /// The status line's words: `Game Pass: active on this PC`, `Game Pass: not found`, `Game Pass: can't tell`.
+    pub fn line(self) -> &'static str {
+        match self {
+            Subscription::Active => "Game Pass: active on this PC",
+            Subscription::NotFound => "Game Pass: not found",
+            Subscription::Unknown => "Game Pass: can't tell",
+        }
+    }
+
+    /// As the stand-in names it: `active`, `none`, `unknown`.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "active" => Some(Subscription::Active),
+            "none" | "not-found" => Some(Subscription::NotFound),
+            "unknown" => Some(Subscription::Unknown),
+            _ => None,
+        }
+    }
+}
+
 /// The region and language the catalogue is asked in: the market, and a language tag (`en-GB`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Locale {

@@ -367,6 +367,7 @@ Each to try once on the TV PC by the user, or on a spare PC, before the matching
 - B4. Do `progress` and `download_rate` move live?
 
 **Xbox**
+- (#173: the queue route is built behind `source_xbox::store_queue`, with these four still to see on the TV PC: docs/research/game-pass.md 8, and its probe `e2e/htpc/probes/gamepass.ps1`.)
 - X1. Does `AppInstallManager.StartProductInstallAsync` take an owned paid game, a Game Pass GDK game and an older UWP game from the Dashboard's own unelevated, unpackaged process? Where does `TargetVolume` put a GDK game against the Xbox app's `XboxGames` folder?
 - X2. Do installs started in the Xbox app or the Store appear in `AppInstallManager.AppInstallItems`, and can they be paused and cancelled from there?
 - X3. Does `RemovePackageAsync` on a GDK game remove `XboxGames\<game>`, keep its cloud saves, and leave the Xbox app saying "not installed"? Does it need an administrator?

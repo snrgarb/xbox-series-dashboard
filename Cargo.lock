@@ -2483,6 +2483,8 @@ dependencies = [
  "log-line",
  "model",
  "roxmltree",
+ "serde",
+ "serde_json",
  "sha2",
  "source-kit",
  "tempfile",

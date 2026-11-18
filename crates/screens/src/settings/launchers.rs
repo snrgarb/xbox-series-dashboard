@@ -412,6 +412,11 @@ impl Pane for Launchers {
             controls::label(ui, LEFT, heading, GAME_PASS);
             let on_show = focused && *at == Line::ShowGamePass;
             controls::checkbox_row(ui, show_row, SHOW_GAME_PASS, options.show_game_pass, on_show);
+            // Beside it, whether the account has PC Game Pass, as far as this PC says (docs/spec/launchers.md 8).
+            let beside = show_row.right() + 30.0;
+            let status = Rect::new(beside, show_row.y, RIGHT - beside, show_row.h);
+            let line = options.game_pass_subscription.line();
+            ui.paragraph(status, line, &BODY.color(TEXT_DIM), HAlign::Left, VAlign::Center, 1);
             controls::label(ui, LEFT, region_label, REGION);
             region.draw(ui, region_box, &region_value, focused && *at == Line::Region);
         });
