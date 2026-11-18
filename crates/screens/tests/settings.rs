@@ -1060,8 +1060,9 @@ fn settings_art() {
 }
 
 /// Settings > Art's sources (#246; docs/spec/settings.md, 16.8): the four online sources in their order under
-/// Download art online, Playnite's at first; A turns one off and on, its menu moves it up or down as Groups' does,
-/// focus following it, each change asked as `Effect::ArtOrder` and in force at once; the page scrolls to them.
+/// Download art online, Playnite's at first, each numbered by its place among those on (#262); A turns one off and
+/// on, its menu moves it up or down as Groups' does, focus following it, each change asked as `Effect::ArtOrder` and
+/// in force at once; the page scrolls to them.
 #[test]
 fn settings_art_sources() {
     use model::{ArtOrder, ArtSource};
@@ -1069,9 +1070,9 @@ fn settings_art_sources() {
     stage.press(&[Down, Down, Right, Down, Down, Down, A, Down, Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Download art online");
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source Steam, 1 of 4, on");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source Steam, 1 of 4, on, number 1");
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source Xbox, 2 of 4, on");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source Xbox, 2 of 4, on, number 2");
     stage.check("settings-art-sources");
 
     // A turns PlayStation off, and on again.
@@ -1080,7 +1081,11 @@ fn settings_art_sources() {
     let off = ArtOrder::default().switched(ArtSource::PlayStation);
     assert_eq!(asked(&mut stage), [Effect::ArtOrder(off)]);
     assert_eq!(stage.dashboard.options().art_order.text(), "steam,xbox,-playstation,steamgriddb");
-    stage.press(&[A]);
+    // Off, it has no number, and the ones after it number on from the one before it (#262).
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source SteamGridDB, 4 of 4, on, number 3");
+    stage.check("settings-art-sources-off");
+    stage.press(&[Up, A]);
     assert_eq!(asked(&mut stage), [Effect::ArtOrder(ArtOrder::default())]);
 
     // SteamGridDB's menu: Move up alone, at the foot. Up twice, the menu staying, focus going with it.
@@ -1094,7 +1099,7 @@ fn settings_art_sources() {
     assert_eq!(stage.dashboard.options().art_order, moved);
     assert_eq!(moved.text(), "steam,steamgriddb,xbox,playstation");
     stage.press(&[B]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source SteamGridDB, 2 of 4, on");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source SteamGridDB, 2 of 4, on, number 2");
     let orders: Vec<_> = asked(&mut stage).into_iter().filter(|e| matches!(e, Effect::ArtOrder(_))).collect();
     assert_eq!(orders.last(), Some(&Effect::ArtOrder(moved)));
     // Up from the first source is Download art online; Left is back.

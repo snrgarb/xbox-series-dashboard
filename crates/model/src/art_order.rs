@@ -103,6 +103,12 @@ impl ArtOrder {
         self.0.iter().any(|(s, on)| *s == source && *on)
     }
 
+    /// A source's number in the order as Settings > Art shows it: its place among the sources that are on, from 1;
+    /// none while it is off.
+    pub fn number(&self, source: ArtSource) -> Option<usize> {
+        self.on().iter().position(|s| *s == source).map(|at| at + 1)
+    }
+
     /// Where a source is, from 0.
     pub fn place(&self, source: ArtSource) -> usize {
         self.0.iter().position(|(s, _)| *s == source).unwrap_or(0)
@@ -169,5 +175,15 @@ mod tests {
         assert_eq!(order.moved(SteamGridDb, 1), order);
         assert_eq!(order.switched(Steam).switched(Steam), order);
         assert!(!order.switched(Steam).is_on(Steam));
+    }
+
+    #[test]
+    fn a_source_is_numbered_among_those_that_are_on_and_one_that_is_off_has_no_number() {
+        let order = ArtOrder::default();
+        assert_eq!(ArtSource::ALL.map(|source| order.number(source)), [Some(1), Some(2), Some(3), Some(4)]);
+        let off = order.switched(Xbox);
+        assert_eq!([Steam, Xbox, PlayStation, SteamGridDb].map(|s| off.number(s)), [Some(1), None, Some(2), Some(3)]);
+        let moved = off.moved(SteamGridDb, -3);
+        assert_eq!([SteamGridDb, Steam, Xbox, PlayStation].map(|s| moved.number(s)), [Some(1), Some(2), None, Some(3)]);
     }
 }
