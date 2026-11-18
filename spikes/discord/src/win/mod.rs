@@ -8,6 +8,9 @@ mod send;
 mod sign_in;
 mod sign_out;
 mod system;
+mod voice;
+mod voice_list;
+mod voice_probe;
 
 use std::time::Duration;
 
@@ -51,6 +54,9 @@ pub fn run(options: &Options) -> i32 {
             Step::SignIn => sign_in::run(&options, &loader),
             Step::Dms => dms::run(&options, &loader),
             Step::Send => send::run(&options, &loader),
+            Step::VoiceProbe => voice_probe::run(&options, &loader),
+            Step::VoiceList => voice_list::run(&options, &loader),
+            Step::VoiceJoin | Step::Call | Step::VoiceIncoming => voice::run(&options, &loader),
             Step::SignOut => unreachable!(),
         }
     });

@@ -36,7 +36,7 @@ struct Ui {
 }
 
 pub fn run(options: &Options, loader: &Loader) -> i32 {
-    let host = match Host::open(loader, &options.data, Show::Full, options.browser_args.as_deref()) {
+    let host = match Host::open(loader, &options.data, Show::Full, options.switches().as_deref()) {
         Ok(host) => host,
         Err(e) => {
             say!("sign-in: no web view: {e}");

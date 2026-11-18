@@ -15,8 +15,8 @@ use webview2_com::{
     CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR, CoreWebView2EnvironmentOptions,
     CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
     ExecuteScriptCompletedHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
-    NewWindowRequestedEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
-    SourceChangedEventHandler,
+    NewWindowRequestedEventHandler, NotificationReceivedEventHandler, PermissionRequestedEventHandler,
+    ProcessFailedEventHandler, SetPermissionStateCompletedHandler, SourceChangedEventHandler,
 };
 use windows::core::{s, w, Interface, BOOL, HRESULT, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -83,6 +83,32 @@ thread_local! {
     static PAINTER: RefCell<Option<Painter>> = const { RefCell::new(None) };
     /// The window was asked to close (Alt+F4).
     pub static CLOSED: Cell<bool> = const { Cell::new(false) };
+    /// The voice steps: the microphone (and autoplay) is granted to the page; otherwise refused.
+    pub static GRANT_MICROPHONE: Cell<bool> = const { Cell::new(false) };
+    /// Discord's web notifications taken this run.
+    pub static NOTIFICATIONS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// The voice steps call this before `Host::open`: the microphone is granted when the page asks.
+pub fn grant_microphone() {
+    GRANT_MICROPHONE.with(|g| g.set(true));
+}
+
+pub fn notifications() -> u32 {
+    NOTIFICATIONS.with(Cell::get)
+}
+
+fn permission_name(kind: COREWEBVIEW2_PERMISSION_KIND) -> &'static str {
+    match kind {
+        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE => "microphone",
+        COREWEBVIEW2_PERMISSION_KIND_CAMERA => "camera",
+        COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS => "notifications",
+        COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY => "autoplay",
+        COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ => "clipboard read",
+        COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION => "geolocation",
+        COREWEBVIEW2_PERMISSION_KIND_WINDOW_MANAGEMENT => "window management",
+        _ => "other",
+    }
 }
 
 pub type Painter = Box<dyn Fn(HDC, RECT)>;
@@ -137,7 +163,7 @@ fn window(show: &Show) -> Result<(HWND, RECT), String> {
         let tool = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
         let (ex, style, at, size) = match show {
             Show::Full => (WS_EX_TOPMOST, WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN, (0, 0), screen),
-            Show::Hidden(Hide::Controller) => (tool, WS_POPUP | WS_CLIPCHILDREN, (0, 0), HIDDEN),
+            Show::Hidden(Hide::Controller | Hide::VisibleUnshown) => (tool, WS_POPUP | WS_CLIPCHILDREN, (0, 0), HIDDEN),
             Show::Hidden(Hide::Offscreen) => (tool, WS_POPUP | WS_CLIPCHILDREN, (-20000, -20000), HIDDEN),
         };
         let hwnd = CreateWindowExW(
@@ -166,6 +192,9 @@ fn window(show: &Show) -> Result<(HWND, RECT), String> {
             }
             Show::Hidden(Hide::Controller) => {
                 say!("window: never shown, {}x{} px; the web view is told it is not visible", size.0, size.1)
+            }
+            Show::Hidden(Hide::VisibleUnshown) => {
+                say!("window: never shown, {}x{} px; the web view is told it IS visible", size.0, size.1)
             }
         }
         Ok((hwnd, RECT { left: 0, top: 0, right: size.0, bottom: size.1 }))
@@ -250,12 +279,110 @@ impl Host {
             }
             controller.SetBounds(area).map_err(|e| format!("SetBounds: {e}"))?;
             controller.SetIsVisible(!controller_hidden).map_err(|e| format!("SetIsVisible: {e}"))?;
+            if hidden {
+                let mut visible = BOOL(0);
+                let _ = controller.IsVisible(&mut visible);
+                say!("controller: IsVisible reads {}", yes(visible.as_bool()));
+            }
             controller.CoreWebView2().map_err(|e| format!("CoreWebView2: {e}"))?
         };
         let host = Host { hwnd, area, env, controller, webview };
         host.settings();
         host.events();
+        host.notifications();
+        host.preset_permissions();
         Ok(host)
+    }
+
+    /// Discord's web notifications (a message, a call), taken by us: counted, their lengths logged, marked handled
+    /// so Windows shows nothing. Never their words or who sent them.
+    fn notifications(&self) {
+        let Ok(w24) = self.webview.cast::<ICoreWebView2_24>() else {
+            say!("notifications: this runtime has no NotificationReceived (ICoreWebView2_24): Windows would show them");
+            return;
+        };
+        let mut token = 0i64;
+        let added = unsafe {
+            w24.add_NotificationReceived(
+                &NotificationReceivedEventHandler::create(Box::new(|_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let n = NOTIFICATIONS.with(|c| {
+                        c.set(c.get() + 1);
+                        c.get()
+                    });
+                    let _ = args.SetHandled(true);
+                    match args.Notification() {
+                        Ok(note) => {
+                            let length = |get: &dyn Fn(*mut PWSTR) -> windows::core::Result<()>| {
+                                let mut p = PWSTR::null();
+                                match get(&mut p) {
+                                    Ok(()) if !p.is_null() => CoTaskMemPWSTR::from(p).to_string().chars().count(),
+                                    _ => 0,
+                                }
+                            };
+                            let title = length(&|p| note.Title(p));
+                            let body = length(&|p| note.Body(p));
+                            let tag = length(&|p| note.Tag(p));
+                            let (mut interaction, mut silent) = (BOOL(0), BOOL(0));
+                            let _ = note.RequiresInteraction(&mut interaction);
+                            let _ = note.IsSilent(&mut silent);
+                            say!(
+                                "notification: {n} (title {title} chars, body {body} chars, tag {tag} chars, requires interaction {}, silent {}): handled, Windows shows nothing",
+                                yes(interaction.as_bool()),
+                                yes(silent.as_bool())
+                            );
+                        }
+                        Err(e) => say!("notification: {n} (unreadable: {e}): handled"),
+                    }
+                    Ok(())
+                })),
+                &mut token,
+            )
+        };
+        match added {
+            Ok(()) => say!("notifications: NotificationReceived taken: each is counted and marked handled"),
+            Err(e) => say!("notifications: NotificationReceived refused: {e}"),
+        }
+    }
+
+    /// The permissions Discord's page gets without asking, set on the profile for https://discord.com, so it never
+    /// waits on a prompt: notifications always (for NotificationReceived to have something to take), the
+    /// microphone in the voice steps. Never kept past what the session already keeps.
+    fn preset_permissions(&self) {
+        let mut kinds = vec![(COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS, "notifications")];
+        if GRANT_MICROPHONE.with(Cell::get) {
+            kinds.push((COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, "microphone"));
+            kinds.push((COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY, "autoplay"));
+        }
+        let profile = unsafe { self.webview.cast::<ICoreWebView2_13>().and_then(|w| w.Profile()) };
+        let Ok(profile) = profile.and_then(|p| p.cast::<ICoreWebView2Profile4>()) else {
+            say!("permissions: this runtime cannot set them ahead (no ICoreWebView2Profile4): only as asked");
+            return;
+        };
+        for (kind, name) in kinds {
+            let handler = SetPermissionStateCompletedHandler::create(Box::new(move |result| {
+                match result {
+                    Ok(()) => say!("permissions: {name} allowed ahead for https://discord.com"),
+                    Err(e) => say!("permissions: {name} could not be allowed ahead: {e}"),
+                }
+                Ok(())
+            }));
+            let origin = HSTRING::from("https://discord.com");
+            if let Err(e) =
+                unsafe { profile.SetPermissionState(kind, &origin, COREWEBVIEW2_PERMISSION_STATE_ALLOW, &handler) }
+            {
+                say!("permissions: {name} refused ahead: {e}");
+            }
+        }
+        pump(Duration::from_millis(300));
+    }
+
+    /// Whether Chromium says the page is playing sound now (`ICoreWebView2_8::IsDocumentPlayingAudio`).
+    pub fn playing_audio(&self) -> Option<bool> {
+        let w8 = self.webview.cast::<ICoreWebView2_8>().ok()?;
+        let mut playing = BOOL(0);
+        unsafe { w8.IsDocumentPlayingAudio(&mut playing) }.ok()?;
+        Some(playing.as_bool())
     }
 
     /// No password saved by WebView2, no autofill, no DevTools window, no context menu, no zoom by keys.
@@ -340,8 +467,31 @@ impl Host {
                     if let Some(args) = args {
                         let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
                         let _ = args.PermissionKind(&mut kind);
-                        let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY);
-                        say!("permission asked and refused: kind {}", kind.0);
+                        let mut user = BOOL(0);
+                        let _ = args.IsUserInitiated(&mut user);
+                        // Granted: notifications (so NotificationReceived takes them), and in the voice steps the
+                        // microphone and autoplay. Never the camera (D5, no video) or anything else.
+                        let grant = kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS
+                            || (GRANT_MICROPHONE.with(Cell::get)
+                                && (kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+                                    || kind == COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY));
+                        let state = if grant {
+                            COREWEBVIEW2_PERMISSION_STATE_ALLOW
+                        } else {
+                            COREWEBVIEW2_PERMISSION_STATE_DENY
+                        };
+                        let _ = args.SetState(state);
+                        // Asked again next run, so each run's log shows the request.
+                        if let Ok(args3) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() {
+                            let _ = args3.SetSavesInProfile(false);
+                        }
+                        say!(
+                            "permission: kind {} ({}) {}, asked by a user gesture {}",
+                            kind.0,
+                            permission_name(kind),
+                            if grant { "granted" } else { "refused" },
+                            yes(user.as_bool())
+                        );
                     }
                     Ok(())
                 })),
@@ -430,9 +580,15 @@ impl Host {
 
     /// `Runtime.evaluate`, awaiting a promise: the value it settles to.
     pub fn evaluate(&self, js: &str) -> Result<Value, String> {
+        self.evaluate_as(js, false)
+    }
+
+    /// `Runtime.evaluate` as if the user had just pressed something (`userGesture`): what an AudioContext's
+    /// `resume()` needs under Chromium's autoplay rule.
+    pub fn evaluate_as(&self, js: &str, gesture: bool) -> Result<Value, String> {
         let answer = self.cdp(
             "Runtime.evaluate",
-            json!({ "expression": js, "awaitPromise": true, "returnByValue": true, "userGesture": false }),
+            json!({ "expression": js, "awaitPromise": true, "returnByValue": true, "userGesture": gesture }),
         )?;
         if let Some(details) = answer.get("exceptionDetails") {
             let text = details

@@ -1,5 +1,6 @@
 //! Spike for #196: discord.com in a WebView2 hosted from Rust, run step by step on the TV PC by the lead, each step
-//! writing what it found to a log. Windows only; what each step answers is in `docs/research/discord-web-spike.md`.
+//! writing what it found to a log. Windows only; what each step answers is in `docs/research/discord-web-spike.md`,
+//! and for the voice steps of #292 (`--voice-*`, `--call`) in `docs/research/discord-web-voice.md`.
 //!
 //! Never read, printed or kept: the password, the token, cookies, query strings and fragments of addresses. Names of
 //! conversations go to a file of their own (`--names`), never the log; the message sent and its conversation come
