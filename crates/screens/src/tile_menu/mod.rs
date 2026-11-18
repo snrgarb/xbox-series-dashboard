@@ -72,7 +72,20 @@ fn game_hub(game: &Game) -> Option<Open> {
 /// can be told which (`Library::storage`), "Where do you want to install X?" takes the place of what asked first
 /// (`install_where`). A game that is installed by now, already in the Queue, or in no library database asks
 /// nothing, and what asked closes all the same.
+///
+/// Before either, where the library has the same game, not installed, from other launchers that can install it now,
+/// "Install from" takes the place of what asked, a row a launcher (`install_from`; #249), and goes on from here with
+/// the launcher chosen ([`install_from_store`]).
 pub fn install(game: &Game, library: &Library) -> PageAction {
+    if crate::install_from::asks(game, library) {
+        return crate::install_from::open(game);
+    }
+    install_from_store(game, library)
+}
+
+/// Install of this launcher's copy of the game, with no question of which launcher: the folder's question where its
+/// store asks one, else the store asked at once.
+pub fn install_from_store(game: &Game, library: &Library) -> PageAction {
     match game {
         game if !game.installed && game.id != 0 && library.queue.get(game.id).is_none() => {
             if crate::install_where::asks(game, library).is_some() {

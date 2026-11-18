@@ -149,6 +149,14 @@ pub trait Source: Send + Sync {
     fn installer(&self) -> Option<&dyn Installer> {
         None
     }
+
+    /// Whether the store can be asked to install the game now: it has an installer (`installer`), whose route or
+    /// whose fallback to [`ask`](Source::ask) takes it, or its own way gives something to open. False where nothing
+    /// would: the EA app's (installs.md 5), an Xbox game with no Store id to hand, a client not on this PC. Asked off
+    /// the UI thread (`ask` may read the client's files): what Install's "Install from" question offers (#249).
+    fn can_install(&self, game: &Game) -> bool {
+        self.installer().is_some() || self.ask(game, Ask::Install).is_some()
+    }
 }
 
 #[cfg(test)]

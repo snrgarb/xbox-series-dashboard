@@ -484,12 +484,12 @@ function Initialize-FakeSteam([string] $Root = (Get-FakeRoot 'steam'), [switch] 
 
 # Writes a fake store at $Root with `standin <Command> $Root` (make-epic, make-gog, make-ea, make-ubisoft,
 # make-battlenet) and returns the Library as the Dashboard's own reader read it back, which is also $Json in the
-# test's output.
-function New-FakeStore([string] $Command, [string] $Root, [string] $Json) {
+# test's output. $Extra goes on the command line after them (make-epic's --owning <name>).
+function New-FakeStore([string] $Command, [string] $Root, [string] $Json, [string[]] $Extra = @()) {
     $standin = Join-Path $script:Payload 'standin.exe'
     if (-not (Test-Path $standin)) { throw "No standin.exe in $script:Payload" }
     $json = Join-Path $script:Out $Json
-    $made = Start-Process $standin -ArgumentList @($Command, "`"$Root`"", '--json', "`"$json`"") -Wait -PassThru
+    $made = Start-Process $standin -ArgumentList (@($Command, "`"$Root`"", '--json', "`"$json`"") + $Extra) -Wait -PassThru
     if ($made.ExitCode -ne 0) {
         $why = Get-Content (Join-Path (Split-Path $Root -Parent) 'standin-error.txt') -Raw -ErrorAction SilentlyContinue
         throw "standin $Command exited with $($made.ExitCode): $why"
@@ -516,9 +516,11 @@ function Register-UrlHandler([string] $Scheme, [string] $Command) {
 # registered: `standin open-address` takes the launcher's links, and finds $Root in handlers.json.
 #
 # Returns the Library as the Dashboard's own reader read it back (also fake-epic.json in the test's output): games by
-# name, each with source_id (its AppName), name, installed, install_dir.
-function Initialize-FakeEpic([string] $Root = (Get-FakeRoot 'epic')) {
-    $library = New-FakeStore 'make-epic' $Root 'fake-epic.json'
+# name, each with source_id (its AppName), name, installed, install_dir. With -Owning, the account also owns a game of
+# that name, not installed: the same game in two launchers, for "Install from" (#249).
+function Initialize-FakeEpic([string] $Root = (Get-FakeRoot 'epic'), [string] $Owning = '') {
+    $extra = if ($Owning) { @('--owning', "`"$Owning`"") } else { @() }
+    $library = New-FakeStore 'make-epic' $Root 'fake-epic.json' $extra
     $standin = Join-Path $script:Payload 'standin.exe'
     Register-Fake 'epic' $Root 'epic'
     if (-not $script:Safe) { Register-UrlHandler 'com.epicgames.launcher' "`"$standin`" epic-url `"$Root`" `"%1`"" }

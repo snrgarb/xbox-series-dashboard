@@ -215,7 +215,10 @@ in Manage Queue opening Settings > Storage; it stops at the first step that is n
 `standin steam-library`, its client's CEF debugger on; Settings > Storage listing both with the drives, the second
 chosen as Steam's default; the storage ring on My games & apps; Install asking "Where do you want to install X?" with
 the second focused, and Steam's client asked to install into it; then the Dashboard started again on the same data
-folder with the choice kept), `epic-legendary` (#175: standin.exe kept as legendary in the test's data folder, its records under
+folder with the choice kept), `install-from` (#249: the fake Steam and a fake Epic owning the same game, Quiet
+Orbit, neither installed (`standin make-epic --owning`); Install on Steam's tile asking "Install from" with Steam
+focused and Epic Games under it, B asking nothing, then Epic Games chosen and Epic's own install asked for, the
+stand-in launcher saying it was, Steam asked nothing), `epic-legendary` (#175: standin.exe kept as legendary in the test's data folder, its records under
 `--helper-home`; not signed in said and shown on Settings > Helpers; signed in with the stand-in's `legendary auth`
 and the library listed; Zinnia Gate installed from its Game hub with legendary's own progress in the Queue, paused,
 resumed and cancelled from Manage Queue, installed to the end with egl-sync's record, played through `legendary

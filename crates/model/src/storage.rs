@@ -136,6 +136,11 @@ pub struct Storage {
     /// The drive Manage's ring shows: the one holding most installed games that are not hidden; none where no
     /// installed game's drive could be read (docs/spec/my-games.md, 2.6).
     pub ring: Option<Drive>,
+    /// Of the games the library has from more than one launcher under one name (`names`), those, not installed, whose
+    /// store can be asked to install them now (`Source::can_install`), by id: the rows Install's "Install from"
+    /// question may offer (docs/spec/install-from.md; #249). Read with the rest, off the UI thread.
+    #[serde(default)]
+    pub installable: Vec<i64>,
 }
 
 impl Storage {
@@ -201,7 +206,7 @@ pub fn read<'a>(
             })
         })
         .collect();
-    Storage { drives: drives.all(), stores, ring: ring(drives, installed) }
+    Storage { drives: drives.all(), stores, ring: ring(drives, installed), installable: Vec::new() }
 }
 
 /// The drive holding most of these games, ties to the first by its root; none where no game's drive is known.
