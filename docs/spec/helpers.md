@@ -143,9 +143,11 @@ Heroic's, which drives gogdl the same way):
   `GOGDL_CONFIG_PATH`, so nothing goes to Heroic's own `%APPDATA%\heroic_gogdl`), `support\<id>` and `redist` the
   support files and the script interpreter, and `installed.json` the Dashboard's record of the games it installed,
   read by GOG's source beside the registry's (a gogdl install writes no `GOG.com\Games` key itself).
-- *The library*: gogdl lists none, so the games owned and not installed are Galaxy's database's alone. Without Galaxy
-  signed in once on the PC, there is nothing to install from here (listing it from GOG's own API with gogdl's token is
-  a decision for later: a source reads files, never the network).
+- *The library*: gogdl lists none of its own. The games owned and not installed are Galaxy's database's where Galaxy
+  was signed in once on the PC; where it was not and gogdl is signed in, GOG's own library service's, asked with
+  gogdl's token (#276, `source_gog::gogdl::library`): at start and on Update now, off the window's thread, kept as
+  `<data>\owned\gog.json` and read from there (the source itself still reads files only). The token is read from
+  `auth.json` for the call and never kept, logged or written elsewhere; one that has run out is renewed by `gogdl auth`.
 - *Install* is `gogdl --auth-config-path <auth.json> download <id> --platform windows --path <Games> --support
   <support\id> --skip-dlcs --lang en-US`, into `<Games>\<installDirectory>`; progress is gogdl's own `[PROGRESS] INFO: =
   Progress: <percent> <written>/<total>, ...` and ` + Download\t- <MiB> MiB/s (raw) ...` lines. Then the game's

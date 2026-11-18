@@ -8,6 +8,8 @@
 //! - What else the account owns, its play time and its art: Galaxy's database,
 //!   `%ProgramData%\GOG.com\Galaxy\storage\galaxy-2.0.db` (`galaxy`), there only when Galaxy was signed in on this
 //!   PC once; and the pictures Galaxy has cached beside it, under `Galaxy\webcache`.
+//! - Without that database and with gogdl signed in, what the account owns from GOG's library service with gogdl's
+//!   token (`gogdl::library`, #276), taken at start and on Update now and kept as `<data>\owned\gog.json`.
 //!
 //! [`Gog`] is the source the library reads (`model::Source`). A GOG game has no launcher check, so it is started
 //! as its own program, with the `.info` file's primary play task: no client is needed. Galaxy is asked to install
@@ -45,12 +47,43 @@ pub struct Gog {
     root: Option<PathBuf>,
     /// gogdl, where the executable gives its route (#176).
     gogdl: Option<gogdl::Gogdl>,
+    /// `<data>\owned`, where the owned list taken with gogdl's sign-in is kept (`source_kit::owned`, #276).
+    owned: Option<PathBuf>,
+    /// Where GOG's services are asked; with none, [`gogdl::library::Web::from_env`].
+    web: Option<gogdl::library::Web>,
 }
 
 impl Gog {
     /// GOG's files under `root` (`--gog` on the command line, `Places::under`), or with none the machine's own.
     pub fn at(root: Option<PathBuf>) -> Self {
-        Self { root, gogdl: None }
+        Self { root, ..Self::default() }
+    }
+
+    /// The owned list kept in `dir` (`<data>\owned`): where Galaxy's database is not on the PC, the games the account
+    /// owns are taken from GOG's library service with gogdl's sign-in and kept there.
+    pub fn with_owned(mut self, dir: Option<PathBuf>) -> Self {
+        self.owned = dir;
+        self
+    }
+
+    /// GOG's services asked at `web` (the tests' stand-in).
+    pub fn with_web(mut self, web: gogdl::library::Web) -> Self {
+        self.web = Some(web);
+        self
+    }
+
+    /// The owned list as kept, where Galaxy's database is not there to say.
+    fn owned_list(&self, places: &Places) -> Option<source_kit::owned::List> {
+        if places.database().is_file() {
+            return None;
+        }
+        let list = source_kit::owned::read(self.owned.as_deref()?, SOURCE).unwrap_or_else(|e| {
+            eprintln!("gog: owned: {e:#}");
+            None
+        })?;
+        static SAID: std::sync::Once = std::sync::Once::new();
+        SAID.call_once(|| eprintln!("{}", owned_line(&list)));
+        Some(list)
     }
 
     /// With gogdl at `route`: its installs read, and asked to install and steer installs while it is added and
@@ -159,12 +192,13 @@ impl Source for Gog {
         }
         let records = places.records();
         let ours = self.gogdl.as_ref().map(|gogdl| gogdl::installed(gogdl.home())).unwrap_or_default();
-        if records.is_none() && ours.is_empty() && !places.database().is_file() {
+        let owned = self.owned_list(&places);
+        if records.is_none() && ours.is_empty() && !places.database().is_file() && owned.is_none() {
             return Ok(None);
         }
         // What gogdl installed first: its folder is the one the Dashboard knows.
         let records = ours.into_iter().chain(records.unwrap_or_default()).collect();
-        let library = load(&places, records).with_context(|| places.data.display().to_string())?;
+        let library = load_with(&places, records, owned.as_ref()).with_context(|| places.data.display().to_string())?;
         Ok(Some(Found { library, from: places.data.display().to_string() }))
     }
 
@@ -216,6 +250,31 @@ impl Source for Gog {
     fn installer(&self) -> Option<&dyn Installer> {
         self.gogdl.as_ref().map(|_| self as &dyn Installer)
     }
+
+    /// Where Galaxy's database is not on the PC and gogdl is added and signed in: the account's games taken again
+    /// from GOG's library service and kept (`gogdl::library`). Whether the list changed.
+    fn refresh_owned(&self) -> bool {
+        let (Some(dir), Some(gogdl), Some(places)) = (&self.owned, &self.gogdl, self.places()) else { return false };
+        if places.database().is_file() {
+            return false;
+        }
+        let web = self.web.clone().unwrap_or_else(gogdl::library::Web::from_env);
+        let last = source_kit::owned::read(dir, SOURCE).ok().flatten();
+        let taken = source_kit::owned::refresh(dir, SOURCE, || {
+            let list = gogdl::library::take(gogdl, &web, last.as_ref())?;
+            if let Some(list) = &list {
+                eprintln!("{}", owned_line(list));
+            }
+            Ok(list)
+        });
+        taken.is_some()
+    }
+}
+
+/// `gog: owned: <n> games (from <host>, <when>)`.
+fn owned_line(list: &source_kit::owned::List) -> String {
+    let when = source_kit::owned::when(list.taken);
+    format!("gog: owned: {} games (from {}, {when})", list.games.len(), list.from)
 }
 
 /// GOG's installer: gogdl, where it is added and signed in. Where it is not, every call is `Unsupported`, and GOG's
@@ -253,7 +312,13 @@ fn product_id(game: &Game) -> Option<&str> {
 /// Reads GOG's games: those `records` list as installed, and with Galaxy's database the rest the account owns,
 /// with play time and cached art for both.
 pub fn load(places: &Places, records: Vec<Record>) -> Result<Library> {
-    let galaxy = match places.database() {
+    load_with(places, records, None)
+}
+
+/// As [`load`], with the games of an `owned` list (GOG's library service's, where Galaxy's database is not there)
+/// listed as owned and not installed where nothing lists them installed.
+pub fn load_with(places: &Places, records: Vec<Record>, owned: Option<&source_kit::owned::List>) -> Result<Library> {
+    let mut galaxy = match places.database() {
         db if db.is_file() => galaxy::read(&db, &places.data).unwrap_or_else(|e| {
             // The installed games are still GOG's to show.
             eprintln!("gog: {}: {e:#}", db.display());
@@ -261,6 +326,12 @@ pub fn load(places: &Places, records: Vec<Record>) -> Result<Library> {
         }),
         _ => galaxy::Galaxy::default(),
     };
+    for game in owned.map_or(&[][..], |list| list.games.as_slice()) {
+        if !galaxy.owned.contains(&game.id) {
+            galaxy.owned.push(game.id.clone());
+        }
+        galaxy.titles.entry(game.id.clone()).or_insert_with(|| game.name.clone());
+    }
     let mut seen = HashSet::new();
     let mut games = Vec::new();
     for record in records {
@@ -271,8 +342,12 @@ pub fn load(places: &Places, records: Vec<Record>) -> Result<Library> {
         if info.as_ref().is_some_and(|info| !info.is_game()) {
             continue;
         }
-        let name = Some(record.name.clone())
-            .filter(|name| !name.is_empty())
+        // The owned list's name first: the folder's is whatever its installer called it (gogdl's `folder_name`), and a
+        // game installed from the list keeps the name it was listed by, in the Queue, Recent and the library.
+        let listed = owned.and_then(|list| list.games.iter().find(|g| g.id == record.id && !g.name.is_empty()));
+        let name = listed
+            .map(|game| game.name.clone())
+            .or_else(|| Some(record.name.clone()).filter(|name| !name.is_empty()))
             .or_else(|| info.map(|info| info.name).filter(|name| !name.is_empty()))
             .or_else(|| galaxy.titles.get(&record.id).cloned());
         let Some(name) = name else { continue };
@@ -582,6 +657,119 @@ mod registry {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn without_galaxy_the_library_is_taken_with_gogdls_sign_in_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("GOG.com");
+        fixture::write(&root, &fixture::Fixture::standard()).unwrap();
+        let (home, owned) = (dir.path().join("gogdl"), dir.path().join("owned"));
+        let program = dir.path().join("gogdl.exe");
+        fs::write(&program, "a program").unwrap();
+        let route = source_kit::HelperRoute::fixed(program, home.clone(), Vec::new(), dir.path().join("games"));
+        let web = gogdl::standin::Web::start(0).unwrap();
+        let gog = Gog::at(Some(root.clone()))
+            .with_gogdl(route)
+            .with_owned(Some(owned.clone()))
+            .with_web(gogdl::library::Web::stand_in(&web.base()).unwrap());
+        let listed = |gog: &Gog| -> Vec<(String, bool)> {
+            let mut games: Vec<(String, bool)> =
+                gog.read().unwrap().unwrap().library.games.into_iter().map(|g| (g.name, g.installed)).collect();
+            games.sort();
+            games
+        };
+
+        // Galaxy's database there: it says, and the service is not asked.
+        standin_auth(&home);
+        assert!(!gog.refresh_owned());
+        assert!(web.asked.lock().unwrap().is_empty());
+
+        // Not there, and gogdl signed in: the service's library, every page, gog's own; names kept once had.
+        fs::remove_file(Places::under(&root).database()).unwrap();
+        assert!(gog.refresh_owned());
+        let list = source_kit::owned::read(&owned, SOURCE).unwrap().unwrap();
+        let ids: Vec<&str> = list.games.iter().map(|g| g.id.as_str()).collect();
+        assert_eq!(ids, ["1900000101", "1900000102", "1900000103", "1900000104"]);
+        assert_eq!(list.games[3].name, "Quarrel Fen");
+        assert_eq!(list.account.as_deref(), Some("48151623420001"));
+        assert!(list.from.ends_with("/galaxy-library"));
+        let file = fs::read_to_string(source_kit::owned::path(&owned, SOURCE)).unwrap();
+        assert!(!file.contains("stand-in-access") && !file.contains("stand-in-refresh"));
+        assert_eq!(
+            listed(&gog),
+            [
+                ("Juniper Signal".into(), true),
+                ("Owlglass Abbey".into(), true),
+                ("Pewter Isles".into(), false),
+                ("Quarrel Fen".into(), false)
+            ]
+        );
+        {
+            let asked = web.asked.lock().unwrap();
+            let pages: Vec<&(String, bool)> = asked.iter().filter(|(p, _)| p.starts_with("/galaxy-library")).collect();
+            assert_eq!(pages.len(), 3);
+            assert!(pages.iter().all(|(_, signed)| *signed));
+            assert!(asked.iter().any(|(p, _)| p == "/api/products/1900000104"));
+            assert!(asked.iter().filter(|(p, _)| !p.starts_with("/galaxy-library")).all(|(_, signed)| !signed));
+        }
+
+        // Again: the same list, no names asked again.
+        let before = web.asked.lock().unwrap().len();
+        assert!(!gog.refresh_owned());
+        assert_eq!(web.asked.lock().unwrap().len(), before + 3);
+
+        // A sign-in the service refuses: the last list stands.
+        let auth = home.join("auth.json");
+        fs::write(&auth, fs::read_to_string(&auth).unwrap().replace("stand-in-access", "other")).unwrap();
+        assert!(!gog.refresh_owned());
+        assert_eq!(source_kit::owned::read(&owned, SOURCE).unwrap().unwrap().games.len(), 4);
+        assert_eq!(listed(&gog).len(), 4);
+    }
+
+    #[test]
+    fn a_game_installed_from_the_owned_list_keeps_its_name_installed_and_uninstalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("GOG.com");
+        fs::create_dir_all(root.join("Games")).unwrap();
+        // As gogdl leaves it: the folder and the .info named by `info`'s folder_name, not the game's name.
+        let folder = dir.path().join("games").join("Game 1900000104");
+        fs::create_dir_all(&folder).unwrap();
+        let info = json!({"gameId": "1900000104", "rootGameId": "1900000104", "name": "Game 1900000104",
+                          "playTasks": [{"isPrimary": true, "type": "FileTask", "path": "game.exe"}]});
+        fs::write(folder.join("goggame-1900000104.info"), info.to_string()).unwrap();
+        let list = source_kit::owned::List {
+            store: SOURCE.into(),
+            games: vec![source_kit::owned::Owned {
+                id: "1900000104".into(),
+                name: "Quarrel Fen".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let record = |path: &Path| Record { id: "1900000104".into(), path: path.to_path_buf(), ..Record::default() };
+        let names = |library: Library| -> Vec<(String, bool)> {
+            library.games.into_iter().map(|g| (g.name, g.installed)).collect()
+        };
+
+        let installed = load_with(&Places::under(&root), vec![record(&folder)], Some(&list)).unwrap();
+        assert_eq!(names(installed), [("Quarrel Fen".to_string(), true)]);
+
+        fs::remove_dir_all(&folder).unwrap();
+        let uninstalled = load_with(&Places::under(&root), vec![record(&folder)], Some(&list)).unwrap();
+        assert_eq!(names(uninstalled), [("Quarrel Fen".to_string(), false)]);
+
+        // With no list, the folder's name as before.
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("goggame-1900000104.info"), info.to_string()).unwrap();
+        assert_eq!(
+            names(load(&Places::under(&root), vec![record(&folder)]).unwrap()),
+            [("Game 1900000104".to_string(), true)]
+        );
+    }
+
+    fn standin_auth(home: &Path) {
+        gogdl::standin::write_auth(&home.join("auth.json")).unwrap();
+    }
 
     fn info_text(id: &str, root: &str, primary: bool) -> String {
         json!({

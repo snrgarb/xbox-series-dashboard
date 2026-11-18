@@ -225,7 +225,11 @@ resumed and cancelled from Manage Queue, installed to the end with egl-sync's re
 launch`, and uninstalled from its Tile menu), `gog-gogdl` (#176: the same for GOG with the stand-in gogdl and the fake
 GOG's Pewter Isles: signed in with the stand-in's `auth --code`; downloaded, paused, resumed and cancelled; to the
 end with its set-up step, the stand-in script interpreter; played as its own program; uninstalled with its
-`unins000.exe /VERYSILENT`), `battlenet-agent` (#172: the fake Battle.net's Agent, standin.exe as
+`unins000.exe /VERYSILENT`), `gog-owned` (#276: the fake GOG with no Galaxy database and the stand-in gogdl signed
+in, against a stand-in of GOG's library service, gamesdb and product API, `standin serve-gog-web`, named by
+`DASHBOARD_STORE_WEB`: every page asked with gogdl's sign-in, the owned list said and kept as `<data>\owned\gog.json`
+with no token in it or in the log, and Quarrel Fen, known to the service alone, installed through gogdl),
+`battlenet-agent` (#172: the fake Battle.net's Agent, standin.exe as
 `Agent\Agent.9999\Agent.exe`, started by the Dashboard and asked over its HTTP API, the token never logged; Larkspur
 Hollow from the catalogue installed into the fake's games folder with the Agent's bytes and speed in the Queue,
 paused, resumed and cancelled from Manage Queue with `DASHBOARD_BATTLENET_STEER=1`, installed to the end, played

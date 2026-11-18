@@ -7,8 +7,9 @@
 //!
 //! It works only with `GOGDL_CONFIG_PATH` naming a test's folder, as the GOG source always gives it.
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -90,6 +91,12 @@ pub fn run(args: &[String]) -> i32 {
             // gogdl's own way with no credentials: it cannot reach GOG's API (`api.py`).
             say("[API] ERROR: No credentials, run gogdl auth first");
             Ok(1)
+        }
+        // `auth` signed in: gogdl renews a token that has run out and prints the credentials (`auth.py` 42-122); the
+        // stand-in's run out in 2100, so it prints them as they are.
+        ["auth"] => {
+            println!("{}", super::read_json(&auth).and_then(|v| v.get(super::CLIENT_ID).cloned()).unwrap_or_default());
+            Ok(0)
         }
         ["download", id, rest @ ..] => download(&config, id, rest),
         ["info", id, ..] => {
@@ -211,4 +218,106 @@ pub fn uninstaller(args: &[String]) -> i32 {
         let _ = if path.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) };
     }
     0
+}
+
+/// A game in the stand-in account's library that is in neither the GOG fixture's folders nor its database: named
+/// only by the product API, gamesdb not knowing it.
+pub const LIBRARY_ONLY: (&str, &str) = ("1900000104", "Quarrel Fen");
+
+/// A stand-in of GOG's web services on 127.0.0.1 (`standin serve-gog-web`), as `library` asks them, for the tests:
+/// `/galaxy-library/users/<id>/releases` (two entries a page, `next_page_token` to the next), which answers 401 to any
+/// sign-in but the stand-in gogdl's; `/gamesdb/platforms/gog/external_releases/<id>`; `/api/products/<id>`. It keeps
+/// the path of every request and whether it came with the stand-in's sign-in.
+pub struct Web {
+    pub addr: std::net::SocketAddr,
+    pub asked: Arc<Mutex<Vec<(String, bool)>>>,
+}
+
+impl Web {
+    /// Listens at `port` (0: any free one), answering on a thread of its own for as long as the program runs.
+    pub fn start(port: u16) -> std::io::Result<Web> {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+        let addr = listener.local_addr()?;
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let kept = asked.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let kept = kept.clone();
+                std::thread::spawn(move || {
+                    let _ = answer_web(stream, &kept);
+                });
+            }
+        });
+        Ok(Web { addr, asked })
+    }
+
+    /// Its address, as `DASHBOARD_STORE_WEB` takes it.
+    pub fn base(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+}
+
+/// The library's entries, in its order: the GOG fixture's games, a Steam game among them, and [`LIBRARY_ONLY`].
+fn library_items() -> Vec<Value> {
+    let mut items: Vec<Value> = crate::fixture::Fixture::standard()
+        .games
+        .iter()
+        .map(|game| json!({"platform_id": "gog", "external_id": game.id, "owned": true}))
+        .collect();
+    items.insert(1, json!({"platform_id": "steam", "external_id": "48151", "owned": true}));
+    items.push(json!({"platform_id": "gog", "external_id": LIBRARY_ONLY.0, "owned": true}));
+    items
+}
+
+fn answer_web(stream: std::net::TcpStream, kept: &Mutex<Vec<(String, bool)>>) -> std::io::Result<()> {
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
+    let mut signed = false;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header)? == 0 || header.trim().is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("authorization") && value.trim() == "Bearer stand-in-access" {
+                signed = true;
+            }
+        }
+    }
+    kept.lock().unwrap_or_else(|p| p.into_inner()).push((path.clone(), signed));
+    let (route, query) = path.split_once('?').unwrap_or((&path, ""));
+    let parts: Vec<&str> = route.trim_matches('/').split('/').collect();
+    let named = |id: &str| -> Option<String> {
+        let fixture = crate::fixture::Fixture::standard();
+        fixture.games.into_iter().find(|game| game.id == id).map(|game| game.name)
+    };
+    let (status, body) = match parts.as_slice() {
+        ["galaxy-library", "users", _, "releases"] if !signed => ("401 Unauthorized", json!({"error": "unauthorized"})),
+        ["galaxy-library", "users", _, "releases"] => {
+            let items = library_items();
+            let page: usize = query.strip_prefix("page_token=page").and_then(|n| n.parse().ok()).unwrap_or(0);
+            let these: Vec<Value> = items.iter().skip(page * 2).take(2).cloned().collect();
+            let next = (page * 2 + 2 < items.len()).then(|| format!("page{}", page + 1));
+            ("200 OK", json!({"total_count": items.len(), "limit": 2, "items": these, "next_page_token": next}))
+        }
+        ["gamesdb", "platforms", "gog", "external_releases", id] => match named(id) {
+            Some(name) => ("200 OK", json!({"id": "1", "external_id": id, "title": {"*": name, "en-US": name}})),
+            None => ("404 Not Found", json!({"error": "not found"})),
+        },
+        ["api", "products", id] => match named(id).or_else(|| (*id == LIBRARY_ONLY.0).then(|| LIBRARY_ONLY.1.into())) {
+            Some(name) => ("200 OK", json!({"id": id.parse::<u64>().unwrap_or(0), "title": name})),
+            None => ("404 Not Found", json!({"error": "not found"})),
+        },
+        _ => ("404 Not Found", json!({"error": "not found"})),
+    };
+    let body = body.to_string();
+    let mut stream = stream;
+    write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )?;
+    stream.flush()
 }
