@@ -81,7 +81,7 @@ try {
     $library = Initialize-FakeBattleNet $script:root -Owned
     $names = @($library.games | ForEach-Object { $_.name })
     foreach ($want in 'Moorlight Saga', 'Thistle Arena', 'Larkspur Hollow') {
-        if ($names -notcontains $want) { throw "the fake Battle.net should list $want: $($names -join ', ')" }
+        if ($names -notcontains $want) { throw "the fake Battle.net should list ${want}: $($names -join ', ')" }
     }
     if ($names -contains 'Quarry Bell') { throw "Quarry Bell is not owned, and was listed: $($names -join ', ')" }
     $script:data = Get-FakeRoot 'battlenet-data'
