@@ -24,7 +24,7 @@ use std::path::PathBuf;
 pub use achievement::{AchievementSource, Achievements};
 pub use audio::{Audio, AudioDevice, Flow};
 pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
-pub use installer::{Agreement, Can, Folder, Installer, Opener, Refusal, Reply, Steer, Stop};
+pub use installer::{Agreement, Can, Folder, Installer, KeptInFront, Opener, Refusal, Reply, Steer, Stop};
 pub use launcher::{Launcher, Launchers};
 pub use media::{Media, MediaCommand, MediaSession};
 pub use profile::{Picture, Profile, ProfileChange, Profiles};

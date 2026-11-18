@@ -17,7 +17,11 @@
 //!       8080 or 8081, where a real Steam's may be): Steam's own calls to install, uninstall, pause, resume and cancel
 //!       are taken there and done to the fake's files (`steam: CEF: asked to pause <appid>: ...`), and its download
 //!       overview given, as the real client's are. make-steam marks its folder so (`STANDIN_CLIENT`), which is how
-//!       the Dashboard knows to ask that port and no other.
+//!       the Dashboard knows to ask that port and no other. With its debugger open it has, on Windows, the real
+//!       client's two windows (#245): its main window, titled "Steam" (class `StandInSteam`, magenta), and its
+//!       Install dialog, titled "Install" (class `StandInSteamInstall`, orange), each shown, brought to the top and
+//!       given the foreground if Windows lets it as the install wizard's scripts open them, and hidden or minimized as
+//!       they are put back (`steam: window: ...` in its log).
 //!   standin steam-install <dir> <appid> --queued | --bytes <n>/<m> | --paused <n>/<m> | --done | --drop
 //!       Moves the fake Steam's install of <appid> at <dir> along, by rewriting its app manifest as Steam's client
 //!       would (`fixture::write_progress`): waiting, so many bytes of so many downloaded, paused there, installed
@@ -575,7 +579,11 @@ fn running_client(root: &Path, seconds: u64) -> i32 {
         note(&format!("steam: running, its CEF debugger off (no {} in its folder)", source_steam::cef::FILE));
         None
     };
-    std::thread::sleep(std::time::Duration::from_secs(seconds));
+    // Its main window and Install dialog, real windows as Steam's are, shown as the debugger's scripts have them.
+    match &debugger {
+        Some(debugger) => steam_windows(debugger, seconds),
+        None => std::thread::sleep(std::time::Duration::from_secs(seconds)),
+    }
     drop(debugger);
     note("steam: the running client stops");
     0
@@ -886,8 +894,14 @@ fn wake() -> i32 {
     2
 }
 
+/// Anywhere but Windows the stand-in Steam has no windows: it waits out its time.
+#[cfg(not(windows))]
+fn steam_windows(_: &source_steam::debugger::Debugger, seconds: u64) {
+    std::thread::sleep(std::time::Duration::from_secs(seconds));
+}
+
 #[cfg(windows)]
-use win::{game, steam_url, toast, wake};
+use win::{game, steam_url, steam_windows, toast, wake};
 
 fn run(args: &[String]) -> i32 {
     let parsed_game = |args: &[String]| match GameArgs::parse(args) {
