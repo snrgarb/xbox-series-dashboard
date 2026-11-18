@@ -27,10 +27,12 @@ function Mask($Value) {
     $Value
 }
 
-# GET on the Agent: the status and the answer, masked, as one line of JSON. $Token is sent as the Authorization header.
-function Ask-Agent([int] $Port, [string] $Path, [string] $Token = '') {
+# GET on the Agent: the status and the answer, masked, as one line of JSON. $Token is sent as the Authorization header,
+# $ProcessId as a `pid` header (redact7's bnetinstaller sends the running Agent's own).
+function Ask-Agent([int] $Port, [string] $Path, [string] $Token = '', [int] $ProcessId = 0) {
     $headers = @{}
     if ($Token) { $headers['Authorization'] = $Token }
+    if ($ProcessId) { $headers['pid'] = [string]$ProcessId }
     try {
         $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:${Port}$Path" -UserAgent 'phoenix-agent/1.0' -Headers $headers -TimeoutSec 5
         $status = [int]$r.StatusCode
@@ -110,7 +112,22 @@ foreach ($p in $candidates) {
         break
     }
 }
-if (-not $token) { Say '-- B1: no port gave a token. The Dashboard would fall back to Battle.net.exe --game=<uid>.' }
+# --- B1. The client's own Agent with its process id in a `pid` header, as redact7's tool asks it (#172: the Dashboard
+# asks so once before giving up on an Agent it did not start). Read-only: GET /agent alone.
+if (-not $token) {
+    foreach ($a in $agents) {
+        foreach ($l in @(Get-NetTCPConnection -State Listen -OwningProcess $a.Id -ErrorAction SilentlyContinue)) {
+            $answer = Ask-Agent ([int]$l.LocalPort) '/agent' '' $a.Id
+            Say "-- B1: GET /agent on $($l.LocalPort) with pid $($a.Id): $($answer.Line)"
+            if (-not $token -and $answer.Json -and $answer.Json.authorization) {
+                $token = [string]$answer.Json.authorization
+                $port = [int]$l.LocalPort
+                Say '   a token with the pid header: the Dashboard would use the client''s own Agent and start none'
+            }
+        }
+    }
+}
+if (-not $token) { Say '-- B1: no port gave a token. With Battle.net or its Agent running the Dashboard starts no Agent and opens Battle.net on the game; with neither, it starts its own.' }
 if ($port) {
     try {
         $plain = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:${port}/agent" -TimeoutSec 5

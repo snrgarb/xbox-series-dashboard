@@ -230,7 +230,7 @@ end with its set-up step, the stand-in script interpreter; played as its own pro
 Hollow from the catalogue installed into the fake's games folder with the Agent's bytes and speed in the Queue,
 paused, resumed and cancelled from Manage Queue with `DASHBOARD_BATTLENET_STEER=1`, installed to the end, played
 through the stand-in Battle.net, uninstalled from its Tile menu; then Quarry Bell, not owned, refused by the Agent and
-the client opened on its page instead), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
+the client opened on its page instead; the Agent's form filled in as the real one first answers it, the Agent the Dashboard started stopped when done, and with Battle.net's own Agent running none started beside it), `mixed` (M4's run: every store's fake at once with an App and a game added by hand, each store's games on
 Home, in Games a screenful at a time and in Full library, a Game hub of each store's, Search finding two stores' games
 by one word, a Steam install through the Queue to Recently installed, and an Uninstall prompt declined; a picture at
 each), `launchers` (Settings > Launchers on the fake Steam and Epic, docs/spec/launchers.md: Steam switched off with

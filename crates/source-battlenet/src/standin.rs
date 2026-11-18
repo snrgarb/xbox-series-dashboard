@@ -8,7 +8,14 @@
 //! [`STEP_BYTES`].
 //!
 //! Like the real one it answers nothing without the `phoenix-agent/1.0` user agent, and nothing but `GET /agent`
-//! without the token that gave. It works only in a fake's folder: one with a `fixture.json`.
+//! without the token that gave; `GET /agent` gives, beside the token, a session and the user's names, as the TV PC's
+//! did, which the Dashboard must never log. An install is a form, as the TV PC's Agent answered it (2026-11-18):
+//! `POST /install` gives it with `language.error` 704 and its list until a listed locale is posted, as the list
+//! writes it; `game_dir` with a `dirname` of its own ([`dirname`]: not the game's name), `required_space_info.state`
+//! 1005 until the second post of the choices, 1009 after, and `warning` 806; the download starts only once the
+//! form is posted finalized, and a form not finalized is taken back by `DELETE /install/<uid>`. `DELETE /agent`
+//! ends it, run as a program. Served as [`Mode::Clients`] it is Battle.net's own Agent as an outside caller finds
+//! it: 401 with no body to every request. It works only in a fake's folder: one with a `fixture.json`.
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -20,7 +27,7 @@ use serde_json::{json, Value};
 
 use crate::agent::PORT_FILE;
 use crate::fixture::{self, Fixture, FixtureProduct, Kind};
-use crate::http::{mask, USER_AGENT};
+use crate::http::{mask, masked, USER_AGENT};
 
 pub const STEPS: u64 = 8;
 pub const STEP_BYTES: u64 = 6 * 1_048_576;
@@ -29,21 +36,47 @@ pub const WHOLE: u64 = STEPS * STEP_BYTES;
 /// The error the stand-in gives for a product the account does not own: barncastle's README's "product invalid or
 /// unavailable".
 pub const NOT_OWNED: i64 = 2221;
+/// The form's error for a language not chosen, as the TV PC's first form had it.
+pub const NO_LANGUAGE: i64 = 704;
+/// The locales the stand-in's games come in, as the TV PC's form writes them.
+pub const LOCALES: &[&str] = &["enUS", "enGB", "frFR", "deDE"];
+
+/// The folder the stand-in Agent names a game's: its name with no spaces or apostrophes, so never the name itself, as
+/// the TV PC's named Tony Hawk's Pro Skater 3 + 4's `Tony Hawks Pro Skater 3 + 4`.
+pub fn dirname(name: &str) -> String {
+    name.chars().filter(|c| *c != ' ' && *c != '\'').collect()
+}
+
+/// How the stand-in Agent answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// As the Agent the Dashboard starts itself.
+    Agent,
+    /// As Battle.net's own, started by the client with its session: 401, no body, to any outside caller.
+    Clients,
+}
 
 #[derive(Debug, Clone)]
 struct Install {
     code: String,
     name: String,
+    /// Where it downloads to: none until the form is posted finalized.
     dir: Option<PathBuf>,
     done: u64,
     paused: bool,
     playable: bool,
+    /// The locale posted, once it is one of [`LOCALES`].
+    locale: Option<String>,
+    /// How many times the choices have been posted.
+    posts: u32,
 }
 
 struct State {
     root: PathBuf,
+    mode: Mode,
     token: String,
     installs: HashMap<String, Install>,
+    closed: bool,
     say: Box<dyn Fn(&str) + Send>,
 }
 
@@ -54,11 +87,16 @@ pub struct Served {
 }
 
 impl Served {
-    /// The uids it has under way.
+    /// The uids it holds, forms and downloads.
     pub fn under_way(&self) -> Vec<String> {
         let mut uids: Vec<String> = lock(&self.state).installs.keys().cloned().collect();
         uids.sort();
         uids
+    }
+
+    /// Whether it was asked to end (`DELETE /agent`).
+    pub fn closed(&self) -> bool {
+        lock(&self.state).closed
     }
 }
 
@@ -75,14 +113,30 @@ pub fn root_of(exe: &Path) -> Option<PathBuf> {
 /// Serves the fake at `root` on a thread of its own, for as long as the program runs, each request said with
 /// `say`. The step between an install's counts is `step`.
 pub fn serve(root: &Path, step: Duration, say: impl Fn(&str) + Send + 'static) -> std::io::Result<Served> {
+    serve_as(root, Mode::Agent, step, say)
+}
+
+/// As [`serve`], answering as `mode` says.
+pub fn serve_as(
+    root: &Path,
+    mode: Mode,
+    step: Duration,
+    say: impl Fn(&str) + Send + 'static,
+) -> std::io::Result<Served> {
     if !root.join(fixture::SPEC).is_file() {
         return Err(std::io::Error::other(format!("{} is no fake Battle.net", root.display())));
     }
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
     let token = format!("standin-{}-{}", std::process::id(), port);
-    let state =
-        Arc::new(Mutex::new(State { root: root.to_path_buf(), token, installs: HashMap::new(), say: Box::new(say) }));
+    let state = Arc::new(Mutex::new(State {
+        root: root.to_path_buf(),
+        mode,
+        token,
+        installs: HashMap::new(),
+        closed: false,
+        say: Box::new(say),
+    }));
     std::fs::write(root.join("Agent").join(PORT_FILE), port.to_string())?;
     let served = state.clone();
     std::thread::spawn(move || {
@@ -110,15 +164,21 @@ pub fn run(exe: &Path, args: &[String], say: impl Fn(&str) + Send + Clone + 'sta
     let step = std::env::var("STANDIN_HELPER_STEP_MS").ok().and_then(|ms| ms.parse().ok()).unwrap_or(600);
     let seconds =
         args.windows(2).find(|pair| pair[0] == "--seconds").and_then(|pair| pair[1].parse().ok()).unwrap_or(1800);
-    match serve(&root, Duration::from_millis(step), say.clone()) {
+    // Started by Battle.net with its session (`--session=...`, as the TV PC's own was): Battle.net's own Agent.
+    let mode = if args.iter().any(|a| a.starts_with("--session")) { Mode::Clients } else { Mode::Agent };
+    match serve_as(&root, mode, Duration::from_millis(step), say.clone()) {
         Ok(served) => {
             say(&format!(
-                "battlenet agent: serving {} on 127.0.0.1:{} ({})",
+                "battlenet agent: serving {} on 127.0.0.1:{} as {mode:?} ({})",
                 root.display(),
                 served.port,
                 args.join(" ")
             ));
-            std::thread::sleep(Duration::from_secs(seconds));
+            let begun = std::time::Instant::now();
+            while begun.elapsed() < Duration::from_secs(seconds) && !served.closed() {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            say(&format!("battlenet agent: ending ({})", if served.closed() { "DELETE /agent" } else { "time" }));
             0
         }
         Err(e) => {
@@ -211,14 +271,18 @@ fn answer(mut stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()> {
     let text = body.to_string();
     {
         let state = lock(state);
-        let sent = if request.body.is_null() { String::new() } else { format!(" {}", request.body) };
+        let sent = if request.body.is_null() { String::new() } else { format!(" {}", masked(&request.body)) };
+        let shown = masked(&body);
         (state.say)(&mask(
-            &format!("battlenet agent: {} {}{sent} -> {status} {text}", request.method, request.path),
+            &format!("battlenet agent: {} {}{sent} -> {status} {shown}", request.method, request.path),
             Some(&state.token),
         ));
     }
+    // Battle.net's own Agent's 401 has no body.
+    let text = if body.is_null() { String::new() } else { text };
     let reason = match status {
         200 => "OK",
+        201 => "Created",
         401 => "Unauthorized",
         404 => "Not Found",
         _ => "Bad Request",
@@ -234,15 +298,21 @@ fn answer(mut stream: TcpStream, state: &Mutex<State>) -> std::io::Result<()> {
 
 fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
     let mut state = lock(state);
+    if state.mode == Mode::Clients {
+        return (401, Value::Null);
+    }
     if request.user_agent.as_deref() != Some(USER_AGENT) {
         return (401, json!({ "error": "unknown client" }));
     }
     let path = request.path.split('?').next().unwrap_or("");
     let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
     if let (["agent"], "GET") = (&parts[..], request.method.as_str()) {
+        // The TV PC's Agent's fields; the session and the user's names never to be logged.
         return (
             200,
-            json!({ "pid": std::process::id(), "state": 1004, "version": "standin", "region": "eu", "authorization": state.token }),
+            json!({ "authorization": state.token, "opt_in_feedback": true, "pid": std::process::id(),
+                    "region": "eu", "session": "48151623421234", "state": 1007, "type": "retail",
+                    "user_id": "S-1-5-21-1111-2222-3333-1001", "user_name": "standin-user", "version": "standin" }),
         );
     }
     if request.authorization.as_deref() != Some(state.token.as_str()) {
@@ -263,17 +333,21 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
             if !patch.ends_with(&format!("/{}", product.code)) {
                 return (200, json!({ "error": 2301, "uid": uid, "why": "patch url names another product" }));
             }
-            state.installs.entry(uid.clone()).or_insert(Install {
+            let games = state.root.join("games");
+            let install = state.installs.entry(uid.clone()).or_insert(Install {
                 code: product.code.clone(),
                 name: product.name.clone(),
                 dir: None,
                 done: 0,
                 paused: false,
                 playable: false,
+                locale: None,
+                posts: 0,
             });
-            (200, json!({ "response_uri": format!("/install/{uid}") }))
+            (201, form(&games, &uid, install, None, false))
         }
         ("POST", ["install", uid]) => {
+            let games = state.root.join("games");
             let Some(install) = state.installs.get_mut(*uid) else { return (404, json!({ "error": 2300 })) };
             if let Some(paused) = request.body.get("paused").and_then(Value::as_bool) {
                 install.paused = paused;
@@ -282,14 +356,26 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
             let Some(dir) = request.body.get("game_dir").and_then(Value::as_str).filter(|d| !d.is_empty()) else {
                 return (200, json!({ "error": 2302, "why": "no game_dir" }));
             };
-            // The folder as the Agent is given it, with a backslash at its end (`calls::install_options`).
             let dir = PathBuf::from(dir.trim_end_matches(['\\', '/']));
-            if std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join("standin-partial.txt"), "")).is_err()
-            {
-                return (200, json!({ "error": 2303, "why": "game_dir could not be made" }));
+            install.posts += 1;
+            // A locale as the form's list writes it, and nothing else, is taken.
+            let locale = request.body.get("selected_locale").and_then(Value::as_str).unwrap_or("");
+            let listed = LOCALES.contains(&locale)
+                && request.body.get("language").and_then(Value::as_array).is_some_and(|l| l == &[json!(locale)]);
+            if listed {
+                install.locale = Some(locale.to_string());
             }
-            install.dir = Some(dir);
-            (200, json!({ "response_uri": format!("/install/{uid}") }))
+            let finalized = request.body.get("finalized").and_then(Value::as_bool).unwrap_or(false);
+            if finalized && install.locale.is_some() && install.dir.is_none() {
+                let made =
+                    std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join("standin-partial.txt"), ""));
+                if made.is_err() {
+                    return (200, json!({ "error": 2303, "why": "game_dir could not be made" }));
+                }
+                install.dir = Some(dir.clone());
+            }
+            let finalized = finalized && install.dir.is_some();
+            (200, form(&games, uid, install, Some(&dir), finalized))
         }
         ("GET", ["install", uid]) => match state.installs.get(*uid) {
             Some(install) => {
@@ -313,9 +399,11 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
         },
         ("DELETE", ["install", uid]) => match state.installs.remove(*uid) {
             Some(install) => {
+                let was = if install.dir.is_none() { "a form not finalized" } else { "a download" };
                 if let Some(dir) = install.dir.filter(|_| !install.playable) {
                     let _ = std::fs::remove_dir_all(dir);
                 }
+                (state.say)(&format!("battlenet agent: {uid}: {was} taken back"));
                 (200, json!({}))
             }
             None => (404, json!({ "error": 2300 })),
@@ -341,7 +429,44 @@ fn route(state: &Mutex<State>, request: &Request) -> (u16, Value) {
             Some(_) => (200, json!({ "response_uri": format!("/update/{}", uid_of(&request.body)) })),
             None => (404, json!({ "error": 2300 })),
         },
-        ("DELETE", ["agent"]) => (200, json!({})),
+        ("DELETE", ["agent"]) => {
+            state.closed = true;
+            (200, json!({}))
+        }
         _ => (404, json!({ "error": "unknown call" })),
     }
+}
+
+/// The form, as the TV PC's Agent answered it: the language in error until a listed locale is posted, the size worked
+/// out by the second post of the choices, the folder its own `dirname` under the fake's `games` by default.
+fn form(games: &Path, uid: &str, install: &Install, game_dir: Option<&Path>, finalized: bool) -> Value {
+    let dirname = dirname(&install.name);
+    let default = format!("{}{}", games.display(), std::path::MAIN_SEPARATOR);
+    let chosen =
+        game_dir.map(|d| d.display().to_string()).unwrap_or_else(|| games.join(&dirname).display().to_string());
+    let sized = install.posts >= 2;
+    json!({
+        "form": {
+            "authentication": { "error": 0 },
+            "eula": { "error": 0, "eula": true },
+            "finalized": finalized,
+            "game_dir": {
+                "default": default,
+                "dirname": dirname,
+                "error": 0,
+                "game_dir": chosen,
+                "required_space": WHOLE,
+                "required_space_info": { "size": if sized { WHOLE } else { 0 }, "state": if sized { 1009 } else { 1005 } },
+                "warning": 806,
+            },
+            "language": {
+                "error": if install.locale.is_some() { 0 } else { NO_LANGUAGE },
+                "list": LOCALES, "speech": LOCALES, "text": LOCALES,
+            },
+            "min_spec": { "error": 0 },
+            "shortcut": "all",
+            "tome_path": { "error": 0 },
+        },
+        "response_uri": format!("/install/{uid}"),
+    })
 }

@@ -10,18 +10,26 @@
 # What it walks:
 # - Battle.net read with its catalogue: Larkspur Hollow listed, not installed.
 # - Larkspur Hollow from its Game hub: the Agent started (`agent: not answering ...: starting ...Agent.exe
-#   --internalclienttools`, `up on port <n>`), a token taken (`battlenet: agent: session: GET /agent -> 200
-#   {"authorization":"<token>",...}`: never the token itself), `POST /install`, `POST /install/larkspur` with its
-#   folder, `the Agent took the install`; the Queue's `joined, asked for` and `downloading, <n>% of 50331648 bytes`.
+#   --internalclienttools`, `up on port <n> ... (pid <n>)`), a token taken (`battlenet: agent: session: GET /agent ->
+#   200 {"authorization":"<token>",...,"session":"<masked>",...}`: never the token, the session or the user's names);
+#   its form as the real Agent first answers it (`POST /install -> 201`, language 704, its own folder name
+#   LarkspurHollow), filled in unfinalized with a locale of its list, posted again until sized (1005, then 1009),
+#   then finalized (`POST /install/larkspur {"finalized":true,...}`), `the Agent took the install`; the Queue's
+#   `joined, asked for` and `downloading, <n>% of 50331648 bytes`.
 # - Manage Queue, its row; Pause installation (`pause: the Agent took it`, `queue: ... paused`), Resume installation,
-#   Cancel installation after its question (`cancelled: the Agent took it`, `queue: ... dropped`, its folder gone).
-# - Installed to the end from its hub again: `done: product.db says installed`, `queue: Larkspur Hollow installed`.
+#   Cancel installation after its question (`cancelled: the Agent took it`, `queue: ... dropped`, its folder gone;
+#   the Agent the Dashboard started stopped: `it exited <n> ms after DELETE /agent`).
+# - Installed to the end from its hub again: `done: product.db says installed`, `queue: Larkspur Hollow installed`,
+#   the Agent stopped again and no Agent left running.
 # - Play from its hub: `Battle.net.exe --exec=launch lkh` (the stand-in Battle.net's line), the stand-in game; ended.
 # - Uninstall from its Tile menu after the Dashboard's question: `POST /uninstall`, `uninstalled: product.db no longer
-#   says installed`, `queue: Larkspur Hollow uninstalled`, its folder gone.
-# - Last, Quarry Bell from its Game hub: the install refused (`error 2221`), and the client asked on the game instead
-#   (`asking Battle.net instead: ...Battle.net.exe --game=quarrybell`, the stand-in Battle.net's `asked for game
-#   quarrybell`).
+#   says installed`, `queue: Larkspur Hollow uninstalled`, its folder gone, the Agent stopped.
+# - Quarry Bell from its Game hub: the install refused (`error 2221`), the install abandoned (`DELETE
+#   /install/quarrybell`), and the client asked on the game instead (`asking Battle.net instead: ...Battle.net.exe
+#   --game=quarrybell`, the stand-in Battle.net's `asked for game quarrybell`).
+# - Last, Battle.net's own Agent running (the stand-in started with `--session=`, 401 to anyone else, as the TV PC's
+#   own answered): Larkspur Hollow's Install starts no second Agent (`no second Agent is started beside it`) and asks
+#   the client instead.
 #
 # Every press is judged by --log-focus before the next, and the walk stops at the first that goes elsewhere. Runs on
 # the VM and in safe mode on the TV PC; every folder is the test's own, and the machine's own Battle.net and Agent are
@@ -124,7 +132,10 @@ try {
     New-Item $script:data -ItemType Directory -Force | Out-Null
     Register-Fake 'battlenet-data' $script:data
     $agentDir = Join-Path $script:root 'Agent'
-    $gameDir = Join-Path $script:root "games\$name"
+    # The folder the stand-in Agent's form names Larkspur Hollow's: not its name, as the real one's for Tony Hawk's.
+    $dirname = 'LarkspurHollow'
+    $gameDir = Join-Path $script:root "games\$dirname"
+    $gameJson = [regex]::Escape(($gameDir -replace '\\', '\\'))
 
     # The stand-in Agent's pace, slow enough to steer with the pad; the Dashboard's guesses at steering on.
     $env:STANDIN_HELPER_STEP_MS = '3000'
@@ -144,12 +155,22 @@ try {
     Press A "GameHub: $code Hub Install" '02-hub-install' | Out-Null
     $mark = Get-DashboardLogLength
     Press A '.+' | Out-Null
-    Expect-Logged "^battlenet: ${code}: installing $uid \($name\) into $([regex]::Escape($gameDir)) through the Agent$" $mark 'Install' | Out-Null
+    Expect-Logged "^battlenet: ${code}: installing $uid \($name\) under $([regex]::Escape((Join-Path $script:root 'games'))) through the Agent$" $mark 'Install' | Out-Null
     Expect-Logged "^battlenet: agent: not answering \(.+\): starting $([regex]::Escape($agentDir))\\Agent\.9999\\Agent\.exe --internalclienttools$" $mark 'The Agent started' | Out-Null
-    Expect-Logged '^battlenet: agent: up on port \d+ after \d+ ms$' $mark 'The Agent up' | Out-Null
+    Expect-Logged '^battlenet: agent: up on port \d+ after \d+ ms \(pid \d+\)$' $mark 'The Agent up' | Out-Null
     $session = Expect-Logged '^battlenet: agent: session: GET /agent -> 200 \{.*"authorization":"<token>".*\}$' $mark 'A token, masked'
-    if ($session -notmatch '"authorization":"<token>"') { throw "the token was said: $session" }
-    Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"game_dir`":`"$([regex]::Escape((($gameDir + '\') -replace '\\', '\\')))`".*\} -> 200 .+$" $mark 'Its folder' | Out-Null
+    foreach ($field in 'authorization', 'session', 'user_id', 'user_name') {
+        if ($session -notmatch "`"$field`":`"<(token|masked)>`"") { throw "$field was said: $session" }
+    }
+    # The form, as the real Agent first answers it: no language chosen (704), its own folder name; then filled in
+    # unfinalized, again until the size is worked out (1005, then 1009), then finalized.
+    Expect-Logged "^battlenet: agent: install ${code}: POST /install \{.*\} -> 201 \{.*`"error`":704.*\}$" $mark 'The first form' | Out-Null
+    Expect-Logged "^battlenet: ${code}: the Agent's form: language 704 \(no language chosen yet\); locales enUS, enGB, frFR, deDE; its folder `"$dirname`" .*size state 1005; not finalized$" $mark 'The form read' | Out-Null
+    $filling = Expect-Logged "^battlenet: ${code}: filling it in: locale (enUS|enGB|frFR|deDE) \(Windows' .+\), into $([regex]::Escape($gameDir))$" $mark 'Filled in'
+    $locale = if ($filling -match 'locale (\w+) ') { $Matches[1] } else { 'enUS' }
+    Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"finalized`":false,`"game_dir`":`"$gameJson`".*`"selected_locale`":`"$locale`".*\} -> 200 .+$" $mark 'Unfinalized, its folder and locale' | Out-Null
+    Expect-Logged "^battlenet: ${code}: the form filled in: locales .*size state 1009; not finalized$" $mark 'Sized' | Out-Null
+    Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"finalized`":true.*\} -> 200 \{.*`"finalized`":true.*\}$" $mark 'Finalized' | Out-Null
     Expect-Logged "^battlenet: ${code}: the Agent took the install$" $mark 'Taken' | Out-Null
     Expect-Logged "^queue: $name joined, asked for$" $mark 'The Queue' | Out-Null
     Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second$" $mark 'The Agent''s bytes and speed' | Out-Null
@@ -195,6 +216,7 @@ try {
     Expect-Logged "^battlenet: agent: cancel ${code}: DELETE /install/$uid -> 200 .+$" $mark 'Cancel asked' | Out-Null
     Expect-Logged "^battlenet: ${code}: cancelled: the Agent took it$" $mark 'Cancelled' | Out-Null
     Expect-Logged "^queue: $name dropped$" $mark 'Cancelled, the Queue' | Out-Null
+    Expect-Logged '^battlenet: agent: the Agent the Dashboard started \(pid \d+, port \d+\) stopped: it exited \d+ ms after DELETE /agent$' $mark 'Its Agent stopped' 20 | Out-Null
     if (Test-Path $gameDir) { throw "its folder is still there after Cancel" }
 
     # --- Installed to the end, from its hub again.
@@ -205,6 +227,8 @@ try {
     Expect-Logged "^queue: $name joined, asked for$" $mark 'Second install' | Out-Null
     Expect-Logged "^battlenet: ${code}: done: product\.db says installed$" $mark 'Done' 90 | Out-Null
     Expect-Logged "^queue: $name installed$" $mark 'Installed' 60 | Out-Null
+    Expect-Logged '^battlenet: agent: the Agent the Dashboard started \(pid \d+, port \d+\) stopped: it exited \d+ ms after DELETE /agent$' $mark 'Its Agent stopped' 20 | Out-Null
+    if (Wait-Until { -not @(Get-OwnProcess Agent).Count } 10) { Say 'no Agent left running' } else { throw 'an Agent is left running after the install' }
     if (-not (Test-Path (Join-Path $gameDir 'game.exe'))) { throw "no game.exe in $gameDir" }
 
     # --- Play, through the stand-in Battle.net.
@@ -237,6 +261,7 @@ try {
     Expect-Logged "^battlenet: agent: uninstall ${code}: POST /uninstall \{.*`"uid`":`"$uid`".*\} -> 200 .+$" $mark 'Asked of the Agent' | Out-Null
     Expect-Logged "^battlenet: ${code}: uninstalled: product\.db no longer says installed, \d+ ms on$" $mark 'Gone from product.db' | Out-Null
     Expect-Logged "^queue: $name uninstalled$" $mark 'Uninstalled' 60 | Out-Null
+    Expect-Logged '^battlenet: agent: the Agent the Dashboard started \(pid \d+, port \d+\) stopped: .+$' $mark 'Its Agent stopped' 20 | Out-Null
     if (Test-Path $gameDir) { throw 'its folder is still there after Uninstall' }
     Start-Sleep -Milliseconds 2500
     Save-Screen '09-uninstalled'
@@ -250,16 +275,35 @@ try {
     $mark = Get-DashboardLogLength
     $standinMark = Standin-LogLength
     Press A '.+' | Out-Null
-    Expect-Logged '^battlenet: qbl: installing quarrybell \(Quarry Bell\) into .+ through the Agent$' $mark 'Asked of the Agent' | Out-Null
+    Expect-Logged '^battlenet: qbl: installing quarrybell \(Quarry Bell\) under .+ through the Agent$' $mark 'Asked of the Agent' | Out-Null
     Expect-Logged '^battlenet: agent: install qbl: POST /install \{.*"uid":"quarrybell".*\} -> 200 \{.*"error":2221.*\}$' $mark 'Refused' | Out-Null
+    Expect-Logged '^battlenet: qbl: the install abandoned \(error 2221: the product is not available to this account\): DELETE /install/quarrybell -> \d+.*; the Agent the Dashboard started is stopped$' $mark 'Nothing left in the Agent' | Out-Null
     Expect-Logged "^battlenet: qbl: the Agent did not take the install \(error 2221: the product is not available to this account\): asking Battle\.net instead: .+Battle\.net\.exe --game=quarrybell$" $mark 'The client asked' | Out-Null
     Expect-Standin 'battlenet: asked for game quarrybell' $standinMark 'The stand-in client'
     Start-Sleep -Seconds 2
     In-Front
 
-    # The token was never said in the Dashboard's log.
-    $said = @(Get-DashboardLog | Where-Object { $_ -match 'standin-\d+-\d+' })
-    if ($said.Count) { throw "the Agent's token is in the Dashboard's log: $($said[0])" }
+    # --- Battle.net's own Agent running (the stand-in started as the client starts its own, with a session: 401 to
+    # anyone else, as the TV PC's): no second Agent is started, and the client is asked instead.
+    $standinMark = Standin-LogLength
+    $clients = Start-Process (Join-Path $agentDir 'Agent.9999\Agent.exe') -ArgumentList '--session=standin-client' -PassThru -WindowStyle Hidden
+    Expect-Standin 'battlenet agent: serving .+ as Clients' $standinMark "Battle.net's own Agent (stand-in)"
+    Walk B 'Recent\(\d+\).*' 4
+    Find-Game $name 'L' 'A'
+    Press A "GameHub: $code Hub Install" | Out-Null
+    $mark = Get-DashboardLogLength
+    Press A '.+' | Out-Null
+    Expect-Logged "^battlenet: agent: an Agent the Dashboard did not start answers on port \d+ and gives it no token \(port \d+ \(Agent\.dat\): 401, no token.*\): Battle\.net's own; no second Agent is started beside it$" $mark 'Not beside it' | Out-Null
+    Expect-Logged "^battlenet: ${code}: the Agent did not take the install \(.+\): asking Battle\.net instead: .+Battle\.net\.exe --game=$uid$" $mark 'The client asked' | Out-Null
+    $agents = @(Get-OwnProcess Agent)
+    if ($agents.Count -ne 1 -or $agents[0].Id -ne $clients.Id) { throw "an Agent was started beside Battle.net's own: $(@($agents | ForEach-Object { $_.Id }) -join ', ')" }
+    Stop-Process -Id $clients.Id -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    In-Front
+
+    # The token, the session and the user's names were never said in the Dashboard's log.
+    $said = @(Get-DashboardLog | Where-Object { $_ -match 'standin-\d+-\d+|48151623421234|S-1-5-21-1111|standin-user' })
+    if ($said.Count) { throw "a secret of the Agent's is in the Dashboard's log: $($said[0])" }
 
     if ($script:dashboard.HasExited) { throw "The Dashboard exited with $($script:dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }
