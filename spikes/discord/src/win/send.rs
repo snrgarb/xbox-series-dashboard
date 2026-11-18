@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use super::host::{self, pump, yes, Host, Key, Loader, Show};
+use super::host::{self, pump, yes, Host, Loader, Show};
 use crate::args::Options;
 use crate::say;
 
@@ -35,6 +35,21 @@ impl Open {
             Open::Navigate => "Navigate to the address",
             Open::Click => "a DevTools click on the row",
         }
+    }
+}
+
+/// One `Input.dispatchKeyEvent`, waited for; a failure is logged.
+fn key_wait(host: &Host, kind: &str, key: &str, code: &str, vk: i32, modifiers: i32, text: Option<&str>) {
+    let mut event = json!({
+        "type": kind, "key": key, "code": code, "windowsVirtualKeyCode": vk, "nativeVirtualKeyCode": vk,
+        "modifiers": modifiers,
+    });
+    if let Some(text) = text {
+        event["text"] = json!(text);
+        event["unmodifiedText"] = json!(text);
+    }
+    if let Err(e) = host.cdp("Input.dispatchKeyEvent", event) {
+        say!("send: key {key} {kind}: {e}");
     }
 }
 
@@ -193,10 +208,36 @@ fn send(host: &Host, to: &str, text: &str) -> i32 {
         return 5;
     };
     say!("send: opened by {}; it shows {} messages", way.name(), composer["messages"]);
-    if composer["empty"] != true {
-        say!("send: the message box already holds a draft: nothing sent");
-        return 6;
+
+    // The history loads after the open: wait until the count holds still for 1.5 s (10 s at most).
+    let sent_js = with("TEXT", &json!(text), SENT);
+    let (started, mut count, mut still) = (Instant::now(), u64::MAX, Instant::now());
+    let mut now = Value::Null;
+    while started.elapsed() < Duration::from_secs(10) {
+        pump(Duration::from_millis(250));
+        let Ok(s) = host.eval(&sent_js) else { continue };
+        let n = s["messages"].as_u64().unwrap_or(0);
+        if n != count {
+            (count, still) = (n, Instant::now());
+        }
+        now = s;
+        if count > 0 && still.elapsed() >= Duration::from_millis(1500) {
+            break;
+        }
     }
+    say!("send: the history settled at {count} messages after {} ms", host::ms(started));
+    let age = now["last_age_ms"].as_f64();
+    if now["last_is_text"] == true && age.is_some_and(|a| a < 60_000.0) {
+        say!("send: the newest message is already this text, {:.0} s old: not sent again", age.unwrap_or(0.0) / 1000.0);
+        return 0;
+    }
+
+    // The page believes it is focused while hidden, and the web view has the keyboard focus.
+    match host.cdp("Emulation.setFocusEmulationEnabled", json!({ "enabled": true })) {
+        Ok(_) => say!("send: focus emulation on"),
+        Err(e) => say!("send: focus emulation refused: {e}"),
+    }
+    host.focus();
 
     // Focus: DevTools' DOM.focus on the box, else a DevTools click in it, else the box's own focus().
     let mut focused = false;
@@ -226,7 +267,22 @@ fn send(host: &Host, to: &str, text: &str) -> i32 {
         say!("send: not sent: the text would go elsewhere");
         return 5;
     }
-    let before = composer["messages"].as_u64().unwrap_or(0);
+    let before = count;
+
+    // A draft (Discord keeps the last run's): select all and delete, by DevTools keys, then look again.
+    if host.eval(&composer_js).map(|c| c["empty"] != true).unwrap_or(true) {
+        key_wait(host, "rawKeyDown", "a", "KeyA", 65, 2, None);
+        key_wait(host, "keyUp", "a", "KeyA", 65, 2, None);
+        key_wait(host, "rawKeyDown", "Backspace", "Backspace", 8, 0, None);
+        key_wait(host, "keyUp", "Backspace", "Backspace", 8, 0, None);
+        pump(Duration::from_millis(400));
+        let empty = host.eval(&composer_js).map(|c| c["empty"] == true).unwrap_or(false);
+        say!("send: the box held a draft: cleared by select all + delete: {}", yes(empty));
+        if !empty {
+            say!("send: the draft would not clear: nothing sent");
+            return 6;
+        }
+    }
 
     if let Err(e) = host.cdp("Input.insertText", json!({ "text": text })) {
         say!("send: Input.insertText failed: {e}: nothing sent");
@@ -242,11 +298,23 @@ fn send(host: &Host, to: &str, text: &str) -> i32 {
         say!("send: Enter not pressed: nothing sent (what went in stays as a draft in this session's box)");
         return 7;
     }
-    host.key(Key::Enter, false);
+    if let Ok(f) = host.eval(&format!(
+        "({{ page: document.hasFocus(), box: !!{BOX_JS} && ({BOX_JS} === document.activeElement || {BOX_JS}.contains(document.activeElement)), active: document.activeElement ? document.activeElement.tagName.toLowerCase() + (document.activeElement.getAttribute('role') ? '[role=' + document.activeElement.getAttribute('role') + ']' : '') : '' }})"
+    )) {
+        say!(
+            "send: before Enter: document.hasFocus() {}, activeElement {}, it is the box {}",
+            f["page"],
+            f["active"].as_str().unwrap_or("?"),
+            yes(f["box"] == true)
+        );
+    }
+    // One Enter: the full sequence a keyboard makes.
+    key_wait(host, "rawKeyDown", "Enter", "Enter", 13, 0, None);
+    key_wait(host, "char", "Enter", "Enter", 13, 0, Some("\r"));
+    key_wait(host, "keyUp", "Enter", "Enter", 13, 0, None);
     let sent_at = Instant::now();
-    say!("send: Enter pressed (once)");
+    say!("send: Enter pressed (once: rawKeyDown, char \\r, keyUp)");
 
-    let sent_js = with("TEXT", &json!(text), SENT);
     let mut last = Value::Null;
     while sent_at.elapsed() < Duration::from_secs(15) {
         pump(Duration::from_millis(250));

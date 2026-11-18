@@ -218,10 +218,14 @@ name one line. Never retried.
 | `send: viewport WxH css px, visibility ...; the row wxh at x,y; elementFromPoint at its centre is the row: yes/no` | What a hidden web view gives the page: a 0x0 viewport or a miss means clicks cannot land (try `--hide offscreen`) |
 | `send: <way>: after <ms> ms the route is the conversation's yes/no, its message box (role textbox) present yes/no` | One line per way of opening, tried in order until one works: `history.pushState + popstate` (the page's own router), `Navigate to the address` (a full load of `/channels/@me/<id>`), `a DevTools click on the row`. The first TV run's click alone did not open it (exit 5) |
 | `send: opened by <way>; it shows n messages` | The way that worked |
-| `send: the message box already holds a draft: nothing sent` | Exit 6: never mixes with the user's own draft |
+| `send: the history settled at n messages after <ms> ms` | The conversation's history loaded (the count held still 1.5 s) before anything is typed |
+| `send: the newest message is already this text, s s old: not sent again` | A run less than a minute after one that sent: exit 0, nothing sent |
+| `send: focus emulation on` | DevTools' `Emulation.setFocusEmulationEnabled`: the hidden page believes it has focus; the controller is also given focus (`MoveFocus`) |
 | `send: the message box has focus after DOM.focus / a DevTools click / the box's focus(): yes` | Tried in that order; none: exit 5, nothing sent |
+| `send: the box held a draft: cleared by select all + delete: yes` | Discord keeps drafts (the second TV run's text was still there): Ctrl+A and Backspace by DevTools; "no": exit 6, nothing sent |
 | `send: the message box holds exactly the text: yes` | `Input.insertText` put the text in; "no": Enter is not pressed, exit 7, nothing sent (the text stays as a draft in the spike's session) |
-| `send: Enter pressed (once)` | Enter went, by `Input.dispatchKeyEvent` |
+| `send: before Enter: document.hasFocus() true, activeElement div[role=textbox], it is the box yes` | Where the key will go |
+| `send: Enter pressed (once: rawKeyDown, char \r, keyUp)` | The full key sequence, each event waited for. The second TV run's single `keyDown` with text left the text in the box |
 | `send: after <ms> ms: the newest message is the text yes, still marked sending no, marked failed no, box empty yes; ...` | **Whether the message appeared in the page** |
 | `send: the message appeared in the page` | Exit 0. Otherwise exit 7: look in Discord itself |
 
