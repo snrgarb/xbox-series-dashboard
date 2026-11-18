@@ -464,6 +464,17 @@ impl Guide {
         }
     }
 
+    /// Opens this DM's conversation over the tab, focus on its reply box, as A on its disc does: a Toast's tap
+    /// (docs/spec/party-chats.md, 7.1). B comes back to the tab. `DirectAsk::Open` is asked of the session.
+    pub fn open_conversation(&mut self, id: Id) {
+        self.dms.open_chat(id, direct::Back::Tab);
+    }
+
+    /// Whether this DM's conversation is open over the tab (arrived or still loading).
+    pub fn conversation_open(&self, id: &Id) -> bool {
+        self.open && self.dms.chat().is_some_and(|chat| &chat.id == id)
+    }
+
     /// Puts focus on this Utility, if the showing tab has it.
     pub fn focus_utility(&mut self, utility: Utility) {
         if let Some(at) = self.utilities.iter().position(|&u| u == utility) {

@@ -787,3 +787,29 @@ this spec was approved, and a few things it left open were decided:
     says "Signed in" until the web session gives a name; Sign out's "Signed out. Discord lists this PC under Devices..."
     stays the Devices line under the status line while a session is kept. The Notifications and While playing are
     options (`Options::notify_*`, `Options::while_playing`) for the Toasts (#202).
+
+---
+
+## 16. Decided in #202
+
+The Toasts of section 7 are built (`ToastKind::{DiscordDm, DiscordMention, DiscordCall}`; `Dashboard::direct_event`;
+`crates/screens/tests/discord_toasts.rs`).
+
+1. **Voice is the web session's**: a ring's tap opens the tab on Answer, and A there asks `DirectAsk::Answer(channel)`.
+   There is no "without the voice connection" form (7.3): the tap always opens the tab.
+2. **One ring is one Toast, by its channel**: a second `Ring` for a channel whose ring Toast is showing or waiting
+   raises nothing. (The port has no RPC ring Toast, so the dedupe is between events.) `RingEnded` takes the Toast away,
+   showing (it goes as a Toast that has had its time) or waiting.
+3. **A burst** replaces only a *waiting* Toast of the same conversation, in its place in the queue; one already showing
+   is not touched. The line is "{who}: {n} new messages" whatever the text setting, with {who} as in 7.1.
+4. **Without text** a Group DM's line is "{name} in {group}" (7.1); a DM's "{name} sent you a message". An empty `line`
+   counts as no text.
+5. **Both While playing's "Calls only" and "None"** act on a game running (`Dashboard::playing`); a Toast already
+   queued is not withdrawn when a game starts. The per-kind switches (8.2) apply first.
+6. **A Toast's tap** with no Discord tab (Direct Messages off, no voice connection) opens the Guide as any tap does.
+   A DM's tap shows the tab, then opens the conversation (`DirectAsk::Open`, back goes to the tab), focus on the reply box.
+7. **The tile** of a DM or a ring is the avatar round 80 (the greeting's), from memory; without one Discord's mark at 48
+   on the lighter square, also a mention's.
+8. **The log** says `toasts: shown (DiscordDm), N waiting at T ms`: the kind and the queue, never the line (the
+   executable's `say_toasts` leaves the text out for these kinds: `ToastKind::is_private`).
+9. **Do Not Disturb** is not checked by the Dashboard: the session raises no event then (7.4).

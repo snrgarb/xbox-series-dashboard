@@ -52,9 +52,25 @@ pub enum ToastKind {
     /// "Rare Achievement unlocked - <n>%": one Rare achievement told of alone, the blue pill with the spinning
     /// diamond and a sound of its own. A tap opens Profile & system.
     RareAchievement,
+    /// A Direct Message (docs/spec/party-chats.md, 7.1): the sender's avatar round, else Discord's mark. A tap opens
+    /// the Guide on that conversation, focus on the reply box.
+    DiscordDm,
+    /// Someone mentioned the user in a server's channel (7.2): Discord's mark. A tap opens the Guide on the Discord tab.
+    DiscordMention,
+    /// A DM call is ringing (7.3): the caller's avatar, else Discord's mark. Shows up to 30 s. A tap opens the
+    /// Guide on the Discord tab, focus on Answer.
+    DiscordCall,
 }
 
+/// How long a ring's Toast shows: the Bundle's `RingToastDuration`.
+pub const RING_SECONDS: f64 = 30.0;
+
 impl ToastKind {
+    /// Whether its line is what someone wrote or who they are: the log says the kind and no more.
+    pub fn is_private(self) -> bool {
+        matches!(self, ToastKind::DiscordDm | ToastKind::DiscordMention | ToastKind::DiscordCall)
+    }
+
     /// What the prompt says after the Guide button's mark.
     pub fn prompt(self) -> &'static str {
         match self {
@@ -79,12 +95,29 @@ pub struct Toast {
     pub art: Option<Box<model::Game>>,
     /// What an Achievement unlocked Toast tells of, beyond its line.
     pub told: Option<Box<achievement::Told>>,
+    /// A Discord Toast's DM, by its channel: what a burst, a ring's end and the open conversation go by.
+    pub channel: Option<model::discord_dms::Id>,
+    /// What a DM Toast's line says before its ": ..." (the sender, "in {group}"), and how many messages it tells of.
+    pub who: Option<(String, u32)>,
+    /// A DM's or a caller's avatar, from memory.
+    pub avatar: Option<model::discord_dms::Picture>,
 }
 
 impl Toast {
     /// A Toast with only a line, of a kind with no game.
     pub fn new(kind: ToastKind, text: impl Into<String>, prompt: bool) -> Self {
-        Self { kind, text: text.into(), prompt, picture: None, game: None, art: None, told: None }
+        Self {
+            kind,
+            text: text.into(),
+            prompt,
+            picture: None,
+            game: None,
+            art: None,
+            told: None,
+            channel: None,
+            who: None,
+            avatar: None,
+        }
     }
 
     /// Whether it is the pill, an achievement's, rather than the banner.
@@ -99,6 +132,7 @@ impl Toast {
                 let description = self.told.as_ref().and_then(|told| told.description.as_deref());
                 f64::from(pill::shown_for(self.kind == ToastKind::RareAchievement, description))
             }
+            ToastKind::DiscordCall => RING_SECONDS,
             _ => SHOWN_SECONDS,
         }
     }
@@ -200,6 +234,48 @@ impl Toasts {
         self.waiting.push_back(toast);
         let free = self.showing().is_none() && self.next_at.is_none();
         free && self.show_next()
+    }
+
+    /// A Toast comes before every one waiting (a ring's); it shows at once when nothing is showing or being waited out.
+    pub fn post_first(&mut self, toast: Toast) -> bool {
+        self.waiting.push_front(toast);
+        let free = self.showing().is_none() && self.next_at.is_none();
+        free && self.show_next()
+    }
+
+    /// A Toast waiting, of this kind, for this channel.
+    pub fn waiting_for(&self, kind: ToastKind, channel: &model::discord_dms::Id) -> Option<&Toast> {
+        self.waiting.iter().find(|toast| toast.kind == kind && toast.channel.as_ref() == Some(channel))
+    }
+
+    /// Puts `toast` in the place of the one waiting of its kind for its channel. False when there is none.
+    pub fn replace_waiting(&mut self, toast: Toast) -> bool {
+        let same = |waiting: &Toast| waiting.kind == toast.kind && waiting.channel == toast.channel;
+        match self.waiting.iter_mut().find(|waiting| same(waiting)) {
+            Some(waiting) => {
+                *waiting = toast;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether a Toast of this kind for this channel is showing or waiting.
+    pub fn has(&self, kind: ToastKind, channel: &model::discord_dms::Id) -> bool {
+        let same = |toast: &Toast| toast.kind == kind && toast.channel.as_ref() == Some(channel);
+        self.showing().is_some_and(same) || self.waiting_for(kind, channel).is_some()
+    }
+
+    /// A Toast of this kind for this channel is taken away: gone from the queue, or sent away if showing.
+    pub fn withdraw(&mut self, kind: ToastKind, channel: &model::discord_dms::Id) {
+        let same = |toast: &Toast| toast.kind == kind && toast.channel.as_ref() == Some(channel);
+        self.waiting.retain(|toast| !same(toast));
+        if self.waiting.is_empty() {
+            self.next_at = None;
+        }
+        if self.showing().is_some_and(same) {
+            self.send_away();
+        }
     }
 
     /// The first one waiting takes the banner, from the start of its coming in, over one still going.
