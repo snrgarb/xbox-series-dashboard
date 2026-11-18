@@ -1,6 +1,5 @@
-//! The marks the Bundle draws from vector paths that are other companies' trademarks. The Xbox sphere and the
-//! stores' are drawn as the Bundle draws them (`crate::drawn`, NOTICE.md); Discord's is still the project's own
-//! drawing of chat (docs/spec/guide.md, section 10).
+//! The marks the Bundle draws from vector paths that are other companies' trademarks: the Xbox sphere, Discord's
+//! and the stores', drawn as the Bundle draws them (`crate::drawn`, NOTICE.md; docs/spec/guide.md, section 10).
 use ui::{Color, Rect, Ui};
 
 use crate::drawn::{self, Drawing};
@@ -11,10 +10,10 @@ pub fn xbox(ui: &mut Ui, rect: Rect, color: Color) {
     drawn::draw(ui, rect, Drawing::Xbox, color);
 }
 
-/// Discord's mark, filling `rect`: the Discord tab's icon, the account's, a Call's. The project's own drawing of
-/// chat, never Discord's logo (docs/spec/guide.md, 10.1).
+/// Discord's mark, filling `rect` across (it is 24 wide and 18.3 high, on the square's middle): the Discord tile and
+/// tab, the account's, a server's or a person's with no picture, a Call's (docs/spec/guide.md, 10.1).
 pub fn discord_mark(ui: &mut Ui, rect: Rect, color: Color) {
-    drawn::draw(ui, rect, Drawing::Chat, color);
+    drawn::draw(ui, rect, Drawing::Discord, color);
 }
 
 /// The store's badge on a game's cover in the list: its mark 18 across, 6 in from the cover's bottom left, on a

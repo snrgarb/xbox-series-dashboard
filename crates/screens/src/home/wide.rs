@@ -20,23 +20,18 @@ struct WideTile {
     subtitle: Option<&'static str>,
     from: Color,
     to: Color,
-    glyph: char,
+    /// Its glyph; none for Discord, which carries Discord's mark.
+    glyph: Option<char>,
 }
 
 const TILES: [WideTile; 4] = [
-    WideTile {
-        title: "Discord",
-        subtitle: None,
-        from: Color::rgb(0x7983F5),
-        to: Color::rgb(0x4752C4),
-        glyph: glyph::CHAT,
-    },
+    WideTile { title: "Discord", subtitle: None, from: Color::rgb(0x7983F5), to: Color::rgb(0x4752C4), glyph: None },
     WideTile {
         title: "Settings",
         subtitle: None,
         from: Color::rgb(0x5F6B7A),
         to: Color::rgb(0x2B323C),
-        glyph: glyph::SETTINGS,
+        glyph: Some(glyph::SETTINGS),
     },
     // Its subtitle is the Score total once there are achievements to count (`subtitle`); this one, the Bundle's
     // line for none recorded, is for none. Its other, "Needs PlayniteAchievements", names a dependency there is
@@ -46,7 +41,7 @@ const TILES: [WideTile; 4] = [
         subtitle: Some("Nothing recorded yet"),
         from: Color::rgb(0x3FA34D),
         to: Color::rgb(0x0E5A1C),
-        glyph: glyph::TROPHY,
+        glyph: Some(glyph::TROPHY),
     },
     // Its subtitle counts the Queue: this one is for an empty Queue (`subtitle`).
     WideTile {
@@ -54,7 +49,7 @@ const TILES: [WideTile; 4] = [
         subtitle: Some("Nothing queued"),
         from: Color::rgb(0x3A8EE6),
         to: Color::rgb(0x1A4C8F),
-        glyph: glyph::DOWNLOAD,
+        glyph: Some(glyph::DOWNLOAD),
     },
 ];
 
@@ -94,7 +89,15 @@ pub fn draw(ui: &mut Ui, focused: Option<usize>, queued: usize, score: Option<u6
         let rect = rect(i);
         ui.gradient(rect, tile.from, tile.to, Gradient::Diagonal, tile::RADIUS * S);
         let (cx, cy) = rect.center();
-        ui.icon(cx, cy - 12.0 * S, tile.glyph, 40.0 * S, Color::WHITE);
+        match tile.glyph {
+            Some(glyph) => ui.icon(cx, cy - 12.0 * S, glyph, 40.0 * S, Color::WHITE),
+            None => {
+                // Discord's mark, 48 square, as the Bundle's PromoRow.xaml draws it.
+                let side = 48.0 * S;
+                let mark = Rect::new(cx - side / 2.0, cy - 12.0 * S - side / 2.0, side, side);
+                crate::guide::marks::discord_mark(ui, mark, Color::WHITE);
+            }
+        }
         // The caption stands on the tile's foot: the title, and under it the subtitle if there is one.
         let line = ui.measure(&BODY_SEMIBOLD, tile.title).height;
         let mut caption = Rect::new(rect.x + 18.0 * S, rect.bottom() - 14.0 * S - line, rect.w - 36.0 * S, line);
