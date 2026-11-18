@@ -139,7 +139,9 @@
 //!       smaller one. Under `/stores` it is the stores' own art online too, for
 //!       `dashboard --store-art-service http://127.0.0.1:<n>/stores`: Steam's GetItems and CDN, the Microsoft
 //!       Store's catalogue and GOG's API, knowing every id, with a red cover, a blue hero, a green header and (the
-//!       Microsoft Store's alone) a magenta square (`STORE_ART_COLOURS`). Says `serve-art: listening on
+//!       Microsoft Store's alone) a magenta square (`STORE_ART_COLOURS`). The stores' searches by name (Steam's,
+//!       the Microsoft Store's autosuggest, the PlayStation Store's) answer, and find nothing: a game that is not a
+//!       store's own goes on to SteamGridDB, as the art payloads expect. Says `serve-art: listening on
 //!       http://127.0.0.1:<n>` and then a line a request (its path, and whether it had the key), until it is killed.
 //!   standin serve-updates --exe <dashboard.exe> --version <x.y.z> [--port <n>] [--bad-hash] [--not-public]
 //!       The stand-in update address (`update::fake`), on 127.0.0.1 at <n> (any free port without one), for

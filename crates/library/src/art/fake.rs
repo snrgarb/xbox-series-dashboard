@@ -52,6 +52,9 @@ pub struct Script {
     pub candidates: usize,
     /// The candidates' pictures and thumbnails; without, every one is `picture`'s.
     pub candidate: Option<CandidatePainter>,
+    /// The style every picture is said to be (`alternate`, `white_logo`...): a request that names styles (`styles=`)
+    /// without it finds none.
+    pub style: String,
 }
 
 impl Script {
@@ -65,6 +68,7 @@ impl Script {
             stores: None,
             candidates: 1,
             candidate: None,
+            style: "alternate".into(),
         }
     }
 }
@@ -82,8 +86,13 @@ pub type StorePainter = Arc<dyn Fn(&str, &str, Kind) -> Vec<u8> + Send + Sync>;
 /// images. Asked with no key.
 #[derive(Clone)]
 pub struct StoreScript {
-    /// The games each store knows, `("xbox", "9ZZZMADEUP02")`, and the kinds it has pictures of.
+    /// The games each store knows, `("xbox", "9ZZZMADEUP02")`, and the kinds it has pictures of. A PlayStation
+    /// game is `("playstation", <its id there>)`.
     pub games: Vec<(String, String, Vec<Kind>)>,
+    /// The names each store's search finds, `("xbox", "Made-up Game", "9ZZZMADEUP03")`: a search finds every one
+    /// of its store whose name has the term in it, as the real ones find near names too. `any_id` finds no name:
+    /// the VM's stand-in knows no game by name, so a game falls through to SteamGridDB as before.
+    pub named: Vec<(String, String, String)>,
     /// Every id is a game, with every kind its store has online (Steam's and GOG's no square): the VM's stand-in.
     pub any_id: bool,
     /// The first this many requests to a catalogue are answered 429, `Retry-After: 1`.
@@ -95,7 +104,17 @@ pub struct StoreScript {
 
 impl StoreScript {
     pub fn new(picture: StorePainter) -> Self {
-        Self { games: Vec::new(), any_id: false, busy: 0, picture, rarity: Vec::new() }
+        Self { games: Vec::new(), named: Vec::new(), any_id: false, busy: 0, picture, rarity: Vec::new() }
+    }
+
+    /// The games of `store` whose names have `term` in them, written plainly: their names and ids.
+    fn search(&self, store: &str, term: &str) -> Vec<(String, String)> {
+        let term = plain_name(term);
+        self.named
+            .iter()
+            .filter(|(s, name, _)| s == store && !term.is_empty() && plain_name(name).contains(&term))
+            .map(|(_, name, id)| (name.clone(), id.clone()))
+            .collect()
     }
 
     /// The kinds the store has of the game, if it knows it.
@@ -104,6 +123,7 @@ impl StoreScript {
         known.or_else(|| {
             self.any_id.then(|| match store {
                 "xbox" => Kind::ALL.to_vec(),
+                "playstation" => vec![Kind::Square, Kind::Hero],
                 _ => vec![Kind::Cover, Kind::Hero, Kind::Header],
             })
         })
@@ -294,10 +314,15 @@ fn route(shared: &Shared, path: &str, authorization: Option<&str>) -> Reply {
                 _ => Kind::Header,
             };
             let known = script.games.iter().find(|game| game.id == id);
-            let has = match known {
-                Some(game) => game.kinds.contains(&kind),
-                None => script.any_name && shared.names.lock().unwrap().values().any(|&named| named == id),
+            let styled = |name: &str| {
+                query.split('&').find_map(|pair| pair.strip_prefix(name)?.strip_prefix('=')).map(str::to_string)
             };
+            let style_fits = styled("styles").is_none_or(|styles| styles.split(',').any(|s| s == script.style));
+            let has = style_fits
+                && match known {
+                    Some(game) => game.kinds.contains(&kind),
+                    None => script.any_name && shared.names.lock().unwrap().values().any(|&named| named == id),
+                };
             if known.is_none() && !has {
                 return not_found();
             }
@@ -319,7 +344,7 @@ fn route(shared: &Shared, path: &str, authorization: Option<&str>) -> Reply {
                 .map(|n| {
                     let file = if n == 0 { kind.name().to_string() } else { format!("{}-{n}", kind.name()) };
                     serde_json::json!({
-                        "id": candidate_id(id, kind, n), "score": 0, "style": "alternate", "width": width,
+                        "id": candidate_id(id, kind, n), "score": 0, "style": script.style, "width": width,
                         "height": height, "nsfw": false, "humor": false, "epilepsy": false, "mime": "image/png",
                         "language": "en",
                         "url": format!("{}/pictures/{id}/{file}.png", shared.base),
@@ -340,7 +365,7 @@ fn store_route(shared: &Shared, stores: &StoreScript, parts: &[&str], query: &st
     let base = format!("{}/stores", shared.base);
     let png = |store: &str, id: &str, kind: Kind| ("200 OK", "image/png", (stores.picture)(store, id, kind), "");
     let missing = || ("404 Not Found", "text/plain", b"no such thing".to_vec(), "");
-    let catalogue = matches!(parts.first(), Some(&("steam-api" | "microsoft" | "gog")));
+    let catalogue = matches!(parts.first(), Some(&("steam-api" | "steam-store" | "microsoft" | "playstation" | "gog")));
     if catalogue && take_one(&shared.stores_busy) {
         return ("429 Too Many Requests", "text/plain", b"slow down".to_vec(), "Retry-After: 1\r\n");
     }
@@ -402,6 +427,51 @@ fn store_route(shared: &Shared, stores: &StoreScript, parts: &[&str], query: &st
                 Some(kinds) if kinds.contains(&kind) => png("steam", id, kind),
                 _ => missing(),
             }
+        }
+        // Steam's store search: `items[]` of `{type, name, id}`.
+        ["steam-store", "api", "storesearch", ..] => {
+            let items: Vec<serde_json::Value> = stores
+                .search("steam", &param("term"))
+                .into_iter()
+                .map(
+                    |(name, id)| serde_json::json!({"type": "app", "name": name, "id": id.parse::<u64>().unwrap_or(0)}),
+                )
+                .collect();
+            json("200 OK", serde_json::json!({"total": items.len(), "items": items}))
+        }
+        // The Microsoft Store's autosuggest: `Results[].Products[]` of `{ProductId, Type, Title}`.
+        ["microsoft", "v7.0", "productFamilies", "autosuggest"] => {
+            let results: Vec<serde_json::Value> = stores
+                .search("xbox", &param("query"))
+                .into_iter()
+                .map(|(name, id)| {
+                    let product = serde_json::json!({"ProductId": id, "Type": "Game", "Title": name, "Icon": ""});
+                    serde_json::json!({"ProductFamilyName": "Games", "Products": [product]})
+                })
+                .collect();
+            json("200 OK", serde_json::json!({"Results": results, "TotalResultCount": results.len()}))
+        }
+        // The PlayStation Store's search, the term the path's last part: `links[]` with their images.
+        ["playstation", "store", "api", "chihiro", "00_09_000", "tumbler", _, _, _, term] => {
+            let links: Vec<serde_json::Value> = stores
+                .search("playstation", term)
+                .into_iter()
+                .map(|(name, id)| {
+                    let kinds = stores.kinds("playstation", &id).unwrap_or_default();
+                    let images: Vec<serde_json::Value> = [(Kind::Square, 10), (Kind::Hero, 12)]
+                        .into_iter()
+                        .filter(|(kind, _)| kinds.contains(kind))
+                        .map(|(_, t)| serde_json::json!({"type": t, "url": format!("{base}/ps-images/{id}/{t}.png")}))
+                        .collect();
+                    serde_json::json!({"name": name, "id": id, "top_category": "downloadable_game",
+                                       "game_contentType": "Full Game", "images": images})
+                })
+                .collect();
+            json("200 OK", serde_json::json!({"size": links.len(), "links": links}))
+        }
+        ["ps-images", id, file] => {
+            let kind = if file.starts_with("12") { Kind::Hero } else { Kind::Square };
+            png("playstation", id, kind)
         }
         ["microsoft", "v7.0", "products"] => {
             let id = param("bigIds");

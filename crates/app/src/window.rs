@@ -1050,6 +1050,14 @@ impl App {
                         self.start_art();
                     }
                 }
+                // Settings > Art's sources: saved, and a lookup under way started again in the new order.
+                Effect::ArtOrder(order) => {
+                    self.store.set_text(model::art_order::KEY, &order.text());
+                    self.art = None;
+                    if self.art_started {
+                        self.start_art();
+                    }
+                }
                 // Settings > Discord: the connection does it, and the page shows how it is after.
                 Effect::Discord(ask) => {
                     self.discord.ask(ask, shell::clipboard::text);

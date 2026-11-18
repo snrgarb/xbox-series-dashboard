@@ -50,7 +50,7 @@ A cell is `#3B3B3B` (`#4A4A4A` focused) under its picture. The candidates' thumb
 
 **The fixed entries**, first on page 1, in this order:
 
-1. **Automatic**, "The Dashboard's pick": no choice; what the lookup finds (sources.md "Art").
+1. **Automatic**, "The Dashboard's pick": no choice; what the lookup finds (sources.md "Art"), in Settings > Art's order of sources (#246): Steam, Xbox, PlayStation and SteamGridDB by default, each kind from the first that has it. The stores' pictures are offered only this way, not as candidates of their own: each store has one picture of a kind for a game, which Automatic already takes (#246 left listing them apart for later).
 2. **The store's own**, its picture with the caption on a dark strip at its foot: where the store's client keeps one on the PC (Steam's cover and hero; none of Steam's is square, so Square has none for Steam).
 
 **In use:** the cell of what is in use carries a disc **36 across**, accent green, **10 in** from its top right corner, a tick (U+E73E) on it.
@@ -101,6 +101,7 @@ Said in the foot:
 
 - No key: "Enter your SteamGridDB API key in Settings > Games & apps > Art to choose from its pictures." (the fixed entries alone, no Retry). The same once SteamGridDB has refused the key.
 - Art online turned off: "Turn on Download art online in Settings > Games & apps > Art to choose from SteamGridDB's pictures."
+- SteamGridDB turned off among Settings > Art's sources (#246): "Turn on SteamGridDB in Settings > Games & apps > Art's sources to choose from its pictures." (focus log: `steamgriddb off`).
 - A game the service does not know: "SteamGridDB doesn't know this game."
 - Asked to wait: "SteamGridDB is busy. Try again in a minute." with Retry.
 - Anything else: "These pictures couldn't be fetched: <why>." with Retry.

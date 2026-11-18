@@ -1,24 +1,33 @@
-//! Each store's own art online: its CDN or public catalogue, asked with no sign-in and no key, sending nothing but the
-//! game's id at that store. What each store has, and what was checked against the real services, is in
-//! docs/sources.md, "Art":
+//! The stores' art online: their CDNs and public catalogues, asked with no sign-in and no key, sending nothing but a
+//! game's id at that store or, where the game is not that store's, its name. What each has, and what was checked
+//! against the real services, is in docs/sources.md, "Art", and docs/research/art-sources.md:
 //!
-//! - **Steam:** `IStoreBrowseService/GetItems` (Steam's public Web API, no key) gives an app's asset file names,
-//!   which are on its CDN under `store_item_assets`: cover (`library_capsule`), hero (`library_hero`), header.
-//!   Nothing square.
-//! - **Xbox:** the Microsoft Store's display catalogue, by the product id the game's `MicrosoftGame.config` names
-//!   (`OnlineArt::product`): `BoxArt` (square), `Poster` (portrait), `SuperHeroArt` (hero), `TitledHeroArt` (header).
-//! - **GOG:** `api.gog.com/v2/games/<id>`: the box art (portrait), Galaxy's background (hero), and the product's
-//!   card (header). Nothing square large enough for a tile.
-//! - **Any store whose client named its pictures' addresses** (`OnlineArt::cover` and the rest: the Epic launcher's
-//!   catalogue cache): those, with no request but the pictures'.
+//! - **The game's own store** ([`Store::Own`]), first: GOG's `api.gog.com/v2/games/<id>` for a GOG game (box art,
+//!   Galaxy's background, the product's card), and the addresses a client named (`OnlineArt::cover` and the rest:
+//!   the Epic launcher's catalogue cache), with no request but the pictures'.
+//! - **Steam** ([`Store::Steam`]): a Steam game by its appid, any other by its name in the store's search
+//!   (`store.steampowered.com/api/storesearch`); then `IStoreBrowseService/GetItems` (Steam's public Web API, no key)
+//!   gives the app's asset file names on its CDN: cover (`library_capsule`), hero (`library_hero`), header. Nothing
+//!   square.
+//! - **Xbox** ([`Store::Microsoft`]): the Microsoft Store's display catalogue, an Xbox game by the product id its
+//!   `MicrosoftGame.config` names (`OnlineArt::product`), any other by name in the catalogue's `autosuggest`; then
+//!   `products?bigIds=`: `BoxArt` (square), `Poster` (portrait), `SuperHeroArt` (hero), `TitledHeroArt` (header).
+//! - **PlayStation** ([`Store::PlayStation`]): by name in the PlayStation Store's `chihiro` search, whose results
+//!   carry their images: the 1024 square (type 10) and the 1920x1080 background (type 12). No PlayStation library
+//!   is read, so every game is matched by name.
 //!
-//! This is one table keyed by the source's key, not a method of `model::Source`: a source reads only its client's
-//! files and never the network (docs/sources.md), and every request for art, with its pace and its manners, is the
-//! lookup's.
+//! The order Steam, Xbox, PlayStation (and SteamGridDB) is the user's (`model::ArtOrder`); the lookup walks it. A
+//! name is matched by [`super::names`]' rule alone: no picture is better than another game's.
+//!
+//! This is one table keyed by the store, not a method of `model::Source`: a source reads only its client's files and
+//! never the network (docs/sources.md), and every request for art, with its pace and its manners, is the lookup's.
 use serde_json::Value;
 
-use super::cache::Kind;
+use model::ArtSource;
+
+use super::cache::{Kind, Online};
 use super::lookup::Want;
+use super::names::{pick, plain_name, search_name};
 use super::steamgriddb::{self, retry_after, segment, transport, Error};
 
 /// Where each store's art is asked for: its own services, or a test's stand-in (`--store-art-service`).
@@ -28,8 +37,12 @@ pub struct Hosts {
     pub steam_api: String,
     /// Steam's CDN, where an app's `asset_url_format` is.
     pub steam_cdn: String,
+    /// Steam's store, whose search finds an app by name.
+    pub steam_store: String,
     /// The Microsoft Store's display catalogue.
     pub microsoft: String,
+    /// The PlayStation Store.
+    pub playstation: String,
     /// GOG's API.
     pub gog: String,
 }
@@ -39,7 +52,9 @@ impl Default for Hosts {
         Self {
             steam_api: "https://api.steampowered.com".into(),
             steam_cdn: "https://shared.steamstatic.com/store_item_assets".into(),
+            steam_store: "https://store.steampowered.com".into(),
             microsoft: "https://displaycatalog.mp.microsoft.com".into(),
+            playstation: "https://store.playstation.com".into(),
             gog: "https://api.gog.com".into(),
         }
     }
@@ -47,19 +62,63 @@ impl Default for Hosts {
 
 impl Hosts {
     /// Every store at one stand-in (`library::art::fake::FakeStores`): `<base>/steam-api`, `<base>/steam-cdn`,
-    /// `<base>/microsoft`, `<base>/gog`.
+    /// `<base>/steam-store`, `<base>/microsoft`, `<base>/playstation`, `<base>/gog`.
     pub fn all_at(base: &str) -> Self {
         let base = base.trim_end_matches('/');
         Self {
             steam_api: format!("{base}/steam-api"),
             steam_cdn: format!("{base}/steam-cdn"),
+            steam_store: format!("{base}/steam-store"),
             microsoft: format!("{base}/microsoft"),
+            playstation: format!("{base}/playstation"),
             gog: format!("{base}/gog"),
         }
     }
 }
 
-/// The stores' own art online.
+/// A store asked for art.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Store {
+    /// The game's own store where it is none of the others: GOG's catalogue, a client's named addresses.
+    Own,
+    Steam,
+    Microsoft,
+    PlayStation,
+}
+
+impl Store {
+    /// The store of an online art source; None for SteamGridDB, which is not a store.
+    pub fn of(source: ArtSource) -> Option<Self> {
+        match source {
+            ArtSource::Steam => Some(Store::Steam),
+            ArtSource::Xbox => Some(Store::Microsoft),
+            ArtSource::PlayStation => Some(Store::PlayStation),
+            ArtSource::SteamGridDb => None,
+        }
+    }
+
+    /// Where its misses are remembered.
+    pub fn online(self) -> Online {
+        match self {
+            Store::Own => Online::Store,
+            Store::Steam => Online::Steam,
+            Store::Microsoft => Online::Microsoft,
+            Store::PlayStation => Online::PlayStation,
+        }
+    }
+
+    /// Its name as the log says where a picture came from.
+    pub fn name(self) -> &'static str {
+        match self {
+            Store::Own => "its store",
+            Store::Steam => "Steam",
+            Store::Microsoft => "Xbox",
+            Store::PlayStation => "PlayStation",
+        }
+    }
+}
+
+/// The stores' art online.
 pub struct StoreArt {
     hosts: Hosts,
     agent: ureq::Agent,
@@ -71,10 +130,19 @@ impl std::fmt::Debug for StoreArt {
     }
 }
 
-/// What a store's catalogue is asked, for a game: the address, and the store's name as the log says it.
+/// What a store is asked, for a game: the address, and the store's name as the log says it (and its gate is kept
+/// by).
 pub struct Ask {
     pub url: String,
     pub name: &'static str,
+}
+
+/// The game a store's search found: its id there, and, where the search's own answer has its pictures (the
+/// PlayStation Store's), that answer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub id: String,
+    pub item: Option<Value>,
 }
 
 impl StoreArt {
@@ -82,31 +150,120 @@ impl StoreArt {
         Self { hosts, agent: steamgriddb::agent() }
     }
 
-    /// The kinds of picture the game's store has online for it, as far as can be told without asking.
-    pub fn offers(&self, want: &Want) -> Vec<Kind> {
-        let catalogue: &[Kind] = match want.source.as_str() {
-            "steam" if steam_app(&want.source_id) => &[Kind::Cover, Kind::Hero, Kind::Header],
-            "xbox" if want.online.product.as_deref().is_some_and(product_id) => &Kind::ALL,
-            "gog" if want.source_id.bytes().all(|b| b.is_ascii_digit()) && !want.source_id.is_empty() => {
-                &[Kind::Cover, Kind::Hero, Kind::Header]
+    /// The kinds of picture the store may have of the game, as far as can be told without asking.
+    pub fn offers(&self, store: Store, want: &Want) -> Vec<Kind> {
+        let named = || Kind::ALL.into_iter().filter(|&kind| named(want, kind).is_some());
+        match store {
+            Store::Own => {
+                let gog = want.source == "gog" && !want.source_id.is_empty();
+                let gog = gog && want.source_id.bytes().all(|b| b.is_ascii_digit());
+                let catalogue: &[Kind] = if gog { &[Kind::Cover, Kind::Hero, Kind::Header] } else { &[] };
+                let mut kinds = catalogue.to_vec();
+                kinds.extend(named().filter(|kind| !catalogue.contains(kind)));
+                kinds
             }
-            _ => &[],
-        };
-        let named = Kind::ALL.into_iter().filter(|&kind| named(want, kind).is_some());
-        let mut kinds: Vec<Kind> = catalogue.to_vec();
-        kinds.extend(named.filter(|kind| !catalogue.contains(kind)));
-        kinds
+            _ if self.own_id(store, want).is_none() && plain_name(&want.name).is_empty() => Vec::new(),
+            Store::Steam => vec![Kind::Cover, Kind::Hero, Kind::Header],
+            Store::Microsoft => Kind::ALL.to_vec(),
+            Store::PlayStation => vec![Kind::Square, Kind::Hero],
+        }
     }
 
-    /// The request to the store's catalogue that gives the game's pictures' addresses; none where the client
-    /// named them all, or the store has no catalogue to ask.
-    pub fn ask(&self, want: &Want, kinds: &[Kind]) -> Option<Ask> {
-        if kinds.iter().all(|&kind| named(want, kind).is_some()) {
+    /// The game's id at the store where it is the store's own: a Steam game's appid, an Xbox game's product id.
+    pub fn own_id(&self, store: Store, want: &Want) -> Option<String> {
+        match store {
+            Store::Steam if want.source == "steam" && steam_app(&want.source_id) => Some(want.source_id.clone()),
+            Store::Microsoft if want.source == "xbox" => want.online.product.clone().filter(|id| product_id(id)),
+            _ => None,
+        }
+    }
+
+    /// The store's search for the game by its name, for a game that is not the store's own. Only the name is sent.
+    pub fn search(&self, store: Store, want: &Want) -> Option<Ask> {
+        let name = search_name(&want.name);
+        if plain_name(&name).is_empty() {
             return None;
         }
-        let id = want.source_id.as_str();
-        match want.source.as_str() {
-            "steam" if steam_app(id) => {
+        let term = segment(&name);
+        match store {
+            Store::Own => None,
+            Store::Steam => Some(Ask {
+                url: format!("{}/api/storesearch/?term={term}&l=english&cc=US", self.hosts.steam_store),
+                name: "Steam",
+            }),
+            Store::Microsoft => Some(Ask {
+                url: format!(
+                    "{}/v7.0/productFamilies/autosuggest?market=US&languages=en-us&productFamilyNames=Games&query={term}",
+                    self.hosts.microsoft
+                ),
+                name: "the Microsoft Store",
+            }),
+            Store::PlayStation => Some(Ask {
+                url: format!(
+                    "{}/store/api/chihiro/00_09_000/tumbler/US/en/999/{term}?suggested_size=10&mode=game",
+                    self.hosts.playstation
+                ),
+                name: "the PlayStation Store",
+            }),
+        }
+    }
+
+    /// Of a search's answer, the game that is the one wanted by the matching rule (`names::pick`); None when none
+    /// is.
+    pub fn matched(&self, store: Store, want: &Want, answer: &Value) -> Option<Found> {
+        let results: Vec<(String, Found, u8)> = match store {
+            Store::Own => Vec::new(),
+            // `items[]`: `{type, name, id}`; apps alone, not bundles or packages.
+            Store::Steam => list(answer.get("items"))
+                .filter(|item| item.get("type").and_then(Value::as_str) == Some("app"))
+                .filter_map(|item| {
+                    let id = item.get("id")?.as_u64()?;
+                    Some((text(item, "name")?, Found { id: id.to_string(), item: None }, 0))
+                })
+                .collect(),
+            // `Results[].Products[]`: `{ProductId, Type, Title}`; games alone, not their add-ons (`Durable`).
+            Store::Microsoft => list(answer.get("Results"))
+                .flat_map(|family| list(family.get("Products")))
+                .filter(|product| product.get("Type").and_then(Value::as_str) == Some("Game"))
+                .filter_map(|product| {
+                    let id = text(product, "ProductId").filter(|id| product_id(id))?;
+                    Some((text(product, "Title")?, Found { id, item: None }, 0))
+                })
+                .collect(),
+            // `links[]`: `{name, id, top_category, game_contentType, images[]}`; a full game before a bundle of it,
+            // never an add-on.
+            Store::PlayStation => list(answer.get("links"))
+                .filter(|link| {
+                    let category = link.get("top_category").and_then(Value::as_str).unwrap_or_default();
+                    matches!(category, "downloadable_game" | "disc_based_game")
+                })
+                .filter_map(|link| {
+                    let rank = match link.get("game_contentType").and_then(Value::as_str) {
+                        Some("Full Game") => 0,
+                        Some("Bundle") => 1,
+                        _ => return None,
+                    };
+                    let found = Found { id: text(link, "id")?, item: Some(link.clone()) };
+                    Some((text(link, "name")?, found, rank))
+                })
+                .collect(),
+        };
+        pick(&want.name, &results).cloned()
+    }
+
+    /// The request to the store that gives the game's pictures' addresses, by its id there; none where the client
+    /// named them all, the search's answer had them, or the store has nothing to ask.
+    pub fn ask(&self, store: Store, want: &Want, id: Option<&str>, kinds: &[Kind]) -> Option<Ask> {
+        match store {
+            Store::Own => {
+                if kinds.iter().all(|&kind| named(want, kind).is_some()) || want.source != "gog" {
+                    return None;
+                }
+                let url = format!("{}/v2/games/{}?locale=en-US", self.hosts.gog, segment(&want.source_id));
+                Some(Ask { url, name: "GOG" })
+            }
+            Store::Steam => {
+                let id = id.filter(|id| steam_app(id))?;
                 let input = format!(
                     r#"{{"ids":[{{"appid":{id}}}],"context":{{"language":"english","country_code":"US"}},"data_request":{{"include_assets":true}}}}"#
                 );
@@ -114,19 +271,16 @@ impl StoreArt {
                     format!("{}/IStoreBrowseService/GetItems/v1/?input_json={}", self.hosts.steam_api, segment(&input));
                 Some(Ask { url, name: "Steam" })
             }
-            "xbox" => {
-                let product = want.online.product.as_deref().filter(|id| product_id(id))?;
-                let url = format!("{}/v7.0/products?bigIds={product}&market=US&languages=en-us", self.hosts.microsoft);
+            Store::Microsoft => {
+                let id = id.filter(|id| product_id(id))?;
+                let url = format!("{}/v7.0/products?bigIds={id}&market=US&languages=en-us", self.hosts.microsoft);
                 Some(Ask { url, name: "the Microsoft Store" })
             }
-            "gog" => {
-                Some(Ask { url: format!("{}/v2/games/{}?locale=en-US", self.hosts.gog, segment(id)), name: "GOG" })
-            }
-            _ => None,
+            Store::PlayStation => None,
         }
     }
 
-    /// The catalogue's answer: its JSON, None for a game it does not know (404).
+    /// The answer: its JSON, None for something it does not know (404).
     pub fn get(&self, ask: &Ask) -> Result<Option<Value>, Error> {
         let mut response = self.agent.get(&ask.url).call().map_err(|e| transport(e, ask.name))?;
         match response.status().as_u16() {
@@ -139,22 +293,23 @@ impl StoreArt {
         serde_json::from_str(&text).map(Some).map_err(|_| Error::Failed(format!("{}'s reply is not JSON", ask.name)))
     }
 
-    /// The addresses of the game's pictures of these kinds: the client's own where it named them, else from the
-    /// catalogue's `answer`.
-    pub fn pictures(&self, want: &Want, kinds: &[Kind], answer: Option<&Value>) -> Vec<(Kind, String)> {
-        let from_catalogue = |kind| -> Option<String> {
+    /// The addresses of the game's pictures of these kinds: for its own store the client's where it named them,
+    /// else from the store's `answer`.
+    pub fn pictures(&self, store: Store, want: &Want, kinds: &[Kind], answer: Option<&Value>) -> Vec<(Kind, String)> {
+        let from_answer = |kind| -> Option<String> {
             let answer = answer?;
-            match want.source.as_str() {
-                "steam" => steam_picture(answer, &self.hosts.steam_cdn, kind),
-                "xbox" => microsoft_picture(answer, &self.hosts.microsoft, kind),
-                "gog" => gog_picture(answer, kind),
-                _ => None,
+            match store {
+                Store::Own => gog_picture(answer, kind),
+                Store::Steam => steam_picture(answer, &self.hosts.steam_cdn, kind),
+                Store::Microsoft => microsoft_picture(answer, &self.hosts.microsoft, kind),
+                Store::PlayStation => playstation_picture(answer, kind),
             }
         };
         kinds
             .iter()
             .filter_map(|&kind| {
-                named(want, kind).map(str::to_string).or_else(|| from_catalogue(kind)).map(|url| (kind, url))
+                let named = if store == Store::Own { named(want, kind).map(str::to_string) } else { None };
+                named.or_else(|| from_answer(kind)).map(|url| (kind, url))
             })
             .filter(|(_, url)| url.starts_with("https://") || url.starts_with("http://"))
             .collect()
@@ -164,6 +319,14 @@ impl StoreArt {
     pub fn download(&self, url: &str) -> Result<Vec<u8>, Error> {
         steamgriddb::download(&self.agent, url)
     }
+}
+
+fn list(value: Option<&Value>) -> impl Iterator<Item = &Value> {
+    value.and_then(Value::as_array).into_iter().flatten()
+}
+
+fn text(value: &Value, field: &str) -> Option<String> {
+    value.get(field)?.as_str().filter(|text| !text.is_empty()).map(str::to_string)
 }
 
 /// The address the client named for this kind.
@@ -225,6 +388,18 @@ fn microsoft_picture(answer: &Value, catalogue: &str, kind: Kind) -> Option<Stri
     Some(format!("{url}{joiner}w={width}"))
 }
 
+/// A `chihiro` search result's `images[]`, `{type, url}`: type 10 is the 1024x1024 square, type 12 the 1920x1080
+/// background (measured 2026-11-18, docs/research/art-sources.md). Nothing portrait or titled-landscape is used.
+fn playstation_picture(item: &Value, kind: Kind) -> Option<String> {
+    let wanted = match kind {
+        Kind::Square => 10,
+        Kind::Hero => 12,
+        Kind::Cover | Kind::Header => return None,
+    };
+    let image = list(item.get("images")).find(|image| image.get("type").and_then(Value::as_u64) == Some(wanted))?;
+    text(image, "url")
+}
+
 /// `v2/games/<id>`'s `_links`: the box art, Galaxy's background, and the product's card at 800 wide.
 fn gog_picture(answer: &Value, kind: Kind) -> Option<String> {
     let link = |path: &str| answer.pointer(path).and_then(Value::as_str).map(str::to_string);
@@ -243,50 +418,113 @@ mod tests {
     use super::*;
 
     fn want(source: &str, id: &str) -> Want {
-        Want { source: source.into(), source_id: id.into(), ..Want::default() }
+        Want { source: source.into(), source_id: id.into(), name: "Made-up Game".into(), ..Want::default() }
     }
 
     #[test]
-    fn each_store_offers_what_its_catalogue_has() {
+    fn each_store_offers_what_it_has() {
         let stores = StoreArt::new(Hosts::default());
-        assert_eq!(stores.offers(&want("steam", "620")), [Kind::Cover, Kind::Hero, Kind::Header]);
-        assert!(stores.offers(&want("steam", "not-an-appid")).is_empty());
-        // An Xbox game only with its product id.
-        assert!(stores.offers(&want("xbox", "Family_abc")).is_empty());
+        let steam = want("steam", "620");
+        assert_eq!(stores.offers(Store::Steam, &steam), [Kind::Cover, Kind::Hero, Kind::Header]);
+        assert_eq!(stores.own_id(Store::Steam, &steam).as_deref(), Some("620"));
+        // Any game, by its name, at every store.
+        let epic = want("epic", "Fernway");
+        assert_eq!(stores.offers(Store::Steam, &epic), [Kind::Cover, Kind::Hero, Kind::Header]);
+        assert_eq!(stores.offers(Store::Microsoft, &epic), Kind::ALL);
+        assert_eq!(stores.offers(Store::PlayStation, &epic), [Kind::Square, Kind::Hero]);
+        assert!(stores.own_id(Store::Steam, &epic).is_none());
+        // With no name to search by, only its own store's id.
+        let nameless = Want { name: "™".into(), ..want("epic", "Fernway") };
+        assert!(stores.offers(Store::Microsoft, &nameless).is_empty());
+        // An Xbox game by its product id.
         let mut xbox = want("xbox", "Family_abc");
         xbox.online.product = Some("9ZZZMADEUP12".into());
-        assert_eq!(stores.offers(&xbox), Kind::ALL);
-        assert_eq!(stores.offers(&want("gog", "1207664663")), [Kind::Cover, Kind::Hero, Kind::Header]);
-        for store in ["ea", "ubisoft", "battlenet", "epic", "manual"] {
-            assert!(stores.offers(&want(store, "1")).is_empty(), "{store}");
+        assert_eq!(stores.own_id(Store::Microsoft, &xbox).as_deref(), Some("9ZZZMADEUP12"));
+        // Its own store: GOG's catalogue and the addresses a client named.
+        assert_eq!(stores.offers(Store::Own, &want("gog", "1207664663")), [Kind::Cover, Kind::Hero, Kind::Header]);
+        for source in ["ea", "ubisoft", "battlenet", "epic", "steam", "xbox"] {
+            assert!(stores.offers(Store::Own, &want(source, "1")).is_empty(), "{source}");
         }
-        // What the client named, with no request at all.
         let mut epic = want("epic", "Fernway");
         epic.online.cover = Some("https://cdn1.epicgames.com/tall.jpg".into());
-        assert_eq!(stores.offers(&epic), [Kind::Cover]);
-        assert!(stores.ask(&epic, &[Kind::Cover]).is_none());
+        assert_eq!(stores.offers(Store::Own, &epic), [Kind::Cover]);
+        assert!(stores.ask(Store::Own, &epic, None, &[Kind::Cover]).is_none());
         assert_eq!(
-            stores.pictures(&epic, &[Kind::Cover], None),
+            stores.pictures(Store::Own, &epic, &[Kind::Cover], None),
             [(Kind::Cover, "https://cdn1.epicgames.com/tall.jpg".into())]
         );
     }
 
     #[test]
-    fn only_the_games_id_is_sent() {
+    fn only_the_games_id_or_name_is_sent() {
         let stores = StoreArt::new(Hosts::default());
-        let steam = stores.ask(&want("steam", "620"), &[Kind::Cover]).unwrap();
+        let steam = stores.ask(Store::Steam, &want("steam", "620"), Some("620"), &[Kind::Cover]).unwrap();
         assert!(steam.url.starts_with("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json="));
         assert!(steam.url.contains("%22appid%22%3A620%7D"), "{}", steam.url);
-        let mut xbox = want("xbox", "Family_abc");
-        xbox.online.product = Some("9ZZZMADEUP12".into());
-        let microsoft = stores.ask(&xbox, &[Kind::Square]).unwrap().url;
+        let microsoft = stores.ask(Store::Microsoft, &want("xbox", "F"), Some("9ZZZMADEUP12"), &[Kind::Square]);
         assert_eq!(
-            microsoft,
+            microsoft.unwrap().url,
             "https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=9ZZZMADEUP12&market=US&languages=en-us"
         );
         assert_eq!(
-            stores.ask(&want("gog", "42"), &[Kind::Cover]).unwrap().url,
+            stores.ask(Store::Own, &want("gog", "42"), None, &[Kind::Cover]).unwrap().url,
             "https://api.gog.com/v2/games/42?locale=en-US"
+        );
+        let game = Want { name: "Oda™ & the Orchard".into(), ..want("epic", "Oda") };
+        assert_eq!(
+            stores.search(Store::Steam, &game).unwrap().url,
+            "https://store.steampowered.com/api/storesearch/?term=Oda%20%26%20the%20Orchard&l=english&cc=US"
+        );
+        assert_eq!(
+            stores.search(Store::Microsoft, &game).unwrap().url,
+            "https://displaycatalog.mp.microsoft.com/v7.0/productFamilies/autosuggest?market=US&languages=en-us\
+             &productFamilyNames=Games&query=Oda%20%26%20the%20Orchard"
+        );
+        assert_eq!(
+            stores.search(Store::PlayStation, &game).unwrap().url,
+            "https://store.playstation.com/store/api/chihiro/00_09_000/tumbler/US/en/999/Oda%20%26%20the%20Orchard\
+             ?suggested_size=10&mode=game"
+        );
+        assert!(stores.search(Store::Own, &game).is_none());
+    }
+
+    #[test]
+    fn a_search_is_taken_only_for_the_same_game() {
+        let stores = StoreArt::new(Hosts::default());
+        let game = Want { name: "Made-up Reforger".into(), ..want("steam", "1") };
+        // Shapes as seen on 2026-11-18 (docs/research/art-sources.md), cut to what is read; names made up.
+        let steam = json!({"total": 3, "items": [
+            {"type": "app", "name": "Made-up Reforger - Rally", "id": 5},
+            {"type": "sub", "name": "Made-up Reforger", "id": 6},
+            {"type": "app", "name": "Made-up Reforger", "id": 7}]});
+        assert_eq!(stores.matched(Store::Steam, &game, &steam).unwrap().id, "7");
+        let steam = json!({"total": 1, "items": [{"type": "app", "name": "Made-up Reforger Soundtrack", "id": 8}]});
+        assert_eq!(stores.matched(Store::Steam, &game, &steam), None, "never the first hit regardless");
+
+        let microsoft = json!({"Results": [
+            {"ProductFamilyName": "Games", "Products": [{"ProductId": "9NZZZMADEUP1", "Type": "Durable", "Title": "Made-up Reforger"}]},
+            {"ProductFamilyName": "Games", "Products": [{"ProductId": "9NZZZMADEUP2", "Type": "Game", "Title": "Made-up Reforger™"}]}],
+            "TotalResultCount": 2});
+        assert_eq!(stores.matched(Store::Microsoft, &game, &microsoft).unwrap().id, "9NZZZMADEUP2");
+        assert_eq!(stores.matched(Store::Microsoft, &game, &json!({"Results": []})), None);
+
+        let image = |t: u64| json!({"type": t, "url": format!("https://image.example/{t}.png")});
+        let playstation = json!({"links": [
+            {"name": "Made-up Reforger Deluxe Edition PS4 & PS5", "id": "EP1-B", "top_category": "downloadable_game",
+             "game_contentType": "Bundle", "images": [image(10)]},
+            {"name": "Made-up Reforger", "id": "EP1-A", "top_category": "add_on", "game_contentType": "Map", "images": []},
+            {"name": "MADE-UP REFORGER PS5", "id": "EP1-C", "top_category": "downloadable_game",
+             "game_contentType": "Full Game", "images": [image(10), image(12), image(13)]}]});
+        let found = stores.matched(Store::PlayStation, &game, &playstation).unwrap();
+        assert_eq!(found.id, "EP1-C", "the full game before its bundle, never the add-on");
+        let item = found.item.as_ref();
+        let pictures = stores.pictures(Store::PlayStation, &game, &[Kind::Cover, Kind::Square, Kind::Hero], item);
+        assert_eq!(
+            pictures,
+            [
+                (Kind::Square, "https://image.example/10.png".into()),
+                (Kind::Hero, "https://image.example/12.png".into())
+            ]
         );
     }
 

@@ -131,6 +131,8 @@ impl ArtPicker {
         let game = find(around.library, &entry.game)?;
         let service = if !around.options.art_online {
             Err(Failure::Offline)
+        } else if !around.options.art_order.is_on(model::ArtSource::SteamGridDb) {
+            Err(Failure::SourceOff)
         } else if !around.options.art_key {
             Err(Failure::NoKey)
         } else {
@@ -549,6 +551,7 @@ fn failure_word(why: &Failure) -> &'static str {
     match why {
         Failure::NoKey | Failure::KeyRefused => "no key",
         Failure::Offline => "offline",
+        Failure::SourceOff => "steamgriddb off",
         Failure::NoGame => "no game",
         Failure::Busy => "busy",
         Failure::Failed(_) => "failed",

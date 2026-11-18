@@ -1,5 +1,6 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod achievement;
+pub mod art_order;
 pub mod art_picker;
 pub mod audio;
 pub mod by_hand;
@@ -23,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub use achievement::{AchievementSource, Achievements};
+pub use art_order::{ArtOrder, ArtSource};
 pub use audio::{Audio, AudioDevice, Flow};
 pub use by_hand::{Added, App, AppKind, ByHand, StoreApp};
 pub use installer::{Agreement, Can, Folder, Installer, KeptInFront, Opener, Refusal, Reply, Steer, Stop};
