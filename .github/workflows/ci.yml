@@ -125,14 +125,17 @@ jobs:
           loader="$(find "$release/build" -path '*webview2-com-sys*/out/x64/WebView2Loader.dll' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)"
           test -n "$loader" || { echo "no WebView2Loader.dll in webview2-com-sys's build" >&2; exit 1; }
           cp "$loader" "$release/"
+      # The build is the check; a full artifact store (the quota is recalculated only every 6 to 12 hours) is not a
+      # failure of the code.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: windows
           path: |
             target/x86_64-pc-windows-gnullvm/release/*.exe
             target/x86_64-pc-windows-gnullvm/release/WebView2Loader.dll
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   package:
     name: Package
