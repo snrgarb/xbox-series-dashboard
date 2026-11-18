@@ -149,7 +149,7 @@ try {
     Expect-Logged '^battlenet: agent: up on port \d+ after \d+ ms$' $mark 'The Agent up' | Out-Null
     $session = Expect-Logged '^battlenet: agent: session: GET /agent -> 200 \{.*"authorization":"<token>".*\}$' $mark 'A token, masked'
     if ($session -notmatch '"authorization":"<token>"') { throw "the token was said: $session" }
-    Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"game_dir`":`"$([regex]::Escape(($gameDir + '\') -replace '\\', '\\'))`".*\} -> 200 .+$" $mark 'Its folder' | Out-Null
+    Expect-Logged "^battlenet: agent: install ${code}: POST /install/$uid \{.*`"game_dir`":`"$([regex]::Escape((($gameDir + '\') -replace '\\', '\\')))`".*\} -> 200 .+$" $mark 'Its folder' | Out-Null
     Expect-Logged "^battlenet: ${code}: the Agent took the install$" $mark 'Taken' | Out-Null
     Expect-Logged "^queue: $name joined, asked for$" $mark 'The Queue' | Out-Null
     Expect-Logged "^battlenet: ${code}: downloading, \d+ of $whole bytes, \d+ bytes a second$" $mark 'The Agent''s bytes and speed' | Out-Null
@@ -243,6 +243,8 @@ try {
 
     # --- Quarry Bell, not owned: the Agent asked, refused; the client opened on the game instead. Last: its row stays
     # in the Queue as asked for until the Queue gives it up, a minute on.
+    # The uninstall was asked from the hub, which stays: back out to Home, where Y is Search.
+    Walk B 'Recent\(\d+\).*' 4
     Find-Game 'Quarry Bell' 'Q' 'Q'
     Press A 'GameHub: qbl Hub Install' '10-hub-not-owned' | Out-Null
     $mark = Get-DashboardLogLength
