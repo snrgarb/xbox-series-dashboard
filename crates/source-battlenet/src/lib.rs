@@ -16,7 +16,8 @@
 //! - **The client:** the Uninstall key whose `UninstallString` has `-uid=battle.net` in it: its `InstallLocation`
 //!   holds `Battle.net.exe`. With neither it nor `product.db`, Battle.net is not installed.
 //! - **Start:** `Battle.net.exe --exec="launch <code>"`, the catalogue's launch code (`Pro`, `Fen`) where it has
-//!   one, else the product code.
+//!   one, else the product code. With the client closed it is started on its own and asked once it is up: it drops
+//!   a launch given to it as it starts (`launching`, #172).
 //! - **Install, uninstall, progress** (#172): through the client's own Agent, its local HTTP API (`agent`), with no
 //!   window: install into a folder (the Agent's form filled in: `agent::calls`), the Queue's bytes and speed,
 //!   uninstall. Pause and resume only with `DASHBOARD_BATTLENET_STEER=1` (no tool knows them); Cancel also while the
@@ -44,6 +45,7 @@ pub mod client;
 pub mod fixture;
 pub mod http;
 pub mod installing;
+pub mod launching;
 pub mod listening;
 pub mod product;
 pub mod standin;
@@ -86,6 +88,12 @@ pub struct BattleNet {
     /// Whether an install stops before the download, its form filled in and abandoned
     /// (`agent::calls::no_download`).
     no_download: bool,
+    /// A launch through a client that was not running, while it is under way (`launching`).
+    launching: launching::Launching,
+    /// What looks at the client and the game as it starts: the desktop, or a test's.
+    looker: launching::Looker,
+    /// Its waits.
+    times: launching::Times,
 }
 
 impl BattleNet {
@@ -96,7 +104,17 @@ impl BattleNet {
             jobs: installing::Jobs::default(),
             steer: agent::calls::steer_on(),
             no_download: agent::calls::no_download(),
+            launching: launching::Launching::default(),
+            looker: launching::Looker::default(),
+            times: launching::Times::default(),
         }
+    }
+
+    /// Looking at the client and the game as it starts with `looker`, waiting `times`: a test's.
+    pub fn with_looker(mut self, looker: std::sync::Arc<dyn launching::Look>, times: launching::Times) -> Self {
+        self.looker = launching::Looker(looker);
+        self.times = times;
+        self
     }
 
     /// With pause, resume and cancel asked of the Agent, or not, whatever the environment says.
@@ -515,6 +533,18 @@ impl Source for BattleNet {
         let listed = self.catalogue().into_iter().find(|p| p.code.eq_ignore_ascii_case(code));
         let launch = listed.and_then(|p| p.launch).unwrap_or_else(|| code.to_string());
         Some(Start::Program { path, args: vec![format!("--exec=launch {launch}")], dir: None })
+    }
+
+    /// The client asked at once where it runs; where it does not, started on its own and asked once it is up
+    /// (`launching`, #172): it drops a launch given to it as it starts.
+    fn launch(&self, game: &Game, start: &Start, open: &mut dyn Opener) -> Result<(), String> {
+        let Some(code) = code(game) else { return open.open(start) };
+        let root = self.fake.as_deref();
+        launching::launch(code, game, start, root, &self.looker, &self.launching, self.times, open)
+    }
+
+    fn getting_ready(&self, game: &Game) -> bool {
+        code(game).is_some_and(|code| self.launching.getting_ready(code))
     }
 
     /// A game `product.db` has installed only under a uid the client does not know it by (#172): Battle.net would
@@ -1115,6 +1145,58 @@ mod tests {
     fn game(battlenet: &BattleNet, code: &str) -> Game {
         let games = battlenet.read().unwrap().unwrap().library.games;
         games.into_iter().find(|g| g.source_id == code).unwrap()
+    }
+
+    /// A desktop that shows what a test says: the client's processes and main window, and the game's process.
+    #[derive(Default)]
+    struct Desk(Mutex<launching::Seen>);
+
+    impl launching::Look for Desk {
+        fn look(&self, _root: Option<&Path>, _game: &Path) -> launching::Seen {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    #[test]
+    fn play_with_battle_net_closed_starts_it_and_asks_it_once_it_is_up_and_with_it_open_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("battlenet");
+        fixture::write(&root, &Fixture::standard()).unwrap();
+        let desk = Arc::new(Desk::default());
+        let times = launching::Times {
+            ready: Duration::from_secs(20),
+            window_alone: Duration::from_secs(20),
+            settle: Duration::from_millis(100),
+            game: Duration::from_secs(20),
+            every: Duration::from_millis(10),
+        };
+        let battlenet = BattleNet::at(Some(root.clone())).with_looker(desk.clone(), times);
+        let emberwatch = game(&battlenet, "emb");
+        let start = battlenet.start(&emberwatch).unwrap();
+        let client = root.join(CLIENT_EXE).display().to_string();
+        let launch = format!("{client} \"--exec=launch emb\"");
+
+        // Closed: the client started on its own, and nothing more until it is up.
+        let open = Kept::default();
+        battlenet.launch(&emberwatch, &start, &mut open.clone()).unwrap();
+        assert_eq!(open.opened(), std::slice::from_ref(&client));
+        assert!(battlenet.getting_ready(&emberwatch), "the Launch screen stays up");
+        *desk.0.lock().unwrap() = launching::Seen { processes: 1, ..launching::Seen::default() };
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(open.opened(), std::slice::from_ref(&client), "starting: not asked yet");
+        *desk.0.lock().unwrap() = launching::Seen { processes: 3, main_window: true, ..launching::Seen::default() };
+        wait("asked once up", || open.opened().len() == 2);
+        assert_eq!(open.opened(), [client.clone(), launch.clone()]);
+        assert!(battlenet.getting_ready(&emberwatch), "until the game runs");
+        desk.0.lock().unwrap().game = Some("game.exe, pid 7".into());
+        wait("over once the game runs", || !battlenet.getting_ready(&emberwatch));
+        assert_eq!(open.opened().len(), 2, "asked once");
+
+        // Open: asked at once.
+        let open = Kept::default();
+        battlenet.launch(&emberwatch, &start, &mut open.clone()).unwrap();
+        assert_eq!(open.opened(), [launch]);
+        assert!(!battlenet.getting_ready(&emberwatch));
     }
 
     #[test]
