@@ -27,8 +27,7 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
         }
     }
     let started = Instant::now();
-    let host = match Host::open(loader, &options.data, Show::Hidden(Hide::Controller), options.browser_args.as_deref())
-    {
+    let host = match Host::open(loader, &options.data, Show::Hidden(Hide::Controller), options.switches().as_deref()) {
         Ok(host) => host,
         Err(e) => {
             say!("probe: no web view: {e}");

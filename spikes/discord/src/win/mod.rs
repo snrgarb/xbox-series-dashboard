@@ -2,12 +2,18 @@
 //! and messages), with a watchdog that ends the process if a step hangs past `--minutes`.
 mod dms;
 mod host;
+mod meter;
 mod probe;
 mod procs;
 mod send;
 mod sign_in;
 mod sign_out;
+mod store_index;
 mod system;
+mod voice;
+mod voice_list;
+mod voice_probe;
+mod webaudio;
 
 use std::time::Duration;
 
@@ -51,6 +57,10 @@ pub fn run(options: &Options) -> i32 {
             Step::SignIn => sign_in::run(&options, &loader),
             Step::Dms => dms::run(&options, &loader),
             Step::Send => send::run(&options, &loader),
+            Step::VoiceProbe => voice_probe::run(&options, &loader),
+            Step::VoiceList => voice_list::run(&options, &loader),
+            Step::Index => store_index::run(&options, &loader),
+            Step::VoiceJoin | Step::Call | Step::VoiceIncoming | Step::DumpShape => voice::run(&options, &loader),
             Step::SignOut => unreachable!(),
         }
     });

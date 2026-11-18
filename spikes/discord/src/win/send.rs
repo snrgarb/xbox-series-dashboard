@@ -99,7 +99,7 @@ pub fn run(options: &Options, loader: &Loader) -> i32 {
     );
 
     let show = if options.visible { Show::Full } else { Show::Hidden(options.hide) };
-    let host = match Host::open(loader, &options.data, show, options.browser_args.as_deref()) {
+    let host = match Host::open(loader, &options.data, show, options.switches().as_deref()) {
         Ok(host) => host,
         Err(e) => {
             say!("send: no web view: {e}");
