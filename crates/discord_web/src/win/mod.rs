@@ -69,7 +69,7 @@ fn run(
     commands: Receiver<Command>,
     tell: &Tell,
 ) -> Option<Result<(), String>> {
-    let host = match host::Host::open(&loader, &folder) {
+    let host = match host::Host::open(&loader, &folder, &base) {
         Ok(host) => host,
         Err(e) => {
             say(&format!("discord web: the web view could not be opened: {e}"));
@@ -80,6 +80,8 @@ fn run(
     // The page is told it has focus whether or not its window has (the spike's lesson: keys and Enter reach a
     // field only so while hidden or never activated).
     host.cdp_send("Emulation.setFocusEmulationEnabled", serde_json::json!({ "enabled": true }));
+    // The page script (Direct Messages) is installed before the first document loads.
+    host.reading(tell.clone(), &base);
     host.navigate(&format!("{base}/app"));
     let mut state = WebState::Checking;
     let mut field: Option<WebField> = None;
@@ -136,6 +138,7 @@ fn run(
                     hands_off = false;
                     host.insert(&text);
                 }
+                Command::Page(op) => host.page(&op),
                 Command::Stop => {
                     host.close();
                     say("discord web: the web view is closed; the session is kept");

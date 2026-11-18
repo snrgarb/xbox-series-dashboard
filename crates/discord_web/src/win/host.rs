@@ -11,10 +11,11 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
-    CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR, CoreWebView2EnvironmentOptions,
-    CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    ExecuteScriptCompletedHandler, NewWindowRequestedEventHandler, PermissionRequestedEventHandler,
-    ProcessFailedEventHandler, SourceChangedEventHandler,
+    AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler, CoTaskMemPWSTR,
+    CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, ExecuteScriptCompletedHandler, NewWindowRequestedEventHandler,
+    NotificationReceivedEventHandler, PermissionRequestedEventHandler, ProcessFailedEventHandler,
+    SetPermissionStateCompletedHandler, SourceChangedEventHandler, WebMessageReceivedEventHandler,
 };
 use windows::core::{s, w, Interface, HRESULT, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -23,7 +24,7 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, Lo
 use windows::Win32::System::Threading::INFINITE;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::{redact, say, Area, WebKey};
+use crate::{redact, say, Area, Notified, PageOp, Report, Tell, WebKey};
 
 type CreateEnvironment = unsafe extern "system" fn(PCWSTR, PCWSTR, *mut c_void, *mut c_void) -> HRESULT;
 type RuntimeVersion = unsafe extern "system" fn(PCWSTR, *mut PWSTR) -> HRESULT;
@@ -153,14 +154,14 @@ pub struct Host {
 impl Host {
     /// The web view in a window of its own. On any failure the window is destroyed before the error comes back:
     /// an attempt that fails leaves nothing behind.
-    pub fn open(loader: &Loader, data: &Path) -> Result<Host, String> {
+    pub fn open(loader: &Loader, data: &Path, base: &str) -> Result<Host, String> {
         let hwnd = window()?;
-        Self::open_in(hwnd, loader, data).inspect_err(|_| unsafe {
+        Self::open_in(hwnd, loader, data, base).inspect_err(|_| unsafe {
             let _ = DestroyWindow(hwnd);
         })
     }
 
-    fn open_in(hwnd: HWND, loader: &Loader, data: &Path) -> Result<Host, String> {
+    fn open_in(hwnd: HWND, loader: &Loader, data: &Path, base: &str) -> Result<Host, String> {
         std::fs::create_dir_all(data).map_err(|e| format!("cannot make the session's folder: {e}"))?;
         let started = Instant::now();
         let options: ICoreWebView2EnvironmentOptions = CoreWebView2EnvironmentOptions::default().into();
@@ -205,7 +206,7 @@ impl Host {
         say(&format!("discord web: the web view is open, hidden, in {} ms", started.elapsed().as_millis()));
         let host = Host { hwnd, controller, webview };
         host.settings();
-        host.events();
+        host.events(&authority(base));
         Ok(host)
     }
 
@@ -224,8 +225,9 @@ impl Host {
         }
     }
 
-    /// Where the page went (scheme, host and path only), new windows refused, permissions refused, a crash.
-    fn events(&self) {
+    /// Where the page went (scheme, host and path only), new windows refused, permissions refused (notifications
+    /// alone are granted, to the page's own address: `reading` takes them), a crash.
+    fn events(&self, authority: &str) {
         let mut token = 0i64;
         unsafe {
             let last = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
@@ -252,13 +254,29 @@ impl Host {
                 })),
                 &mut token,
             );
+            let authority = authority.to_string();
+            // Notifications are granted only where this runtime lets `reading` take them (ICoreWebView2_24).
+            let taken = self.webview.cast::<ICoreWebView2_24>().is_ok();
             let _ = self.webview.add_PermissionRequested(
-                &PermissionRequestedEventHandler::create(Box::new(|_, args| {
+                &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
                     if let Some(args) = args {
                         let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
                         let _ = args.PermissionKind(&mut kind);
-                        let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY);
-                        say(&format!("discord web: a permission asked and refused: kind {}", kind.0));
+                        // Notifications, for Discord's own address only, so that the page raises them and `reading`
+                        // takes them; every other permission is refused.
+                        let from = authority_of(|p| args.Uri(p));
+                        let grant = taken && kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS && from == authority;
+                        let state = if grant {
+                            COREWEBVIEW2_PERMISSION_STATE_ALLOW
+                        } else {
+                            COREWEBVIEW2_PERMISSION_STATE_DENY
+                        };
+                        let _ = args.SetState(state);
+                        say(&format!(
+                            "discord web: a permission asked and {}: kind {}",
+                            if grant { "granted" } else { "refused" },
+                            kind.0
+                        ));
                     }
                     Ok(())
                 })),
@@ -326,6 +344,133 @@ impl Host {
             let _ = self.controller.SetZoomFactor(1.0);
         }
         say("discord web: the sign-in page is put away");
+    }
+
+    /// Reading Discord's Direct Messages (docs/discord-web.md, "Reading"): the page script (`crate::direct_script`)
+    /// installed to run in every new document before the page's own, what it posts taken as `Report::Page` (only from
+    /// the page's own address), and the page's web notifications taken and marked handled, so Windows shows none.
+    /// Called before the first navigation. A failure is logged and the web view goes on without it: the state then
+    /// stays Loading, and the health says nothing.
+    pub fn reading(&self, tell: Tell, base: &str) {
+        let authority = authority(base);
+        match self.add_script(&crate::direct_script()) {
+            Ok(()) => say("discord web: the page script is installed"),
+            Err(e) => say(&format!("discord web: the page script could not be installed: {e}")),
+        }
+        let mut token = 0i64;
+        unsafe {
+            let page = tell.clone();
+            let added = self.webview.add_WebMessageReceived(
+                &WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    if authority_of(|p| args.Source(p)) != authority {
+                        return Ok(());
+                    }
+                    let mut json = PWSTR::null();
+                    if args.WebMessageAsJson(&mut json).is_ok() && !json.is_null() {
+                        page(Report::Page(CoTaskMemPWSTR::from(json).to_string()));
+                    }
+                    Ok(())
+                })),
+                &mut token,
+            );
+            if let Err(e) = added {
+                say(&format!("discord web: WebMessageReceived refused: {e}"));
+            }
+            let Ok(w24) = self.webview.cast::<ICoreWebView2_24>() else {
+                say("discord web: this runtime has no NotificationReceived (ICoreWebView2_24): notifications stay refused");
+                return;
+            };
+            let added = w24.add_NotificationReceived(
+                &NotificationReceivedEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else { return Ok(()) };
+                    let _ = args.SetHandled(true);
+                    if let Ok(note) = args.Notification() {
+                        let text = |get: &dyn Fn(*mut PWSTR) -> windows::core::Result<()>| {
+                            let mut p = PWSTR::null();
+                            match get(&mut p) {
+                                Ok(()) if !p.is_null() => CoTaskMemPWSTR::from(p).to_string(),
+                                _ => String::new(),
+                            }
+                        };
+                        tell(Report::Notified(Notified {
+                            title: text(&|p| note.Title(p)),
+                            body: text(&|p| note.Body(p)),
+                            tag: text(&|p| note.Tag(p)),
+                        }));
+                    }
+                    Ok(())
+                })),
+                &mut token,
+            );
+            if let Err(e) = added {
+                say(&format!("discord web: NotificationReceived refused: {e}"));
+            }
+        }
+        self.allow_notifications(base);
+    }
+
+    /// Notifications allowed ahead for Discord's origin, so the page never waits on a prompt; nothing else is.
+    fn allow_notifications(&self, base: &str) {
+        let profile = unsafe { self.webview.cast::<ICoreWebView2_13>().and_then(|w| w.Profile()) };
+        let Ok(profile) = profile.and_then(|p| p.cast::<ICoreWebView2Profile4>()) else {
+            say("discord web: this runtime cannot allow notifications ahead: only as asked");
+            return;
+        };
+        let handler = SetPermissionStateCompletedHandler::create(Box::new(|result| {
+            if let Err(e) = result {
+                say(&format!("discord web: notifications could not be allowed ahead: {e}"));
+            }
+            Ok(())
+        }));
+        let origin = HSTRING::from(origin(base));
+        if let Err(e) = unsafe {
+            profile.SetPermissionState(
+                COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
+                &origin,
+                COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+                &handler,
+            )
+        } {
+            say(&format!("discord web: notifications refused ahead: {e}"));
+        }
+    }
+
+    /// Something asked of the page script (`window.__xsdDirect`). An id that is not digits is never put in a script.
+    pub fn page(&self, op: &PageOp) {
+        let (name, js) = match op {
+            PageOp::Open(id) if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) => {
+                ("open", format!("window.__xsdDirect ? window.__xsdDirect.open(\"{id}\") : false"))
+            }
+            PageOp::Open(_) => return,
+            PageOp::Close => ("close", "window.__xsdDirect ? window.__xsdDirect.close() : false".to_string()),
+            PageOp::Older => ("older", "window.__xsdDirect ? window.__xsdDirect.older() : false".to_string()),
+            PageOp::Resend => ("resend", "window.__xsdDirect ? window.__xsdDirect.resend() : false".to_string()),
+        };
+        match self.eval(&js) {
+            Ok(Value::Bool(true)) => {}
+            Ok(_) => say(&format!("discord web: the page script did not take {name}")),
+            Err(e) => say(&format!("discord web: the page script's {name} failed: {e}")),
+        }
+    }
+
+    /// WebView2's own `AddScriptToExecuteOnDocumentCreated`: the script runs in every new document of the main world
+    /// before the page's scripts. Waited for.
+    fn add_script(&self, js: &str) -> Result<(), String> {
+        let webview = self.webview.clone();
+        let js = HSTRING::from(js);
+        let (tx, rx) = mpsc::channel();
+        AddScriptToExecuteOnDocumentCreatedCompletedHandler::wait_for_async_operation(
+            Box::new(move |handler| unsafe {
+                webview.AddScriptToExecuteOnDocumentCreated(&js, &handler).map_err(webview2_com::Error::WindowsError)
+            }),
+            Box::new(move |result, _id| {
+                let _ = tx.send(result);
+                Ok(())
+            }),
+        )
+        .map_err(|e| format!("AddScriptToExecuteOnDocumentCreated: {e:?}"))?;
+        rx.recv().map_err(|e| e.to_string())?.map_err(|e| format!("AddScriptToExecuteOnDocumentCreated: {e}"))
     }
 
     /// ExecuteScript: the script's value, as JSON.
@@ -441,6 +586,27 @@ fn parts(key: WebKey) -> (&'static str, &'static str, i32, Option<&'static str>)
         WebKey::Up => ("ArrowUp", "ArrowUp", 38, None),
         WebKey::Right => ("ArrowRight", "ArrowRight", 39, None),
         WebKey::Down => ("ArrowDown", "ArrowDown", 40, None),
+    }
+}
+
+/// `host:port` of an address, lower case and without a user: what two addresses of one site share.
+fn authority(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    rest[..end].rsplit('@').next().unwrap_or("").to_ascii_lowercase()
+}
+
+/// The address's origin (`https://discord.com`).
+fn origin(url: &str) -> String {
+    let scheme = url.split_once("://").map_or("https", |(scheme, _)| scheme);
+    format!("{scheme}://{}", authority(url))
+}
+
+fn authority_of(get: impl FnOnce(*mut PWSTR) -> windows::core::Result<()>) -> String {
+    let mut uri = PWSTR::null();
+    match get(&mut uri) {
+        Ok(()) if !uri.is_null() => authority(&CoTaskMemPWSTR::from(uri).to_string()),
+        _ => String::new(),
     }
 }
 
