@@ -8,6 +8,7 @@ mod procs;
 mod send;
 mod sign_in;
 mod sign_out;
+mod store_index;
 mod system;
 mod voice;
 mod voice_list;
@@ -58,6 +59,7 @@ pub fn run(options: &Options) -> i32 {
             Step::Send => send::run(&options, &loader),
             Step::VoiceProbe => voice_probe::run(&options, &loader),
             Step::VoiceList => voice_list::run(&options, &loader),
+            Step::Index => store_index::run(&options, &loader),
             Step::VoiceJoin | Step::Call | Step::VoiceIncoming | Step::DumpShape => voice::run(&options, &loader),
             Step::SignOut => unreachable!(),
         }

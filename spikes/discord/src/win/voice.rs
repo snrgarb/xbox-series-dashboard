@@ -21,8 +21,9 @@ use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect
 
 use super::host::{self, pump, yes, Host, Loader, Show};
 use super::webaudio::WebAudio;
-use super::{meter, procs};
+use super::{meter, procs, store_index as index};
 use crate::args::{Options, Step, Way};
+use crate::index::{is_voice, resolve, Found};
 use crate::say;
 use std::cell::RefCell;
 
@@ -32,6 +33,44 @@ const SHAPE: &str = include_str!("../js/shape.js");
 thread_local! {
     /// The DevTools WebAudio follower of the step's web view.
     static AUDIO: RefCell<Option<WebAudio>> = const { RefCell::new(None) };
+    /// The call's channel (a voice channel's or a DM's id), for the store's voice states in the hold.
+    static STORE_CHANNEL: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub const STORE_FIND: &str = include_str!("../js/store_find.js");
+const STORE_VOICE: &str = include_str!("../js/store_voice.js");
+const STORE_JOIN: &str = include_str!("../js/store_join.js");
+
+/// A store script (`js/store_find.js` before it) given one value, in a block of its own.
+pub fn store_script(name: &str, value: &Value, script: &str) -> String {
+    format!("{{ const {name} = {value};\n{STORE_FIND}\n{script}\n}}")
+}
+
+fn set_store_channel(cid: Option<&str>) {
+    STORE_CHANNEL.with(|c| *c.borrow_mut() = cid.map(String::from));
+}
+
+/// The call by Discord's stores: who is in it, speaking, muted, deafened; the user's own mute and deafen.
+fn store_line(host: &Host) -> String {
+    let cid = STORE_CHANNEL.with(|c| c.borrow().clone());
+    let v = host.evaluate(&store_script("CID", &json!(cid), STORE_VOICE)).unwrap_or_else(|e| json!({ "error": e }));
+    if let Some(e) = v["error"].as_str() {
+        return format!("stores: failed: {e}");
+    }
+    let flag = |b: &Value| match b.as_bool() {
+        Some(b) => yes(b),
+        None => "unknown",
+    };
+    format!(
+        "stores: in the call {}, speaking {}, muted {}, deafened {}; the user in it {}, self mute {}, self deafen {}",
+        v["users"],
+        v["speaking"],
+        v["muted"],
+        v["deafened"],
+        yes(v["meIn"] == true),
+        flag(&v["selfMute"]),
+        flag(&v["selfDeaf"])
+    )
 }
 
 /// What else runs Discord's page: DevTools' targets by type (frames, workers), counted.
@@ -69,7 +108,7 @@ pub fn dump_shape(host: &Host, options: &Options, when: &str) {
 fn outside(host: &Host, last_clock: &mut f64) -> String {
     let audio = AUDIO.with(|a| a.borrow().as_ref().map(|w| w.read(host)));
     let pids: Vec<u32> = procs::webview(&host.env).iter().map(|u| u.pid).collect();
-    let windows = meter::read(&pids).line();
+    let windows = format!("{}; {}", store_line(host), meter::read(&pids).line());
     match audio {
         Some(a) => {
             let line = format!(
@@ -175,7 +214,6 @@ pub fn read_channels(host: &Host, target: Option<&str>, until: Option<&str>) -> 
     }
     channels_op(host, "result", target)
 }
-const FIND: &str = include_str!("../js/find.js");
 /// The page's router follows the history: a new entry, and the event it listens for (#196's lesson).
 pub const PUSH: &str =
     "history.pushState(history.state, '', HREF); dispatchEvent(new PopStateEvent('popstate', { state: history.state })); true";
@@ -692,6 +730,53 @@ fn finish(host: Host, options: &Options, cid: Option<&str>, code: i32) -> i32 {
 }
 
 /// `--voice-join`: the server and its voice channel found from the lead's files, joined once, held, left.
+/// Several items matched a name: they go to `--voice-names` for the lead to pick from (never the log).
+fn write_choices(options: &Options, what: &str, lines: &[String]) {
+    let text = format!(
+        "# discord-spike: several {what} matched. PRIVATE: keep it out of the repository.\n{}\n",
+        lines.join("\n")
+    );
+    match std::fs::write(&options.voice_names, text) {
+        Ok(()) => say!(
+            "{what}: the {} candidates written to {} (not to this log)",
+            lines.len(),
+            options.voice_names.display()
+        ),
+        Err(e) => say!("{what}: the candidates could not be written: {e}"),
+    }
+}
+
+/// The page's own button `what` on the route just opened, pressed once by trusted input (`--way`); if it is not
+/// there in 5 s, Discord's own `selectVoiceChannel(cid)` from its stores, once, said so. Whether a voice panel or a
+/// call showed.
+fn start_voice(host: &Host, what: &str, cid: &str, options: &Options) -> bool {
+    let effect = |s: &Value| in_call(s) || s["callView"] == true;
+    let (shown, _, ms) = wait_for(host, Some(cid), SIGN, &|_| mark(host, what, None)["found"] == true);
+    say!("voice: the page's {what} button shown {} after {ms} ms", yes(shown));
+    if shown {
+        if act(host, what, Some(cid), options.way, &effect) {
+            say!("voice: started by the page's own {what} button");
+            return true;
+        }
+        say!("voice: the {what} button was pressed but nothing showed");
+    }
+    let r = host.evaluate(&store_script("CID", &json!(cid), STORE_JOIN)).unwrap_or_else(|e| json!({ "why": e }));
+    say!(
+        "voice: Discord's own selectVoiceChannel called from its store (the button {}): called {}{}",
+        if shown { "did nothing" } else { "was not found" },
+        yes(r["called"] == true),
+        r["why"].as_str().map(|w| format!(" ({w})")).unwrap_or_default()
+    );
+    if r["called"] != true {
+        return false;
+    }
+    let (seen, _, ms) = wait_for(host, Some(cid), SIGN, &effect);
+    say!("voice: after selectVoiceChannel a voice panel shown {} after {ms} ms", yes(seen));
+    seen
+}
+
+/// `--voice-join`: the server and channel named in the lead's files resolved to ids by the index (Discord's stores),
+/// the channel's route opened, the page's Join Voice button pressed (else the store's action), held, left.
 pub fn join(options: &Options, loader: &Loader) -> i32 {
     let (server, channel) = match (
         read_name(options.server_file.as_deref(), "server"),
@@ -713,88 +798,75 @@ pub fn join(options: &Options, loader: &Loader) -> i32 {
         Err(code) => return code,
     };
     clear_controls(&options.control);
-    let Some(gid) = open_server(&host, &server) else {
+    let Some(index) = index::build(&host, options) else {
         host.close();
-        return 4;
+        return 7;
     };
-    let found = match read_channels(&host, Some(&channel), None) {
-        Ok(v) => v,
-        Err(e) => {
-            say!("voice-join: reading the channels failed: {e}: nothing joined");
+    let guild = match resolve(&index.guilds, |g| &g.name, &server) {
+        Found::One(g, how) => {
+            say!("voice-join: the server resolved {how}");
+            g.clone()
+        }
+        Found::Many(list, how) => {
+            say!("voice-join: {} servers match {how}: nothing joined", list.len());
+            write_choices(options, "servers", &list.iter().map(|g| format!("server\t{}", g.name)).collect::<Vec<_>>());
             host.close();
-            return 7;
+            return 4;
+        }
+        Found::None => {
+            say!("voice-join: no server of that name: nothing joined");
+            host.close();
+            return 4;
         }
     };
-    log_channels(&found);
-    write_channel_names(options, &found);
-    if found["found"] != 1 || found["stage"] == true {
-        say!(
-            "voice-join: {} channels of that name ({} kind){}: nothing joined",
-            found["found"],
-            found["kind"].as_str().unwrap_or("?"),
-            if found["stage"] == true { " (a stage channel: not tried)" } else { "" }
-        );
+    let in_guild: Vec<_> = index.channels.iter().filter(|c| c.guild == guild.id).cloned().collect();
+    let voice: Vec<_> = in_guild.iter().filter(|c| is_voice(c.kind)).cloned().collect();
+    let chosen = match resolve(&voice, |c| &c.name, &channel) {
+        Found::One(c, how) => {
+            say!("voice-join: the channel resolved {how} among the server's {} voice and stage channels", voice.len());
+            c.clone()
+        }
+        Found::Many(list, how) => {
+            say!("voice-join: {} voice channels match {how}: nothing joined", list.len());
+            write_choices(
+                options,
+                "channels",
+                &list.iter().map(|c| format!("channel\t{}", c.name)).collect::<Vec<_>>(),
+            );
+            host.close();
+            return 4;
+        }
+        Found::None => {
+            let other = matches!(resolve(&in_guild, |c| &c.name, &channel), Found::One(..) | Found::Many(..));
+            say!(
+                "voice-join: no voice or stage channel of that name in the server ({}): nothing joined",
+                if other { "a channel of another kind has it" } else { "none of any kind" }
+            );
+            host.close();
+            return 4;
+        }
+    };
+    if chosen.kind == 13 {
+        say!("voice-join: it is a stage channel: not tried");
         host.close();
         return 4;
     }
-    let channel_id = found["cid"].as_str().unwrap_or_default().to_string();
-    let cid = Some(channel_id.as_str());
     say!(
-        "voice-join: the channel found (name matched {}, told as {}: {}); already in a call: {}",
-        if found["exact"] == true { "exactly" } else { "ignoring case" },
-        found["kind"].as_str().unwrap_or("?"),
-        if found["kind"] == "voice" {
-            "labelled voice or showing users"
-        } else {
-            "no voice sign found: the only row of that name; the press shows what it is"
-        },
-        yes(in_call(&sample(&host, cid)))
+        "voice-join: {} in it now by the store; already in a call: {}",
+        chosen.users,
+        yes(in_call(&sample(&host, None)))
     );
-    // The list was read to its end: its row may be out of the virtual list now. Paged to again from the top.
-    match read_channels(&host, None, cid) {
-        Ok(_) => {
-            say!("voice-join: the channel's row shown again: {}", yes(mark(&host, "channel", cid)["found"] == true))
-        }
-        Err(e) => say!("voice-join: paging back to the channel failed: {e}"),
+    set_store_channel(Some(&chosen.id));
+    let href = format!("/channels/{}/{}", guild.id, chosen.id);
+    let cid = Some(chosen.id.as_str());
+    if let Err(e) = host.eval(&with("HREF", &json!(href), PUSH)) {
+        say!("voice-join: opening the channel's route failed: {e}: nothing joined");
+        host.close();
+        return 5;
     }
     let pressed = Instant::now();
-    // Each way only if the one before showed no voice panel at all: never the same press twice.
-    let ways: &[Way] = match options.way {
-        Way::Auto => &[Way::Key, Way::Click, Way::Route],
-        Way::Key => &[Way::Key],
-        Way::Click => &[Way::Click],
-        Way::Route => &[Way::Route],
-    };
-    let mut sign = false;
-    for &w in ways {
-        if w == Way::Route {
-            let href = format!("/channels/{gid}/{channel_id}");
-            if let Err(e) = host.eval(&with("HREF", &json!(href), PUSH)) {
-                say!("voice-join: route: the script failed: {e}");
-                continue;
-            }
-            let (shown, _, ms) = wait_for(&host, cid, SIGN, &|_| mark(&host, "join_voice", None)["found"] == true);
-            say!("voice-join: route: the channel's Join Voice button shown {} after {ms} ms", yes(shown));
-            if !shown || !press_once(&host, "join_voice", None, Way::Key) {
-                continue;
-            }
-        } else if !press_once(&host, "channel", cid, w) {
-            break;
-        }
-        let (seen, s, ms) = wait_for(&host, cid, SIGN, &in_call);
-        say!(
-            "voice-join: by {}: a voice panel shown {} after {ms} ms (status class {})",
-            w.name(),
-            yes(seen),
-            s["statusClass"].as_str().unwrap_or("?")
-        );
-        if seen {
-            sign = true;
-            break;
-        }
-    }
-    if !sign {
-        say!("voice-join: no way showed a voice panel: not joined");
+    if !start_voice(&host, "join_voice", &chosen.id, options) {
+        say!("voice-join: no voice panel showed: not joined");
         return finish(host, options, cid, 5);
     }
     let code = connected(&host, cid, pressed, options);
@@ -920,14 +992,6 @@ pub fn channel_names(v: &Value) -> String {
     text
 }
 
-fn write_channel_names(options: &Options, v: &Value) {
-    let text = format!("# discord-spike --voice-join. PRIVATE: keep it out of the repository.\n{}", channel_names(v));
-    match std::fs::write(&options.voice_names, text) {
-        Ok(()) => say!("voice-join: the rows' names written to {} (not to this log)", options.voice_names.display()),
-        Err(e) => say!("voice-join: the names could not be written to {}: {e}", options.voice_names.display()),
-    }
-}
-
 /// `--dump-shape [--server-file f]`: the signed-in page (that server open, if given) written as its shape.
 pub fn shape(options: &Options, loader: &Loader) -> i32 {
     let server = match options.server_file.as_deref() {
@@ -989,39 +1053,41 @@ pub fn call(options: &Options, loader: &Loader) -> i32 {
         Err(code) => return code,
     };
     clear_controls(&options.control);
-    let found = match host.evaluate(&with("TARGET", &json!(to), FIND)) {
-        Ok(v) => v,
-        Err(e) => {
-            say!("call: finding the conversation failed: {e}: nobody called");
+    let Some(index) = index::build(&host, options) else {
+        host.close();
+        return 7;
+    };
+    let dm = match resolve(&index.dms, |d| &d.name, &to) {
+        Found::One(d, how) => {
+            say!("call: the conversation resolved {how} among {} DMs", index.dms.len());
+            d.clone()
+        }
+        Found::Many(list, how) => {
+            say!("call: {} conversations match {how}: nobody called", list.len());
+            write_choices(
+                options,
+                "conversations",
+                &list.iter().map(|d| format!("dm\t{}", d.name)).collect::<Vec<_>>(),
+            );
             host.close();
-            return 7;
+            return 4;
+        }
+        Found::None => {
+            say!("call: no conversation of that name: nobody called");
+            host.close();
+            return 4;
         }
     };
-    if found["found"] != 1 {
-        say!("call: {} conversations of that name among {} rows: nobody called", found["found"], found["rows"]);
-        host.close();
-        return 4;
-    }
-    let href = found["href"].as_str().unwrap_or_default().to_string();
+    set_store_channel(Some(&dm.id));
+    let href = format!("/channels/@me/{}", dm.id);
     if let Err(e) = host.eval(&with("HREF", &json!(href), PUSH)) {
         say!("call: opening by route failed: {e}: nobody called");
         host.close();
         return 5;
     }
-    let (shown, _, ms) =
-        wait_for(&host, None, Duration::from_secs(10), &|_| mark(&host, "call", None)["found"] == true);
-    say!(
-        "call: the conversation found (name matched {}), opened by route; its Start Voice Call button shown {} after {ms} ms",
-        if found["exact"] == true { "exactly" } else { "ignoring case" },
-        yes(shown)
-    );
-    if !shown {
-        host.close();
-        return 5;
-    }
     let pressed = Instant::now();
-    if !act(&host, "call", None, options.way, &|s| in_call(s) || s["callView"] == true) {
-        say!("call: no way showed a call: nobody called");
+    if !start_voice(&host, "call", &dm.id, options) {
+        say!("call: no call showed: nobody called");
         return finish(host, options, None, 5);
     }
     let code = connected(&host, None, pressed, options);

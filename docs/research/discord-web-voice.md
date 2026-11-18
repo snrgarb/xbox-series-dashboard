@@ -224,6 +224,53 @@ way showed a voice panel or call; 6 a panel but never connected in 20 s; 7 a scr
 did not show; 9 the watchdog; 10 a name file missing or not one line; 11 `--voice-probe`'s verdict FAIL; 12 its verdict INCOMPLETE (the timer never ran); 13 leave not
 confirmed.
 
+## 4b. The index: Discord's own stores, then straight to the target by id
+
+The user, 2026-11-18: do not hunt the page's lists for each action; build an index in memory (every server, every
+channel with its id and kind, every DM with its id) and go straight to the target by id, **from Discord's in-page
+stores only** (no DOM fallback). This is now the spike's main question, and the product's design if it holds.
+
+**How** (`js/store_find.js`, `js/index_store.js`, `src/index.rs`). Discord's web client is a webpack bundle; its chunk
+global `webpackChunkdiscord_app` takes a probe chunk once, which hands back webpack's `require` and its module
+cache. The cache is searched for objects by the methods they have: the guild store (`getGuilds`, `getGuild`), the
+channel store (`getChannel`, `getMutableGuildChannelsForGuild`; or the guild channel store's `getChannels`), the
+private channel order (`getPrivateChannelIds` or `getSortedPrivateChannels`), voice states
+(`getVoiceStatesForChannel`), users (`getUser`, `getCurrentUser`), speaking (`isSpeaking`), the media engine
+(`isSelfMute`, `isSelfDeaf`) and the voice actions (`selectVoiceChannel`). Only those are called, and only to read,
+except `selectVoiceChannel` below. **Nothing credential-like is ever read**: a unit test fails the build if any store
+script mentions a token, local or session storage, IndexedDB, cookies, a password, an Authorization header or a
+network call.
+
+| Line | Means |
+| --- | --- |
+| `index: stores found among n modules: guilds [getGuilds getGuild]; channels [...]; ...; voiceActions [selectVoiceChannel]` | Which store methods were found, by name: **how brittle this is**. `NOT FOUND` for a store Discord renamed |
+| `index: built from Discord's stores in t ms (the page's script s ms): servers n, channels m (category a, text b, voice c, ...), DMs d (group g), users in voice channels now u (in k channels)` | **The index**, counts only. Names and ids go to `index.txt` (`--index-file`), private |
+| `index: built again after 10 s, to time a refresh` | `--index` builds twice: the second time is a refresh's cost |
+| `voice-join: the server resolved exactly / ignoring case / by a part of it` | Name to id: exact, then ignoring case, then contained. Several matches: `n servers match ...: nothing joined`, the candidates to `voice-names.txt` |
+| `voice-join: the channel resolved exactly among the server's n voice and stage channels` | Only voice channels are candidates; a stage channel is not tried |
+| `voice: the page's join_voice button shown yes after n ms` | The channel's route (`/channels/<server>/<channel>`) opened by `history.pushState`; its Join Voice button found |
+| `voice: started by the page's own join_voice button` | Pressed by trusted input (`--way`) and a voice panel showed |
+| `voice: Discord's own selectVoiceChannel called from its store (the button was not found): called yes` | **The store's action**, used only when the button is not there or did nothing; said so every time |
+| `call: the conversation resolved exactly among n DMs` | `--call` the same way: the DM's id, its route `/channels/@me/<id>`, the page's Start Voice Call button, else `selectVoiceChannel(<dm id>)` |
+| `hold t s, outside the page: ...; stores: in the call 2, speaking 1, muted 0, deafened 0; the user in it yes, self mute no, self deafen no; Windows: ...` | Once a second: **participants, speaking and the user's own mute and deafen from the stores** beside Windows' meters |
+
+**For the product** (if the spike holds):
+
+- The index is kept in memory only, never written (the spike's `index.txt` is for the lead), built when the session
+  is up and refreshed on the stores' change events (each store is a Flux store with `addChangeListener`) or, simpler
+  and enough for a Guide, a slow poll (every few seconds while the Discord tab is open; the second `--index` build
+  times it).
+- Actions go by id: a route by `history.pushState`, then the page's own button by trusted input; the store's action
+  only where the page has no button.
+- The Discord tab's Call, who is speaking, and mute and deafen are read from the stores, not the DOM: no selectors
+  to keep up for them.
+- **What breaks it**: Discord renaming or reshaping a store method, or the webpack chunk global. The `stores found`
+  line names each method, so a break shows as `NOT FOUND` on one line, and the product's health probe can be that
+  same search. There is no DOM fallback (the user's choice): a break means the Discord tab says so until the method
+  names are updated.
+- The terms risk grows: reading a client's internal state is closer to "modifying the services" than reading its
+  page; still read-only, no API call, nothing credential-like.
+
 ## 5. The questions of #292
 
 | Question | Step and line | TV result |

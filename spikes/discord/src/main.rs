@@ -11,6 +11,7 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 #![windows_subsystem = "windows"]
 mod args;
+mod index;
 mod keyboard;
 mod log;
 mod pad;

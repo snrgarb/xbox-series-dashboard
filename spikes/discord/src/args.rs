@@ -42,7 +42,10 @@ options (a relative path is from the exe's folder):
   --way <w>               how the voice steps press Discord's buttons: auto (key, then click, then route, each
                           only if the one before showed nothing), key, click, route  [auto]
   --voice-names <file>    --voice-list writes server and voice channel names here  [<exe dir>\\voice-names.txt]
+  --index                 builds the index (servers, channels, DMs, voice states) from Discord's in-page stores,
+                          read-only; counts and timings to the log, names and ids to --index-file
   --shape <file>          where the shape goes                          [<exe dir>\\shape.txt]
+  --index-file <file>     the index's names and ids                     [<exe dir>\\index.txt]
   --dir <dir>             the folder every relative name is taken from  [the exe's folder]
   --args-file <f>         more arguments from <f>, one a line (# lines skipped): for long command lines
 control files, made in --dir while a voice step holds: mute, deafen, leave, answer, decline, shape (each acted on
@@ -61,6 +64,7 @@ pub enum Step {
     Call,
     VoiceIncoming,
     DumpShape,
+    Index,
 }
 
 impl Step {
@@ -77,6 +81,7 @@ impl Step {
             Step::Call => "call",
             Step::VoiceIncoming => "voice-incoming",
             Step::DumpShape => "dump-shape",
+            Step::Index => "index",
         }
     }
 
@@ -171,6 +176,8 @@ pub struct Options {
     pub control: PathBuf,
     /// `--dump-shape` and the `shape` control file write the page's shape here.
     pub shape: PathBuf,
+    /// `--index` (and the voice steps that resolve by it) write the index's names and ids here.
+    pub index_file: PathBuf,
 }
 
 impl Options {
@@ -252,6 +259,7 @@ pub fn parse_in(args: &[String], exe_dir: &Path) -> Result<Options, String> {
         voice_names: base.join("voice-names.txt"),
         control: base.to_path_buf(),
         shape: base.join("shape.txt"),
+        index_file: base.join("index.txt"),
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -272,6 +280,8 @@ pub fn parse_in(args: &[String], exe_dir: &Path) -> Result<Options, String> {
             "--call" => set_step(Step::Call)?,
             "--voice-incoming" => set_step(Step::VoiceIncoming)?,
             "--dump-shape" => set_step(Step::DumpShape)?,
+            "--index" => set_step(Step::Index)?,
+            "--index-file" => options.index_file = base.join(value("--index-file")?),
             "--shape" => options.shape = base.join(value("--shape")?),
             "--data" => options.data = base.join(value("--data")?),
             "--log" => options.log = base.join(value("--log")?),
@@ -339,8 +349,10 @@ pub fn parse_in(args: &[String], exe_dir: &Path) -> Result<Options, String> {
     if step == Step::VoiceJoin && (options.server_file.is_none() || options.channel_file.is_none()) {
         return Err("--voice-join needs both --server-file and --channel-file".into());
     }
-    if !matches!(step, Step::VoiceJoin | Step::VoiceList | Step::DumpShape) && options.server_file.is_some() {
-        return Err("--server-file is for --voice-list, --voice-join and --dump-shape only".into());
+    if !matches!(step, Step::VoiceJoin | Step::VoiceList | Step::DumpShape | Step::Index)
+        && options.server_file.is_some()
+    {
+        return Err("--server-file is for --voice-list, --voice-join, --dump-shape and --index only".into());
     }
     if step != Step::VoiceJoin && options.channel_file.is_some() {
         return Err("--channel-file is for --voice-join only".into());
