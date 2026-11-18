@@ -326,6 +326,18 @@ impl Acts {
         self.outgoing.iter_mut().find(|o| o.nonce == nonce)
     }
 
+    /// When [`Acts::tick`] next has something to do: the running action's timeout, or the next queued action's turn
+    /// once the pace allows it. None with nothing running or queued.
+    pub fn next(&self) -> Option<Instant> {
+        if let Some(run) = &self.running {
+            return Some(run.started + LIMIT);
+        }
+        if self.queue.is_empty() {
+            return None;
+        }
+        Some(self.last_end.map_or_else(Instant::now, |end| end + PACE))
+    }
+
     /// The clock: a timeout, or the next action's turn.
     pub fn tick(&mut self, now: Instant) -> Vec<Out> {
         let mut out = Vec::new();

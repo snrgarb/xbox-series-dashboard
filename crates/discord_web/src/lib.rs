@@ -479,6 +479,13 @@ impl Session {
         }
     }
 
+    /// How long until the action queue next has something to do (a timeout, the next action's turn), so the
+    /// Dashboard's loop wakes for it with nothing else happening. None with nothing queued or running.
+    pub fn next_timer(&self) -> Option<std::time::Duration> {
+        let at = self.acts.next()?;
+        Some(at.saturating_duration_since(std::time::Instant::now()))
+    }
+
     /// The queue's clock: a timeout, or the next action's turn. Each frame, from [`Session::pump`].
     fn drive(&mut self) {
         let outs = self.acts.tick(std::time::Instant::now());
