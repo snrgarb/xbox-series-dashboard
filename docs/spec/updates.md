@@ -47,7 +47,7 @@ The focus line: `About: Version 0.1.0 (0123abc); <control>; <state>`, the state 
 
 | State (`model::update::Updates`) | `state` | The line |
 |---|---|---|
-| Unchecked | `unchecked` | "Check to see whether there's a newer version." |
+| Unchecked | `unchecked` | none, and Check for updates 14 under "Updates" ("Check to see whether there's a newer version." until #261) |
 | Checking | `checking` | "Checking for updates..." |
 | UpToDate(v) | `up-to-date <v>` | "This is the latest version." |
 | NotPublic | `not-public` | "Updates can't be checked yet: the Dashboard's releases aren't public." |

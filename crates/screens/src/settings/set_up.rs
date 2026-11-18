@@ -90,17 +90,12 @@ fn games_of(key: &str) -> &'static str {
     mark(key).map_or("its", Source::name)
 }
 
-/// The line under the Rows, of the app focus is on: what A does to it, or why the last thing asked failed.
-fn detail(client: &Client, around: Around) -> String {
-    match &client.state {
+/// The line under the Rows, of the app focus is on: how it stands, or why the last thing asked failed. None for one
+/// not installed: its question says where it comes from and its size (#261).
+fn detail(client: &Client, around: Around) -> Option<String> {
+    let said = match &client.state {
         ClientState::Failed { why, .. } => why.clone(),
-        ClientState::NotInstalled => format!(
-            "A installs {} {} from {}'s own address ({}).",
-            client.name,
-            client.version,
-            client.vendor,
-            setup::size(client.size)
-        ),
+        ClientState::NotInstalled => return None,
         ClientState::Installed => {
             format!("{} {}", count(games(around, &client.key), games_of(&client.key)), client.removing)
         }
@@ -114,7 +109,8 @@ fn detail(client: &Client, around: Around) -> String {
         ClientState::Removing => "Its uninstaller is running. Answer Windows' prompt with a mouse or keyboard if one \
                                   shows."
             .into(),
-    }
+    };
+    Some(said)
 }
 
 /// The question Install asks: the vendor, the address and the size in front of the user before anything is
@@ -318,7 +314,7 @@ impl Pane for SetUp {
         let focused_rect = row(self.at);
         let detail_text = match (&self.note, self.clients.get(self.at)) {
             (Some(note), _) => Some((note.clone(), Color::WHITE)),
-            (None, Some(client)) => Some((detail(client, around), TEXT_DIM)),
+            (None, Some(client)) => detail(client, around).map(|said| (said, TEXT_DIM)),
             (None, None) => None,
         };
         let detail_height =

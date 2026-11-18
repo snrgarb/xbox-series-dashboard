@@ -67,7 +67,8 @@ impl Default for Build {
 /// What the line under Updates says of where they stand; `playing`, a game is running.
 pub fn status(updates: Updates, playing: bool) -> String {
     match updates {
-        Updates::Unchecked => "Check to see whether there's a newer version.".into(),
+        // Nothing to say before the first check (#261): the button says it.
+        Updates::Unchecked => String::new(),
         Updates::Checking => "Checking for updates...".into(),
         Updates::UpToDate(_) => "This is the latest version.".into(),
         Updates::NotPublic => "Updates can't be checked yet: the Dashboard's releases aren't public.".into(),
@@ -168,11 +169,17 @@ impl Pane for About {
         y += controls::label(ui, LEFT, y, NAME) + 4.0;
         y += controls::description(ui, LEFT, y, ROW_WIDTH, &self.build.says()) + 40.0;
         // Updates: where they stand, the two buttons, then the daily check.
-        y += controls::label(ui, LEFT, y, UPDATES_LABEL) + 4.0;
-        let style = BODY.color(TEXT_DIM);
         let line = status(updates, around.playing.is_some());
-        y += ui.paragraph(Rect::new(LEFT, y, ROW_WIDTH, 2000.0), &line, &style, HAlign::Left, VAlign::Top, 0).height
-            + 18.0;
+        if line.is_empty() {
+            // Not checked yet: the buttons 14 under the label, as a control under its label.
+            y += controls::label(ui, LEFT, y, UPDATES_LABEL) + 14.0;
+        } else {
+            y += controls::label(ui, LEFT, y, UPDATES_LABEL) + 4.0;
+            let style = BODY.color(TEXT_DIM);
+            y +=
+                ui.paragraph(Rect::new(LEFT, y, ROW_WIDTH, 2000.0), &line, &style, HAlign::Left, VAlign::Top, 0).height
+                    + 18.0;
+        }
         let check = Rect::new(LEFT, y, controls::pane_button_width(ui, CHECK), FIELD_HEIGHT);
         let install = Rect::new(check.right() + 18.0, y, controls::pane_button_width(ui, INSTALL), FIELD_HEIGHT);
         let ready = matches!(updates, Updates::Ready(_)) && around.playing.is_none();

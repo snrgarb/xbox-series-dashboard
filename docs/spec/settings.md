@@ -938,9 +938,9 @@ The user, 2026-11-18: "remove all the text paragraphs underneath setting heading
 | Art | "Art that no store has for a game comes from SteamGridDB..." (shortened, below); "Art and details downloaded for your games are kept on this PC..."; at rest, "A refresh goes on in the background: Home can be used meanwhile."; "Downloads art for games that have none on this PC..."; "Each picture a game lacks is looked for in this order..." (16.8) |
 | Storage | "Where your games are installed. Choose the folder each store installs into..."; under a store that can be told its folder, "Installs go to the folder ticked." (storage.md 3) |
 | Helpers | "Some stores install games through a helper program. It isn't part of the Dashboard..." (helpers.md 2) |
-| Set up this PC | "Install the apps your games come from, or remove them. Each app's installer comes from its maker's own address..." (set-up.md) |
+| Set up this PC | "Install the apps your games come from, or remove them. Each app's installer comes from its maker's own address..."; under the Rows, for an app not installed, "A installs Steam 2.10.91.91 from Valve's own address (2.4 MB)." (its Install question says the vendor, the address and the size) (set-up.md) |
 | System | under Start with Windows, "Starts the Dashboard in place of the Windows desktop when you sign in..." (shell-mode.md 2) |
-| About | under Check for updates every day, "Once a day while the Dashboard runs, it asks for the newest version..." (updates.md 2) |
+| About | under Check for updates every day, "Once a day while the Dashboard runs, it asks for the newest version..."; before the first check, "Check to see whether there's a newer version." (updates.md 2) |
 
 **Kept**, each for what it says of how things stand or what the user cannot do without:
 
@@ -952,10 +952,10 @@ The user, 2026-11-18: "remove all the text paragraphs underneath setting heading
 | Storage | the drives' figures; "Installs go to the folder ticked: this launcher chooses it for itself." under such a store; "This PC's drives couldn't be read."; "No launcher here says where it installs games." | how things stand: why A does nothing on that store's Rows; the empty states |
 | Helpers | a helper's "Version 0.21.1. GPL-3.0 licence. Source: github.com/..." and how it stands (added or not, signed in or not and what to do, downloading, why it failed); "There are no helpers to add." | how things stand, and the licence and source of what would be fetched |
 | Helpers, Set up this PC, Art, System, Groups, Games & apps | every question's message (Add legendary?, Install Steam?, Clear downloaded art?, Refresh all art and details?, Start with Windows as the shell?, Delete X?) | a confirmation keeps its text |
-| Set up this PC | the line under the Rows of the focused app (what A installs, at what size; how many games are installed and what removing does; what is running and Windows' prompt; why it failed); "There are no apps to set up." | how things stand, and errors |
+| Set up this PC | the line under the Rows of the focused app once it is installed or something is under way (how many games are installed and what removing does; what is running and Windows' prompt; why it failed); "There are no apps to set up." | how things stand, and errors |
 | Boot video | "No boot videos were found on this PC..." with none found | how things stand, and what to do |
 | Add an app | "The Microsoft Store apps on this PC show up here once Windows has listed them."; "There are no Microsoft Store apps on this PC." | how things stand |
 | Picture (a Profile's) | "Add images to the Gamerpics folder to choose from more." with at most one picture | how things stand, and what to do |
 | Discord | the four numbered steps, the portal's address under its code, the values ("Not set", "Saved") and the status line | what the user cannot connect without, and how things stand |
 | System | the line under the checkbox (Off, On, refused, failed); "Getting to the desktop" and "If the Dashboard won't start" with their text | how things stand; the way out of shell mode, which no control on the page does |
-| About | the version; where updates stand; "Third-party licences" and "Sounds and boot videos" with their text | how things stand; where the licences are, and where the media files go |
+| About | the version; where updates stand once checked; "Third-party licences" and "Sounds and boot videos" with their text | how things stand; where the licences are, and where the media files go |

@@ -92,7 +92,7 @@ winget manifest, as a reviewed change. Steam's has been the same file since May 
 | Element | y | Notes |
 | --- | --- | --- |
 | The Rows | 210, no line over them (#261, settings.md 16.11) | One an app, 892 x 66 every 74 (settings.md 4.3), in the table's order: the launcher's mark (`home::source_mark`, as Launchers'), the app's name, and how it stands right-aligned: "Not installed", "Installed", "Downloading: 34%", "Installing...", "Removing..." (with the Spinner before it) |
-| The line | 30 under the last Row | Of the focused app: "A installs Steam 2.10.91.91 from Valve's own address (2.4 MB)."; installed, "8 Steam games are installed." and what removing it does; while a step works, what it is doing; after a failure, why; after a refusal, why (white) |
+| The line | 30 under the last Row | Of the focused app: none while it is not installed (its question says the vendor, the address and the size; "A installs Steam 2.10.91.91 from Valve's own address (2.4 MB)." until #261); installed, "8 Steam games are installed." and what removing it does; while a step works, what it is doing; after a failure, why; after a refusal, why (white) |
 
 Up and Down move between the Rows, stopping at the ends; B or Left goes back to Games & apps' boxes on Set up this PC.
 
