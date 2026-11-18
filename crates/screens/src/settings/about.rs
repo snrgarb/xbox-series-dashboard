@@ -21,8 +21,6 @@ const UPDATES_LABEL: &str = "Updates";
 pub const CHECK: &str = "Check for updates";
 pub const INSTALL: &str = "Install";
 pub const DAILY: &str = "Check for updates every day";
-const DAILY_ABOUT: &str = "Once a day while the Dashboard runs, it asks for the newest version and downloads it. \
-                           You're told when it's ready, never during a game.";
 const LICENCES_LABEL: &str = "Third-party licences";
 const LICENCES: &str = "The Dashboard is built from open-source parts. Their licences are in \
                         THIRD-PARTY-LICENSES.txt, beside dashboard.exe.";
@@ -187,8 +185,7 @@ impl Pane for About {
         let daily = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
         let on = around.options.daily_update_check;
         controls::checkbox_row(ui, daily, DAILY, on, focused && self.at == Control::Daily);
-        y += FIELD_HEIGHT + 12.0;
-        y += controls::description(ui, LEFT, y, ROW_WIDTH, DAILY_ABOUT) + 40.0;
+        y += FIELD_HEIGHT + 40.0;
         y += controls::label(ui, LEFT, y, LICENCES_LABEL) + 4.0;
         y += controls::description(ui, LEFT, y, ROW_WIDTH, LICENCES) + 40.0;
         y += controls::label(ui, LEFT, y, MEDIA_LABEL) + 4.0;

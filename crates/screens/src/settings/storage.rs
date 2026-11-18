@@ -18,12 +18,10 @@ use crate::Effect;
 
 /// The box on Games & apps, and the page's header.
 pub const TITLE: &str = "Storage";
-const ABOUT: &str = "Where your games are installed. Choose the folder each store installs into; where a store has \
-                     more than one, Install asks which, starting on the one ticked here.";
 const DRIVES: &str = "Drives";
 const NO_DRIVES: &str = "This PC's drives couldn't be read.";
 const NO_STORES: &str = "No launcher here says where it installs games.";
-const CHOOSES: &str = "Installs go to the folder ticked.";
+/// The line under a store that chooses its own folder, so A does nothing on its Rows: one that can be told has none.
 const OWN: &str = "Installs go to the folder ticked: this launcher chooses it for itself.";
 /// The bar under a drive: its track and how much is used.
 const TRACK: Color = Color::rgb(0x262626);
@@ -40,8 +38,8 @@ struct At {
 struct Layout {
     /// Each drive's top.
     drives: Vec<f32>,
-    /// Each store's label's top, its note's, then each of its folders' Row.
-    stores: Vec<(f32, f32, Vec<Rect>)>,
+    /// Each store's label's top, its note's if it has one, then each of its folders' Row.
+    stores: Vec<(f32, Option<f32>, Vec<Rect>)>,
     /// Where the line said in place of the stores is, with none.
     none: f32,
 }
@@ -74,8 +72,7 @@ impl Storage {
 
     fn layout(&self, ui: &mut Ui) -> Layout {
         let line = ui.measure(&BODY, "0").height;
-        let mut y = BOXES_TOP + controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT) + 30.0;
-        y += line + 12.0;
+        let mut y = BOXES_TOP + line + 12.0;
         let mut drives = Vec::new();
         for _ in &self.storage.drives {
             drives.push(y);
@@ -89,8 +86,8 @@ impl Storage {
         let mut stores = Vec::new();
         for store in &self.storage.stores {
             let label = y;
-            let note = label + line + 2.0;
-            y = note + line + 14.0;
+            let note = (!store.choose).then_some(label + line + 2.0);
+            y = note.unwrap_or(label) + line + 14.0;
             let rows = store
                 .folders
                 .iter()
@@ -203,7 +200,6 @@ impl Pane for Storage {
         let Self { storage, at, scroll, .. } = self;
         let focus = at.filter(|_| focused);
         controls::scrolled(ui, scroll, BOXES_TOP, top, bottom, |ui| {
-            controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT);
             let drives_top =
                 layout.drives.first().copied().unwrap_or(layout.none) - ui.measure(&BODY, "0").height - 12.0;
             controls::label(ui, LEFT, drives_top, DRIVES);
@@ -220,7 +216,9 @@ impl Pane for Storage {
             let mut focused_row = None;
             for (s, (store, (label, note, rows))) in storage.stores.iter().zip(&layout.stores).enumerate() {
                 controls::label(ui, LEFT, *label, &store.name);
-                controls::description(ui, LEFT, *note, ROW_WIDTH, if store.choose { CHOOSES } else { OWN });
+                if let Some(note) = note {
+                    controls::description(ui, LEFT, *note, ROW_WIDTH, OWN);
+                }
                 for (f, (place, rect)) in store.folders.iter().zip(rows).enumerate() {
                     let row = (*rect, place, f == store.default);
                     if focus == Some(At { store: s, folder: f }) {

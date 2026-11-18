@@ -25,10 +25,11 @@ Picture: `crates/screens/tests/reference/settings-theme-settings-launchers-box.p
 | Element | y | Notes |
 |---|---|---|
 | Header | as every page | "Storage" |
-| What it does | 210 | `controls::description`, wrapped at 892: "Where your games are installed. Choose the folder each store installs into; where a store has more than one, Install asks which, starting on the one ticked here." |
-| Drives | 30 under it | A label, "Drives"; 12 under it each drive: its name left ("Local Disk (C:)" as Explorer names a drive with no label, "Games (D:)"), "354.6 GB free of 802.0 GB" right, dim; 8 under them a bar 892 x 6, `#FF262626`, filled with the accent (`#FF107C10`) as far as the drive is used; 22 to the next. With none: "This PC's drives couldn't be read.", dim |
-| A store | 18 under the drives, 26 between stores | Its name as a label ("Steam"); under it, dim, "Installs go to the folder ticked." or, for a store that chooses for itself, "Installs go to the folder ticked: this launcher chooses it for itself."; 14 under that a Row a folder, 892 x 66 every 74 (settings.md, 4.3): the tick on the store's default, the folder's path, its drive's free space right-aligned 24 in, dim |
+| Drives | 210 | A label, "Drives"; 12 under it each drive: its name left ("Local Disk (C:)" as Explorer names a drive with no label, "Games (D:)"), "354.6 GB free of 802.0 GB" right, dim; 8 under them a bar 892 x 6, `#FF262626`, filled with the accent (`#FF107C10`) as far as the drive is used; 22 to the next. With none: "This PC's drives couldn't be read.", dim |
+| A store | 18 under the drives, 26 between stores | Its name as a label ("Steam"); for a store that chooses for itself, under it, dim, "Installs go to the folder ticked: this launcher chooses it for itself." (it says why A does nothing there); 14 under the last of those a Row a folder, 892 x 66 every 74 (settings.md, 4.3): the tick on the store's default, the folder's path, its drive's free space right-aligned 24 in, dim |
 | No store | in the stores' place | "No launcher here says where it installs games.", dim |
+
+No line says what the page is for, and a store that can be told its folder has none under its name ("Where your games are installed..." and "Installs go to the folder ticked." until #261): settings.md 16.11.
 
 Sizes are written as the Bundle's ring writes them (C/MyGamesState.cs:283-309): one decimal, GB, MB under 1 GB, TB from 1024 GB, 1024 to a step.
 

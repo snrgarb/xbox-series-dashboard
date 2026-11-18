@@ -290,10 +290,10 @@ Focus, the ring and glow, the fly-in, B's levels and sounds are those of the Set
 
 Opens in Personalisation's boxes' place, as Boot video's page does, and is laid out as that page is ([settings.md](settings.md) section 6.3):
 
-- y 210: "Choose which Groups show on Home and in Full library, and in what order." (MutedText, one line), 26 under it.
-- Then one **Row** per filter, in order, x 520..1412, row i at y 270.58 + 74 i. The Row's name is the filter's name. **The tick means shown**: unlike Boot video's list, any number of Rows can be ticked.
+- No line over the Rows: "Choose which Groups show on Home and in Full library, and in what order." went in #261 (settings.md 16.11).
+- One **Row** per filter, in order, x 520..1412, row i at y 210 + 74 i. The Row's name is the filter's name. **The tick means shown**: unlike Boot video's list, any number of Rows can be ticked.
 - Last Row, always: **New Group**. In the tick's slot it has the glyph U+E710 (Add), icon font 24, white.
-- Ten Rows fit with room for the last one's ring and glow (the tenth ends at 270.58 + 74 x 9 + 66 = 1002.58; an eleventh would end at 1076.58, its ring cut by the screen's foot). With more than ten, New Group included, the pane scrolls as the Profiles page does ([settings.md](settings.md) section 6.5): no scroll bar, it jumps, the focused Row kept whole with its ring.
+- Eleven Rows fit with room for the last one's ring and glow (the eleventh ends at 210 + 74 x 10 + 66 = 1016; a twelfth would end at 1090, past the screen's foot). With more than eleven, New Group included, the pane scrolls as the Profiles page does ([settings.md](settings.md) section 6.5): no scroll bar, it jumps, the focused Row kept whole with its ring.
 - The page opens with focus on the first Row.
 
 | Input | On a filter's Row | On New Group |

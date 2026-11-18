@@ -7,11 +7,6 @@ use super::{Change, Pane, Setting, Step};
 use crate::pages::{Around, PageAction};
 use crate::Effect;
 
-const ABOUT: &str = "Opens the Guide with the Guide button and from Home. Turn it off to leave the Guide button to \
-                     Steam or another app.";
-const SOURCE_ABOUT: &str =
-    "The app the Audio flyout's Now Playing follows while it plays or is paused, else whatever Windows shows.";
-
 /// The page's two controls, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
@@ -82,17 +77,14 @@ impl Pane for Guide {
     }
 
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool) {
-        // The label, its description 4 under it, and the checkbox 18 under that; the source's label 40 under the
-        // checkbox, and the same again for its dropdown.
+        // Each label, its control 14 under it, and the next label 48 under that, as Idle's: no descriptions (#261).
         let mut y = TOP;
-        y += controls::label(ui, LEFT, y, "Guide") + 4.0;
-        y += controls::description(ui, LEFT, y, FIELD_WIDTH, ABOUT) + 18.0;
+        y += controls::label(ui, LEFT, y, "Guide") + 14.0;
         let row = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
         let on_row = focused && self.focus == Focus::UseGuide;
         controls::checkbox_row(ui, row, "Use the Guide", around.options.use_guide, on_row);
-        y += FIELD_HEIGHT + 40.0;
-        y += controls::label(ui, LEFT, y, "Now Playing source") + 4.0;
-        y += controls::description(ui, LEFT, y, FIELD_WIDTH, SOURCE_ABOUT) + 18.0;
+        y += FIELD_HEIGHT + 48.0;
+        y += controls::label(ui, LEFT, y, "Now Playing source") + 14.0;
         let dropdown = Rect::new(LEFT, y, FIELD_WIDTH, FIELD_HEIGHT);
         let on_source = focused && self.focus == Focus::Source;
         self.source.draw(ui, dropdown, around.now_playing.source(), on_source);

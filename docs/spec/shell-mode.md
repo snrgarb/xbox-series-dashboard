@@ -36,10 +36,10 @@ Dashboard's exit.
 ## 2. Settings > System
 
 The System category's first box is **System** (icon U+E770), the port's own, About beside it ([settings.md](settings.md) 6.1). Its page, laid out as Discord's
-(settings.md, 6.9): a label, its description, the control, the next group 40 under.
+(settings.md, 6.9): a label, the control 14 under it, the next group 40 under.
 
-- **Start with Windows** — "Starts the Dashboard in place of the Windows desktop when you sign in, as a console starts.
-  The desktop still starts behind it once the Boot video ends. A change takes effect the next time you sign in."
+- **Start with Windows**, and no text under it: "Starts the Dashboard in place of the Windows desktop..." went in #261
+  (settings.md 16.11). The two groups below keep theirs: they are what to do, with no control to do it.
 - The checkbox row **Start with Windows as the shell**, ticked while it is on, and under it a line saying where it stands:
 
   | Stands | Line |

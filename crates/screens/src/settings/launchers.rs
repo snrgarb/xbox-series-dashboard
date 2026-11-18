@@ -22,10 +22,7 @@ use crate::Effect;
 
 /// The box on Games & apps, and the page's header.
 pub const TITLE: &str = "Launchers";
-const ABOUT: &str = "Your games come in from the launchers switched on here, with their play time and collections. \
-                     Switch one off to hide its games until you switch it on again.";
 const UPDATE: &str = "Update now";
-const UPDATE_ABOUT: &str = "Looks for new games, play time, Groups, art and achievements.";
 const WORKING: &str = "Updating your library...";
 const FAILED: &str = "Your library couldn't be updated. Try again later.";
 /// How dim a launcher that is not on this PC is drawn.
@@ -172,10 +169,9 @@ impl Launchers {
         (game.source == key).then(|| game.name.clone())
     }
 
-    /// Where the Rows start, under the line and the count, and where Update now is: as drawn.
+    /// Where the Rows start, under the count, and where Update now is: as drawn.
     fn layout(ui: &mut Ui) -> (f32, f32) {
-        let about = ui.measure_wrapped(&BODY, ABOUT, ROW_WIDTH, 0).height;
-        let rows = BOXES_TOP + about + 18.0 + ui.measure(&BODY, "0").height + 26.0;
+        let rows = BOXES_TOP + ui.measure(&BODY, "0").height + 26.0;
         let update = rows + ROW_PITCH * (launcher::ALL.len() - 1) as f32 + ROW_HEIGHT + 40.0;
         (rows, update)
     }
@@ -278,8 +274,7 @@ impl Pane for Launchers {
         let now = now();
         let Self { list, count, update, at, note, scroll } = self;
         controls::scrolled(ui, scroll, BOXES_TOP, focused_rect.y, focused_rect.bottom(), |ui| {
-            let y = BOXES_TOP + controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT) + 18.0;
-            controls::label(ui, LEFT, y, count);
+            controls::label(ui, LEFT, BOXES_TOP, count);
             let draw = |ui: &mut Ui, i: usize, launcher: &Launcher, focused: bool| {
                 let alpha = if launcher.switchable() { 1.0 } else { ABSENT };
                 ui.with_alpha(alpha, |ui| launcher_row(ui, row(i), launcher, now, focused));
@@ -292,7 +287,7 @@ impl Pane for Launchers {
             for (i, launcher) in list.iter().enumerate().filter(|(_, l)| has(l)) {
                 draw(ui, i, launcher, true);
             }
-            // Update now, and beside it how the update goes, or why the last press did nothing.
+            // Update now, and beside it how the update goes, or why the last press did nothing: nothing at rest.
             controls::pane_button(ui, update_box, UPDATE, true, focused && *at == Line::Update);
             let beside = update_box.right() + 30.0;
             let line = Rect::new(beside, update_box.y, RIGHT - beside, update_box.h);
@@ -301,7 +296,7 @@ impl Pane for Launchers {
             };
             match (&*note, &*update) {
                 (Some(note), _) => said(ui, note, Color::WHITE, line),
-                (None, Update::Idle) => said(ui, UPDATE_ABOUT, TEXT_DIM, line),
+                (None, Update::Idle) => {}
                 (None, Update::Working) => {
                     crate::spinner::spinner(ui, beside + 16.0, update_box.y + update_box.h / 2.0, 32.0);
                     let after = Rect::new(beside + 48.0, line.y, line.w - 48.0, line.h);

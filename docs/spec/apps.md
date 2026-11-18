@@ -32,7 +32,7 @@ A box on the Games & apps category, **Games & apps** (glyph U+E71D), in its Libr
 
 ### 4.1 The page
 
-Header "Games & apps"; under it at y 210 the line "Add games that no store brings in, and apps to start from My games & apps. Press A on one to rename or remove it." (dim, wrapped at the Rows' 892), then the Rows (settings.md 4.3; 892 x 66, 74 apart) from y 305.16: **Add a game** and **Add an app** (the plus glyph), then each game added by hand by name (hidden ones too: this is where they are removed; glyph U+E7FC), then each App in the order added (glyph U+E71D).
+Header "Games & apps"; under it the Rows (settings.md 4.3; 892 x 66, 74 apart) from y 210, no line over them (#261, settings.md 16.11): **Add a game** and **Add an app** (the plus glyph), then each game added by hand by name (hidden ones too: this is where they are removed; glyph U+E7FC), then each App in the order added (glyph U+E71D).
 
 - A on Add a game or Add an app opens its page in this one's place; B there comes back here, focus where it was.
 - A or Menu on a game's or an App's Row opens its menu, the Tile menu's panel over the dimmed page, as Groups' (filters.md, 6.2): **Rename**, which opens text entry ("Name", at most 60) on its name, saved as it is kept unless it is empty or unchanged; and **Remove**, which asks "Remove <name>?" (Remove / Cancel) first. A game removed goes with its Play sessions; its program is left on disk.
@@ -52,11 +52,11 @@ A page of fields, laid out as a Group's page (filters.md, 6.3: a name over each 
 
 ### 4.3 The Microsoft Store apps
 
-Add an app goes on under Add with the heading "Microsoft Store apps", a line, and a Row for each Store app installed, by name, ticked while it is an App. A ticks one, which adds it as an App at once, or unticks it, which removes it; focus stays.
+Add an app goes on under Add with the heading "Microsoft Store apps" and, 26 under it, a Row for each Store app installed, by name, ticked while it is an App. A ticks one, which adds it as an App at once, or unticks it, which removes it; focus stays.
 
 - **Where the list comes from** (`crates/app/src/store_apps.rs`): Windows PowerShell's `Get-StartApps`, the apps the Start menu starts, of which those with an Application User Model ID (`<package family>!<app id>`) are packaged apps; for each, `Get-AppxPackage` gives the package's folder and `Get-AppxPackageManifest` its `Square150x150Logo` (else the package's own logo), whose largest scale on disk (`.scale-200` and so on; never a high-contrast one) is its art. It is listed once, on a thread of its own after the first frame (`apps: <n> Microsoft Store apps listed in <ms> ms`), and handed to the screens with the library's snapshots (`Library::store_apps`); it is not kept in the database.
 - What PowerShell prints is read as JSON and the art is found on disk in Rust, both tested on made-up data. **The PowerShell itself has not run on a real machine**: if the list is empty on the VM, `store_apps::SCRIPT` is the one place to look.
-- Until it is listed, and anywhere but Windows: "The Microsoft Store apps on this PC show up here once Windows has listed them."; listed and empty: "There are no Microsoft Store apps on this PC."; else "Tick the ones to start from My games & apps."
+- Until it is listed, and anywhere but Windows, a line 4 under the heading: "The Microsoft Store apps on this PC show up here once Windows has listed them."; listed and empty: "There are no Microsoft Store apps on this PC."; with apps, no line ("Tick the ones to start from My games & apps." until #261).
 
 ## 5. What is left for later
 

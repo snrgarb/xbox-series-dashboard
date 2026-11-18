@@ -21,9 +21,6 @@ use crate::Effect;
 
 /// The box on Games & apps, and the page's header.
 pub const TITLE: &str = "Set up this PC";
-const ABOUT: &str = "Install the apps your games come from, or remove them. Each app's installer comes from its \
-                     maker's own address and is checked before it runs. Windows asks for permission on screen \
-                     each time: answer it with a mouse or keyboard, as the controller can't.";
 const NONE: &str = "There are no apps to set up.";
 const INSTALL: &str = "Install";
 const REMOVE: &str = "Remove";
@@ -193,9 +190,9 @@ impl SetUp {
         })
     }
 
-    /// The Rows' top, under the description: as drawn.
-    fn rows_top(ui: &mut Ui) -> f32 {
-        BOXES_TOP + ui.measure_wrapped(&BODY, ABOUT, ROW_WIDTH, 0).height + 26.0
+    /// The Rows' top: the page's, with no line over them (#261).
+    fn rows_top(_ui: &mut Ui) -> f32 {
+        BOXES_TOP
     }
 }
 
@@ -334,7 +331,6 @@ impl Pane for SetUp {
             focused_rect.y,
             focused_rect.bottom().max(below + detail_height),
             |ui| {
-                controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, ABOUT);
                 if clients.is_empty() {
                     controls::description(ui, LEFT, rows_top, ROW_WIDTH, NONE);
                 }

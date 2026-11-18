@@ -18,9 +18,8 @@ const SECTION_TITLE: f32 = 52.0;
 pub enum Item {
     /// A opens a page in the boxes' place: an icon and a name. The page is made from the world as it is then.
     Opens { icon: char, name: &'static str, pane: fn(Around) -> Box<dyn Pane> },
-    /// A checkbox box: A turns the option over, at once and saved. Its info text shows beside it while it has
-    /// focus, so it has a row to itself.
-    Check { setting: Setting, name: &'static str, info: &'static str },
+    /// A checkbox box: A turns the option over, at once and saved. It has a row to itself.
+    Check { setting: Setting, name: &'static str },
 }
 
 impl Item {
@@ -41,7 +40,7 @@ enum Layout {
 }
 
 /// A pane of boxes under a header. Rows of boxes scroll where they run past the screen's foot, to keep the focused
-/// box and its info text in view.
+/// box in view.
 pub struct Boxes {
     header: &'static str,
     rows: Vec<Vec<Item>>,
@@ -127,7 +126,7 @@ fn step_sections(rows: &[Vec<Item>], column: &mut usize, at: &mut usize, button:
 fn draw_item(ui: &mut Ui, around: Around, rect: Rect, item: Item, focused: bool) {
     let face = match item {
         Item::Opens { icon, .. } => Face::Icon(icon),
-        Item::Check { setting, info, .. } => Face::Checkbox { on: around.options.get(setting), info },
+        Item::Check { setting, .. } => Face::Checkbox { on: around.options.get(setting) },
     };
     controls::settings_box(ui, rect, item.name(), face, focused);
 }
@@ -183,12 +182,7 @@ impl Pane for Boxes {
                 }
             }
             Layout::Rows(grid) => {
-                // A focused checkbox box's info text may reach below it: the pane scrolls to show that too.
-                let below = match focused_item {
-                    Item::Check { info, .. } if focused => controls::info_height(ui, info),
-                    _ => 0.0,
-                };
-                grid.scrolled(ui, below, |ui| {
+                grid.scrolled(ui, |ui| {
                     for (row, items) in rows.iter().enumerate() {
                         for (column, &item) in items.iter().enumerate() {
                             if !focused || (row, column) != at {
@@ -211,7 +205,7 @@ mod tests {
 
     #[test]
     fn sections_step_along_a_column_and_across_to_the_one_beside_as_far_down_as_it_goes() {
-        let item = Item::Check { setting: Setting::ReduceMotion, name: "x", info: "" };
+        let item = Item::Check { setting: Setting::ReduceMotion, name: "x" };
         let rows = vec![vec![item; 4], vec![item; 2]];
         let (mut column, mut at) = (0, 0);
         let mut step = |button| {

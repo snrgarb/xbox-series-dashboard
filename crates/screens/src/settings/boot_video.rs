@@ -1,10 +1,11 @@
-//! General > Boot video (docs/spec/settings.md, 6.3; docs/spec/start-up.md): a line, then a Row for Off and
+//! General > Boot video (docs/spec/settings.md, 6.3; docs/spec/start-up.md): a Row for Off and
 //! one for each of the Bundle's boot videos the media folder has, oldest first, the one that plays ticked. A sets a
 //! Row at once and saved; the tick moves, focus stays, and no preview plays.
 //!
 //! The Bundle lists every generation whatever is on the PC, its videos being in its own package. Here they are the
-//! user's to put in the media folder (#10), so only those found are listed; with none found the line says so and
-//! only Off is there. A choice whose video has gone is kept, and ticks Off, which is what then plays.
+//! user's to put in the media folder (#10), so only those found are listed; with none found a line over the Rows
+//! says so and only Off is there. The Bundle's line over the Rows ("Plays as the Dashboard starts...") is gone
+//! (#261). A choice whose video has gone is kept, and ticks Off, which is what then plays.
 use ui::{Button, Press, Rect, Ui};
 
 use super::controls::{self, BOXES_TOP, LEFT, ROW_HEIGHT, ROW_PITCH, ROW_WIDTH};
@@ -13,9 +14,7 @@ use crate::pages::{Around, PageAction};
 use crate::startup::BootVideo;
 use crate::Effect;
 
-/// The line over the Rows, the Bundle's with the Dashboard for Playnite.
-pub const ABOUT: &str = "Plays as the Dashboard starts. Any button skips it.";
-/// The line with no video found.
+/// The line over the Rows with no video found.
 pub const NONE_FOUND: &str =
     "No boot videos were found on this PC, so none plays as the Dashboard starts. Put them in the media folder's \
      videos folder to choose one here.";
@@ -88,8 +87,10 @@ impl Pane for BootVideoPage {
     }
 
     fn draw(&mut self, ui: &mut Ui, around: Around, focused: bool) {
-        let about = if self.found { ABOUT } else { NONE_FOUND };
-        let top = BOXES_TOP + controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, about) + 26.0;
+        let top = match self.found {
+            true => BOXES_TOP,
+            false => BOXES_TOP + controls::description(ui, LEFT, BOXES_TOP, ROW_WIDTH, NONE_FOUND) + 26.0,
+        };
         let ticked = self.ticked(around);
         let row = |i: usize| Rect::new(LEFT, top + ROW_PITCH * i as f32, ROW_WIDTH, ROW_HEIGHT);
         for (i, video) in self.rows.iter().enumerate() {

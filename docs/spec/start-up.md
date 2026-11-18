@@ -53,8 +53,8 @@ Held back until Start-up is over: the Overlay and the Toast strip, and the art l
 
 Personalisation's first box, (0, 0), U+E714, as the Bundle's (settings.md 6.2). Its page (settings.md 6.3):
 
-- y 210: "Plays as the Dashboard starts. Any button skips it." With no video found: "No boot videos were found on this PC, so none plays as the Dashboard starts. Put them in the media folder's videos folder to choose one here."
-- Then a Row (settings.md 4.3) for **Off**, and one for each video **found**, in the Bundle's order, 74 apart from y 270.58.
+- With no video found, y 210: "No boot videos were found on this PC, so none plays as the Dashboard starts. Put them in the media folder's videos folder to choose one here.", and the Rows 26 under it. With videos found there is no line: the Bundle's "Plays as ... starts. Any button skips it." is not drawn (#261, settings.md 16.11).
+- A Row (settings.md 4.3) for **Off**, and one for each video **found**, in the Bundle's order, 74 apart from y 210.
 - The Row of what plays is ticked: the choice if its video was found, else Off. A choice whose video has gone is kept, and Off is ticked while it is gone.
 - The page opens with focus on the ticked Row. Up and Down move, stopping at the ends; Left and Right do nothing; B is Personalisation, on Boot video.
 - A on a Row makes it the choice, at once and saved: the tick moves, focus stays, no sound beyond the move's, no preview. It plays from the next start.
@@ -112,8 +112,8 @@ The wake is heard from `PowerRegisterSuspendResumeNotification`, a callback that
 
 Personalisation's box at (0, 1), U+E748, the Bundle's place (settings.md 6.2, 6.4). Its page, as Boot video's:
 
-- y 210: "Choose who's playing as the Dashboard starts and wakes from sleep."
-- Two Rows: **Ask every time** (the default) and **Sign in the last profile**, the one in force ticked. The page opens with focus on it; Up and Down move; A chooses, at once and saved; B is Personalisation, on Who's playing today?.
+- No line over the Rows: the Bundle's "Choose who's playing as ... starts and wakes from sleep." is not drawn (#261, settings.md 16.11).
+- Two Rows, from y 210: **Ask every time** (the default) and **Sign in the last profile**, the one in force ticked. The page opens with focus on it; Up and Down move; A chooses, at once and saved; B is Personalisation, on Who's playing today?.
 
 The choice is the settings table's `startup.ask_whos_playing` row (settings.md 16.4), `true` or `false`; with no row it asks. The log says `settings: startup.ask_whos_playing = false` as Sign in the last profile is chosen, and `settings: startup.ask_whos_playing is false` at the next start. `--log-focus` says `focus: Settings: Who's playing today?: <Row's name>`, with `; ticked` after it on the ticked Row.
 

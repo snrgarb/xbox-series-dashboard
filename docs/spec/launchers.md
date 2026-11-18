@@ -15,10 +15,11 @@ Picture: `crates/screens/tests/reference/settings-theme-settings-launchers-box.p
 | Element | y | Notes |
 |---|---|---|
 | Header | as every page | "Launchers" |
-| What it does | 210 | `controls::description`, wrapped at 892: "Your games come in from the launchers switched on here, with their play time and collections. Switch one off to hide its games until you switch it on again." |
-| The count | 18 under it | A label: "14 games from 2 launchers", "1 game from 1 launcher", "No games from your launchers". The games shown, from the launchers switched on |
+| The count | 210 | A label: "14 games from 2 launchers", "1 game from 1 launcher", "No games from your launchers". The games shown, from the launchers switched on |
 | The Rows | 26 under the count | One a launcher, 892 x 66 every 74 (settings.md, 4.3), in the order Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net, Xbox |
-| Update now | 40 under the last Row | A pane button (settings.md, 4.4), and beside it, 30 to its right, one line (section 4) |
+| Update now | 40 under the last Row | A pane button (settings.md, 4.4), and beside it, 30 to its right, one line (section 4): nothing there at rest |
+
+No line says what the page is for, and none beside Update now at rest ("Looks for new games, play time, Groups, art and achievements." until #261): settings.md 16.11.
 
 A Row: the launcher's mark (the drawing the tiles carry, home.md 3.3.1, `home::source_mark`, 28 x 28, centred 45 in), its name where a Row's text goes, what it says (right-aligned, from 340 in to just before the checkbox), and its checkbox (28 px, 18 from the right): ticked when the launcher is switched on. A launcher that cannot be switched (section 3) is drawn at 40 % and has no checkbox. The page scrolls as the other Settings pages do (`controls::scrolled`), so focus is always whole on screen.
 

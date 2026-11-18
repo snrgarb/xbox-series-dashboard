@@ -35,8 +35,8 @@ System > About (settings.md 16.10) gets a group **Updates** between the version 
 - two buttons, **Check for updates** and **Install** beside it (18 apart, 58 tall, as Launchers' Update now). Install
   takes focus always and is dimmed, doing nothing, unless a version is ready and no game runs. Check for updates is
   dimmed while a check or an install is under way, and the Spinner turns beside Install;
-- the checkbox row **Check for updates every day**, off by default, and under it "Once a day while the Dashboard runs,
-  it asks for the newest version and downloads it. You're told when it's ready, never during a game."
+- the checkbox row **Check for updates every day**, off by default, with no line under it ("Once a day while the
+  Dashboard runs, ..." went in #261, settings.md 16.11): Third-party licences is 40 under it
 
 Focus opens on Check for updates. Right goes to Install, Left back (and Left from Check for updates or the checkbox,
 or B anywhere, back to System's boxes on About); Down from either button to the checkbox, Up back to Check for

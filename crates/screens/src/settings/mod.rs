@@ -33,7 +33,7 @@ mod whos_playing;
 
 use ui::{Button, Color, Font, HAlign, Press, Rect, TextStyle, Ui, VAlign};
 
-pub use self::boot_video::{ABOUT as BOOT_VIDEO_ABOUT, NONE_FOUND as NO_BOOT_VIDEOS};
+pub use self::boot_video::NONE_FOUND as NO_BOOT_VIDEOS;
 use self::boxes::Boxes;
 pub use self::categories::Category;
 pub use self::options::{BootVideo, Change, Found, Options, Setting, ART_KEY, BOOT_VIDEO, LAST_UPDATE_CHECK};

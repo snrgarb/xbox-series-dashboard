@@ -270,6 +270,8 @@ Info texts (section 4.2; x 1005, top = box top + 8, 400 wide; line counts estima
 | Show Play history | "Ends Home's recent games with the Play history tile. Turn it off to show another recent game in its place; Play history stays in My games & apps." | 5 | 172.9 |
 | Show battery percentages | "Shows how much charge is left beside the controller's battery, and this PC's on a laptop or handheld. Turn it off to show the batteries alone." | 5 | 172.9 |
 
+**The port shows none of these** (#261, 16.11): a checkbox box has nothing beside it, focused or not.
+
 The first three span their own row and the next (`Grid.RowSpan="2"`), so that text taller than the box does not push the next box down as it shows (E/PersonalisationPane.xaml:174-182, 209-213, 241-245): they overlap the empty second column of the row below and move nothing.
 
 **A defect of the Bundle here, at 1080 tall, not to be copied.** Six rows need 6 x 149 = 894 from y 210, to 1104; the screen ends at 1080 and nothing scrolls (the page is in no scroller). So:
@@ -288,13 +290,13 @@ E/PersonalisationPane.xaml:281-286; names at E/PersonalisationPane.xaml.cs:29-40
 - Then nine Rows (section 4.3), x 520..1412, row i at y 270.58 + 74 i (the last ends at 928.58): **Off**, **Xbox (2001)**, **Xbox 360 (2005)**, **Xbox 360 Slim (2010)**, **Xbox 360 Special Edition (2012)**, **Xbox One (2013)**, **Xbox One X (2017)**, **Xbox Series S (2020)**, **Xbox Series X (2020)** (the default, C/ExtensionCore.Startup.cs:360).
 - The one that plays is ticked. The page opens with focus **on the ticked row** (E/PersonalisationPane.xaml.cs:355-359). A sets and saves; no preview plays.
 
-The port's page (start-up.md 2): the line is "Plays as the Dashboard starts. Any button skips it.", and the Rows are Off and the videos **found** in the media folder, in this order; with none found the line says so and Off is alone.
+The port's page (start-up.md 2): no line over the Rows (#261, 16.11), which start at y 210, and the Rows are Off and the videos **found** in the media folder, in this order; with none found a line says so ("No boot videos were found on this PC...") with the Rows 26 under it, and Off is alone.
 
 ### 6.4 ... > Personalisation > Who's playing today? - built in #127 (start-up.md 9)
 
 E/PersonalisationPane.xaml:289-294; E/PersonalisationPane.xaml.cs:194-200. As Boot video: "Choose who's playing as Playnite starts in Fullscreen and wakes from sleep." then two Rows at y 270.58 and 344.58: **Ask every time** (the default) and **Sign in the last profile**. Opens with focus on the ticked one.
 
-The port's line is "Choose who's playing as the Dashboard starts and wakes from sleep."
+The port has no line (#261, 16.11): the two Rows are at y 210 and 284.
 
 ### 6.5 ... > Personalisation > Profiles, and one Profile - built in #125 (profiles.md 4)
 
@@ -348,12 +350,14 @@ E/SettingsControl.xaml:405-441; C/SettingsState.cs:141-195; C/ExtensionCore.NowP
 
 With L1 and L2 lines in the two descriptions: checkbox top = 246.58 + 34.58 L1; dropdown top = checkbox top + 154.58 + 34.58 L2.
 
+**The port draws neither description** (#261, 16.11) and lays the page out as Idle's (6.7): "Guide" at 190, the checkbox 14 under it (238.58), "Now Playing source" 48 under the checkbox (344.58), its dropdown 14 under that (393.16).
+
 - **Use the Guide**: on by default. Off, the Guide never shows: the Guide button is left alone, Home's profile and Achievements tile do nothing, its Discord tile opens Settings on Discord (section 8.2), and a Toast has no "Press ... to view" (C/SettingsState.cs:155-160). In force at once, saved, shared by every Profile.
 - **Now Playing source** choices: **Any**, **Spotify** (the default), then every other app that has had a media session this run (C/ExtensionCore.NowPlayingSource.cs:48-59, 107-108). A source saved in an earlier run whose app has had no session yet is among them, first after Spotify, so that the list always holds what the box shows. What it does: docs/spec/now-playing.md.
 
 ### 6.9 Theme settings > Discord - built in #143 ([../discord.md](../discord.md))
 
-As built: the y positions below are the Bundle's picture's (`artifacts/e2e/port-reference-20261115-192720/36-settings-discord.jpg` in the Bundle): the steps and the code from y 255; the address under the code in four centred lines, broken after each slash ("https://", "discord.com/", "developers/", "applications"); the Client ID row's buttons at y 645, the Secret's at 734, Connect and Disconnect at 833, the status line 24 under them. The QR code is a plain stand-in (a white square, the corner marks' places outlined): the Bundle's picture is not copied, and a real code is for later (discord.md). The value under "Client ID" and the status line are white, as in the picture. The focus log: `Settings: Discord: <button>; client id <set|not set>, secret <saved|not set>, "<status>"`.
+As built, without the intro line (1. below) since #261 (16.11): the steps and the code start at y 190, everything under them 65 higher than the Bundle's picture. Before that, the y positions below were the Bundle's picture's (`artifacts/e2e/port-reference-20261115-192720/36-settings-discord.jpg` in the Bundle): the steps and the code from y 255; the address under the code in four centred lines, broken after each slash ("https://", "discord.com/", "developers/", "applications"); the Client ID row's buttons at y 645, the Secret's at 734, Connect and Disconnect at 833, the status line 24 under them. The QR code is a plain stand-in (a white square, the corner marks' places outlined): the Bundle's picture is not copied, and a real code is for later (discord.md). The value under "Client ID" and the status line are white, as in the picture. The focus log: `Settings: Discord: <button>; client id <set|not set>, secret <saved|not set>, "<status>"`.
 
 E/SettingsControl.xaml:449-543; C/DiscordSettingsState.cs:26-32, 80-83. The pane is the host's full width (x 520..1750) from y 190, top to bottom:
 
@@ -758,7 +762,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 | **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers, Set up this PC ([set-up.md](set-up.md), #178) | sections |
 | **System** | System (0, 0), About (1, 0) | rows |
 
-- **Personalisation** keeps its four checkbox boxes, a row each, and has a fifth of the port's own (#248): Background delay (y 210), Reduce motion (359), Show Play history (508), **Show launcher icons** (657), Show battery percentages (806). The new one is beside Show Play history, the other that changes the Recent row; its name says the user's word for the mark ("the game launcher icon"), "Show launcher on recent games" being cut short in the box, and its info says where: "Marks each of Home's recent games with the launcher it comes from, at the tile's foot. Turn it off to show the covers alone." Five rows fit the screen with every info text (the last, 806 + 8 + 172.9, ends at 987), so the pane does not scroll (16.2). Its boxes that opened pages went to their categories: Boot video to General, Profiles and Who's playing today? to Account, Groups to Games & apps.
+- **Personalisation** keeps its four checkbox boxes, a row each, and has a fifth of the port's own (#248): Background delay (y 210), Reduce motion (359), Show Play history (508), **Show launcher icons** (657), Show battery percentages (806). The new one is beside Show Play history, the other that changes the Recent row; its name says the user's word for the mark ("the game launcher icon"), "Show launcher on recent games" being cut short in the box, (its info text, "Marks each of Home's recent games with the launcher it comes from...", went with the others in #261, 16.11). Five rows fit the screen (the last ends at 937), so the pane does not scroll (16.2). Its boxes that opened pages went to their categories: Boot video to General, Profiles and Who's playing today? to Account, Groups to Games & apps.
 - **Choices #194 made where the ticket did not say**: Games & apps (the box, games added by hand and Apps: apps.md 4) in Library, under Launchers, the ticket's "Recently added" being taken for it; Helpers under Storage in Installs, being what some stores install through; the System box (shell mode, the ticket's "Start-up as the shell") and About (with Updates, updates.md 2) in System. The sections are Library (where games come from, how Home groups them and their art) and Installs (where installs go and what installs them).
 - **The focus log**: `Settings: Rail: General` (`Account`, `Games & apps`, `System`); on a category's boxes `Settings: General: Idle`, `Settings: Games & apps: Storage`; a page's lines are as they were (`Settings: Idle: Dim after`). The Games & apps box on its category reads `Settings: Games & apps: Games & apps`; its page's lines start `Settings: GamesAndApps:`, so they are never taken for the category's.
 - **Playnite settings, More Playnite options and the Debug menu are not built** (section 14).
@@ -767,11 +771,11 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 | Page | What it holds |
 |---|---|
 | Idle | "Dim after" and "Show things after", each a dropdown, as 6.7 (#128). |
-| Guide | "Guide", its description and Use the Guide, and the Now Playing source under them (#129), as 6.8. Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
+| Guide | "Guide" and Use the Guide, and the Now Playing source under them (#129), as 6.8 without its descriptions (#261). Down and Up move between the two; A on the source opens its list on the source set now, and A in the list chooses, at once and saved (`guide.now_playing_source` in the settings table). The log: `Guide: Use the Guide`, `Guide: Now Playing source`, and with the list open `Guide: Now Playing source, list on "Spotify"`. |
 
 ### 16.2 A pane that would run off the screen scrolls
 
-Open question 1. A pane of boxes in rows scrolls, as Profiles does: only as far as shows the focused box whole with its ring, and under a checkbox box the whole of its info text, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. The info text never moves its box: every one overlaps the empty second column, as the first three do in the Bundle. Personalisation, four rows since #194 and five since #248, fits the screen with every info text; the test pane of seven rows (`a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box`) scrolls. A pane in sections does not scroll: its columns are four boxes at most.
+Open question 1. A pane of boxes in rows scrolls, as Profiles does: only as far as shows the focused box whole with its ring, 32 clear of the screen's foot; back down as focus goes up, until the first row is at its place again. It jumps: nothing on Settings scrolls with an animation (10.3). Scrolled, the boxes are cut 32 over the first row's place (y 178) and 32 left of the first column, so they pass under the header's row and a ring is never cut where it rests. Personalisation, four rows since #194 and five since #248, fits the screen (it had info texts until #261, which fitted too); the test pane of seven rows (`a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box`) scrolls. A pane in sections does not scroll: its columns are four boxes at most.
 
 The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (x 520), which its picture 29 of Theme settings has not: a clipping accident of that pane's grid, not copied.
 
@@ -837,32 +841,29 @@ The Groups page's menu is a dialog the page shows over itself: while it is up `P
 
 ### 16.7 The controls, for the pages still to come
 
-`settings::controls` has every control of section 4 as a function that draws it in a rectangle, with or without focus: `settings_box` (a Box with an icon, or a checkbox box with its info text), `row`, `pane_button`, `checkbox_row`, `label` and `description`; `Dropdown` (the box, and its list while open, with the list's own presses and scrolling); `Grid` (a pane of boxes' places, its steps and its scrolling); and `focus_ring` and `glow`. A page is a struct that implements `settings::Pane` (its header, its focus line, `press`, `draw`) and is opened by a box (`boxes::Item::Opens`) of the pane it belongs to; `boxes::Boxes` is a whole pane of boxes made from a list of them. The dropdown is on Guide's and Idle's pages; the Row and the pane button are on no page yet: `crates/screens/tests/settings.rs` builds a list of Rows from them, for their pictures.
+`settings::controls` has every control of section 4 as a function that draws it in a rectangle, with or without focus: `settings_box` (a Box with an icon, or a checkbox box: no info text since #261), `row`, `pane_button`, `checkbox_row`, `label` and `description`; `Dropdown` (the box, and its list while open, with the list's own presses and scrolling); `Grid` (a pane of boxes' places, its steps and its scrolling); and `focus_ring` and `glow`. A page is a struct that implements `settings::Pane` (its header, its focus line, `press`, `draw`) and is opened by a box (`boxes::Item::Opens`) of the pane it belongs to; `boxes::Boxes` is a whole pane of boxes made from a list of them. The dropdown is on Guide's and Idle's pages; the Row and the pane button are on no page yet: `crates/screens/tests/settings.rs` builds a list of Rows from them, for their pictures.
 
 ### 16.8 Art (the port's own; #80)
 
 The Bundle has no such page: Playnite's metadata sources fetched missing art (section 14, "Download metadata"). The port's is the user's own SteamGridDB key, a way to take away what was downloaded, a switch for all art online (#110), and the order of the online art sources, Playnite's by default (#246) (docs/sources.md, "Art"), and is decided here.
 
 - **Its box**: **Art**, icon U+EB9F, the last of Games & apps' Library section (x 520..957, y 709..840), under Groups (16.1; #194). Right from it is Set up this PC, the foot of Installs (#178).
-- **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190:
+- **Its page** is laid out as Discord's (6.9), a 560..892-wide column from y 190; a label's control 14 under it, and no text that only says what a group is for (#261, 16.11):
 
 | Element | y | Notes |
 |---|---|---|
 | "SteamGridDB key" (Text) | 190 | |
-| "Art that no store has for a game comes from SteamGridDB, with your own API key: make one at steamgriddb.com, under Preferences and API. Only a game's store id or name is sent." (MutedText, wrapping at 892) | 228.58 | |
+| "Make one at steamgriddb.com, under Preferences and API." (MutedText, one line) | 228.58 | Where a key is made: the one line the page cannot do without (#261) |
 | The value, a 420-wide column at x 520 (Text): eight dots while a key is kept, whatever its length; "Not set" (MutedText) while none is. Then pane buttons **Type** (x 940..1120) and **Clear** (x 1140..1320), 58 tall | 30 under the description | Clear is dimmed (0.4) with no key, and focusable all the same (4.4) |
 | "Downloaded art" (Text) | 40 under the buttons | |
-| "Art and details downloaded for your games are kept on this PC. Clearing removes them; refreshing fetches them all again. A store's own art, and your games, play time and Groups, stay." (MutedText) | 4 under | #190 |
-| Pane buttons **Clear downloaded art**, then **Refresh all art and details** 20 to its right (as Discord's Connect and Disconnect) | 18 under | each as wide as its label and 30 each side |
-| The refresh's line (Text, one line, 892 wide): at rest "A refresh goes on in the background: Home can be used meanwhile." (MutedText); working, the Spinner (32, centred 16 in) and 48 in "Refreshing: 3 of 14 games..."; "Refresh paused: it goes on once Download art online is on."; "Refreshed: 9 pictures downloaded." (white) | 24 under the buttons, as Discord's status line | #190 |
-| "Art online" (Text) | 40 under the refresh's line | #110 |
-| "Downloads art for games that have none on this PC, from the game's own store and the sources below. Turn it off to use only what is on this PC." (MutedText) | 4 under | |
-| Checkbox row **Download art online** (4.3's checkbox row, 560 wide, as Use the Guide's) | 18 under | on by default |
+| Pane buttons **Clear downloaded art**, then **Refresh all art and details** 20 to its right (as Discord's Connect and Disconnect) | 14 under | each as wide as its label and 30 each side |
+| The refresh's line (Text, one line, 892 wide), once one has been asked for: none at rest, nor its room; working, the Spinner (32, centred 16 in) and 48 in "Refreshing: 3 of 14 games..."; "Refresh paused: it goes on once Download art online is on."; "Refreshed: 9 pictures downloaded." (white) | 24 under the buttons, as Discord's status line | #190 |
+| "Art online" (Text) | 40 under the refresh's line, or the buttons at rest | #110 |
+| Checkbox row **Download art online** (4.3's checkbox row, 560 wide, as Use the Guide's) | 14 under | on by default |
 | "Art sources" (Text) | 40 under the checkbox | #246 |
-| "Each picture a game lacks is looked for in this order, the first source that has it giving it. Only a game's name or store id is sent. A turns a source on or off; Menu moves it." (MutedText) | 4 under | |
-| A Row each (Groups' Row, 16.1 and filters.md 6.2: 892 x 66, 74 apart) for **Steam**, **Xbox**, **PlayStation**, **SteamGridDB**, in the order kept, a tick (U+E73E) in the slot while it is on | 26 under | Playnite's order, all on, until changed |
+| A Row each (Groups' Row, 16.1 and filters.md 6.2: 892 x 66, 74 apart) for **Steam**, **Xbox**, **PlayStation**, **SteamGridDB**, in the order kept, a tick (U+E73E) in the slot while it is on | 14 under | Playnite's order, all on, until changed |
 
-The page scrolls, at once, as every Settings pane does (`controls::scrolled`), to keep the control with focus whole on screen: the sources' Rows run past the screen's foot.
+The page scrolls, at once, as every Settings pane does (`controls::scrolled`), to keep the control with focus whole on screen: at rest its last source's Row ends at 1021, so it scrolls only once a refresh's line is there.
 
 - **Focus**: three rows, [Type, Clear], [Clear downloaded art, Refresh all art and details] and [Download art online], then the four sources' Rows; the page opens on Type. Up and Down go between the rows, onto a row's first (Down from Clear is Clear downloaded art; Up from either of the second row is Type; Down from Download art online is the first source, Up from it Download art online; Down stops at the last source), Left and Right along the first two; Left from the first column (a source's Row among them), or B, goes back to Games & apps' boxes on Art.
 - **Art sources** (#246, `model::ArtOrder`), as Settings > Groups orders Groups (filters.md 6.2): **A** on a source turns it on or off, in force at once; **Menu** opens its menu, the Tile menu's panel over the dimmed page, titled with its name: **Move up** (U+E74A) but for the first, **Move down** (U+E74B) but for the last. A move is in force at once; the menu stays up with its rows as they are for the new place, focus on the same row if it is still there, else the first; focus on the page follows the source. B closes the menu. The hint bar shows Menu's "More options" on a source's Row, on or off, as on Settings > Groups' Rows: that is where the page says how a source is moved. **Each Row is numbered by its place in the order** (#262): the number of the sources that are on, 1 to 4, in Segoe UI 26 (`BODY`) white, right-aligned in a box 60 wide whose right edge is 33 in from the Row's (as far in as the tick is from the left), on the Row's middle; a move renumbers at once. A source that is off has no number and no tick, and those after it number on from the one before it (Steam 1, Xbox 2, PlayStation off, SteamGridDB 3): the numbers are the order the lookup asks in (`ArtOrder::number`). Each change is `Effect::ArtOrder`, saved as the settings row `art.order` (the sources' keys in order, `-` before one that is off: `steam,steamgriddb,xbox,-playstation`; a row that is garbled or misses a source is mended: unknown words passed over, the missing sources after the others and on), and starts a lookup under way again in the new order (docs/sources.md, "Art"). The lookup asks only the sources that are on, in that order, after what the PC has and the game's own store; the Art picker lists SteamGridDB's pictures only while SteamGridDB is on, and else says "Turn on SteamGridDB in Settings > Games & apps > Art's sources to choose from its pictures." Turning SteamGridDB on does not need a key, but nothing is asked of it without one.
@@ -916,3 +917,45 @@ apart, from y 190; the second, **Updates**, is updates.md's (section 2), between
   the version by (with
   `--screenshot --page settings --press down,down,down,right,right,a --log-focus`, the offscreen frame logs where
   its presses left focus).
+
+### 16.11 No text that only says what a setting is for (#261)
+
+The user, 2026-11-18: "remove all the text paragraphs underneath setting headings describing what this is for, people get the picture." No Settings page has a paragraph that only says what a heading or an option is for, nor a checkbox box an info text. What is left closes up: a label's control 14 under it (as Idle's, 6.7), a list's Rows at y 210 where a line was over them, and a page that scrolled only for its paragraphs no longer does.
+
+**Gone**:
+
+| Page | Text (first words) |
+|---|---|
+| Personalisation | the five checkbox boxes' info texts: "Waits a moment on a game...", "Shows pages, rows and tiles in place...", "Ends Home's recent games with the Play history tile...", "Marks each of Home's recent games...", "Shows how much charge is left..." (6.2) |
+| Guide | "Opens the Guide with the Guide button and from Home...", "The app the Audio flyout's Now Playing follows..." (6.8) |
+| Boot video | "Plays as the Dashboard starts. Any button skips it." (the Bundle's line, 6.3) |
+| Who's playing today? | "Choose who's playing as the Dashboard starts and wakes from sleep." (the Bundle's line, 6.4) |
+| Discord | "Connect your own Discord application, so the Guide can show you on Discord." (the Bundle's intro, 6.9) |
+| Launchers | "Your games come in from the launchers switched on here..."; beside Update now at rest, "Looks for new games, play time, Groups, art and achievements." (launchers.md 2) |
+| Games & apps | "Add games that no store brings in, and apps to start from My games & apps..." (apps.md 4.1) |
+| Add an app | over the Store apps' Rows, "Tick the ones to start from My games & apps." (apps.md 4.3) |
+| Groups | "Choose which Groups show on Home and in Full library, and in what order." (filters.md 6.2) |
+| Art | "Art that no store has for a game comes from SteamGridDB..." (shortened, below); "Art and details downloaded for your games are kept on this PC..."; at rest, "A refresh goes on in the background: Home can be used meanwhile."; "Downloads art for games that have none on this PC..."; "Each picture a game lacks is looked for in this order..." (16.8) |
+| Storage | "Where your games are installed. Choose the folder each store installs into..."; under a store that can be told its folder, "Installs go to the folder ticked." (storage.md 3) |
+| Helpers | "Some stores install games through a helper program. It isn't part of the Dashboard..." (helpers.md 2) |
+| Set up this PC | "Install the apps your games come from, or remove them. Each app's installer comes from its maker's own address..." (set-up.md) |
+| System | under Start with Windows, "Starts the Dashboard in place of the Windows desktop when you sign in..." (shell-mode.md 2) |
+| About | under Check for updates every day, "Once a day while the Dashboard runs, it asks for the newest version..." (updates.md 2) |
+
+**Kept**, each for what it says of how things stand or what the user cannot do without:
+
+| Page | Text | Why |
+|---|---|---|
+| Art | "Make one at steamgriddb.com, under Preferences and API." under SteamGridDB key | where a key is made, cut to one line |
+| Art | the refresh's line once one is asked for (working, paused, done); "Not set" | how things stand |
+| Launchers | the count ("14 games from 2 launchers"), each Row's status, and beside Update now what an update is doing or did ("Updated: nothing new", a failure, why a launcher can't be switched off) | how things stand |
+| Storage | the drives' figures; "Installs go to the folder ticked: this launcher chooses it for itself." under such a store; "This PC's drives couldn't be read."; "No launcher here says where it installs games." | how things stand: why A does nothing on that store's Rows; the empty states |
+| Helpers | a helper's "Version 0.21.1. GPL-3.0 licence. Source: github.com/..." and how it stands (added or not, signed in or not and what to do, downloading, why it failed); "There are no helpers to add." | how things stand, and the licence and source of what would be fetched |
+| Helpers, Set up this PC, Art, System, Groups, Games & apps | every question's message (Add legendary?, Install Steam?, Clear downloaded art?, Refresh all art and details?, Start with Windows as the shell?, Delete X?) | a confirmation keeps its text |
+| Set up this PC | the line under the Rows of the focused app (what A installs, at what size; how many games are installed and what removing does; what is running and Windows' prompt; why it failed); "There are no apps to set up." | how things stand, and errors |
+| Boot video | "No boot videos were found on this PC..." with none found | how things stand, and what to do |
+| Add an app | "The Microsoft Store apps on this PC show up here once Windows has listed them."; "There are no Microsoft Store apps on this PC." | how things stand |
+| Picture (a Profile's) | "Add images to the Gamerpics folder to choose from more." with at most one picture | how things stand, and what to do |
+| Discord | the four numbered steps, the portal's address under its code, the values ("Not set", "Saved") and the status line | what the user cannot connect without, and how things stand |
+| System | the line under the checkbox (Off, On, refused, failed); "Getting to the desktop" and "If the Dashboard won't start" with their text | how things stand; the way out of shell mode, which no control on the page does |
+| About | the version; where updates stand; "Third-party licences" and "Sounds and boot videos" with their text | how things stand; where the licences are, and where the media files go |
