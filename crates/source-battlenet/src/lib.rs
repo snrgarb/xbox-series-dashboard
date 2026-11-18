@@ -14,8 +14,9 @@
 //!   one, else the product code.
 //! - **Install, uninstall, progress** (#172): through the client's own Agent, its local HTTP API (`agent`), with no
 //!   window: install into a folder (the Agent's form filled in: `agent::calls`), the Queue's bytes and speed,
-//!   uninstall. Pause, resume and cancel only with `DASHBOARD_BATTLENET_STEER=1` (no tool knows them). No Agent is
-//!   started beside Battle.net's own, and one the Dashboard started is stopped when it is done with it (`agent`).
+//!   uninstall. Pause and resume only with `DASHBOARD_BATTLENET_STEER=1` (no tool knows them); Cancel also while the
+//!   Agent is the Dashboard's, by stopping it. No Agent is started beside Battle.net's own, and one the Dashboard
+//!   started is stopped once the install it took is over, never during it (`agent`, `installing`).
 //!   Where the Agent does not answer or take it, as before: `Battle.net.exe --game=<uid>`, the game's page in the
 //!   client; uninstall by the game's Uninstall key's own `UninstallString`, Blizzard's uninstaller. Each fallback
 //!   says why in the log.
@@ -149,15 +150,17 @@ impl BattleNet {
         if let Some(product) = products.iter().find(|p| p.code.eq_ignore_ascii_case(code)) {
             let folder = source_kit::native(product.install_path.trim());
             let installed = product.installed && !product.install_path.trim().is_empty() && folder.is_dir();
+            let partial = !product.installed && !product.install_path.trim().is_empty();
             return Some(Target {
                 code: product.code.clone(),
                 uid: product.uid.clone(),
                 name: listed.map_or_else(|| game.name.clone(), |p| p.name),
-                installed: installed.then_some(folder),
+                installed: installed.then_some(folder.clone()),
+                partial: partial.then_some(folder),
             });
         }
         let listed = listed?;
-        Some(Target { code: listed.code, uid: listed.uid, name: listed.name, installed: None })
+        Some(Target { code: listed.code, uid: listed.uid, name: listed.name, installed: None, partial: None })
     }
 
     /// The client's program, when it is there.
@@ -183,6 +186,9 @@ struct Target {
     name: String,
     /// Its folder, where `product.db` says it is installed and it is there.
     installed: Option<PathBuf>,
+    /// Its folder, where `product.db` has it and does not say installed: a download the Agent began and did not
+    /// finish (the Dashboard ended mid-download, which ends the Agent it started). Installed again into it.
+    partial: Option<PathBuf>,
 }
 
 /// Every product in the `product.db` of the agent's folder `agent`.
@@ -409,7 +415,16 @@ impl Installer for BattleNet {
         if self.place().is_none() {
             return Can::NOTHING;
         }
-        Can { pause: self.steer, cancel: self.steer, choose_folder: self.folders().len() > 1, quiet_uninstall: true }
+        // Cancel is sure with the Agent the Dashboard started (it is stopped, and its download with it); with another,
+        // only the guess, with steering on.
+        let place = self.place();
+        let ours = place.as_ref().is_some_and(|place| agent::ours(&place.dir).is_some());
+        Can {
+            pause: self.steer,
+            cancel: self.steer || ours,
+            choose_folder: self.folders().len() > 1,
+            quiet_uninstall: true,
+        }
     }
 
     /// The default folder ([`BattleNet::default_folder`]) and the folders the installed games are in, each game's
@@ -464,12 +479,14 @@ impl Installer for BattleNet {
             target.name,
             base.display()
         ));
+        let game = game.clone();
         std::thread::spawn(move || {
             let code = target.code.clone();
             match agent_install(&place, &target, &base, no_download) {
-                Asked::Taken(session) => {
+                Asked::Taken(session, watch) => {
                     let agent = place.dir.clone();
-                    installing::follow(jobs, session, code.clone(), move || installed_in(&agent, &code));
+                    let installed = move || installed_in(&agent, &code);
+                    installing::follow(jobs, session, place, *watch, game, detached, installed);
                 }
                 Asked::Refused(why) => {
                     jobs.end(&code);
@@ -528,11 +545,15 @@ impl Installer for BattleNet {
         Ok(())
     }
 
-    /// Only with `DASHBOARD_BATTLENET_STEER=1`, and only an install the Dashboard asked for: the Agent's answer is
-    /// logged, and a refusal said; nothing falls back (the client has no command for it).
+    /// Only an install the Dashboard asked for. Pause and resume only with `DASHBOARD_BATTLENET_STEER=1`, asked on
+    /// the path its progress is read on (guesses: `agent::calls::pause`). Cancel: with steering on, the guess
+    /// (`DELETE` on that path) is asked first; then, always, the install is no longer followed, which lets the Agent
+    /// the Dashboard started go: it is stopped, and its download with it, and the folder it made taken away
+    /// (`installing`). With an Agent the Dashboard did not start and steering off, Cancel is not offered (`can`).
+    /// Each answer is logged, and a refusal said; nothing falls back (the client has no command for it).
     fn steer(&self, game: &Game, steer: Steer, _open: &mut dyn Opener) -> Result<(), Refusal> {
         let code = code(game).ok_or(Refusal::Unsupported)?.to_string();
-        if !self.steer || !self.jobs.has(&code) {
+        if !self.jobs.has(&code) || !steer.allowed(self.can()) {
             return Err(Refusal::Unsupported);
         }
         let place = self.place().ok_or(Refusal::Unsupported)?;
@@ -540,29 +561,40 @@ impl Installer for BattleNet {
         if steer == Steer::Resume && !self.jobs.paused(&code) {
             return Ok(());
         }
+        let path = self.jobs.live(&code).unwrap_or_else(|| format!("/update/{uid}"));
         let jobs = self.jobs.clone();
+        let guess = self.steer;
         std::thread::spawn(move || {
             let what = format!("{} {code}", steer.verb());
+            if steer == Steer::Cancel && !guess {
+                log(&format!(
+                    "{code}: cancel: the Agent the Dashboard started is to be stopped, which ends its download"
+                ));
+                jobs.stop(&code);
+                return;
+            }
             let asked = agent::connect(&place).and_then(|mut session| {
                 let answer = match steer {
                     Steer::Pause | Steer::Resume => {
-                        let (method, path, body) = agent::calls::pause(&uid, steer == Steer::Pause);
+                        let (method, path, body) = agent::calls::pause(&path, steer == Steer::Pause);
                         session.call(&what, method, &path, Some(&body))?
                     }
                     Steer::Cancel => {
-                        let (method, path) = agent::calls::cancel(&uid);
+                        let (method, path) = agent::calls::cancel(&path);
                         session.call(&what, method, &path, None)?
                     }
                 };
                 agent::calls::error(&answer).map_or(Ok(()), Err)
             });
-            match asked {
-                Ok(()) if steer == Steer::Cancel => {
-                    jobs.stop(&code);
-                    log(&format!("{code}: cancelled: the Agent took it"));
-                }
-                Ok(()) => log(&format!("{code}: {}: the Agent took it", steer.verb())),
-                Err(why) => log(&format!("{code}: {}: the Agent did not take it ({why})", steer.verb())),
+            match (asked, steer) {
+                (Ok(()), Steer::Cancel) => log(&format!("{code}: cancelled: the Agent took it")),
+                (Ok(()), _) => log(&format!("{code}: {}: the Agent took it", steer.verb())),
+                (Err(why), _) => log(&format!("{code}: {}: the Agent did not take it ({why})", steer.verb())),
+            }
+            // Cancelled here whatever the Agent made of the guess: the follower lets the Agent the Dashboard
+            // started go.
+            if steer == Steer::Cancel {
+                jobs.stop(&code);
             }
         });
         Ok(())
@@ -574,8 +606,8 @@ const FORM_WAIT: Duration = Duration::from_secs(30);
 
 /// How an install asked of the Agent came out.
 enum Asked {
-    /// Taken: the download under way, followed with this session.
-    Taken(agent::Session),
+    /// Taken: the download under way, followed with this session, by what the Agent said of it.
+    Taken(agent::Session, Box<installing::Watch>),
     /// Not taken: why, the client to be asked instead.
     Refused(String),
     /// Stopped before the download, as asked (`calls::no_download`): why, and nothing more to do.
@@ -607,7 +639,19 @@ fn agent_install(place: &agent::Place, target: &Target, base: &Path, no_download
     let locale =
         agent::calls::choose_locale(&form.languages, windows.as_deref()).unwrap_or(agent::calls::LOCALE.to_string());
     let dirname = form.dirname.clone().unwrap_or_else(|| folder_name(&target.name));
-    let game_dir = base.join(&dirname).display().to_string();
+    // A download the Agent began and did not finish goes on in its own folder (the Agent is taken to pick up from
+    // the files there, as the client does: not known for sure, docs/sources.md).
+    let game_dir = match &target.partial {
+        Some(folder) => {
+            log(&format!(
+                "{code}: product.db has a download of it not finished in {}: installed again into that folder",
+                folder.display()
+            ));
+            folder.display().to_string()
+        }
+        None => base.join(&dirname).display().to_string(),
+    };
+    let made_dir = (!Path::new(&game_dir).exists()).then(|| PathBuf::from(&game_dir));
     log(&format!(
         "{code}: filling it in: locale {locale} (Windows' {}), into {game_dir}",
         windows.as_deref().unwrap_or("not known")
@@ -640,28 +684,43 @@ fn agent_install(place: &agent::Place, target: &Target, base: &Path, no_download
         return Asked::Stopped(why.into());
     }
     let (method, path, body) = agent::calls::install_options(uid, &game_dir, &locale, true);
-    match session.call(&what, method, &path, Some(&body)) {
+    let finalized = match session.call(&what, method, &path, Some(&body)) {
         Ok(answer) => {
             if let Some(why) = agent::calls::problem(&answer) {
                 abandon(&mut session, code, uid, &said(&why));
                 return Asked::Refused(said(&why));
             }
+            answer
         }
         Err(why) => {
             abandon(&mut session, code, uid, &why);
             return Asked::Refused(why);
         }
-    }
+    };
     let (method, path, body) = agent::calls::start(uid);
-    match session.call(&what, method, &path, Some(&body)).map(|answer| agent::calls::error(&answer)) {
-        Ok(None) => {}
-        Ok(Some(error)) => {
-            log(&format!("{code}: POST /update said {}: following the install all the same", said(&error)))
+    let update = match session.call(&what, method, &path, Some(&body)) {
+        Ok(answer) => {
+            if let Some(error) = agent::calls::error(&answer) {
+                log(&format!("{code}: POST /update said {}: following the install all the same", said(&error)));
+            }
+            Some(answer)
         }
-        Err(why) => log(&format!("{code}: POST /update had no answer ({why}): following the install all the same")),
-    }
+        Err(why) => {
+            log(&format!("{code}: POST /update had no answer ({why}): following the install all the same"));
+            None
+        }
+    };
+    let answers: Vec<&http::Answer> = update.iter().chain([&finalized]).collect();
+    let watch = installing::Watch {
+        code: code.clone(),
+        paths: agent::calls::progress_paths(uid, &answers),
+        game_path: agent::calls::game_path(uid, &answers),
+        required: agent::calls::read_form(&finalized).and_then(|f| f.required_space).or(filled.required_space),
+        made_dir,
+    };
     log(&format!("{code}: the Agent took the install"));
-    Asked::Taken(session)
+    log(&format!("{code}: its progress read on {}, the game on {}", watch.paths.join(", "), watch.game_path));
+    Asked::Taken(session, Box::new(watch))
 }
 
 /// Leaves nothing of an install the Dashboard will not finish in the Agent: its form taken back (`calls::abandon`, a
@@ -795,14 +854,18 @@ mod tests {
         }
     }
 
-    /// Keeps what it was asked to open, here and from its detached copies.
+    /// Keeps what it was asked to open, and what it was told stopped, here and from its detached copies.
     #[derive(Clone, Default)]
-    struct Kept(Arc<Mutex<Vec<String>>>);
+    struct Kept(Arc<Mutex<Vec<String>>>, Arc<Mutex<Vec<(String, model::Stop)>>>);
 
     impl Opener for Kept {
         fn open(&mut self, start: &Start) -> Result<(), String> {
             self.0.lock().unwrap().push(start.to_string());
             Ok(())
+        }
+
+        fn stopped(&mut self, game: &Game, stop: &model::Stop) {
+            self.1.lock().unwrap().push((game.source_id.clone(), stop.clone()));
         }
 
         fn detached(&self) -> Option<Box<dyn Opener + Send>> {
@@ -813,6 +876,10 @@ mod tests {
     impl Kept {
         fn opened(&self) -> Vec<String> {
             self.0.lock().unwrap().clone()
+        }
+
+        fn stops(&self) -> Vec<(String, model::Stop)> {
+            self.1.lock().unwrap().clone()
         }
     }
 
@@ -864,6 +931,7 @@ mod tests {
         assert_eq!(larkspur.install_dir, Some(root.join("games").join("LarkspurHollow")));
         assert!(battlenet.installed_now().unwrap().contains(&"lkh".to_string()));
         assert!(open.opened().is_empty(), "{:?}", open.opened());
+        assert!(open.stops().is_empty(), "{:?}", open.stops());
         // Every request said, the token never.
         let lines = said.lock().unwrap().clone();
         assert!(lines.iter().any(|l| l.contains("POST /install {")), "{lines:?}");
@@ -878,6 +946,10 @@ mod tests {
             })
         };
         assert!(posted(false) && posted(true), "{lines:?}");
+        // Once finalized, the progress where the Agent says it is: `/install/<uid>` is 404 and not the end.
+        assert!(lines.iter().any(|l| l.contains("GET /install/larkspur -> 404 {}")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("GET /update/larkspur -> 200")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("GET /game/larkspur -> 200")), "{lines:?}");
         assert!(
             lines.iter().all(|l| !l.contains(&format!("standin-{}-{}", std::process::id(), served.port))),
             "{lines:?}"
@@ -927,8 +999,39 @@ mod tests {
         wait("downloading again", || state().is_some_and(|s| s.downloading()));
         installer.steer(&larkspur, Steer::Cancel, &mut open).unwrap();
         wait("cancelled", || state().is_none());
-        assert!(!root.join("games").join("LarkspurHollow").exists());
+        wait("its folder taken away", || !root.join("games").join("LarkspurHollow").exists());
         assert!(!game(&battlenet, "lkh").installed);
+        assert!(open.opened().is_empty() && open.stops().is_empty());
+    }
+
+    #[test]
+    fn an_error_the_agent_names_mid_download_is_told_with_its_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("battlenet");
+        fixture::write(&root, &Fixture::standard()).unwrap();
+        let served = standin::serve(&root, Duration::from_millis(1500), |_| {}).unwrap();
+        let battlenet = BattleNet::at(Some(root.clone())).with_steer(false);
+        let installer = battlenet.installer().unwrap();
+        // Steering off and the Agent not the Dashboard's: no Cancel to offer.
+        assert!(!installer.can().cancel);
+        let larkspur = game(&battlenet, "lkh");
+        let mut open = Kept::default();
+        installer.install(&larkspur, None, &mut open).unwrap();
+        let state = || battlenet.installs().unwrap().first().map(|i| i.state);
+        wait("downloading", || state().is_some_and(|s| s.downloading()));
+        served.fail("larkspur", 2421);
+        wait("dropped", || state().is_none());
+        assert_eq!(
+            open.stops(),
+            [(
+                "lkh".to_string(),
+                model::Stop::Failed(
+                    "Battle.net's Agent stopped it with error 2421: the PC does not meet its needs, or there is not \
+                     enough space."
+                        .into()
+                )
+            )]
+        );
         assert!(open.opened().is_empty());
     }
 

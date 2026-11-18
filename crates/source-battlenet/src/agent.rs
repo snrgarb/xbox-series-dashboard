@@ -16,9 +16,11 @@
 //! said with why. Nor is one started while `Battle.net.exe`, or an `Agent.exe` of this folder that answers on no
 //! port, runs. Only where nothing of Battle.net's runs does the Dashboard start the Agent itself (`--internalclienttools`,
 //! no window: barncastle's and HSCentric's way), find it by its own process's port, and **stop it** once nothing
-//! of the Dashboard's uses it: `DELETE /agent` (barncastle's end), then killed if it has not gone 5 s on. On Windows it
-//! is in a job object that kills it when the Dashboard's process ends, however it ends. An Agent the Dashboard did not
-//! start is never stopped.
+//! of the Dashboard's uses it: `DELETE /agent` (barncastle's end), then killed if it has not gone 5 s on. An install
+//! it took holds it until the install is over (`installing`): never while a download is under way, which stopping it
+//! would end. On Windows it is in a job object that kills it when the Dashboard's process ends, however it ends (and
+//! with it any download it had: docs/sources.md, "When the Dashboard ends mid-download"). An Agent the Dashboard did
+//! not start is never stopped.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -116,7 +118,7 @@ impl Place {
 
     /// What of Battle.net's runs that the Dashboard did not start, by which no Agent is started: `Battle.net.exe`
     /// (for a fake, only its own) and this folder's `Agent.exe`.
-    fn others_running(&self, ours: Option<u32>) -> Vec<String> {
+    pub fn others_running(&self, ours: Option<u32>) -> Vec<String> {
         let root = self.dir.parent().map(Path::to_path_buf).unwrap_or_default();
         listening::processes()
             .into_iter()
@@ -185,6 +187,13 @@ pub fn ours(dir: &Path) -> Option<u32> {
     owned().as_ref()?.get(dir).map(|agent| agent.child.id())
 }
 
+/// Whether the Agent the Dashboard started for `dir` still runs: None where it started none.
+pub fn alive(dir: &Path) -> Option<bool> {
+    let mut owned = owned();
+    let agent = owned.as_mut()?.get_mut(dir)?;
+    Some(matches!(agent.child.try_wait(), Ok(None)))
+}
+
 /// Stops an Agent the Dashboard started: `DELETE /agent`, then killed where it has not gone within 5 s.
 fn stop_owned(mut agent: Owned) {
     let pid = agent.child.id();
@@ -222,7 +231,6 @@ pub struct Session {
     pub http: Http,
     /// `GET /agent`'s `region`: which patch server installs are fetched from.
     pub region: String,
-    said_once: bool,
     lease: Option<Lease>,
 }
 
@@ -392,7 +400,7 @@ fn token_on(port: u16, pid: Option<u32>) -> Result<Session, NoToken> {
     let token = calls::token(&answer).ok_or(NoToken::Answered(answer.status))?;
     http.token = Some(token);
     let region = answer.text("region").unwrap_or("us").to_string();
-    Ok(Session { http, region, said_once: false, lease: None })
+    Ok(Session { http, region, lease: None })
 }
 
 fn start(program: &Path) -> Result<Child, String> {
@@ -462,16 +470,24 @@ impl Session {
         self.http.call(what, method, path, body)
     }
 
-    /// A `GET` said in the log only the first time, and where it goes wrong: the progress asked once a second.
-    pub fn call_quiet(&mut self, what: &str, method: &str, path: &str) -> Result<Answer, String> {
-        let say = !self.said_once;
-        self.said_once = true;
-        let answer = self.http.call_said(what, method, path, None, say)?;
+    /// A `GET` said nowhere, again once with a new token where the Agent says the old one is no good: the progress
+    /// asked once a second, whose answers the follower says itself (`installing`).
+    pub fn get_silent(&mut self, path: &str) -> Result<Answer, String> {
+        let answer = self.http.fetch("GET", path)?;
         if !calls::refused(&answer) {
             return Ok(answer);
         }
         self.renew()?;
-        self.http.call(what, method, path, None)
+        self.http.fetch("GET", path)
+    }
+
+    /// Whether the Agent is still there: for one the Dashboard started, its process; for another, whether anything
+    /// answers `GET /agent` on its port.
+    pub fn agent_alive(&self, dir: &Path) -> bool {
+        match alive(dir) {
+            Some(alive) if self.ours() => alive,
+            _ => self.http.fetch("GET", calls::SESSION).is_ok(),
+        }
     }
 
     fn renew(&mut self) -> Result<(), String> {
