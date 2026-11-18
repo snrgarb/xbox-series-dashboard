@@ -1,4 +1,4 @@
-//! The launchers' marks (docs/spec/home.md 3.3.1), every one of the project's own drawings, drawn offscreen and
+//! The launchers' marks (docs/spec/home.md 3.3.1), the stores' own and the project's few, drawn offscreen and
 //! compared with the committed reference: on a tile's corner at the size a tile carries it, at the size that is in
 //! pixels on a 4K screen, and enlarged with its name.
 use std::path::{Path, PathBuf};

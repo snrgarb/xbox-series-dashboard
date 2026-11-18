@@ -198,7 +198,7 @@ Strip: 80 + (375 + 16) + (416 + 16) + (480 + 16) + (436 + 16) + 64 = **1915**, l
 
 Badge on the cover (lines 797-818, 1013-1027): bottom-left, `Margin="10"`, `Padding="8,4"`, `CornerRadius="3"`, fill **`#CC1A1A1A`** (`XboxChipBrush`, T/Constants.xaml:236). Inside:
 
-- Source "Steam" or "Xbox": the store's mark, a white vector path 20 x 20 (paths at lines 25-26; the same marks as Home's tiles, and as home.md 3.3 says, not ours to ship). The badge is then 36 x 28: **x 90..126, y 732.4..760.4**.
+- Source "Steam" or "Xbox": the store's mark, a white vector path 20 x 20 (paths at lines 25-26; the same marks as Home's tiles, which the port ships as the Bundle does, home.md 3.3.1). The badge is then 36 x 28: **x 90..126, y 732.4..760.4**.
 - Any other source: its name as text, Segoe UI Regular **14**, white, `MaxWidth="180"`, character ellipsis.
 - No source: the platforms joined by ", ", same text style.
 - No source and no platform: no badge.
@@ -659,7 +659,7 @@ Consequence for M3 with today's schema: the header is the title and "Steam"; the
 | Focus sounds for buttons (`navigation.wav`), none for the toggle and scroller, which the extension adds | Section 12 | **Port**: one navigation sound per focus move in the hub. (Whether the console's sounds come over is plan.md open question 4.) |
 | The game status view and its "is starting… / is running…" text | Section 11 | **Decide** (Open question 6). The Launch screen (M1) already does its job while a game starts. |
 | PlayniteAchievements, Extra Metadata Loader | Achievements row, trailer video | Achievements: **M6**. Trailer video: **drop for M3**, show the art; revisit with video in the renderer (M5). |
-| The store marks on the badge (Steam, Xbox paths) | Cover badge | **Do not copy** (home.md 3.3): the launcher's mark, the project's own drawing (home.md 3.3.1), in the same chip. |
+| The store marks on the badge (Steam, Xbox paths) | Cover badge | **Copy** (#275): the launcher's own mark, the same paths for Steam and Xbox and Simple Icons' for the other stores (home.md 3.3.1), in the same chip. |
 | The extension's silent Install and Queue action | Sections 6.2, 6.4 | **M4.** M3 leaves the Queue slot and gives Install to Steam (`steam://install/<appid>` or nothing: Open question 7). |
 
 ---
@@ -716,7 +716,7 @@ What `crates/screens/src/game_hub/` does (ticket #51), where the sections above 
 - **Opening is timed in the log** (#214): every hub says, once it has come to rest, `hub: opened <game> in N ms: first frame N ms, last moving frame N ms after A`, then the frame that answered A, when the hub was put up after A (`put up N ms after A`, in the turn that took A: no double tap's wait since 2026-11-17), the page's data, what its first frame spent its time on, each picture (a cache hit, or how long it queued, decoded and uploaded, and when it came), the transition (none) and its longest frame. The game-hub payload fails when the first frame is done more than 50 ms after A on a GPU (3 s on the processor, WARP on a VM).
 - **The darkening gradient and the green** (2.2, 1.1) have three stops, where the renderer's gradients have two: each is a small picture painted once (`Kind::Painted`) and stretched over the screen.
 - **A game with no cover** shows its name on the dark tile, as Home's tiles do, where the Bundle shows Playnite's default cover.
-- **The source's mark** on the cover is the launcher's mark Home's tiles carry (home.md 3.3.1), the project's own drawing, on the Bundle's chip: the stores' marks are not ours to ship.
+- **The source's mark** on the cover is the launcher's mark Home's tiles carry (home.md 3.3.1), the store's own logo, on the Bundle's chip, for every launcher's games (#275).
 - **The date last played** is in the user's short date format, as their Windows writes it (`LOCALE_SSHORTDATE`, read once at start by `shell::locale`; "18/11/2026" for Australia), as is every date the Dashboard shows (`screens::date`: the hub's Last played, the achievements' Unlocked and Last unlocked, Play history's rows). The Bundle's pictures read month/day/year because their PC was set to US English. Off Windows and in the tests, US English's ("11/18/2026"), so the reference pictures are those (#237).
 - **Last played** is Steam's record of the user's play, `LastPlayed` beside `Playtime` in `localconfig.vdf`, or the Dashboard's latest Play session if later; never the app manifest's `LastPlayed`, which a new install's manifest can set to the day of the install (#237).
 - **Info lays its pairs one to a line**, each the card's 384 wide, where the Bundle's grid has two columns of 192 (5.2): there "Community score" and most developers' names are cut, and with this library's three pairs at most (Developer, Critic score, Community score; no Genres, Series or Your score) most of the card was left empty. Five fit the card; the width stays the Bundle's 436 (#237).

@@ -103,7 +103,7 @@ pub struct Row<T> {
     pub value: T,
     /// The row starts a group of its own, 21 further down with no line drawn: the Tile menu's Customise.
     pub gap: bool,
-    /// A drawing in the icon's place: a launcher's placeholder mark ("Install from", #249).
+    /// A drawing in the icon's place: a launcher's mark ("Install from", #249).
     pub mark: Option<Drawing>,
 }
 

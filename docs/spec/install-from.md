@@ -96,7 +96,7 @@ The log says, for each game two or more stores can install:
 | Where | In the place of what asked (`PageAction::Replace`): over whatever the Tile menu or the Game hub was over, the screen dimmed (`menu_panel::DIM`), the panel in the middle, flying up as the Tile menu's question does |
 | Title | **Install from** (guessed) |
 | Under it | The game's name, dim, in the prompt's message place: "Quiet Orbit" |
-| Rows | A launcher each, in Settings > Launchers' order (Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net, Xbox): its placeholder mark (the project's own drawing, `drawn`, 26 square in the icon's place, never the store's logo) and its name as the screens write it (`home::Source::name`) |
+| Rows | A launcher each, in Settings > Launchers' order (Steam, Epic Games, GOG, EA app, Ubisoft Connect, Battle.net, Xbox): its mark (the store's own, `drawn`, home.md 3.3.1; 26 square in the icon's place) and its name as the screens write it (`home::Source::name`) |
 | Focus | On the launcher of the game pressed, wherever it is in the list |
 
 **A** goes on with the launcher chosen exactly as Install on that launcher's copy alone would

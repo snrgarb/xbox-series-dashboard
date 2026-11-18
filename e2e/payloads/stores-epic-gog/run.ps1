@@ -13,7 +13,7 @@
 # Which games and how many there are is the fixtures' to say (crates/source-epic/src/fixture.rs,
 # crates/source-gog/src/fixture.rs), read from what the fakes were read back as. Passes when every press is followed by
 # the line expected of it, both games start and end, and the Dashboard stays up. The pictures show each store's
-# placeholder mark on its game's tile and its name in the Game hub, to be looked at.
+# own mark on its game's tile and its name in the Game hub, to be looked at.
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib\E2E.psm1') -Force
 $result = 'FAIL'
