@@ -802,66 +802,101 @@ fn a_on_the_reply_box_opens_text_entry_which_logs_its_length_and_never_its_text(
     assert_eq!(draft(&dashboard).as_deref(), Some("Hello there"));
 }
 
+/// Types and sends a message in Ana's conversation; the send, and the Dashboard on its message (focus on it).
+fn sent(words: &str) -> (Dashboard, DirectAsk) {
+    let mut dashboard = in_a_conversation(with_ana()).dashboard;
+    press(&mut dashboard, &[A]);
+    kind_text(&mut dashboard, words);
+    press(&mut dashboard, &[Menu]);
+    let mut sent = asks(&mut dashboard);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    (dashboard, sent.remove(0))
+}
+
 #[test]
-fn menu_sends_the_draft_which_shows_at_once_as_sending_and_is_matched_or_fails_after_fifteen_seconds() {
+fn menu_sends_the_draft_which_shows_at_once_as_sending() {
     let mut dashboard = in_a_conversation(with_ana()).dashboard;
     press(&mut dashboard, &[A]);
     kind_text(&mut dashboard, "on my way");
     press(&mut dashboard, &[Menu]);
     let sent = asks(&mut dashboard);
     let [DirectAsk::Send { channel, text, reply: None, nonce }] = &sent[..] else { panic!("{sent:?}") };
-    assert_eq!((channel.as_str(), text.as_str()), ("d1", "on my way"));
+    assert_eq!((channel.as_str(), text.as_str(), *nonce), ("d1", "on my way", 1));
     // Text entry went, the draft is emptied, focus is on the reply box; the message is there, Sending.
     assert!(dashboard.guide().dms().draft(&"d1".into()).is_none());
     assert_eq!(line(&dashboard), "Conversation ReplyBox; draft 0 chars");
     press(&mut dashboard, &[Up]);
     assert_eq!(line(&dashboard), "Conversation Message(0) of 8, own, sending");
-    // The session reports it by its nonce: the local one is replaced.
+}
+
+#[test]
+fn a_message_the_session_reports_under_the_nonce_replaces_the_local_one() {
+    let (mut dashboard, ask) = sent("on my way");
+    let DirectAsk::Send { nonce, .. } = ask else { panic!("{ask:?}") };
+    press(&mut dashboard, &[Up]);
     let direct = dashboard.direct().clone();
     let mut reported = with_ana();
     let mut message = said(&nonce.to_string(), true, "me", NOW, "on my way");
     message.delivery = Delivery::Sending;
     reported.messages.push(message);
-    dashboard.set_direct(&open_with(&direct, reported.clone()));
+    dashboard.set_direct(&open_with(&direct, reported));
     assert_eq!(dashboard.guide().dms().outs.len(), 0);
     assert_eq!(line(&dashboard), "Conversation Message(0) of 8, own, sending");
-    // Or, as the data source will, under the real id once Discord has it: matched by what it says.
-    let mut dashboard = in_a_conversation(with_ana()).dashboard;
-    press(&mut dashboard, &[A]);
-    kind_text(&mut dashboard, "on my way");
-    press(&mut dashboard, &[Menu]);
-    asks(&mut dashboard);
+}
+
+#[test]
+fn the_sent_event_moves_focus_from_the_nonce_to_the_real_id_and_the_message_is_not_matched_by_its_text() {
+    let (mut dashboard, ask) = sent("on my way");
+    let DirectAsk::Send { nonce, .. } = ask else { panic!("{ask:?}") };
     press(&mut dashboard, &[Up]);
+    let direct = dashboard.direct().clone();
+    // An own message with the same text under another id is not this one: the local one stays.
+    let mut other = with_ana();
+    other.messages.push(said("9001", true, "me", NOW + 1000, "on my way"));
+    dashboard.set_direct(&open_with(&direct, other));
+    assert_eq!(dashboard.guide().dms().outs.len(), 1);
+    // The fresh conversation comes with the message under Discord's id, then the event.
     let mut done = with_ana();
-    done.messages.push(said("9001", true, "me", NOW + 1000, "on my way"));
+    done.messages.push(said("9002", true, "me", NOW + 2000, "on my way"));
     dashboard.set_direct(&open_with(&direct, done));
-    assert_eq!(dashboard.guide().dms().outs.len(), 0);
-    // Focus followed the message to its real id.
+    dashboard.direct_event(&DirectEvent::Sent { channel: "d1".into(), nonce, message: "9002".into() });
+    assert!(dashboard.guide().dms().outs.is_empty());
     assert_eq!(line(&dashboard), "Conversation Message(0) of 8, own");
-    // Not seen within 15 s: Not sent.
-    let mut dashboard = in_a_conversation(with_ana()).dashboard;
-    press(&mut dashboard, &[A]);
-    kind_text(&mut dashboard, "lost");
-    press(&mut dashboard, &[Menu]);
-    asks(&mut dashboard);
-    dashboard.advance(14.0);
+}
+
+#[test]
+fn a_message_the_model_shows_failed_has_retry_and_delete_in_its_menu_and_nothing_times_out() {
+    let (mut dashboard, ask) = sent("lost");
+    let DirectAsk::Send { nonce, .. } = ask else { panic!("{ask:?}") };
+    // No timer: time passing changes nothing.
+    dashboard.advance(60.0);
     press(&mut dashboard, &[Up]);
-    assert!(line(&dashboard).ends_with("sending"));
-    dashboard.advance(1.5);
+    assert!(line(&dashboard).ends_with("sending"), "{}", line(&dashboard));
+    // The session shows it failed, under the nonce, and says so.
+    let direct = dashboard.direct().clone();
+    let mut failed = with_ana();
+    let mut message = said(&nonce.to_string(), true, "me", NOW, "lost");
+    message.delivery = Delivery::Failed;
+    failed.messages.push(message);
+    dashboard.set_direct(&open_with(&direct, failed));
+    dashboard.direct_event(&DirectEvent::NotSent { channel: "d1".into(), nonce });
+    assert!(dashboard.guide().dms().outs.is_empty());
     assert!(line(&dashboard).ends_with("not sent"), "{}", line(&dashboard));
-    // Its menu has Retry and Delete: Retry sends it again as a new one, the old one dropped.
+    // Retry asks to forget the old one and sends the text again under a new nonce.
     press(&mut dashboard, &[A, Down, Down]);
     press(&mut dashboard, &[A]);
     let again = asks(&mut dashboard);
     assert!(matches!(&again[0], DirectAsk::Forget { .. }), "{again:?}");
     assert!(matches!(&again[1], DirectAsk::Send { text, nonce: 2, .. } if text.as_str() == "lost"), "{again:?}");
-    assert_eq!(dashboard.guide().dms().outs.len(), 1);
-    // Delete drops it from the view.
-    dashboard.advance(16.0);
+    // Delete asks to forget it.
+    let mut failed_again = with_ana();
+    let mut message = said("2", true, "me", NOW, "lost");
+    message.delivery = Delivery::Failed;
+    failed_again.messages.push(message);
+    dashboard.set_direct(&open_with(&direct, failed_again));
     press(&mut dashboard, &[Up, A, Down, Down, Down, A]);
     let gone = asks(&mut dashboard);
     assert!(matches!(&gone[..], [DirectAsk::Forget { .. }]), "{gone:?}");
-    assert!(dashboard.guide().dms().outs.is_empty());
 }
 
 #[test]
@@ -1209,4 +1244,60 @@ fn shot_the_captcha_prompt() {
     let mut stage = in_a_conversation(with_ana());
     stage.dashboard.direct_event(&DirectEvent::Captcha);
     stage.check("direct-captcha");
+}
+
+// ------------------------------------------------------------------------------------------------ what a payload judges by
+
+/// The walk a payload makes: the tab, the sixth circle, All Direct Messages, a DM, its conversation, the reply box,
+/// text entry, a send, and B back to All Direct Messages. These are the `--log-focus` lines (`guide: ...` and
+/// `focus: ...`) it can expect, a step at a time. Names and words never are in them.
+#[test]
+fn the_log_lines_of_a_walk_from_the_tab_to_a_sent_message_and_back_to_all_direct_messages() {
+    let direct = ready(seven());
+    let mut dashboard = direct_only(&direct);
+    let mut walk = Vec::new();
+    let mut step = |dashboard: &mut Dashboard, what: &str| {
+        walk.push(format!("{what}\n  guide: {}\n  focus: {}", dashboard.guide_line(), dashboard.focus_line()));
+    };
+    step(&mut dashboard, "tab");
+    press(&mut dashboard, &[Right, Right, Right, Right, Right]);
+    step(&mut dashboard, "sixth circle");
+    press(&mut dashboard, &[A]);
+    step(&mut dashboard, "All Direct Messages");
+    press(&mut dashboard, &[Up, Up, Up, Up, A]);
+    step(&mut dashboard, "conversation, loading");
+    dashboard.set_direct(&open_with(&direct, with_ana()));
+    step(&mut dashboard, "conversation, arrived");
+    press(&mut dashboard, &[A]);
+    step(&mut dashboard, "text entry");
+    kind_text(&mut dashboard, "hello");
+    step(&mut dashboard, "typed");
+    press(&mut dashboard, &[Menu]);
+    step(&mut dashboard, "sent");
+    press(&mut dashboard, &[Up]);
+    step(&mut dashboard, "on the message going out");
+    press(&mut dashboard, &[B]);
+    step(&mut dashboard, "B: back to All Direct Messages");
+    println!("{}", walk.join("\n"));
+    let all = walk.join("\n");
+    for word in ["Ana", "Zephyr", "hello", "are you on tonight"] {
+        assert!(!all.contains(word), "{word} is in the log: {all}");
+    }
+}
+
+#[test]
+fn the_guide_button_closes_the_guide_while_writing_and_the_draft_is_kept() {
+    let mut dashboard = in_a_conversation(with_ana()).dashboard;
+    press(&mut dashboard, &[A]);
+    kind_text(&mut dashboard, "half a thought");
+    press(&mut dashboard, &[Guide]);
+    assert!(!dashboard.guide_open());
+    assert_eq!(asks(&mut dashboard), [DirectAsk::Close]);
+    assert_eq!(dashboard.guide().dms().draft(&"d1".into()).map(|draft| draft.text.as_str()), Some("half a thought"));
+    // The Guide opens on the landing tab as always; the draft is there when the conversation is opened again.
+    press(&mut dashboard, &[Guide, RightBumper]);
+    press(&mut dashboard, &[A]);
+    assert_eq!(asks(&mut dashboard), [DirectAsk::Open("d1".into())]);
+    dashboard.set_direct(&open_with(&ready(seven()), with_ana()));
+    assert_eq!(line(&dashboard), "Conversation ReplyBox; draft 14 chars");
 }

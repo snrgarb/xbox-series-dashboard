@@ -519,9 +519,13 @@ impl Guide {
         self.dms.write.take()
     }
 
-    /// A captcha or a refusal: what was going out is Not sent.
-    pub fn fail_pending(&mut self) {
-        self.dms.fail_pending();
+    /// The web session says a message went, or did not.
+    pub fn sent(&mut self, channel: &Id, nonce: u64, message: &Id) {
+        self.dms.sent(channel, nonce, message);
+    }
+
+    pub fn not_sent(&mut self, channel: &Id, nonce: u64) {
+        self.dms.not_sent(channel, nonce);
     }
 
     /// Text entry is up (or gone) over the conversation.
@@ -548,7 +552,7 @@ impl Guide {
     pub fn timer(&self) -> Option<f32> {
         let loading =
             self.dms.loading_since.map(|since| (1.0 - (self.dms.age - since)).max(0.0)).filter(|&left| left > 0.0);
-        [self.dms.timer(), loading].into_iter().flatten().reduce(f32::min)
+        [loading].into_iter().flatten().reduce(f32::min)
     }
 
     /// What time it is, for the times of messages: the machine's unless told.

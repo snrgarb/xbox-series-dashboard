@@ -770,13 +770,14 @@ this spec was approved, and a few things it left open were decided:
    reads "Replying to yourself".
 10. **"{n} new messages"** counts others' messages only; the user's own going out never raise it. LT and RT move by the
     number of bubbles the last frame showed whole.
-11. **Your own message going out** is kept in the screens, keyed by the nonce it was sent under (`DirectAsk::Send`),
-    and drawn Sending until the session reports it: a message with the nonce as its id (`Delivery::Sending`, then
-    `Sent` or `Failed`), or, once Discord has given it an id, an own message with the same text (trimmed) that the
-    conversation did not have when it was sent. Focus follows it to the real id. After 15 s of the Dashboard's time
-    unmatched it is Not sent; a captcha or a refusal (`DirectEvent::Captcha`, `Refused`) marks everything still going out
-    Not sent too. Retry sends the text again under a new nonce and asks `DirectAsk::Forget` for the old one; Delete
-    asks `Forget`.
+11. **Your own message going out** is drawn Sending at once from a local copy keyed by the nonce it was sent under
+    (`DirectAsk::Send`), for the gap until the web session shows it: the data source carries the outgoing message in
+    `Direct::open` with `Delivery::Sending`, `own`, and the nonce (decimal) as its id, then under Discord's real id with
+    `Sent` (`DirectEvent::Sent` moves focus from the nonce id to the real one), or, on failure, as `Failed` under the
+    nonce id until `DirectAsk::Forget` (`DirectEvent::NotSent`). The local copy goes as soon as the model has a message
+    with that id, or `Sent`/`NotSent` arrives. There is no timer and no matching by text. Retry asks `Forget` for the
+    old one and sends the text again under a new nonce; Delete asks `Forget`. A captcha or a refusal is a prompt
+    (6.4); the `NotSent` that follows is what marks the message.
 12. **Text entry for a message** is `keyboard::Entry::private()`: the focus log says `TextEntry: Q; 12 chars, lower
     letters`. The caption is made when it opens ("Message @Ana", "Replying to Ana").
 13. **Closing the Guide** drops the conversation (`DirectAsk::Close`) and keeps the drafts; turning Direct Messages off

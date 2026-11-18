@@ -2,7 +2,7 @@
 //! conversation keep between frames, and what a press does in them. The web session's reading arrives whole
 //! (`Dms::set`); what the user does is asked of it (`DirectAsk`, queued in `Dms::asks` for the Dashboard to send) and is
 //! shown done only once it says so, but for one's own message going out, which shows at once, Sending, and is
-//! matched with what the session reports (`Dms::reconcile`) or marked Not sent after fifteen seconds.
+//! matched with what the session reports (`Dms::reconcile`): it carries the message under that nonce.
 //!
 //! Nothing here is written anywhere, and nothing of a name or a message reaches a log: `line` says places and
 //! counts only (spec 9 and 10).
@@ -16,8 +16,6 @@ use ui::{Button, Press};
 
 use super::when::When;
 
-/// A message not seen on its way out within this long is Not sent (spec 6.4).
-pub const SEND_SECONDS: f32 = 15.0;
 /// How many messages a page of LT or RT moves before the view has said how many it shows.
 const PAGE: usize = 6;
 
@@ -89,7 +87,8 @@ impl std::fmt::Debug for Draft {
     }
 }
 
-/// A message of the user's own that has gone out and is not yet seen sent.
+/// A message of the user's own that has gone out and that the web session does not show yet: drawn Sending until the
+/// model carries a message under its nonce (`Direct::open`), or says `Sent` or `NotSent` for it.
 #[derive(Clone, PartialEq)]
 pub struct Out {
     pub channel: Id,
@@ -99,18 +98,12 @@ pub struct Out {
     pub reply: Option<Id>,
     /// Unix milliseconds, at the moment of sending.
     pub at: i64,
-    /// `Dms::age` then.
-    pub sent_at: f32,
-    pub failed: bool,
-    /// The messages the conversation had then: a message that is not one of them, of the user's, with this text,
-    /// is this one sent.
-    pub known: Vec<Id>,
 }
 
 impl std::fmt::Debug for Out {
     /// Its length and state only: never what is written.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Out({} chars, {})", self.text.chars().count(), if self.failed { "not sent" } else { "sending" })
+        write!(f, "Out({} chars)", self.text.chars().count())
     }
 }
 
@@ -198,30 +191,27 @@ impl Dms {
         self.follow();
     }
 
-    /// Time passes: a message not seen sent in fifteen seconds is Not sent.
+    /// Time passes (the Direct Messages section's spinner comes after a second).
     pub fn pass(&mut self, seconds: f32) {
         self.age += seconds;
-        for out in &mut self.outs {
-            if !out.failed && self.age - out.sent_at >= SEND_SECONDS {
-                out.failed = true;
+    }
+
+    /// The web session says this message went: its nonce's id is now Discord's. A local message goes, and focus on it
+    /// follows to the real one.
+    pub fn sent(&mut self, channel: &Id, nonce: u64, message: &Id) {
+        let id = Id(nonce.to_string());
+        self.outs.retain(|out| !(out.id == id && &out.channel == channel));
+        if let Some(View::Chat(chat)) = &mut self.view {
+            if chat.focus == Place::Message(id) {
+                chat.focus = Place::Message(message.clone());
             }
         }
     }
 
-    /// Every message still going out is Not sent: Discord asked for a check or refused.
-    pub fn fail_pending(&mut self) {
-        for out in &mut self.outs {
-            out.failed = true;
-        }
-    }
-
-    /// Whether anything is still waiting on the clock.
-    pub fn timer(&self) -> Option<f32> {
-        self.outs
-            .iter()
-            .filter(|out| !out.failed)
-            .map(|out| (SEND_SECONDS - (self.age - out.sent_at)).max(0.0))
-            .reduce(f32::min)
+    /// The web session says this message did not go: it shows in the model as Failed under its nonce.
+    pub fn not_sent(&mut self, channel: &Id, nonce: u64) {
+        let id = Id(nonce.to_string());
+        self.outs.retain(|out| !(out.id == id && &out.channel == channel));
     }
 
     /// The conversation the view is on, as the session has it.
@@ -281,7 +271,7 @@ impl Dms {
                     extras: Vec::new(),
                     reactions: Vec::new(),
                 },
-                delivery: if out.failed { Delivery::Failed } else { Delivery::Sending },
+                delivery: Delivery::Sending,
             });
         }
         messages
@@ -292,44 +282,10 @@ impl Dms {
         self.messages(channel).into_iter().filter(|message| matches!(message.body, Body::Said { .. })).collect()
     }
 
-    /// Drops the local messages the session now shows, and moves focus onto the message that took a local one's
-    /// place.
+    /// Drops the local messages the session now shows: a message with the nonce as its id, in whatever state.
     fn reconcile(&mut self) {
         let Some(open) = self.direct.open.clone() else { return };
-        let mut moved: Vec<(Id, Id)> = Vec::new();
-        let mut claimed: Vec<Id> = Vec::new();
-        self.outs.retain(|out| {
-            if out.channel != open.id {
-                return true;
-            }
-            let by_nonce = open.messages.iter().find(|message| message.id == out.id);
-            let by_text = || {
-                open.messages.iter().find(|message| {
-                    message.own
-                        && message.delivery == Delivery::Sent
-                        && !out.known.contains(&message.id)
-                        && !claimed.contains(&message.id)
-                        && Self::text_of(message).trim() == out.text.trim()
-                })
-            };
-            match by_nonce.or_else(by_text) {
-                // Still going, or failed, as the session says: the session's message is shown in its place.
-                Some(message) if message.delivery != Delivery::Sent && message.id == out.id => false,
-                Some(message) => {
-                    claimed.push(message.id.clone());
-                    moved.push((out.id.clone(), message.id.clone()));
-                    false
-                }
-                None => true,
-            }
-        });
-        if let Some(View::Chat(chat)) = &mut self.view {
-            if let Place::Message(id) = &chat.focus {
-                if let Some((_, to)) = moved.iter().find(|(from, _)| from == id) {
-                    chat.focus = Place::Message(to.clone());
-                }
-            }
-        }
+        self.outs.retain(|out| out.channel != open.id || !open.messages.iter().any(|message| message.id == out.id));
     }
 
     /// The open view follows what the session says: a conversation that has come, focus on a message that has
@@ -458,16 +414,12 @@ impl Dms {
         }
         self.nonce += 1;
         let id = Id(self.nonce.to_string());
-        let known = self.messages(channel).into_iter().map(|message| message.id).collect();
         self.outs.push(Out {
             channel: channel.clone(),
             id,
             text: text.clone(),
             reply: draft.reply.clone(),
             at: self.when.now_ms(),
-            sent_at: self.age,
-            failed: false,
-            known,
         });
         self.asks.push(DirectAsk::Send {
             channel: channel.clone(),

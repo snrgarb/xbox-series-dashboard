@@ -650,7 +650,6 @@ impl Dashboard {
         use model::discord_dms::DirectEvent;
         match event {
             DirectEvent::Captcha | DirectEvent::Refused(_) => {
-                self.guide.fail_pending();
                 if !self.open_guide_for_a_prompt() {
                     return;
                 }
@@ -661,6 +660,8 @@ impl Dashboard {
                 self.effects.push(Effect::Sound(Sound::PromptOpen));
             }
             // Toasts (#202): the hook is here.
+            DirectEvent::Sent { channel, nonce, message } => self.guide.sent(channel, *nonce, message),
+            DirectEvent::NotSent { channel, nonce } => self.guide.not_sent(channel, *nonce),
             DirectEvent::Message { .. }
             | DirectEvent::Mention { .. }
             | DirectEvent::Ring(_)
@@ -1226,8 +1227,13 @@ impl Dashboard {
             return;
         }
         if self.writing.is_some() && self.guide.is_open() {
-            self.write_press(press);
-            return;
+            // Text entry takes every button but the Guide's, which closes the Guide (the draft is kept as typed).
+            if press.button != Button::Guide {
+                self.write_press(press);
+                return;
+            }
+            self.writing = None;
+            self.guide.set_writing(false);
         }
         let (was_open, guide) = (self.guide.is_open(), self.guide_place());
         // Focus moved if the same screen has the pad as before and says its focus is somewhere else. A page
