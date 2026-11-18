@@ -14,6 +14,19 @@ Read on 18 November 2026, on Linux. **No store client was run, nothing was signe
 
 Whether something breaks a store's terms is **my reading, not legal advice**: every such line is [inferred].
 
+## Decisions, 18 November 2026
+
+The user answered the open questions the same day (recorded on [#265](https://github.com/snrgarb/xbox-series-dashboard/issues/265)); the follow-up research for them was read on 18 November 2026 too, on the same terms as above (nothing run, nothing signed in to).
+
+1. **Xbox: no Windows user per person.** The user's answer was "Nah". **Reading to confirm with the user**: the Dashboard only names the Profile's Xbox account and, when the Xbox app is signed in as another, opens the Xbox app's own account page; it switches nothing (5.3). Section 3.4 stays as the record of why not.
+2. **No credential helper** (the "middleman executable", 3.5). Agreed.
+3. **A kept copy of the Epic launcher's sign-in per account: undecided.** The user asked for the security risks first; they are in [section 7](#7-keeping-a-copy-of-a-launchers-sign-in-the-risks), with the alternative that keeps no copy. GOG, EA and Ubisoft raise the same question (7.6).
+4. **Play time and achievements follow the Profile, not the store account** (5.5).
+5. **GOG, EA and Ubisoft switch too** (1.5 to 1.7, tickets in 5.6).
+6. **Binding a Discord account is out of scope.**
+7. **A download under way at switch time**: wait until it is done, or offer to cancel it and switch (5.4). Pausing it is no longer offered.
+8. **Both routes scoped**: the Dashboard doing the file work itself, or calling TcNo Account Switcher's command line, side by side in [section 8](#8-two-routes-the-dashboards-own-file-work-or-tcnos-command-line). Recommended: the Dashboard's own (8.4). Not yet chosen by the user.
+
 ## Summary
 
 | Client | Switch between accounts it already remembers, with no password? | How | Client restart | Confidence |
@@ -23,21 +36,21 @@ Whether something breaks a store's terms is **my reading, not legal advice**: ev
 | Epic, older launcher | Yes, by swap | `GameUserSettings.ini` `[RememberMe] Data` and `HKCU\Software\Epic Games\Unreal Engine\Identifiers` `AccountId` | Yes | [code: TcNo, legendary] |
 | **Battle.net** | **Probably yes** | `%AppData%\Battle.net\Battle.net.config` `Client.SavedAccountNames`: the target's email put first; each account must have been signed in with the launcher's "remember" ticked | Yes, killed | [code: TcNo]; where the token itself lives is not known |
 | **Xbox app / Microsoft Store / Gaming Services** | **Not by files. Only through Microsoft's own sign-in UI** | Two separate accounts: the **Xbox profile** (gamertag, achievements, friends) and the **Microsoft Store account** (what is owned and Game Pass). Both are held by Windows' Web Account Manager, not in files a program can swap. The Xbox app can switch between them through its own UI; whether a second account added to Windows switches without a password or PIN is untested | The Xbox app, perhaps; the games yes | [MS] for the two-account model; the rest [reported] / untested |
-| GOG Galaxy | Yes, by swap | `HKCU\Software\GOG.com\Galaxy` `refreshToken`, `settings\userId`, `settings\username`, `%LocalAppData%\GOG.com\Galaxy\Configuration\config.json`, and much of `%ProgramData%\GOG.com\Galaxy` (its `galaxy-2.0.db` is the library) | Yes | [code: TcNo] |
-| EA app | Yes, by swap, heavy | The whole of `%LocalAppData%\Electronic Arts\EA Desktop\` and `%ProgramData%\EA Desktop\` | Yes | [code: TcNo] |
-| Ubisoft Connect | Yes, by swap | `%LocalAppData%\Ubisoft Game Launcher\` `ConnectSecureStorage.dat`, `user.dat`, `user.vdat`, `settings.yaml` | Yes | [code: TcNo] |
+| GOG Galaxy | Yes, by swapping a snapshot | Remembers one account. `HKCU\Software\GOG.com\Galaxy` `refreshToken`, `settings\userId`, `settings\username`, `%LocalAppData%\GOG.com\Galaxy\Configuration\config.json`, and much of `%ProgramData%\GOG.com\Galaxy` (its `galaxy-2.0.db` is the library) | Yes, killed | [code: TcNo]; single source |
+| EA app | Yes, by swapping a snapshot, heavy | Remembers one account. The whole of `%LocalAppData%\Electronic Arts\EA Desktop\` and `%ProgramData%\EA Desktop\` | Yes, killed | [code: TcNo]; single source |
+| Ubisoft Connect | Yes, by swapping a snapshot | Remembers one account. `%LocalAppData%\Ubisoft Game Launcher\` `ConnectSecureStorage.dat`, `user.dat`, `user.vdat`, `settings.yaml` | Yes, killed | [code: TcNo]; single source |
 
 **Xodus Nexus** (the user's "Xodeus Nexus") is **Nexus Launcher**, formerly Xodus Nexus: an unofficial, MIT-licensed launcher that runs Microsoft Store and PC Game Pass games **on Linux**, on top of the GPL-3.0 **Xodus** project, which reimplements Microsoft account sign-in by **impersonating Windows' own sign-in host** and a Windows device. It does keep several Microsoft accounts and switch between them without a password, but only because it *is* its own Microsoft Store client holding its own refresh tokens in the Linux keyring. **It does not inject credentials into the Windows Xbox app, and nothing in it can.** It is worth reading to learn how Microsoft's sign-in works; it is not a model for the Dashboard (section 2.3).
 
 **The user's middleman idea** (a helper that supplies Xbox credentials at run time): **do not build it.** Microsoft gives no API that signs an account into Windows or the Xbox app without its own UI; a password typed by a program is defeated by the second factor, by passkeys, and by accounts with no password at all (new Microsoft accounts are passwordless by default since May 2025); the only way around that is what Xodus does, impersonating Windows to Microsoft's servers, which is fragile, against the Microsoft Services Agreement's spirit if not letter, and puts every Profile's Microsoft account at risk (section 3.5).
 
-**Recommended**, in five lines:
+**Recommended**, in five lines (updated with the decisions above):
 
-1. A Profile is bound, per launcher, to **one account the client already remembers**, picked from a list the Dashboard reads from the client's own files (Steam's `loginusers.vdf`, Battle.net's `SavedAccountNames`, a snapshot taken of Epic's session); never typed into the Dashboard.
-2. At Signing you in and at Switch profile, the Dashboard switches only the launchers whose account differs: closes each cleanly, writes the client's own remembered-account files, starts it again silent, one at a time, Steam first, with "Signing you in" held until each says it is signed in (or 60 s).
-3. A game running or a download under way stops the switch for that launcher and asks; the Profile still changes in the Dashboard.
-4. Play time, achievements and owned games then follow the account: each source reads the bound account's files, not "the newest", and the database keeps per-account rows.
-5. **Xbox is not switched by the Dashboard.** It is told which Microsoft account the Profile uses and, when the Xbox app shows another, offers to open the Xbox app's own account page. One Windows user per Profile is the only full answer for Xbox, and it is a different product (section 3.4).
+1. A Profile is bound, per launcher, to **one account the client already remembers**, picked from a list the Dashboard reads from the client's own files (Steam's `loginusers.vdf`, Battle.net's `SavedAccountNames`, a snapshot taken of a one-account launcher's session: Epic, GOG, EA, Ubisoft, if decision 3 allows it); never typed into the Dashboard.
+2. At Signing you in and at Switch profile, the Dashboard switches only the launchers whose account differs: closes each cleanly, writes the client's own remembered-account files, starts it again silent, one at a time, Steam first, with "Signing you in" held until each says it is signed in (or 60 s). The Dashboard does this file work itself (section 8), using TcNo's definitions as its reference.
+3. A game running stops the switch for that launcher; a download under way is waited for, or cancelled if the user chooses; the Profile still changes in the Dashboard.
+4. **Play time and achievements follow the Profile**: the Dashboard records them per Profile; what a store reports for an account is shown for the Profile bound to it (5.5). Owned games follow the account, since the licence is the account's.
+5. **Xbox is not switched by the Dashboard.** It is told which Microsoft account the Profile uses and, when the Xbox app shows another, offers to open the Xbox app's own account page. No Windows user per person (decision 1).
 
 ## 1. Each client
 
@@ -116,27 +129,63 @@ TcNo's FAQ: Battle.net "can detect saved accounts, but each account still needs 
 
 Section 3 has this in depth. In short: two Microsoft accounts are in play, the Store account (purchases and Game Pass) and the Xbox profile (identity) [MS: [mismatched store accounts][ms-mismatch]]. Both are Web Account Manager accounts, held by Windows' token broker for the Windows user, not in files. **There is no file to swap.**
 
-### 1.5 GOG Galaxy, EA app, Ubisoft Connect (briefly)
+### 1.5 GOG Galaxy
 
-From TcNo's definitions [code: TcNo [`Platforms.json`][tc-pj]]; each is one source, untested here:
+Decision 5 brings GOG, EA and Ubisoft in. All three remember **one** account, as Epic does, so each is switched by a snapshot of its session, and each raises decision 3's question (7.6). The only public account of what to swap is TcNo's, read again at [`6f1ad81`][tc] [code: TcNo [`Platforms.json`][tc-pj] "GOG Galaxy", "EA Desktop", "Ubisoft"]; no store documents any of it. What the Dashboard reads today is in [../sources.md](../sources.md) "The stores".
 
-- **GOG Galaxy**: `HKCU\Software\GOG.com\Galaxy` `refreshToken`; `...\Galaxy\settings` `userId` and `username`; `%LocalAppData%\GOG.com\Galaxy\Configuration\config.json`; and from `%ProgramData%\GOG.com\Galaxy`: `config.json`, `storage\galaxy-2.0.db*`, `storage\etags.db` and the web cache's cookies, local and session storage. Closes `GalaxyClient.exe`, `GalaxyClientService.exe`, `GalaxyCommunication.exe` and the notifications renderer. **Note**: `galaxy-2.0.db` is where the Dashboard reads GOG's owned games [stores.md], so swapping it swaps the library too, and it is in `%ProgramData%`, shared by every Windows user [inferred]. gogdl, like legendary, has its own sign-in file per `--auth-config-path` [installs.md].
-- **EA app**: the whole of `%LocalAppData%\Electronic Arts\EA Desktop\` and `%ProgramData%\EA Desktop\` (logs left out), `cookie.ini` required; closes `EADesktop.exe` and `EABackgroundService.exe`. Heavy and brittle: a folder that holds settings and caches as well as the session [inferred].
-- **Ubisoft Connect**: `%LocalAppData%\Ubisoft Game Launcher\` `ConnectSecureStorage.dat`, `user.dat`, `user.vdat`, `settings.yaml`, and the launcher log (from which the account id is read); closes `upc.exe`, `UplayService.exe`, `UplayWebCore.exe`; sets `user.closebehavior` to close, not to tray.
+**Where the account is.** TcNo's login files for GOG Galaxy:
 
-Whether any of these files is DPAPI-bound was not looked at; GOG's `refreshToken` in the registry reads as plain [UNVERIFIED].
+- Registry: `HKCU\Software\GOG.com\Galaxy` value `refreshToken` (**the session**: an OAuth refresh token), `...\Galaxy\settings` values `userId` (TcNo's unique id: `UniqueIdMethod: REGKEY`) and `username`.
+- `%LocalAppData%\GOG.com\Galaxy\Configuration\config.json`.
+- Under `%ProgramData%\GOG.com\Galaxy`: `config.json`, `storage\galaxy-2.0.db*` and `storage\etags.db`, and the client's web view state under `webcache\common`: `Cookies`, `Local Storage\leveldb`, `Session Storage\*.ldb` and `*.log`, and cache indexes.
+- Closed first (`ExitBeforeInteract`): `GalaxyClient.exe`, `GalaxyClientService.exe`, `GalaxyCommunication.exe`, `GOG Galaxy Notifications Renderer.exe`. `PathListToClear: SAME_AS_LOGIN_FILES`: to add a new account TcNo deletes all of the above, which signs Galaxy out.
+
+**How it is kept.** TcNo dumps registry values into a `reg.json` in its snapshot folder as they are, strings kept as strings [code: [`internal/basic/flow_registry.go`][tc-reg]]: the `refreshToken` is copied in the clear unless the user turned on TcNo's own app password (8.2). Whether Galaxy itself encrypts the registry value was not looked at; read as plain text it would be a bearer token for the account [UNVERIFIED; G1].
+
+**What a switch breaks.**
+
+- **The library**: `galaxy-2.0.db` is where `source-gog` reads owned-not-installed games, play time and last played ([../sources.md](../sources.md)). Swapping it swaps all of that with the account, which is what decision 4 wants for owned games and **not** for play time (5.5): the Dashboard must keep its own per-Profile record and not overwrite it from Galaxy's database after each switch.
+- **`%ProgramData%`** is the machine's, shared by every Windows user [inferred]. With one Windows user (decision 1) that does not matter; it does mean a snapshot writes outside the user's own folders, which needs write access there (Galaxy's installer grants it, or the write fails) [UNVERIFIED; G1].
+- **Downloads**: Galaxy's own downloads stop with it and resume at its next start [inferred]. GOG games start as their own programs with no client ([../sources.md](../sources.md)), so a GOG game running does not stop a switch the way a Steam game does; Galaxy's overlay and cloud saves sync at the game's exit through Galaxy, so still never switch while a GOG game runs [inferred].
+- **gogdl**, where the user added it, has its own sign-in file per `--auth-config-path` [installs.md]; like legendary (A11), it can be given a folder per bound account.
+
+**What it costs**: four processes killed and Galaxy started again [inferred: 15 to 30 s; G1 times it]. Galaxy is known to sign itself back in on start with no prompt once remembered [reported (excerpt): [GOG forum][gog-forum]].
+
+**How the user revokes a copy**: GOG added "one-click log out of all active account sessions across all devices" with two-step login in 2016 [reported: [TweakTown, 2016][gog-2fa]]; where it is on gog.com today was not found [UNVERIFIED]. Changing the password is the fallback [inferred].
+
+### 1.6 EA app
+
+**Where the account is.** TcNo's login files are **two whole folders**: `%LocalAppData%\Electronic Arts\EA Desktop\` and `%ProgramData%\EA Desktop\` (log files left out: `BackupFileTypesIgnore: .log`), with `cookie.ini` required (`RequiredLoginFiles`). The unique id is read from `telemetry.ini` (`=([^\r\n]*)`), the user id from `user_*.ini`, the display name and picture out of the client's CEF web cache (`CEF\*\EADesktop\Default\Cache\Cache_Data\data_*`). Closed first, and before saving too (`ExitBeforeSave`): `EADesktop.exe`, `EABackgroundService.exe`. TcNo also has a separate **Origin** definition (whole `%AppData%\Origin` caches and `%ProgramData%\Origin` files); Origin is retired and not a target here.
+
+**What is in it.** The folder holds settings, caches and the session together, and which file is the session beyond `cookie.ini` is not known [UNVERIFIED]. So a snapshot is the whole folder, and putting one back also puts back the settings and caches of the time it was taken: settings changed since are lost, which is why this is "heavy and brittle" [inferred].
+
+**EA's own behaviour.** EA's help says to switch by "Sign out" from the menu, after which the app asks for another account [docs (excerpt): [help.ea.com, How to use the EA app][ea-help]]; no remembered-accounts list. Players report the EA app signing them out after closing [reported (excerpt): [EA forums][ea-forum-keep]], and that an EA account signs in on one PC at a time ("EA is the only one that doesn't" let them stay signed in on two) [reported (excerpt): [EA forums][ea-forum-two]]. A game can also bring its own linked account back: The Sims 4 "immediately logs you into the different EA account you use for that Sims 4 game" after a switch [reported (excerpt): [EA forums][ea-forum-sims]]. Each of those would show as "EA needs you to sign in" after a switch (5.2 step 3).
+
+**What a switch breaks.** `source-ea` reads installed games from the registry and each game's `__Installer` folder ([../sources.md](../sources.md)), not from these folders, so the library is unaffected [code: this repository]. EA's downloads stop and are its to resume [inferred]. EA games start their own program, which brings the EA app up itself when it needs it ([../sources.md](../sources.md)); a game started that way during a switch would start the app as whoever's snapshot is there at that moment, hence one launcher at a time and never during a game [inferred].
+
+**What it costs**: two processes killed, two folders written (size not known: an EA folder's caches can be hundreds of MB [UNVERIFIED; EA1]), the app started again.
+
+### 1.7 Ubisoft Connect
+
+**Where the account is.** TcNo's login files: `%LocalAppData%\Ubisoft Game Launcher\` `ConnectSecureStorage.dat`, `user.dat`, `user.vdat`, `settings.yaml`, and the client's `logs\launcher_log.txt`, from which the account's id (a GUID after `User:`) is read. Display name from the client's HTTP cache (`nameOnPlatform` matched by `userId`); picture from `avatars.ubisoft.com/<id>/default_256_256.png`. Closed first: `upc.exe`, `UplayService.exe`, `UplayWebCore.exe`. Before a switch TcNo sets `settings.yaml` `user.closebehavior` to `CloseBehavior_Close`, so closing the window quits rather than going to the tray.
+
+**What is in it.** `ConnectSecureStorage.dat` reads as the session by its name; whether it is DPAPI-bound was not looked at [UNVERIFIED; U1]. Ubisoft offers no remembered-accounts list; players report Connect asking for the password again despite "Remember me" until the PC is made a **trusted device**, which needs two-step verification [reported (excerpt): [Steam Community][ubi-remember]]. So an account with 2FA may need the PC trusted before a snapshot of it survives a restart [inferred; U1].
+
+**What a switch breaks.** `source-ubisoft` reads installed games from the registry and owned games from `cache\configuration\configurations`, which is in the same folder but not in TcNo's list [code: this repository; TcNo]: after a switch the cache is rewritten by the client for the new account, so the owned list follows the account once the client has run [inferred]. Ubisoft games bought on Steam start Connect themselves and sign in with whatever it holds [inferred].
+
+**What it costs**: three processes killed, five files written, the client started again [inferred: 10 to 20 s].
 
 ## 2. How existing tools do it
 
 ### 2.1 TcNo Account Switcher
 
-The best witness: open source (**GPL-3.0**), in active development, a definition per platform in one JSON file. Read at [`6f1ad81`][tc] (master, 16 Nov 2026; `Platforms.json` version 4.0.9, now in Go with Wails). The newest **published** release is `2025-11-20_03` [code: GitHub API], so master may be ahead of what users run.
+The best witness: open source (**GPL-3.0**), in active development, a definition per platform in one JSON file. Read at [`6f1ad81`][tc] (master, 16 Nov 2026; `Platforms.json` version 4.0.9, now in Go with Wails). The newest published release is **v4.0.9**, published 16 Nov 2026 half an hour after that commit [code: GitHub API, read 18 Nov 2026] (the first version of this document said `2025-11-20_03`: wrong, an older listing), so what users run is what was read. ("Platforms.json version 4.0.9" above and the release are the same version.)
 
 - **Model**: for every platform but Steam, a "basic" flow driven by `Platforms.json`: `ExesToEnd`, `LoginFiles` (files, registry values `REG:...`, or a JSON path `JSON_SELECT...`), `PathListToClear`, `UniqueIdFile`/`UniqueIdMethod`, `ClosingMethod`. **Save current** copies the login files into TcNo's own folder for that account; **switch** closes the client, writes them back, starts the client. Steam has its own code (section 1.1), as does Epic's credential session (1.2).
 - **No passwords** are kept for switching. Its optional Steam Guard feature does take the Steam password, which "is encrypted with a key fetched from Steam, sent to Steam, and never written to disk", and keeps Steam Guard secrets in a vault behind a password of the user's own (Argon2id) [docs: [TcNo FAQ][tc-faq]; [`docs/steam-guard-passwords-and-factors.md`][tc-sg]].
 - **No Xbox or Microsoft Store** platform at all; the nearest is "Spotify (Windows Store)", a file swap in a Store app's `LocalState` [code].
-- **A CLI**: `+s:<steamId64>` swaps Steam, `+<platformShort>:<uniqueId>` any other (`+b:`, `+eg:`...), `--list-accounts --json` lists them [code: [`internal/cli/help.go`][tc-cli]]. So the Dashboard **could** drive TcNo as a helper the user adds, as it drives legendary, instead of doing the file work itself. Against: TcNo is a whole desktop app with its own window, update checker and Discord presence; its saved accounts live in its own folder under its own lock; and its released build lags master [inferred].
-- **Trust**: the code is careful (atomic writes, `.vdf_last` backups, recovery copies, link checks, logs that never record arguments "they can contain passwords or tokens"). It is a fair reference for *what* to swap [inferred]. Its licence means **read it, do not copy it** into the Dashboard (whose own licence is not decided, plan.md open question 5).
+- **A CLI**: `+s:<steamId64>` swaps Steam, `+<platformShort>:<uniqueId>` any other (`+b:`, `+eg:`...), `--list-accounts --json` lists them [code: [`internal/cli/help.go`][tc-cli]]. So the Dashboard **could** drive TcNo as a helper the user adds, as it drives legendary, instead of doing the file work itself. Against: TcNo is a whole desktop app with its own window, update checker and Discord presence; its saved accounts live in its own folder under its own lock [inferred]. Section 8 scopes this route in full.
+- **Trust**: the code is careful (atomic writes, `.vdf_last` backups, recovery copies, link checks, logs that never record arguments "they can contain passwords or tokens"). It is a fair reference for *what* to swap [inferred]. Its licence means **read it, do not copy it** into the Dashboard (whose own licence is not decided, plan.md open question 5); section 8.2 has what the licence allows for running or shipping it.
 
 ### 2.2 Others
 
@@ -187,7 +236,7 @@ The only route that gives each Profile its own Xbox app, Store, WAM and every la
 - **Shell mode is per user**: the Dashboard's shell is `HKCU\...\Winlogon\Shell` [docs: this repository, [../spec/shell-mode.md](../spec/shell-mode.md)], so each Windows user needs it installed and set separately, and each has its own Dashboard, database, Profiles and logs.
 - **A switch** goes through Windows' lock screen and sign-in (password, PIN, Windows Hello) for the target user, and the first user's session, Dashboard, launchers and any game keep running behind, holding memory and the GPU's attention [inferred]. Signing in automatically without Windows' prompt needs the target's Windows password stored for auto-logon (`AutoAdminLogon`), the very thing to avoid.
 - **Launchers**: Steam, Epic, Battle.net and the rest are installed once for the machine but run and sign in per user; whether two users' Steams can run at once (one per session) is **not known** [UNVERIFIED]. Store packages are installed per user, so each Windows user installs (registers) an Xbox game again, reportedly without a second download [reported, not checked].
-- **For a TV**: a Windows lock screen between "Who's playing today?" and Home is not a console. **Not recommended** as the default; worth saying in Settings as the way to give an Xbox account its own seat [inferred].
+- **For a TV**: a Windows lock screen between "Who's playing today?" and Home is not a console. **Not recommended** as the default [inferred]. **Decided against** on 18 November 2026 (decision 1, as read): not offered, not mentioned in Settings.
 
 ### 3.5 The middleman executable that supplies credentials
 
@@ -211,10 +260,10 @@ The user's idea, assessed squarely.
 
 - **Never ask for, keep or log a password, a Steam Guard code, a token or a cookie** of any store. Not in the database, not in settings, not in logs, not in a crash report. Log lines name the launcher, the account's public name and id, and what was done.
 - **Never copy a session to another PC or another Windows user.** Only the clients' own remembered-session files that already live on this PC under this Windows user are touched. Most are DPAPI-bound anyway (1.2).
-- **At most, swap the clients' own files back and forth.** Where a client remembers several accounts itself (Steam, Battle.net), only its own "which one" markers are changed. Where it remembers one (Epic), a snapshot of its own session files is kept, **DPAPI-protected for this Windows user, in the Dashboard's data folder**, as Discord's tokens already are (docs/discord.md), with the user's knowledge, removable per account.
+- **At most, swap the clients' own files back and forth.** Where a client remembers several accounts itself (Steam, Battle.net), only its own "which one" markers are changed. Where it remembers one (Epic, GOG, EA, Ubisoft), a snapshot of its own session files is kept **only if the user allows it (decision 3, open)**, under the limits of section 7.4: DPAPI-protected for this Windows user, in the Dashboard's data folder, as Discord's tokens already are (docs/discord.md), never in the database or a log, deleted on unbind, forgettable from Settings.
 - **Back up before writing**, write atomically, and restore the backup if the client does not come up signed in (TcNo's `.vdf_last` and recovery copies) [code: TcNo].
 - **Never sign anyone out** of a client; that drops the remembered session (1.1).
-- **Never switch under a running game or a running download**; ask.
+- **Never switch under a running game or a running download**: wait for it, or cancel the download if the user chooses (5.4).
 - **Never drive a Microsoft sign-in**, type into any store's sign-in window, or impersonate a client to a store's servers.
 - **Never use one account for another person.** The stores' terms, quoted:
   - **Steam**: "You may not reveal, share or otherwise allow others to use your password or Account except as otherwise specifically authorized by Valve" (section 1.C); and "You may not use Cheats, mods, hacks, or any other unauthorized third-party software ... in interacting with or controlling the processes or user interface of Steam Content and Services" (4.B) [docs: [Steam Subscriber Agreement][ssa], revision of 10 September 2026, read through a summarising fetch].
@@ -230,7 +279,7 @@ The user's idea, assessed squarely.
 
 - A Profile's page in Settings gains **Accounts**: a row per launcher installed (Steam, Epic, Battle.net, GOG, EA, Ubisoft, Xbox), each showing the bound account or "Any" (the default: nothing switched).
 - **Choosing an account** lists those the client already remembers, read from its own files: Steam's `loginusers.vdf` rows (persona name and avatar from `userdata`), Battle.net's `SavedAccountNames` (BattleTag from `CachedData.db`), Epic's **saved snapshots** plus "the account signed in now". Nothing is typed. An account not in the list: "Sign in to it in <launcher> once, with Remember me, then come back."
-- **Epic** (one remembered account): "Save this sign-in for <Profile>" takes the snapshot of the launcher's session as it is now (1.2). To add a second account the user signs in to it in the launcher and saves again.
+- **Epic, GOG, EA, Ubisoft** (one remembered account each): if decision 3 allows copies, "Save this sign-in for <Profile>" takes the snapshot of the launcher's session as it is now (1.2, 1.5 to 1.7). To add a second account the user signs in to it in the launcher and saves again. If it does not, the row binds an account by name only and the switch is the launcher's own sign-in window (7.5).
 - **Xbox**: the row records which Microsoft account the Profile uses, read from what the Xbox app is signed in as when the user picks "This one", by its gamertag; nothing is switched (5.3).
 - Stored in the database: `profile_accounts (profile, source, account_id, display_name)`; for Epic, the snapshot file's name. No secret is in the database.
 
@@ -238,7 +287,7 @@ The user's idea, assessed squarely.
 
 1. The Profile is signed in at once, as today (start-up.md 6). **Signing you in** stays up, its spinner turning, past its 3 s **while any launcher is being switched**, with one line under it: "Switching Steam to <persona>..." then "Switching Epic Games...".
 2. For each launcher whose bound account is not "Any" and differs from the one signed in now, **one at a time**, Steam first (the Dashboard's main source), then Epic, Battle.net, the rest:
-   - running and busy (a game of its own running, a download in the Queue): **skip it** and say so later in a Toast ("Steam stays on <old> while <game> runs");
+   - running and busy (a game of its own running, a download in the Queue): **skip it for now** as 5.4 says, and say so later in a Toast ("Steam stays on <old> while <game> runs");
    - close it cleanly (`steam.exe -shutdown`; the others by their window close, then killed after 10 s), wait for its processes to be gone;
    - back up and write its files (1.1 to 1.5);
    - start it silent (`steam.exe -silent`; the others minimised to tray where they can be);
@@ -251,41 +300,77 @@ The user's idea, assessed squarely.
 
 ### 5.3 Xbox
 
+Decision 1, **as read by the lead and to be confirmed with the user**: no Windows user per person; what follows is all the Dashboard does for Xbox.
+
 - At Signing you in, if the Profile has an Xbox account and the Xbox app's signed-in gamertag (read how? see X2; else not read at all) is another, a Toast: "The Xbox app is signed in as <other>" with A = **Open the Xbox app's account page** (`ms-xbox://` or the Xbox app's Settings, X3), leaving the switch to the user and to Microsoft's UI.
 - No Microsoft account is switched by the Dashboard, no credential is kept.
-- Settings says once, plainly: "Xbox accounts are Windows' to switch. For each person to have their own Xbox account without switching, give them their own Windows user."
+- Settings says once, plainly: "The Xbox app's account is switched in the Xbox app." The earlier line suggesting a Windows user per person is dropped with decision 1.
 
 ### 5.4 A game running, or a download under way
 
 - **A game of that launcher running**: that launcher is not switched; the Profile changes in the Dashboard; the Toast says why; the switch is offered again when the game ends ("Switch Steam to <persona> now?").
-- **A download in the Queue for that launcher**: asked once: "Steam is downloading <game>. Switch now and pause it, or later?" Later = when the Queue for that launcher is empty.
+- **A download in the Queue for that launcher** (decision 7): asked once, A = **Wait until it is done** (the default, focused), the other = **Cancel it and switch**: "Steam is downloading <game>. Switch to <persona> when it is done, or cancel the download and switch now?" Waiting: the Profile changes in the Dashboard at once, the launcher switches when its part of the Queue is empty, with a Toast then. Cancelling: the Dashboard cancels the download through the route that started it (the Queue's Cancel, built in M8), which may leave a partly downloaded game for the launcher to clean or resume later [inferred], then switches. A download the launcher started itself, not through the Queue, is not seen by the Dashboard; the launcher stops it at close and resumes it at its next start [inferred; T4 checks Steam's].
 - **The Steam CEF connection** is dropped and remade after the restart; installs fall back to `steam.exe` routes until it answers (sources.md already does this when the debugger is off).
 
-### 5.5 The library, play time and achievements follow the account
+### 5.5 Owned games follow the account; play time and achievements follow the Profile
+
+Decision 4: **play time and achievements follow the Profile, not the store account.** Owned games cannot: a licence is the store account's, so what a Profile can install and start is its bound account's.
+
+**What the database keeps.** Today `games.playtime_minutes`, `games.last_played`, `achievements.unlocked` and `play_sessions` are one per game with no Profile column (section 1). They become:
+
+- `play_sessions` gain the **Profile** that played (and the source account, for the record). The Dashboard already writes a session per launch it follows; that becomes the Profile's own history.
+- **Per-Profile figures**: a `profile_games (profile, game, playtime_minutes, last_played)` table in place of the two columns on `games`, and `profile_achievements (profile, game, achievement, unlocked_at)` in place of `achievements.unlocked`. `games` keeps what is the game's (name, art, installed or not, the store's achievement list).
+- **Owned-not-installed rows** gain the **account** they are owned by, so My games shows the signed-in Profile's bound accounts' games plus every installed game (installed games stay the machine's).
+
+**Where the figures come from.** The stores report per account, the Dashboard per Profile:
+
+| Store | Per-account figure the Dashboard reads today | With decision 4 |
+|---|---|---|
+| Steam | play time and last played in `userdata\<id>\config\localconfig.vdf`; achievements in `UserGameStats_<id>_<appid>.bin` | read for the bound account only |
+| GOG | play time and last played in `galaxy-2.0.db` (swapped with the account, 1.5) | read for the bound account only, from the database Galaxy holds while that account is in |
+| Epic, EA, Ubisoft, Battle.net, Xbox | none of play time or achievements on disk ([../sources.md](../sources.md)) | the Dashboard's own sessions only |
+
+The rule [inferred; **a reading to confirm with the user**]:
+
+1. **Play time of a Profile on a game** = the Dashboard's own sessions by that Profile, **plus**, once, at the moment a Profile is first bound to an account, the store's figure for that account then, as "played before the Dashboard". After that the store's figure is not read back into the Profile, because it would also count other Profiles' play on the same account, or "Any" sessions.
+2. **Last played** = the latest of the Profile's own sessions and that seed.
+3. **Achievements**: an achievement is unlocked **for the Profile** when a store reports it newly unlocked on the Profile's bound account while that Profile is signed in (the Dashboard compares the account's list before and after each session), plus, at first binding, every achievement the account already has. Two Profiles sharing an account, or a Profile on "Any", each keep only what was unlocked in their own sessions.
+4. **"Any"** (nothing bound): the Profile still gets its own sessions; nothing is seeded, since no account is its.
+5. **Unbinding** keeps the Profile's figures; **binding another account** seeds that account's figures once more for the games not yet seeded.
+
+What this means for the stores that report per account: Steam's and GOG's own figures stop being the shown truth after the seed; a game played on Steam outside the Dashboard (Big Picture, a Steam shortcut) adds to the account's figure, not to any Profile's, unless the Dashboard is running and follows it [inferred]. That gap is the price of decision 4; a later ticket could attribute play seen on the account while a Profile was signed in to that Profile.
+
+**After a switch** the sources re-read (as at start), and Home and My games show the Profile's own play time and its bound accounts' owned games; the greeting Toast waits for that, so "Hi Sam!" and Sam's Home come together.
 
 - **Sources read the bound account, not "the newest"**: `source-steam` takes the account id to read (`userdata\<id>`, `UserGameStats_<id>_*`) from the signed-in Profile's binding, falling back to today's newest-`localconfig` rule for "Any"; `source-epic` reads `cache\prod\account\<bound>\library-cache.json`; GOG's database is whatever Galaxy holds (it is swapped with the account).
-- **The database** keeps what is per account per account: owned-not-installed rows, `playtime_minutes`, `last_played` and `achievements.unlocked` gain an `account` key (or move to per-account tables), and `play_sessions` gain the Profile that played. Installed games stay the machine's.
-- After a switch, the source re-reads (as at start), and Home and My games show the new account's library and play time; the greeting Toast waits for that, so "Hi Sam!" and Sam's Home come together [inferred: a choice for the user, question 4].
 
 ### 5.6 Tickets for M10, smallest first
 
-M10 depends on nothing in **M9 Full Discord**. It depends on what is built: Profiles and Signing you in (M5: #125, #127), the Queue and installs (M8, for "a download under way"), Steam's CEF route (#132/#171), legendary (#175). If the user wants a Profile bound to a Discord account too (question 6), that ticket would come after M9.
+Reshaped on 18 November 2026 for the decisions: GOG, EA and Ubisoft in (5), play time and achievements per Profile (4), the download rule (7), Discord out (6), Xbox naming only (1). The list is **route (a)**, the Dashboard's own file work, as recommended in section 8; section 8.3 says which tickets route (b), TcNo's command line, would replace.
+
+M10 depends on nothing in **M9 Full Discord**. It depends on what is built: Profiles and Signing you in (M5: #125, #127), the Queue and installs (M8, for "a download under way"), Steam's CEF route (#132/#171), legendary (#175), gogdl (#176).
 
 | # | Ticket | Done when | Stand-in or real |
 |---|---|---|---|
-| A1 | **Profile accounts in the database**: `profile_accounts`, the `ProfileChange` to bind and unbind, the log lines | A Profile can be bound to "Any" or an account per source; the binding survives a restart; tests on the library alone | Stand-in |
-| A2 | **Steam: list the remembered accounts** from `loginusers.vdf` (parser of made-up files: `AccountName`, `PersonaName`, `MostRecent`, `AutoLogin`, `RememberPassword`, `Timestamp`) and which is active | `source_steam::accounts(root)` returns them; tested on made-up files, including a broken one | Stand-in |
-| A3 | **Settings > Profile > Accounts** page: a row per installed launcher, the list from A2 (others "Any" only for now), `--log-focus` lines | Binding Steam from the pad works on the stand-in Steam; screenshot test | Stand-in |
-| A4 | **Steam reads by account**: `signed_in_account` replaced by the bound id where there is one; play time, achievements, owned games per account in the database; `play_sessions` with the Profile | Two made-up `userdata` accounts in the fixture show two libraries and two play times by Profile | Stand-in |
-| A5 | **Steam switch**: close, back up, write `loginusers.vdf` and `AutoLoginUser`, start silent, wait for signed in, put the backup back on failure; skipped while a game runs or the Queue is busy; Signing you in held with its line | On the stand-in Steam (a fake `steam.exe` honouring `-shutdown` and reading the files), the right account comes up; **then T1 on the TV PC** | Stand-in, then **real Steam** |
-| A6 | **Battle.net**: list `SavedAccountNames` (+ BattleTag from `CachedData.db`), switch by putting one first | Made-up config files; **then B1, B2 on the TV PC** | Stand-in, then **real client** |
-| A7 | **Epic snapshot**: "Save this sign-in" (Credential Manager entry + `auth` folder, DPAPI-wrapped in the data folder), restore to switch, remove | DPAPI and Credential Manager behind a trait, tested with a fake on Linux; **E1, E2 on the TV PC** | Stand-in for the logic, **real launcher** for the rest |
-| A8 | **legendary per account**: its sign-in file per bound Epic account, its installs shared | Two made-up `user.json` folders; the right one used per Profile | Stand-in |
-| A9 | **Xbox: name the account and say when it differs**, with the button to the Xbox app's account page | Needs X2 (how to read the Xbox app's gamertag) first; Toast tested on the stand-in | **Real Xbox app** for X1 to X3 |
-| A10 | **GOG, EA, Ubisoft** switches by snapshot, one ticket each, only if the user asks (question 5) | As A7, per client | **Real clients** |
-| A11 | **Settings > Accounts help** and the "own Windows user" note | Text in, screenshot | Stand-in |
+| A1 | **Profile accounts in the database**: `profile_accounts (profile, source, account_id, display_name)`, the `ProfileChange` to bind and unbind, the log lines | A Profile can be bound to "Any" or an account per source; the binding survives a restart; tests on the library alone | Stand-in |
+| A2 | **Play time and achievements per Profile** (decision 4): `play_sessions` with the Profile, `profile_games`, `profile_achievements`, the seed at first binding, the before-and-after compare of an account's achievements around a session (5.5) | Two Profiles playing the same made-up game show two play times; a seed is taken once; tests on the library alone | Stand-in |
+| A3 | **Steam: list the remembered accounts** from `loginusers.vdf` (`AccountName`, `PersonaName`, `MostRecent`, `AutoLogin`, `RememberPassword`, `Timestamp`) and which is active | `source_steam::accounts(root)` returns them; tested on made-up files, including a broken one | Stand-in |
+| A4 | **Settings > Profile > Accounts** page: a row per installed launcher, the list from A3 (others "Any" only until their ticket), `--log-focus` lines | Binding Steam from the pad works on the stand-in Steam; screenshot test | Stand-in |
+| A5 | **Steam reads by account**: `signed_in_account` replaced by the bound id where there is one; owned games per account; achievements of the bound account fed to A2 | Two made-up `userdata` accounts in the fixture show two libraries by Profile | Stand-in |
+| A6 | **The switch runner**: one launcher at a time, Steam first; Signing you in held with its line; the 30 s cap and Toasts; skip while a game of that launcher runs and offer again at its end; the **download question** (wait until done / cancel it and switch, 5.4); back up before writing and restore on failure; a `Switcher` trait per launcher | With a fake switcher that succeeds, fails and hangs, each case shows what 5.2 says; the download dialog's two answers on the stand-in Queue; screenshot tests | Stand-in |
+| A7 | **Steam switch**: close with `-shutdown`, write `loginusers.vdf` and `AutoLoginUser`, start silent, wait for signed in | The stand-in Steam (`standin`'s `steam.exe` taught `-shutdown` and to read the files) comes up as the right account; **then S1, T1 to T4 on the TV PC** | Stand-in, then **real Steam** |
+| A8 | **Battle.net**: list `SavedAccountNames` (+ BattleTag from `CachedData.db`), switch by putting one first; leave the Agent running | Made-up config files; **then B1, B2 on the TV PC** | Stand-in, then **real client** |
+| A9 | **The sign-in store** (only if decision 3 allows copies): a snapshot per (launcher, account) of files, registry values and a Credential Manager entry, each wrapped with DPAPI for the Windows user in the data folder (7.4); never in the database or a log; deleted on unbind; "Forget this sign-in" in Settings; listed in Settings with the date each was saved | DPAPI and Credential Manager behind a trait, a fake on Linux; unbind and Forget leave no file behind; a log scan test finds no token | Stand-in |
+| A9' | **No copies** (if decision 3 refuses them): a one-account launcher whose account differs is closed, its local sign-in cleared, and started on its own sign-in window, with a Toast "Sign in to <launcher> as <account>" (7.5) | Stand-in launcher shows its sign-in window; the Toast names the account | Stand-in, then **real Epic** |
+| A10 | **Epic switch** by snapshot (A9): Credential Manager entry + `auth` folder, `EBWebView` cleared | Stand-in for the logic; **E1, E2, E4 on the TV PC** | Stand-in, then **real launcher** |
+| A11 | **legendary and gogdl per account**: each one's sign-in file per bound account, their installs shared | Two made-up `user.json` folders (legendary) and two auth configs (gogdl); the right one used per Profile | Stand-in |
+| A12 | **GOG Galaxy switch** by snapshot (A9): the registry values, `Configuration\config.json`, the `%ProgramData%` files of 1.5; the per-Profile play time of A2 not overwritten from `galaxy-2.0.db` | `standin make-gog` given two accounts' made-up files; **G1 on the TV PC** | Stand-in, then **real Galaxy** |
+| A13 | **Ubisoft Connect switch** by snapshot (A9): the five files of 1.7, `user.closebehavior` set to close | Made-up files; **U1 on the TV PC** | Stand-in, then **real client** |
+| A14 | **EA app switch** by snapshot (A9): the two folders of 1.6 without logs; the snapshot's size shown in Settings | Made-up folders; **EA1 on the TV PC** | Stand-in, then **real app** |
+| A15 | **Xbox: name the account and say when it differs**, with the button to the Xbox app's account page | Needs X2 (how to read the Xbox app's gamertag) first; Toast tested on the stand-in | **Real Xbox app** for X1 to X3 |
+| A16 | **Settings > Accounts help**: what is kept and where (7), how to forget it, "the Xbox app's account is switched in the Xbox app" | Text in, screenshot | Stand-in |
 
-A1 to A4 change nothing on the TV PC and can be built now. A5 is the first that writes a real client's files.
+**Size**: 16 tickets (A9 or A9', not both). A1 to A6 change nothing on the TV PC and can be built now; A7 is the first that writes a real client's files. A9, A10 and A12 to A14 wait for decision 3; if it refuses copies, A9' replaces A9, and A10, A12, A13 and A14 shrink to their launcher's "clear and show the sign-in window" (a line each in A9'), leaving 12.
 
 ## 6. What needs trying on the TV PC
 
@@ -302,30 +387,146 @@ Each by the lead, by hand, with the user's own accounts, **after a backup** of t
 **Epic**
 
 - **E1. What the session is.** Signed in as A: `cmdkey /list | findstr epicgames` (note the target name only), and list the file names in `%LocalAppData%\com.epicgames.eglv2\auth`. Look for: the target `credentials.com.epicgames.eglv2.prod` and `auth.json`, `access-token-prod.dpapi`.
-- **E2. A swap by hand.** Close the launcher (tray > Exit; then confirm `EpicGamesLauncher.exe` and `EpicWebHelper.exe` are gone); copy `auth` aside as A; sign in to B in the launcher with Remember me; close it; copy `auth` aside as B. Credential Manager's entry cannot be copied with built-in tools, so this test tries **files only** first: put A's `auth` back, start the launcher. Look for: signed in as A, as B, or signed out. If signed out, the credential is needed too (A7 must snapshot it, as TcNo does); that is expected.
+- **E2. A swap by hand.** Close the launcher (tray > Exit; then confirm `EpicGamesLauncher.exe` and `EpicWebHelper.exe` are gone); copy `auth` aside as A; sign in to B in the launcher with Remember me; close it; copy `auth` aside as B. Credential Manager's entry cannot be copied with built-in tools, so this test tries **files only** first: put A's `auth` back, start the launcher. Look for: signed in as A, as B, or signed out. If signed out, the credential is needed too (A10 must snapshot it, as TcNo does); that is expected.
 - **E3. legendary.** `legendary status` before and after E2. Look for: legendary stays on its own account (it should).
+- **E4. How long a snapshot lives** (for decision 3). After E2, leave B's snapshot unused for a week (the launcher runs as A meanwhile), then put it back. Look for: B signed in, or signed out. Then sign B out from Epic's site ("Sign out everywhere", 7.3) and put B's snapshot back again. Look for: signed out (the copy is dead), which is what makes revoking work.
 
 **Battle.net**
 
 - **B1. Remembered accounts.** Signed in as A with "Keep me logged in", sign out to the account picker, sign in as B the same way. Then: the client closed, `%AppData%\Battle.net\Battle.net.config`'s `SavedAccountNames` (note the order only), put A first, start the client. Look for: signed in as A with no password. Also `cmdkey /list | findstr -i battle` (names only) to see whether its token is in Credential Manager.
 - **B2. The Agent.** Start a small install through the Dashboard (the Agent route), then do B1. Look for: does `Agent.exe` keep running, does the install continue, does `GET /install/<uid>` still answer.
 
+**GOG Galaxy, Ubisoft Connect, EA app** (decision 5; each after a backup of the files 1.5 to 1.7 name)
+
+- **G1. GOG.** With Galaxy signed in as A: `reg query HKCU\Software\GOG.com\Galaxy /v refreshToken` and note only whether the value **reads as text** (a long printable string) or as binary; do not copy it anywhere. Then a swap by hand as E2, with the registry values and files of 1.5, A to B and back, timed. Look for: signed in with no password; whether writing under `%ProgramData%\GOG.com\Galaxy` needed an administrator; whether the Dashboard's GOG play time (from `galaxy-2.0.db`) changed with the swap.
+- **U1. Ubisoft.** The swap by hand as E2 with the five files of 1.7, for an account with two-step verification on and the PC not trusted, then trusted. Look for: signed in, or asked for the password or a code; whether `ConnectSecureStorage.dat` from A works after B has signed in and out.
+- **EA1. EA.** The size of `%LocalAppData%\Electronic Arts\EA Desktop\` and `%ProgramData%\EA Desktop\` (sizes only), then the swap by hand of both folders, logs left out. Look for: signed in as A with no password; whether the EA app's settings went back to what they were when A was saved; whether starting an EA game after the swap brings up A.
+
 **Xbox**
 
 - **X1. Two accounts in the Xbox app.** Settings > Accounts > Email & accounts > "Accounts used by other apps": is the second Microsoft account there? If not, add it there (its owner signs in). Then in the Xbox app: gamerpic > Switch account (or Sign out > sign in) to B. Look for: does it ask for B's password, PIN or an approval, or switch with a click? Then the same for Settings > Account > Change my Microsoft Store account. Then start a Game Pass game under each. Look for: which starts, which says it is not owned.
-- **X2. Reading the Xbox app's gamertag.** Is there a file or setting naming the signed-in gamertag without a sign-in of our own (look in `%LocalAppData%\Packages\Microsoft.GamingApp_8wekyb3d8bbwe\LocalState` and `\Settings` for a gamertag or XUID, names only)? Look for: anything stable. If none, A9 shows the account it was told, and cannot say when it differs.
+- **X2. Reading the Xbox app's gamertag.** Is there a file or setting naming the signed-in gamertag without a sign-in of our own (look in `%LocalAppData%\Packages\Microsoft.GamingApp_8wekyb3d8bbwe\LocalState` and `\Settings` for a gamertag or XUID, names only)? Look for: anything stable. If none, A15 shows the account it was told, and cannot say when it differs.
 - **X3. Opening the account page.** `start ms-xbox:` and `start ms-windows-store://settings`. Look for: which link opens the Xbox app's or Store's account settings directly.
+
+## 7. Keeping a copy of a launcher's sign-in: the risks
+
+Decision 3 is open: the user asked "Explain the security risks". This is that, for Epic first, as plainly as the sources allow. Nothing here was tried; Epic documents none of its launcher's tokens.
+
+### 7.1 What the copy contains, and what it allows
+
+- **What is copied**: the Epic launcher's own remembered sign-in, two things together (1.2): the Credential Manager entry `credentials.com.epicgames.eglv2.prod` (at most 2560 bytes, copied whole, contents not documented) and the files in `%LocalAppData%\com.epicgames.eglv2\auth` (`auth.json` with the account's id and display name; `access-token-prod.dpapi` with the access token) [code: TcNo [`epic_new_launcher.go`][tc-epic]]. Since the launcher signs in after a restart with no password, one of the two must hold a **refresh token**, the long-lived key that gets new access tokens [inferred].
+- **What it allows**: everything the launcher can do as that person, because it *is* the launcher's sign-in: see and download the library, start games and sign them in to Epic Online Services, friends and presence, and the launcher's store [inferred from what the launcher does with it]. **Purchases**: the store in the launcher uses the same session; whether a purchase with a saved card asks again for a password or a code is not documented [UNVERIFIED]. Epic's **parental controls PIN**, when set, is required to "authorize real-money purchases made with Epic payment" [docs (excerpt): [Epic, parental controls][epic-pin]], which is the brake that exists. **Changing the password, the email or two-step verification** is done on Epic's website, not in the launcher; whether a launcher token alone is enough there is not known [UNVERIFIED; my guess: no, those ask for the password or a code].
+- So, in plain terms: **a copy is the account, for playing and probably for buying, but probably not for taking the account over.**
+
+### 7.2 How it is protected
+
+- The Dashboard would wrap each copy with **DPAPI for the Windows user** (as `discord-secrets.dat` is, docs/discord.md). DPAPI: "only a user with the same logon credential as the user who encrypted the data can decrypt the data. In addition, the encryption and decryption usually must be done on the same computer" [MS: [dpapi]]. So the copy is useless on another PC, to another Windows user, or to someone holding only the disk.
+- It does **not** protect against **any program running as that Windows user**: such a program calls `CryptUnprotectData` or `CredRead` and gets it, as TcNo does [code: TcNo]. That is **exactly the protection the launcher's own sign-in has today**: the same DPAPI, the same Credential Manager, the same user.
+- With decision 1 (one Windows user for the household), every person's programs, games and mods run as that one user, so each can reach every copy [inferred].
+
+### 7.3 What is new compared with today
+
+The launcher already keeps one such sign-in on the PC. What copies add:
+
+1. **N sign-ins at rest instead of one.** Malware, a bad mod or a cheat tool running on the PC today gets the one Epic account signed in; with copies it gets every bound account's [inferred].
+2. **A sign-in that lives on while its owner thinks it is gone.** When the launcher shows Sam, Alex may believe Alex's account is not on the PC; it is, in the Dashboard's folder. A family member who leaves, or a guest bound once, stays signed in on the PC until the copy is forgotten [inferred].
+3. **Copies in a place a backup may take.** The Dashboard's data folder is `%LOCALAPPDATA%\XboxSeriesDashboard` (docs/HANDOVER.md). OneDrive's folder backup takes "Desktop, Documents, Pictures, Screenshots, and Camera Roll" [MS: [Known Folder Move][ms-kfm]], not `AppData`, so it would not; a **whole-disk or whole-profile image** would. DPAPI's keys go with such an image, unlocked by the Windows password, so an image plus that password opens the copies [inferred]. Today's one launcher sign-in has that same exposure.
+4. **Lifetime.** Epic does not document its launcher's token lifetimes. A community-documented token reply for another Epic client shows `"expires_in": 7200` (2 h, the access token) and `"refresh_expires": 28800` (8 h, the refresh token) [reported: [FortniteEndpointsDocumentation][epic-token]]; the launcher's remembered sign-in evidently lasts longer, since it signs in after days unused [inferred]. Refresh tokens are usually **replaced** at each use, so a copy is only good until the launcher next refreshes that account; TcNo handles it by re-saving the outgoing account's session at every switch away, after closing the launcher and before restoring the other [code: TcNo [`internal/basic/flow.go`][tc-flow] `SwapTo`, "needsFreshSnapshot"]. A copy left unused ages out on its own at Epic's limit [inferred]; **E4** measures how long.
+5. **How the owner revokes a copy from Epic's side**: account settings, **Password and security**, "Sign out everywhere", confirmed by a code emailed to the account [docs (excerpt): [Epic, "How do I sign out of all devices and all signed in sessions"][epic-signout]]. That ends every session, the copy included (E4 checks that a copy is dead after it). Changing the password does the same, by Epic's usual practice [inferred].
+
+### 7.4 What the Dashboard would do to limit it
+
+- Keep copies **only wrapped with DPAPI** for the Windows user, in the data folder (`accounts\<launcher>\<account id>.dat`), never in the database, settings, a log, a crash report or a screenshot; the log names the launcher and the account's public name only (section 4).
+- **One copy per account**, refreshed at each switch away (as TcNo), so no stale extras pile up; no recovery copies beyond the one backup a switch needs, deleted when the switch succeeds.
+- **Delete on unbind**, and when a Profile is deleted.
+- **Settings > Profile > Accounts > Forget this sign-in**, per account, and one "Forget all saved sign-ins"; the page lists every copy with the date it was saved, so nothing is kept unseen.
+- **Opt-in per account**: "Save this sign-in for <Profile>" is pressed for each account by its owner; nothing is saved by default.
+- Settings says what a saved sign-in is, in two lines: "A saved sign-in lets the Dashboard switch Epic to you without a password. Anyone who can run programs on this PC as this Windows user could use it; sign out everywhere on Epic's site to end it."
+
+### 7.5 The alternative: no copy
+
+At each switch to a one-account launcher whose account differs, the Dashboard closes it, clears its local sign-in (the `auth` folder and the credential), and starts it on **its own sign-in window**, with a Toast "Sign in to Epic as <account>". The person signs in there each time (password, or Epic's other sign-in options, and two-step verification if on), with the on-screen keyboard and a pad [inferred]. At most one sign-in is at rest, as today, and none is ever the Dashboard's. Cost: a sign-in by hand at every switch of that launcher, which on a TV is slow, and Epic's sign-in page is not made for a pad [inferred]. Clearing the old sign-in locally leaves it valid at Epic until it expires, but no longer on the PC [inferred]. This is ticket A9'.
+
+### 7.6 The same question for the other launchers
+
+| Launcher | Is a copy kept? | What it is | Notes |
+|---|---|---|---|
+| **Steam** | **No** | Steam keeps each remembered account's sign-in itself; the Dashboard only changes which one starts (1.1) | No new exposure |
+| **Battle.net** | **No** | The client keeps a sign-in per remembered email; the Dashboard reorders `SavedAccountNames` (1.3) | Where the client keeps them is unknown (B1); no new exposure |
+| **Epic** | **Yes** | Credential Manager entry + `auth` folder (7.1) | This section |
+| **GOG Galaxy** | **Yes** | The registry's `refreshToken` and the files of 1.5 | Possibly plain text in the registry (G1), so the DPAPI wrap would be the copy's only protection; revoke: GOG's sign-out of all sessions [reported, 2016] or a password change |
+| **EA app** | **Yes** | Two whole folders, `cookie.ini` among them (1.6) | The largest copy, with settings and caches in it; how to revoke EA sessions was not found [UNVERIFIED] |
+| **Ubisoft Connect** | **Yes** | `ConnectSecureStorage.dat` and four files (1.7) | Trusted-device rules may decide whether it works at all (U1); how to revoke was not found [UNVERIFIED] |
+| **legendary, gogdl** | Already, by their design | Each keeps its own sign-in file; A11 would keep **one per account** | The same "N at rest" point, in files the user chose to add; listed and forgettable on the same page |
+| **Xbox** | **No** | Not switched (5.3) | - |
+
+So decision 3 is really "may the Dashboard keep saved sign-ins for one-account launchers (Epic, GOG, EA, Ubisoft)?", which can be answered per launcher.
+
+## 8. Two routes: the Dashboard's own file work, or TcNo's command line
+
+Decision 8: both scoped side by side. Read in TcNo at [`6f1ad81`][tc] (= release v4.0.9).
+
+### 8.1 Route (a): the Dashboard does the file and registry work itself
+
+- **What has to be built**: the switch runner (A6); per launcher, a lister and a switcher following 1.1 to 1.7 (A3, A7, A8, A10, A12, A13, A14); the sign-in store or its no-copy alternative (A9 or A9'). Everything else in 5.6 (A1, A2, A4, A5, A11, A15, A16) is needed by either route.
+- **Coverage**: Steam, Battle.net, Epic (current launcher), GOG Galaxy, EA app, Ubisoft Connect. Not Epic's old launcher (not on the TV PC) or Xbox (not switched).
+- **Effort**: 16 tickets for M10, of which **9 are the file work** (A3, A6's write-and-restore part, A7, A8, A9, A10, A12, A13, A14). Steam and Battle.net are small (markers only); each snapshot launcher is small once A9 exists.
+- **The user installs**: nothing.
+- **Licence**: nothing to comply with. TcNo is read as a reference for *where* each launcher keeps its sign-in, which is a fact about the launchers; no TcNo code is copied [inferred; not legal advice].
+- **Failure modes**: a launcher update moves its files and the Dashboard's switch for it breaks until a fix ships (TcNo's maintainers face the same, and their `Platforms.json` changes are a free early warning to watch); a bug of ours could leave a launcher signed out (the backup and restore of A6 are the guard); writing under `%ProgramData%` (GOG, EA) may need an administrator, which the shell is not (TcNo turns "access is denied" into a "needs admin" error and offers to restart elevated [code: [`internal/basic/flow_helpers.go`][tc-helpers] `wrapNeedsAdminIfPermission`]); G1 and EA1 find out.
+- **Testability**: all of it but the real launchers' acceptance runs in CI: listers on made-up files, switchers against `standin`'s fake launchers (it already makes a fake Steam, Epic, GOG, EA, Ubisoft and Battle.net), DPAPI and Credential Manager behind a trait with a fake on Linux. The real launchers are tested on the TV PC (section 6).
+
+### 8.2 Route (b): calling TcNo Account Switcher's command line
+
+- **What TcNo's CLI offers** [code: [`internal/cli/help.go`][tc-cli], [`main.go`][tc-main], [`internal/app/dispatch.go`][tc-disp]]:
+  - `--list-accounts=<platform> --json`: each saved account's `uniqueId`, `displayName`, `lastLoggedIn`; printed and exited before TcNo's window or single-instance lock.
+  - `+s:<steamId64>` and `+<code>:<uniqueId>` (codes from `Platforms.json`: `eg` Epic, `b` Battle.net, `g` GOG, `ea` EA, `u` Ubisoft): a **headless swap** (`RunHeadless`), exit code 0, or 1 with the error on stderr. It closes the launcher, re-saves the outgoing account, restores the target and starts the launcher.
+  - **No "save current account" on the command line**: accounts are saved only in TcNo's own window.
+- **What has to be built**: a TcNo driver (find it, check its version, list, swap, read the exit code, log), a Settings page that lists what TcNo has saved and sends the user to TcNo to save more, and everything route (a) shares (A1, A2, A4, A5, A6 without the write part, A11, A15, A16). The runner must still check "signed in" itself: TcNo starts the launcher and returns.
+- **Coverage**: everything TcNo covers: 26 platforms, including all six here. No Xbox.
+- **Effort**: about **10 tickets** (the 8 shared, the driver, the TcNo set-up page).
+- **The user installs**: TcNo (installer or portable build from its [releases][tc-rel]), keeps it updated, and **saves every account of every launcher in TcNo's window**, outside the Dashboard; and must not set TcNo's app password (below).
+- **Licence**: TcNo is **GPL-3.0** [code: [LICENSE][tc-lic]].
+  - **Invoking it** is allowed and puts no condition on the Dashboard: "pipes, sockets and command-line arguments are communication mechanisms normally used between two separate programs" [docs: [GNU GPL FAQ, MereAggregation][gpl-faq-agg]].
+  - **Shipping it** inside the Dashboard's installer is allowed as an aggregate, "even when the licenses of the other software are nonfree or GPL-incompatible" [docs: same], provided TcNo goes with its licence and its source (or a written offer for it) [docs: [GPL-3.0][gpl3] sections 5 and 6], and the Dashboard's own licence (undecided; plan.md question 5) does not restrict TcNo's. Simplest: **do not ship it**; the user installs it from TcNo's own page. Not legal advice.
+  - Copying TcNo's code or its `Platforms.json` into the Dashboard would make that part GPL: not done on either route.
+- **Failure modes** [code unless marked]:
+  - **TcNo's window already open**: a second TcNo forwards its arguments to the first over a named pipe and **exits 0 at once**, so the Dashboard cannot tell whether the swap happened ([`main.go`][tc-main]: `ipc.ForwardArgs`). The Dashboard must check the result itself, and should make sure TcNo is not running first.
+  - **TcNo's app password**: a headless swap first calls `security.RequireUnlocked()` and refuses while TcNo is locked; with saved-account encryption on, the saved copies cannot be read while locked [code: [`internal/security/vault.go`][tc-vault]]. Whether a headless run can ever be unlocked was not followed [UNVERIFIED].
+  - **Saved copies outside the Dashboard's control**: TcNo keeps them in its own `LoginCache` folder; without its app password they are **plain copies** (GOG's `refreshToken` dumped into a `reg.json` as text [code: [`flow_registry.go`][tc-reg]]); only Epic's credential session is DPAPI-wrapped. So route (b) answers decision 3 with "yes, copies, in a weaker form, kept by another program", and the app password that would protect them breaks the headless swap.
+  - **Elevation**: "needs admin" errors for `%ProgramData%` writes, and an "always run as admin" setting that would put a UAC prompt over the shell [code: [`flow_helpers.go`][tc-helpers]; `main.go` `ShouldElevateAtStartup`].
+  - **A moving interface**: TcNo's CLI is described only by its `--help` text, with no promise of stability [inferred]. Its updater can change behaviour under the Dashboard between two of our releases.
+  - **One more program trusted with every account's sign-in**, with its own updater, crash reporter and Discord presence [code; inferred].
+- **Testability**: in CI, only the Dashboard's side, against a fake `TcNo-Acc-Switcher.exe` (a `standin` subcommand answering `--list-accounts --json` and `+x:<id>`); TcNo itself is a Windows desktop program and its file work is tested only on the TV PC [inferred].
+
+### 8.3 Side by side
+
+| | (a) The Dashboard's own | (b) TcNo's CLI |
+|---|---|---|
+| Tickets for M10 | **16** (9 of them file work) | **about 10** |
+| Launchers | Steam, Battle.net, Epic, GOG, EA, Ubisoft | The same, and 20 more not needed |
+| User installs | Nothing | TcNo, kept updated |
+| Saving an account | In Settings, with the pad | In TcNo's own window |
+| Saved sign-ins (decision 3) | Ours: DPAPI-wrapped, opt-in, listed, forgettable; or none (A9') | TcNo's: plain copies unless its app password, which blocks headless swaps |
+| Licence | Nothing | GPL-3.0: invoking fine; shipping needs its source and licence along |
+| When a launcher changes | We fix it | TcNo fixes it, usually first |
+| Result of a swap | Known (our own code) | Exit code, but none when TcNo's window is open |
+| Tested in CI | All but the real launchers | The driver only, against a fake TcNo |
+
+Route (b) drops A3, A7's and A8's writes, A9 or A9', A10, A12, A13 and A14, and adds the driver and the TcNo set-up page.
+
+### 8.4 Recommendation
+
+**Route (a), the Dashboard's own file work**, with TcNo's `Platforms.json` and Steam code kept as the reference to check against at each TcNo release. The six extra tickets are small, and the gains are the ones that matter on a TV: accounts are saved from the Dashboard with the pad, the saved sign-ins are the Dashboard's to protect, list and forget (decision 3's whole question), nothing else has to be installed or kept unlocked, and a swap's result is never unknown. Build it in two steps: Steam and Battle.net first (no copies, so decision 3 does not block them: A1 to A8), then the snapshot launchers once decision 3 is taken. Route (b) is the fallback if the snapshot launchers turn out to change their files often (watch for it in G1, EA1, U1 and TcNo's history).
 
 ## Open questions for the user
 
-1. **Xbox**: is "the Dashboard names the account and opens the Xbox app's account page; you switch it there" enough? The alternative that truly switches is one Windows user per person (3.4), with Windows' lock screen in between.
-2. **The middleman executable**: this research recommends **not** building one (3.5). Agree?
-3. **Epic's snapshot**: may the Dashboard keep a DPAPI-protected copy of the Epic launcher's session per account in its data folder (as TcNo does), or only switch launchers that remember several accounts themselves (Steam, Battle.net)?
-4. **Play time and achievements**: per account (what the store says for that account, the recommendation) or per Profile (what the Dashboard saw that person play, across accounts)?
-5. **GOG, EA, Ubisoft**: switch them too (whole-folder snapshots, brittle), or leave them on "Any"?
-6. **Discord**: should a Profile also be bound to its own Discord account once M9 is in?
-7. **A download under way**: ask each time (recommended), or always wait, or always switch and pause?
-8. **TcNo as a helper**: drive TcNo's CLI for the file work, as legendary is driven, rather than the Dashboard doing it itself? Recommended: no (a whole desktop app; GPL; release lags master), but it would cover more launchers sooner.
+Answered on 18 November 2026: see "Decisions" at the top. Still open:
+
+1. **Decision 3, saved sign-ins**, now for Epic, GOG, EA and Ubisoft, with the risks in section 7: keep them (opt-in per account, 7.4), or no copies and the launcher's own sign-in window at each switch (7.5)? It can be answered per launcher.
+2. **Xbox, the reading of "Nah"**: no Windows user per person, and the Dashboard only names the account and opens the Xbox app's account page. Right?
+3. **The route**: (a) the Dashboard's own file work (recommended) or (b) TcNo's command line (section 8)?
+4. **Play time seed** (5.5): when a Profile is first bound to an account, take that account's existing play time and achievements into the Profile once, or start the Profile from zero?
 
 [tc]: https://github.com/TCNOco/TcNo-Acc-Switcher/tree/6f1ad81e80703da600c8f6d3263a288a23bf698f
 [tc-pj]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/Platforms.json
@@ -369,3 +570,24 @@ Each by the lead, by hand, with the user's own accounts, **after a backup** of t
 [ssa]: https://store.steampowered.com/subscriber_agreement/
 [epic-tos]: https://cdn1.epicgames.com/eulatracking-download/epicgames_tos/en/v2/r1/45d4dd9e67fab2855ba409cd77569499.pdf
 [bn-eula]: https://www.blizzard.com/legal/2c72a35c-bf1b-4ae6-99ec-80624e1b429c
+[tc-reg]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/internal/basic/flow_registry.go
+[tc-flow]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/internal/basic/flow.go
+[tc-helpers]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/internal/basic/flow_helpers.go
+[tc-main]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/main.go
+[tc-disp]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/internal/app/dispatch.go
+[tc-vault]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/internal/security/vault.go
+[tc-lic]: https://github.com/TCNOco/TcNo-Acc-Switcher/blob/6f1ad81e80703da600c8f6d3263a288a23bf698f/LICENSE
+[tc-rel]: https://github.com/TCNOco/TcNo-Acc-Switcher/releases
+[gpl-faq-agg]: https://www.gnu.org/licenses/gpl-faq.html#MereAggregation
+[gpl3]: https://www.gnu.org/licenses/gpl-3.0.html
+[epic-token]: https://github.com/LeleDerGrasshalmi/FortniteEndpointsDocumentation/blob/main/EpicGames/AccountService/Authentication/Token.md
+[epic-signout]: https://www.epicgames.com/help/en-US/c-202300000001645/c-202300000001755/how-do-i-sign-out-of-all-devices-and-all-signed-in-sessions-for-my-epic-games-account-a202300000014282
+[epic-pin]: https://safety.epicgames.com/parental-controls
+[ms-kfm]: https://learn.microsoft.com/sharepoint/redirect-known-folders
+[gog-forum]: https://www.gog.com/forum/general/my_account_has_been_hacked/post7
+[gog-2fa]: https://www.tweaktown.com/news/50911/gog-adds-optional-two-step-login-https-encryption/index.html
+[ea-help]: https://help.ea.com/no/articles/platforms/how-to-use-ea-app/
+[ea-forum-keep]: https://forums.ea.com/discussions/ea-app-technical-issues-en/re-ea-app-fails-to-remember-keep-me-signed-in-option/7657954
+[ea-forum-two]: https://forums.ea.com/discussions/ea-app-feedback-en/is-two-too-many/12367299
+[ea-forum-sims]: https://forums.ea.com/discussions/the-sims-4-technical-issues-pc-en/how-do-you-signout-of-your-sims4-account-to-login-into-a-different-account/11817195
+[ubi-remember]: https://steamcommunity.com/app/2208920/discussions/1/3713811178932018440
