@@ -130,6 +130,7 @@ A row of tabs starting 21 into the panel: tab *i* (from 0) is the box x 99+84*i*
 - Selected mark: a bar 84 wide, 6 high, radius 2, `#FF2CA243`, at the tab's foot hanging 4 below it: y 133..139. No glow (1071-1077). Measured x 99..182, y 133..138.
 - In M2 without the Discord tab: Landing at x 99..183, Profile & system at x 183..267 (measured: mark x 124..157, picture x 198..251, y 57..110).
 - Tabs are not focusable and have no focus state; they change with LB/RB only. The underline moves at once.
+- **The port's landing tab mark is the picture's size, not the Bundle's 33 (#269).** The user, on the TV PC, where the mark showed about 34 px beside the 54 px picture: "please make the home button bigger in the guide". The Bundle's XAML has the Xbox mark at 33 and the picture at 54 (OverlayWindow.xaml 1048-1049), so its mark is smaller than the picture and the user's request wins: the port's Guide button mark (10.1) has its ring 54 across, the picture's diameter, on the same centre (the tab's), its square drawn 54 x 24 / 23.2 (about 55.9) since the ring's outer edge is 23.2 of the drawing's 24 (`guide::marks::guide_button_across`). The tabs' boxes, their pitch, the underline and the colours are as above; the mark in the hints and the Toasts keeps its own size (10.1).
 
 ### 2.3 Status area (beside the panel, stacked form)
 
@@ -704,7 +705,7 @@ The user, on the TV PC: "no Xbox icons in the guide or the toasts". Every icon o
 
 | Where | The Bundle | The port before | The port now |
 |---|---|---|---|
-| Header: the landing tab | The Xbox mark, 33 | A plain disc | Drawn: the Guide button, 33, grey or white |
+| Header: the landing tab | The Xbox mark, 33 | A plain disc | Drawn: the Guide button, its ring 54 across as the picture is (#269, 2.2), grey or white |
 | Header: the Discord tab | Discord's logo, 36 | A rounded bar | Drawn: chat, two speech bubbles (`Drawing::Chat`), 36 |
 | Header: the Profile & system tab | The profile's picture | The picture | Unchanged |
 | Hints beside the panel: "Hold for power options" | The Xbox mark | A plain disc | Drawn: the Guide button, 27 |
