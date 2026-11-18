@@ -149,6 +149,12 @@ impl Home {
         recent::games(self.play_history)
     }
 
+    /// What `--log-focus` says of the game's art behind Home as it was last drawn (`home background: ...`), None
+    /// with the swirl alone.
+    pub fn background_line(&self) -> Option<&str> {
+        self.background.line()
+    }
+
     /// Whether Home is what the player is looking at, or lies under the Guide: the swirl moves only in front.
     pub fn set_in_front(&mut self, in_front: bool) {
         self.background.in_front = in_front;

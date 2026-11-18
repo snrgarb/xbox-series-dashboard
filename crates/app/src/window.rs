@@ -190,6 +190,8 @@ struct App {
     media: Box<dyn MediaSessions>,
     /// What --log-focus last said of the card (`now playing: ...`): said again only as it changes.
     now_playing_said: Option<String>,
+    /// What --log-focus last said of the art behind Home (`home background: ...`): said again only as it changes.
+    background_said: Option<String>,
     /// How long the sound of leaving has still to play: Exit waits for it.
     leaving: Duration,
     /// The minute of the day Home's last frame showed on its clock.
@@ -565,6 +567,7 @@ pub fn run(
             }
         },
         now_playing_said: None,
+        background_said: None,
         leaving: Duration::ZERO,
         minute: minute(),
         frames: args.log_frames.then(|| ([0; 3], Instant::now())),
@@ -2242,6 +2245,12 @@ impl App {
                     playing.after_present();
                 }
                 Self::say_startup(&self.dashboard, &mut self.startup_said);
+                // With --log-focus: the game's art behind Home as it goes up, and where it was drawn (#247).
+                let background = self.dashboard.home_background_line();
+                if self.log_focus && background.is_some() && background != self.background_said {
+                    eprintln!("home background: {}", background.as_deref().unwrap_or_default());
+                }
+                self.background_said = background;
                 if self.home_presented.is_none() && !self.dashboard.starting_up() {
                     self.home_presented = Some(Instant::now());
                     eprintln!("startup: Home's first frame at {:.0} ms", since_start());

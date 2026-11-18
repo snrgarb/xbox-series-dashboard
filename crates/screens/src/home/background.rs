@@ -62,6 +62,9 @@ pub struct Background {
     /// each from wherever it is, so a crossfade cut short by another carries on smoothly.
     layers: [Option<Hero>; 2],
     front: usize,
+    /// What `--log-focus` says of the art up front as it was last drawn (#247): its decoded size, where on the
+    /// output in pixels it was drawn and the part of it shown. None while the swirl is all there is.
+    line: Option<String>,
 }
 
 impl Default for Background {
@@ -77,11 +80,19 @@ impl Default for Background {
             shown: None,
             layers: [None, None],
             front: 0,
+            line: None,
         }
     }
 }
 
 impl Background {
+    /// What `--log-focus` says of the game's art behind Home as it was last drawn: `<w>x<h> art drawn over <x>,<y>
+    /// <w>x<h>, uv <u0>,<v0>,<u1>,<v1>`, the picture's decoded size, its box on the output in pixels and the part of
+    /// it that fills the box. None with the swirl alone.
+    pub fn line(&self) -> Option<&str> {
+        self.line.as_deref()
+    }
+
     /// Focus moved on Home: whatever the background was waiting to follow, the wait starts again.
     pub fn focus_moved(&mut self) {
         self.moved = true;
@@ -112,12 +123,26 @@ impl Background {
             if shown <= 0.0 {
                 continue;
             }
+            // The blur's soft edges hang 120 off every side of the screen.
+            let rect = if *blurred { screen.grow(120.0) } else { screen };
             if *blurred {
-                // The blur's soft edges hang 120 off every side of the screen.
-                ui.art_darkened(screen.grow(120.0), key, Crop::Top, shown, BLURRED_LIGHT);
+                ui.art_darkened(rect, key, Crop::Top, shown, BLURRED_LIGHT);
             } else {
-                ui.art(screen, key, Crop::Top, shown, 0.0);
+                ui.art(rect, key, Crop::Top, shown, 0.0);
             }
+            if layer == self.front {
+                if let Art::Ready { width, height, .. } = ui.art.get(key) {
+                    let [u0, v0, u1, v1] = ui::fill_uv((width, height), rect, Crop::Top);
+                    let at = ui.in_pixels(rect);
+                    self.line = Some(format!(
+                        "{width}x{height} art drawn over {:.0},{:.0} {:.0}x{:.0}, uv {u0:.3},{v0:.3},{u1:.3},{v1:.3}",
+                        at.x, at.y, at.w, at.h
+                    ));
+                }
+            }
+        }
+        if self.shown.is_none() {
+            self.line = None;
         }
 
         // The scrim: dark at the top for the top bar, darker at the foot for the rows.

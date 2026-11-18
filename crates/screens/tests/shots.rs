@@ -417,6 +417,60 @@ fn home_recent_tile_pictures_are_cut_about_their_middle() {
     }
 }
 
+/// A background the shape of Steam's library hero, 1920 by 620, much wider than the screen (#247): its red is a
+/// ruler, `x` across it in 255ths, and a white mark stands about 63% across, off its middle as a picture's subject
+/// often is. Green and blue are a dark grey.
+fn ruler_art() -> PathBuf {
+    let (w, h) = (1920, 620);
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("art").join("ruler-1920x620.png");
+    let image = image::RgbImage::from_fn(w, h, |x, _| {
+        if (x as f32 + 0.5 - w as f32 * MARK).abs() < w as f32 * 0.01 {
+            image::Rgb([0xFF, 0xFF, 0xFF])
+        } else {
+            image::Rgb([(x * 255 / (w - 1)) as u8, 0x40, 0x40])
+        }
+    });
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    shots::save_shared(&image, &path);
+    path
+}
+
+/// Where across the ruler's picture its mark stands.
+const MARK: f32 = 0.63;
+
+/// Home's background, a picture much wider than the screen (#247), fills it as the Bundle's `UniformToFill` does:
+/// as tall as the screen, cut about its middle across. The ruler's red at the screen's two edges says which part of
+/// the picture shows, and the mark where it stands: at 1080p and at 4K alike.
+#[test]
+fn home_background_wider_than_the_screen_is_cut_about_its_middle() {
+    let mut library = library_with_art();
+    library.games[0].hero = Some(ruler_art());
+    // The picture as tall as the screen is 1080 / 620 times its width: 3345 of 1920, so 57.4% of it shows, from
+    // 21.3% across to 78.7%, and the mark lands 72.7% across the screen.
+    let shown = (1920.0 / 1080.0) / (1920.0 / 620.0);
+    let (from, to) = ((1.0 - shown) / 2.0, (1.0 + shown) / 2.0);
+    let mark = (MARK - from) / shown;
+    for (scale, size, name) in [(1.0, HD, Some("home-background-wide")), (2.0, (3840, 2160), None)] {
+        let image = Stage::on_row(library.clone(), size).still();
+        // Between the top bar and the rows, where the scrim leaves the art as it is.
+        let y = (300.0 * scale) as u32;
+        let width = size.0 as f32;
+        let red = |x: u32| image.get_pixel(x, y).0[0] as f32 / 255.0;
+        let (left, right) = (red(0), red(size.0 - 1));
+        let middle = stripe_middle(&image, y, 0, size.0) / width;
+        eprintln!("{size:?}: left edge {left:.3}, right edge {right:.3}, mark at {middle:.3} of the screen");
+        assert!(
+            (left - from).abs() < 0.01,
+            "{size:?}: the left edge shows the picture {left:.3} across, not {from:.3}"
+        );
+        assert!((right - to).abs() < 0.01, "{size:?}: the right edge shows {right:.3} across, not {to:.3}");
+        assert!((middle - mark).abs() < 0.005, "{size:?}: the mark at {middle:.3} of the screen, not {mark:.3}");
+        if let Some(name) = name {
+            compare(name, &image);
+        }
+    }
+}
+
 #[test]
 fn home_blurred_cover_behind_a_game_with_no_background() {
     let mut stage = Stage::on_row(library_with_art(), HD);
