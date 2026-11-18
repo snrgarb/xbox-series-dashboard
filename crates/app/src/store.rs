@@ -671,9 +671,11 @@ impl Store {
             return None;
         }
         let hosts = self.store_art_service.as_deref().map_or_else(Hosts::default, Hosts::all_at);
+        let order = model::ArtOrder::read(self.setting(model::art_order::KEY).as_deref()).on();
         let services = Services {
             stores: Some(StoreArt::new(hosts)),
             steamgriddb: self.art_key().map(|key| Service::new(&self.art_service, &key)),
+            order,
         };
         Some((self.art_dir()?, services))
     }

@@ -116,6 +116,9 @@ pub struct Options {
     pub art_online: bool,
     /// A SteamGridDB key has been entered (Settings > Art): with art online on, SteamGridDB is asked too.
     pub art_key: bool,
+    /// The online art sources' order, and which are on (Settings > Art's sources): kept as the row
+    /// `model::art_order::KEY`. Playnite's order, all on, until it is set.
+    pub art_order: model::ArtOrder,
     /// Who's playing today? asks on every start and on waking from sleep: on by default, as the Bundle's.
     pub ask_whos_playing: bool,
     /// Settings > About checks for updates once a day: off by default.
@@ -148,6 +151,7 @@ impl Default for Options {
             use_guide: of(Setting::UseGuide),
             art_online: of(Setting::DownloadArtOnline),
             art_key: false,
+            art_order: model::ArtOrder::default(),
             ask_whos_playing: of(Setting::AskWhosPlaying),
             daily_update_check: of(Setting::DailyUpdateCheck),
             boot_video: BootVideo::DEFAULT,
@@ -171,6 +175,7 @@ impl Options {
             }
         }
         options.art_key = stored(ART_KEY).is_some_and(|key| !key.trim().is_empty());
+        options.art_order = model::ArtOrder::read(stored(model::art_order::KEY).as_deref());
         if let Some(video) = stored(BOOT_VIDEO).as_deref().and_then(BootVideo::from_key) {
             options.boot_video = video;
         }
@@ -229,6 +234,7 @@ mod tests {
         assert!(options.use_guide && !options.reduce_motion && options.ask_whos_playing);
         // The port's own: art online is on until it is turned off.
         assert!(options.art_online && !options.art_key);
+        assert_eq!(options.art_order, model::ArtOrder::default(), "Steam, Xbox, PlayStation, SteamGridDB, all on");
         // The port's own: no update check of its own accord until it is turned on.
         assert!(!options.daily_update_check);
     }

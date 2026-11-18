@@ -5,12 +5,17 @@
 //!    read).
 //! 2. Our own cache in the data folder ([`ArtDir`]): a snapshot of the library fills in from it what the source did
 //!    not give (`Database::snapshot`).
-//! 3. The store's own art online ([`StoreArt`]): its CDN or public catalogue, no key, unless Settings' Download art
-//!    online is off; off the UI thread ([`Lookup`]), into that cache.
-//! 4. SteamGridDB ([`Service`]), only with the user's own key and art online on, the same way.
+//! 3. The game's own store online ([`Store::Own`]: GOG's catalogue, a client's named addresses), no key.
+//! 4. The online sources in the user's order (`model::ArtOrder`, Settings > Art), by default Playnite's: Steam's store,
+//!    Xbox (the Microsoft Store's catalogue), the PlayStation Store ([`StoreArt`], no key), then SteamGridDB
+//!    ([`Service`], only with the user's own key). Each kind of picture falls through them apart, until one has it;
+//!    a game that is not a store's own is found there by its name ([`names`]: the same game or nothing).
+//!
+//! 3 and 4 only with Settings' Download art online on, off the UI thread ([`Lookup`]), into that cache.
 pub mod cache;
 pub mod fake;
 pub mod lookup;
+pub mod names;
 pub mod picker;
 pub mod steamgriddb;
 pub mod store_online;
@@ -19,7 +24,7 @@ pub use cache::{ArtDir, Kind, Online};
 pub use lookup::{wanted, Event, Log, Lookup, Pace, Pictures, Services, Summary, Want};
 pub use picker::{download_full, Picker};
 pub use steamgriddb::{Service, SERVICE};
-pub use store_online::{Hosts, StoreArt};
+pub use store_online::{Hosts, Store, StoreArt};
 
 /// The settings row that holds the user's SteamGridDB key. Its value is never logged.
 pub const KEY_SETTING: &str = "art.steamgriddb_key";
@@ -80,7 +85,7 @@ mod tests {
         let lines = Arc::new(Mutex::new(Vec::new()));
         let kept = lines.clone();
         let log: Log = Arc::new(move |line| kept.lock().unwrap().push(line.to_string()));
-        let services = Services { stores: None, steamgriddb: Some(Service::new(&service.url(), key)) };
+        let services = Services { steamgriddb: Some(Service::new(&service.url(), key)), ..Services::default() };
         let summary = Lookup::run_now(dir.clone(), services, wanted(library), NOW, pace(), log);
         let log = lines.lock().unwrap().clone();
         Ran { summary, log }
@@ -189,7 +194,7 @@ mod tests {
         let kept = lines.clone();
         let log: Log = Arc::new(move |line| kept.lock().unwrap().push(line.to_string()));
         let later = NOW + 8 * 86_400;
-        let services = Services { stores: None, steamgriddb: Some(Service::new(&fake.url(), KEY)) };
+        let services = Services { steamgriddb: Some(Service::new(&fake.url(), KEY)), ..Services::default() };
         Lookup::run_now(art.clone(), services, wanted(&library), later, pace(), log);
         assert!(fake.requests().len() > asked);
     }
@@ -210,7 +215,7 @@ mod tests {
         let (done, finished) = std::sync::mpsc::channel();
         let lookup = Lookup::start(
             art.clone(),
-            Services { stores: None, steamgriddb: Some(Service::new(&fake.url(), "wrong-key")) },
+            Services { steamgriddb: Some(Service::new(&fake.url(), "wrong-key")), ..Services::default() },
             wanted(&library),
             NOW,
             pace(),
@@ -266,7 +271,7 @@ mod tests {
         let snapshot = db.snapshot().unwrap();
         let _lookup = Lookup::start(
             art.clone(),
-            Services { stores: None, steamgriddb: Some(Service::new(&fake.url(), KEY)) },
+            Services { steamgriddb: Some(Service::new(&fake.url(), KEY)), ..Services::default() },
             wanted(&snapshot),
             NOW,
             pace(),
@@ -378,12 +383,23 @@ mod tests {
     }
 
     fn run_with(dir: &ArtDir, fake: &FakeService, key: Option<&str>, library: &Library) -> Ran {
+        run_in(dir, fake, key, library, &model::ArtSource::ALL)
+    }
+
+    fn run_in(
+        dir: &ArtDir,
+        fake: &FakeService,
+        key: Option<&str>,
+        library: &Library,
+        order: &[model::ArtSource],
+    ) -> Ran {
         let lines = Arc::new(Mutex::new(Vec::new()));
         let kept = lines.clone();
         let log: Log = Arc::new(move |line| kept.lock().unwrap().push(line.to_string()));
         let services = Services {
             stores: Some(StoreArt::new(Hosts::all_at(&fake.stores_url()))),
             steamgriddb: key.map(|key| Service::new(&fake.url(), key)),
+            order: order.to_vec(),
         };
         let summary = Lookup::run_now(dir.clone(), services, wanted(library), NOW, pace(), log);
         let log = lines.lock().unwrap().clone();
@@ -447,7 +463,8 @@ mod tests {
         assert!(line.starts_with("art: 3 looked up, 3 found, 0 none, in "), "{line}");
         assert!(line.ends_with("; pictures: 1 store files, 0 cache, 8 store online, 0 SteamGridDB"), "{line}");
         // What a store had not is remembered as its miss, not SteamGridDB's.
-        assert!(art.missed("steam", "620", Kind::Hero, Online::Store, NOW));
+        assert!(art.missed("steam", "620", Kind::Hero, Online::Steam, NOW));
+        assert!(art.missed("steam", "620", Kind::Hero, Online::Microsoft, NOW), "and Xbox had no game of its name");
         assert!(!art.missed("steam", "620", Kind::Hero, Online::SteamGridDb, NOW));
 
         // A key, the next start: SteamGridDB for what the stores had not, and the stores not asked again.
@@ -503,10 +520,14 @@ mod tests {
         let art = ArtDir::under(dir.path());
         let ran = run_with(&art, &fake, None, &library);
         assert_eq!(ran.summary.pictures.store_online, 1);
-        assert_eq!(fake.requests().len(), 1, "the picture, and nothing else: {:?}", fake.requests());
+        let asked: Vec<String> = fake.requests().into_iter().map(|r| r.path).collect();
+        // The picture, and for the rest the other stores' searches by name; no catalogue for the cover.
+        assert_eq!(asked.iter().filter(|path| path.contains("/gog-images/")).count(), 1, "{asked:?}");
+        assert!(asked.iter().all(|path| !path.contains("/gog/v2/")), "{asked:?}");
         assert!(art.find("epic", "MossApp", Kind::Cover).is_some());
-        // Nothing else of an Epic game is online at its store: no misses either, for a key to find later.
+        // Nothing else of an Epic game is online at its own store: no misses there, for another source to find.
         assert!(!art.missed("epic", "MossApp", Kind::Hero, Online::Store, NOW));
+        assert!(art.missed("epic", "MossApp", Kind::Hero, Online::Steam, NOW), "no Steam game of its name");
     }
 
     #[test]
@@ -542,5 +563,156 @@ mod tests {
         let lines = lines.lock().unwrap().clone();
         assert_eq!(lines.len(), 1);
         assert!(lines[0].ends_with("; pictures: 1 store files, 0 cache, 0 store online, 0 SteamGridDB"), "{lines:?}");
+    }
+
+    // ------------------------------------------------------------- any source's game, in the user's order (#246)
+
+    /// A stand-in whose stores know games by name: `named` as `(store, name, id, kinds)`.
+    fn with_named(games: Vec<FakeGame>, named: Vec<(&str, &str, &str, &[Kind])>) -> FakeService {
+        let mut stores_script = fake::StoreScript::new(Arc::new(store_png));
+        for (store, name, id, kinds) in named {
+            stores_script.games.push((store.into(), id.into(), kinds.to_vec()));
+            stores_script.named.push((store.into(), name.into(), id.into()));
+        }
+        FakeService::start(0, Script { stores: Some(stores_script), ..script(games) }).unwrap()
+    }
+
+    #[test]
+    fn a_steam_game_with_no_square_at_steam_or_steamgriddb_gets_xboxs_and_each_kind_falls_through_apart() {
+        let library = Library {
+            games: vec![game("steam", "1874", "Made-up Reforger™"), game("epic", "Quarry", "Made-up Quarry")],
+            ..Library::default()
+        };
+        let fake = with_named(
+            // SteamGridDB has covers alone.
+            vec![
+                known(1, "Made-up Reforger", &[("steam", "1874")], &[Kind::Cover]),
+                known(2, "Made-up Quarry", &[], &[Kind::Cover]),
+            ],
+            vec![
+                // Steam has its own game's cover, hero and header; and the Epic game's, by its name.
+                ("steam", "Made-up Reforger", "1874", &[Kind::Cover, Kind::Hero, Kind::Header]),
+                ("steam", "Made-up Quarry", "77", &[Kind::Cover]),
+                // A near name at Xbox is passed over; the same name, mark and all, is taken.
+                ("xbox", "Made-up Reforger - Rally", "9ZZZMADEUP31", &Kind::ALL),
+                ("xbox", "MADE-UP REFORGER", "9ZZZMADEUP32", &Kind::ALL),
+                // PlayStation has the Epic game, Xbox not.
+                ("playstation", "Made-up Quarry PS4 & PS5", "EP1-QUARRY", &[Kind::Square, Kind::Hero]),
+            ],
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        let ran = run_with(&art, &fake, Some(KEY), &library);
+        assert_eq!(whose(&art, "steam", "1874", Kind::Cover), "store steam 1874 cover");
+        assert_eq!(whose(&art, "steam", "1874", Kind::Square), "store xbox 9ZZZMADEUP32 square");
+        assert_eq!(whose(&art, "epic", "Quarry", Kind::Cover), "store steam 77 cover");
+        assert_eq!(whose(&art, "epic", "Quarry", Kind::Hero), "store playstation EP1-QUARRY hero");
+        assert_eq!(whose(&art, "epic", "Quarry", Kind::Square), "store playstation EP1-QUARRY square");
+        assert_eq!(whose(&art, "epic", "Quarry", Kind::Header), "none", "no source had it");
+        let asked: Vec<String> = fake.requests().into_iter().map(|r| r.path).collect();
+        assert!(!asked.iter().any(|path| path.contains("9ZZZMADEUP31")), "the near name is never asked: {asked:?}");
+        // Steam's own game is asked by its appid, never searched for by name at Steam.
+        assert!(!asked.iter().any(|path| path.contains("storesearch") && path.contains("Reforger")), "{asked:?}");
+        // SteamGridDB is asked only for what no store had: the Epic game's header.
+        let grids: Vec<&String> =
+            asked.iter().filter(|path| path.starts_with("/grids") || path.starts_with("/heroes")).collect();
+        assert!(grids.iter().all(|path| path.contains("920x430")), "{grids:?}");
+        // A line a game, by its id: which source gave each kind.
+        let line = "art: steam 1874: cover Steam, hero Steam, header Steam, square Xbox";
+        assert!(ran.log.contains(&line.to_string()), "{:?}", ran.log);
+        assert!(
+            ran.log
+                .contains(&"art: epic Quarry: cover Steam, hero PlayStation, header none, square PlayStation".into()),
+            "{:?}",
+            ran.log
+        );
+        for line in &ran.log {
+            assert!(!line.contains("Made-up"), "no game's name: {line}");
+        }
+    }
+
+    #[test]
+    fn a_name_the_stores_search_misses_whole_is_found_by_its_start_and_a_miss_is_said_without_the_name() {
+        let library = Library {
+            games: vec![game("steam", "6", "Made-up Field™ 6 Enhanced"), game("steam", "7", "Made-up Nowhere")],
+            ..Library::default()
+        };
+        let fake = with_named(
+            vec![],
+            vec![
+                // Its search finds nothing for "Made up Field 6 Enhanced"; for "Made up Field 6", the game and a
+                // near name.
+                ("xbox", "Made-up Field 6 Season Pass", "9ZZZMADEUP60", &Kind::ALL),
+                ("xbox", "MADE-UP FIELD™ 6", "9ZZZMADEUP61", &Kind::ALL),
+                ("xbox", "Made-up Nowhere 2", "9ZZZMADEUP70", &Kind::ALL),
+            ],
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        let ran = run_with(&art, &fake, None, &library);
+        assert_eq!(whose(&art, "steam", "6", Kind::Square), "store xbox 9ZZZMADEUP61 square");
+        assert_eq!(whose(&art, "steam", "7", Kind::Square), "none", "a near name is never taken");
+        let asked: Vec<String> = fake.requests().into_iter().map(|r| r.path).collect();
+        assert!(!asked.iter().any(|path| path.contains("9ZZZMADEUP60") || path.contains("9ZZZMADEUP70")), "{asked:?}");
+        // Asked twice ("Made up Nowhere", then "Made up"), the near names counted, none taken: said by the id.
+        let said = |line: &&String| {
+            line.starts_with("art: steam 7: Xbox: ") && line.ends_with(" candidates, none the same name")
+        };
+        assert!(ran.log.iter().any(|line| said(&line) && !line.contains(": 0 candidates")), "{:?}", ran.log);
+        for line in &ran.log {
+            assert!(!line.contains("Made-up") && !line.contains("Nowhere"), "no game's name: {line}");
+        }
+    }
+
+    #[test]
+    fn the_users_order_is_followed_and_a_source_turned_off_is_never_asked() {
+        use model::ArtSource::*;
+        let library = Library { games: vec![game("steam", "5", "Made-up Lantern")], ..Library::default() };
+        let make = || {
+            with_named(
+                vec![known(5, "Made-up Lantern", &[("steam", "5")], &Kind::ALL)],
+                vec![
+                    ("steam", "Made-up Lantern", "5", &[Kind::Cover, Kind::Hero, Kind::Header]),
+                    ("xbox", "Made-up Lantern", "9ZZZMADEUP05", &Kind::ALL),
+                ],
+            )
+        };
+        // SteamGridDB first: every kind is its.
+        let fake = make();
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        let ran = run_in(&art, &fake, Some(KEY), &library, &[SteamGridDb, Steam, Xbox, PlayStation]);
+        assert_eq!(ran.summary.pictures.steamgriddb, 4);
+        assert!(fake.requests().iter().all(|r| !r.path.starts_with("/stores/")), "{:?}", fake.requests());
+
+        // Steam off, Xbox before PlayStation and SteamGridDB: Xbox's, and Steam never asked.
+        let fake = make();
+        let art = ArtDir::under(&dir.path().join("second"));
+        let ran = run_in(&art, &fake, Some(KEY), &library, &[Xbox, PlayStation, SteamGridDb]);
+        assert_eq!(ran.summary.pictures.store_online, 4);
+        assert_eq!(whose(&art, "steam", "5", Kind::Cover), "store xbox 9ZZZMADEUP05 cover");
+        assert!(fake.requests().iter().all(|r| !r.path.contains("/steam-")), "{:?}", fake.requests());
+        assert!(fake.requests().iter().all(|r| r.authorization.is_none()), "SteamGridDB not needed");
+    }
+
+    #[test]
+    fn steamgriddb_is_asked_for_its_plainest_style_first_then_any() {
+        let fake = FakeService::start(
+            0,
+            Script {
+                style: "white_logo".into(),
+                ..script(vec![known(6, "Made-up Wren", &[("gog", "6")], &[Kind::Square])])
+            },
+        )
+        .unwrap();
+        let library = Library { games: vec![game("gog", "6", "Made-up Wren")], ..Library::default() };
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        let ran = run(&art, &fake, KEY, &library);
+        assert_eq!(ran.summary.pictures.steamgriddb, 1);
+        let squares: Vec<String> =
+            api(&fake.requests()).into_iter().filter(|path| path.contains("1024x1024")).collect();
+        assert_eq!(squares.len(), 2, "{squares:?}");
+        assert!(squares[0].ends_with("&styles=alternate") && !squares[1].contains("styles="), "{squares:?}");
     }
 }

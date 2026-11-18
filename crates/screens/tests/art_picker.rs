@@ -131,6 +131,11 @@ fn press(dashboard: &mut Dashboard, buttons: &[Button]) {
 fn picker(key: bool) -> Dashboard {
     let mut dashboard = Dashboard::new(library());
     dashboard.set_options(Options { art_key: key, art_online: true, ..dashboard.options() });
+    picker_of(dashboard)
+}
+
+/// The picker of the Recent row's fifth game, opened from its Tile menu on `dashboard` as it is.
+fn picker_of(mut dashboard: Dashboard) -> Dashboard {
     press(&mut dashboard, &[Down, Right, Right, Right, Right, Menu]);
     for _ in 0..8 {
         if dashboard.focus_line().contains("(More options)") {
@@ -190,6 +195,18 @@ fn without_a_key_it_asks_nothing_and_says_where_to_set_one() {
     let mut dashboard = picker(false);
     assert!(dashboard.art_asks().is_empty());
     assert_eq!(dashboard.focus_line(), "ArtPicker: Square: Page 1 of 1: Automatic; in use: Automatic; no key");
+}
+
+/// Settings > Art's sources with SteamGridDB off (#246): the picker asks it nothing, key or not, and says where to
+/// turn it on.
+#[test]
+fn with_steamgriddb_off_among_the_sources_it_asks_nothing() {
+    let mut dashboard = Dashboard::new(library());
+    let order = model::ArtOrder::default().switched(model::ArtSource::SteamGridDb);
+    dashboard.set_options(Options { art_key: true, art_online: true, art_order: order, ..dashboard.options() });
+    let mut picker = picker_of(dashboard);
+    assert!(picker.art_asks().is_empty());
+    assert_eq!(picker.focus_line(), "ArtPicker: Square: Page 1 of 1: Automatic; in use: Automatic; steamgriddb off");
 }
 
 // ---------------------------------------------------------------------------------------------------- pictures

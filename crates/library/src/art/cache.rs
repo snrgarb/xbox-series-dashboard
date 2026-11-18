@@ -1,8 +1,9 @@
 //! Our own art cache: the pictures downloaded for games their store gives none for, in the data folder, one folder a
 //! game: `art/<source>/<source_id>/{cover,hero,header,square}.{png,jpg,webp}`. A picture that was looked for and not
 //! found leaves a mark in its place holding when (Unix seconds), one for each place it was looked for in
-//! (`<kind>.store.none` for the store's own art online, `<kind>.none` for SteamGridDB), so that it is not asked for
-//! there again until [`MISS_DAYS`] have passed. Nothing here is a store's: clearing the cache removes this folder and
+//! (`<kind>.store.none` for the game's own store online, `<kind>.steam.none`, `<kind>.xbox.none` and
+//! `<kind>.ps.none` for Steam's, the Microsoft Store's and the PlayStation Store's, `<kind>.none` for SteamGridDB), so
+//! that it is not asked for there again until [`MISS_DAYS`] have passed. Nothing here is a store's: clearing the cache removes this folder and
 //! nothing else.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,19 +47,32 @@ impl Kind {
 /// Where online a picture was looked for: what a remembered miss is a miss of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Online {
-    /// The store's own art online: its CDN or public catalogue.
+    /// The game's own store online where it is not one of the others: GOG's catalogue, a client's named addresses.
     Store,
+    /// Steam's store.
+    Steam,
+    /// The Microsoft Store's catalogue.
+    Microsoft,
+    /// The PlayStation Store.
+    PlayStation,
     /// SteamGridDB, with the user's key.
     SteamGridDb,
 }
 
+/// Every mark's middle, as [`Online::miss_file`] writes it: what a picture found removes.
+const MISS_MARKS: [&str; 5] = ["none", "store.none", "steam.none", "xbox.none", "ps.none"];
+
 impl Online {
     /// The mark's file name for a kind: `cover.store.none`, `cover.none` (SteamGridDB's, as #80 named it).
     fn miss_file(self, kind: Kind) -> String {
-        match self {
-            Online::Store => format!("{}.store.none", kind.name()),
-            Online::SteamGridDb => format!("{}.none", kind.name()),
-        }
+        let mark = match self {
+            Online::Store => "store.none",
+            Online::Steam => "steam.none",
+            Online::Microsoft => "xbox.none",
+            Online::PlayStation => "ps.none",
+            Online::SteamGridDb => "none",
+        };
+        format!("{}.{mark}", kind.name())
     }
 }
 
@@ -167,7 +181,7 @@ impl ArtDir {
         std::fs::write(&part, bytes)?;
         std::fs::rename(&part, &path)?;
         // One picture of a kind: an older one of another format, and the remembered misses, go.
-        for other in ["png", "jpg", "webp", "none", "store.none"].into_iter().filter(|&other| other != ext) {
+        for other in ["png", "jpg", "webp"].into_iter().chain(MISS_MARKS).filter(|&other| other != ext) {
             let _ = std::fs::remove_file(dir.join(format!("{}.{other}", kind.name())));
         }
         Ok(path)
@@ -312,9 +326,13 @@ mod tests {
         // A miss at the store is not one at SteamGridDB: a key entered tomorrow looks there.
         art.miss("gog", "1", Kind::Square, store, now).unwrap();
         assert!(art.missed("gog", "1", Kind::Square, store, now) && !art.missed("gog", "1", Kind::Square, sgdb, now));
+        art.miss("gog", "1", Kind::Square, Online::PlayStation, now).unwrap();
+        assert!(art.missed("gog", "1", Kind::Square, Online::PlayStation, now));
+        assert!(!art.missed("gog", "1", Kind::Square, Online::Microsoft, now));
         // A picture found later takes the misses' place.
         art.save("gog", "1", Kind::Hero, PNG).unwrap();
         art.save("gog", "1", Kind::Square, PNG).unwrap();
         assert!(!art.missed("gog", "1", Kind::Hero, sgdb, now) && !art.missed("gog", "1", Kind::Square, store, now));
+        assert!(!art.missed("gog", "1", Kind::Square, Online::PlayStation, now));
     }
 }

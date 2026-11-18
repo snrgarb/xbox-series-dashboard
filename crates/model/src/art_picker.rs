@@ -163,6 +163,8 @@ pub enum Failure {
     NoKey,
     /// Settings > Art's Download art online is off.
     Offline,
+    /// SteamGridDB is turned off among Settings > Art's sources.
+    SourceOff,
     /// The service refused the key just now.
     KeyRefused,
     /// SteamGridDB does not know the game, by its store's id or by its name.
@@ -183,6 +185,9 @@ impl Failure {
             Failure::Offline => {
                 "Turn on Download art online in Settings > Games & apps > Art to choose from SteamGridDB's pictures."
                     .into()
+            }
+            Failure::SourceOff => {
+                "Turn on SteamGridDB in Settings > Games & apps > Art's sources to choose from its pictures.".into()
             }
             Failure::NoGame => "SteamGridDB doesn't know this game.".into(),
             Failure::Busy => "SteamGridDB is busy. Try again in a minute.".into(),
@@ -375,7 +380,8 @@ impl Pager {
     /// (no key).
     pub fn retry(&mut self) -> bool {
         match self.failed {
-            Some(Failure::NoKey | Failure::KeyRefused | Failure::Offline | Failure::NoGame) | None => false,
+            Some(Failure::NoKey | Failure::KeyRefused | Failure::Offline | Failure::SourceOff | Failure::NoGame)
+            | None => false,
             Some(_) => {
                 self.failed = None;
                 true

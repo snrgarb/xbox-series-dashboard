@@ -1,7 +1,11 @@
 //! Looking up the art a store's files on the PC gave none for, off the UI thread: a game's missing pictures are taken
-//! from our own cache if it has them, else asked of the store's own art online (its CDN or public catalogue, no key),
-//! else of SteamGridDB (with the user's key), a few games at a time, and kept in the cache for every start after.
+//! from our own cache if it has them, else asked of the game's own store online (GOG's catalogue, a client's named
+//! addresses), then of the online sources in the user's order (`model::ArtOrder`: Steam's store, the Microsoft
+//! Store's catalogue, the PlayStation Store, SteamGridDB with the user's key, by default), each kind of picture
+//! falling through them apart until one has it; a few games at a time, and kept in the cache for every start after.
 //! What was looked for and not found is remembered for a week, in each place apart, so a start does not ask again.
+//! Each game asked about is said in one line of the log: by its source and its id there (never its name), and for
+//! each kind asked, which source gave it, or that none had it.
 //!
 //! Every host is asked politely: one request at a time per worker, two workers, a gap between any two requests to
 //! the same host, and when one says to wait (429 or 503, `Retry-After`) every worker waits that long before asking
@@ -13,11 +17,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use model::{Library, OnlineArt};
+use model::{ArtSource, Library, OnlineArt};
 
 use super::cache::{ArtDir, Kind, Online};
 use super::steamgriddb::{Error, Service, NAME};
-use super::store_online::StoreArt;
+use super::store_online::{Store, StoreArt};
 
 /// A game of a store, the pictures it has, and which it lacks.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -56,12 +60,21 @@ pub fn wanted(library: &Library) -> Vec<Want> {
 }
 
 /// Where the missing pictures are asked for: either may be off. With neither, nothing is asked.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Services {
-    /// The stores' own art online: on unless Settings' Download art online is off.
+    /// The stores' art online: on unless Settings' Download art online is off.
     pub stores: Option<StoreArt>,
     /// SteamGridDB, with the user's key: only with one, and with art online on.
     pub steamgriddb: Option<Service>,
+    /// The online sources that are on, in the order they are asked (Settings > Art's sources): a source not here is
+    /// not asked, whatever else is set. The game's own store comes before all of them.
+    pub order: Vec<ArtSource>,
+}
+
+impl Default for Services {
+    fn default() -> Self {
+        Self { stores: None, steamgriddb: None, order: ArtSource::ALL.to_vec() }
+    }
 }
 
 impl Services {
@@ -242,6 +255,10 @@ enum Halt {
 struct Outcome {
     /// Something was asked online.
     asked: bool,
+    /// The kinds asked for online, in this run.
+    tried: Vec<Kind>,
+    /// The kinds found, and where.
+    got: Vec<(Kind, &'static str)>,
     store_online: usize,
     steamgriddb: usize,
     failed: bool,
@@ -360,8 +377,8 @@ impl Run {
     /// as good as none.
     fn fetch(&self, want: &Want, kind: Kind, url: &str, there: Online, out: &mut Outcome) -> bool {
         let download = |url: &str| match there {
-            Online::Store => self.services.stores.as_ref().map(|stores| stores.download(url)),
             Online::SteamGridDb => self.services.steamgriddb.as_ref().map(|service| service.download(url)),
+            _ => self.services.stores.as_ref().map(|stores| stores.download(url)),
         };
         match self.ask(&host(url), || download(url).unwrap_or(Err(Error::Failed("no service".into())))) {
             Ok(bytes) => match self.dir.save(&want.source, &want.source_id, kind, &bytes) {
@@ -385,29 +402,100 @@ impl Run {
     fn look_up(&self, want: &Want) -> Outcome {
         let mut out = Outcome::default();
         if let Some(stores) = &self.services.stores {
-            self.ask_store(stores, want, &mut out);
+            self.ask_store(stores, Store::Own, want, &mut out);
+        }
+        for &source in &self.services.order {
             if out.stopped {
-                return out;
+                break;
+            }
+            match (Store::of(source), &self.services.stores, &self.services.steamgriddb) {
+                (Some(store), Some(stores), _) => self.ask_store(stores, store, want, &mut out),
+                (None, _, Some(service)) => self.ask_steamgriddb(service, want, &mut out),
+                _ => {}
             }
         }
-        if let Some(service) = &self.services.steamgriddb {
-            self.ask_steamgriddb(service, want, &mut out);
+        if !out.stopped {
+            self.say(want, &out);
         }
         out
     }
 
-    /// The store's own art online, for what the store offers of what the game lacks.
-    fn ask_store(&self, stores: &StoreArt, want: &Want, out: &mut Outcome) {
-        let offered = stores.offers(want);
+    /// The game's line: `art: steam 620: cover Steam, hero SteamGridDB, header Steam, square none`, each kind asked
+    /// for in this run, with where it came from, `none` when no source had it, or `failed` when a request for it
+    /// did. Nothing for a game nothing was asked about.
+    fn say(&self, want: &Want, out: &Outcome) {
+        let mut tried: Vec<Kind> = Vec::new();
+        for kind in Kind::ALL.into_iter().filter(|kind| out.tried.contains(kind)) {
+            tried.push(kind);
+        }
+        if tried.is_empty() {
+            return;
+        }
+        let parts: Vec<String> = tried
+            .into_iter()
+            .map(|kind| {
+                let from = out.got.iter().find(|(k, _)| *k == kind).map(|(_, from)| *from);
+                let from = from.unwrap_or(if out.failed { "failed" } else { "none" });
+                format!("{} {from}", kind.name())
+            })
+            .collect();
+        (self.log)(&format!("art: {} {}: {}", want.source, want.source_id, parts.join(", ")));
+    }
+
+    /// A store's art online, for what it may have of what the game still lacks: by the game's own id there, else
+    /// found by its name.
+    fn ask_store(&self, stores: &StoreArt, store: Store, want: &Want, out: &mut Outcome) {
+        let offered = stores.offers(store, want);
         let kinds: Vec<Kind> = want.kinds.iter().copied().filter(|kind| offered.contains(kind)).collect();
-        let kinds = self.still_wanted(want, &kinds, Online::Store);
+        let kinds = self.still_wanted(want, &kinds, store.online());
         if kinds.is_empty() {
             return;
         }
         out.asked = true;
-        let answer = match stores.ask(want, &kinds) {
-            None => None,
-            Some(ask) => match self.ask(ask.name, || stores.get(&ask)) {
+        out.tried.extend(&kinds);
+        let missed = |kinds: &[Kind]| kinds.iter().for_each(|&kind| self.miss(want, kind, store.online()));
+        let mut id = stores.own_id(store, want);
+        let mut item = None;
+        if id.is_none() && store != Store::Own {
+            // Each search in turn until one finds the game: its name's words, then without the last.
+            let searches = stores.searches(store, want);
+            let mut seen = 0;
+            for search in &searches {
+                match self.ask(search.name, || stores.get(search)) {
+                    Ok(Some(answer)) => {
+                        seen += stores.candidates(store, &answer).len();
+                        if let Some(found) = stores.matched(store, want, &answer) {
+                            id = Some(found.id);
+                            item = found.item;
+                            break;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(Halt::Stop) => {
+                        out.stopped = true;
+                        return;
+                    }
+                    Err(Halt::Failed) => {
+                        out.failed = true;
+                        return;
+                    }
+                }
+            }
+            if id.is_none() {
+                // Where a game falls through, by its id: never its name.
+                (self.log)(&format!(
+                    "art: {} {}: {}: {seen} candidates, none the same name",
+                    want.source,
+                    want.source_id,
+                    store.name()
+                ));
+                return missed(&kinds);
+            }
+        }
+        let answer = match (item, stores.ask(store, want, id.as_deref(), &kinds)) {
+            (Some(item), _) => Some(item),
+            (None, None) => None,
+            (None, Some(ask)) => match self.ask(ask.name, || stores.get(&ask)) {
                 Ok(answer) => answer,
                 Err(Halt::Stop) => {
                     out.stopped = true;
@@ -419,15 +507,16 @@ impl Run {
                 }
             },
         };
-        let pictures = stores.pictures(want, &kinds, answer.as_ref());
+        let pictures = stores.pictures(store, want, &kinds, answer.as_ref());
         for kind in kinds {
             match pictures.iter().find(|(k, _)| *k == kind) {
                 Some((_, url)) => {
-                    if self.fetch(want, kind, url, Online::Store, out) {
+                    if self.fetch(want, kind, url, store.online(), out) {
                         out.store_online += 1;
+                        out.got.push((kind, store.name()));
                     }
                 }
-                None => self.miss(want, kind, Online::Store),
+                None => self.miss(want, kind, store.online()),
             }
             if out.stopped {
                 return;
@@ -442,6 +531,7 @@ impl Run {
             return;
         }
         out.asked = true;
+        out.tried.extend(&kinds);
         let game = match self.ask(NAME, || service.find_game(&want.source, &want.source_id, &want.name)) {
             Ok(Some(game)) => game,
             Ok(None) => {
@@ -475,6 +565,7 @@ impl Run {
             };
             if self.fetch(want, kind, &url, Online::SteamGridDb, out) {
                 out.steamgriddb += 1;
+                out.got.push((kind, NAME));
             }
             if out.stopped {
                 return;

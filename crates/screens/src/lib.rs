@@ -129,6 +129,10 @@ pub enum Effect {
     /// Settings > Art: the user's SteamGridDB key, to keep (none: forget it). The Dashboard takes note that there
     /// is one, never what it is; whoever keeps the settings saves it and looks up art with it.
     ArtKey(Option<Secret>),
+    /// Settings > Art's sources: the online art sources' order, and which are on, as the user has just set them
+    /// (`model::ArtOrder`). In force on the page at once; whoever keeps the settings saves it, and the art lookup
+    /// and the Art picker follow it.
+    ArtOrder(model::ArtOrder),
     /// Settings > Art: remove the art downloaded into the data folder (the user has said yes). A store's own art is
     /// not touched.
     ClearArt,
@@ -1136,6 +1140,11 @@ impl Dashboard {
             PageAction::Effect(Effect::ArtKey(key)) => {
                 self.options.art_key = key.is_some();
                 self.effects.push(Effect::ArtKey(key));
+            }
+            // The art sources' order: shown at once, and saved.
+            PageAction::Effect(Effect::ArtOrder(order)) => {
+                self.options.art_order = order;
+                self.effects.push(Effect::ArtOrder(order));
             }
             // A page's Play is Home's: with another game running it is asked about first.
             PageAction::Effect(Effect::Launch(game)) => self.play(game),

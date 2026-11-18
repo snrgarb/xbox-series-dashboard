@@ -461,6 +461,7 @@ fn every_option_is_as_it_was_left_when_the_core_starts_again() {
         use_guide: false,
         art_online: true,
         art_key: false,
+        art_order: model::ArtOrder::default(),
         ask_whos_playing: true,
         boot_video: BootVideo::XboxSeriesX,
         boot_videos: Found::NONE,
@@ -1055,6 +1056,51 @@ fn settings_art() {
     assert!(asked(&mut stage).contains(&Effect::ClearArt));
     // Left from the first column, as B, goes back to Games & apps' boxes on Art.
     stage.press(&[Up, Left]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Art");
+}
+
+/// Settings > Art's sources (#246; docs/spec/settings.md, 16.8): the four online sources in their order under
+/// Download art online, Playnite's at first; A turns one off and on, its menu moves it up or down as Groups' does,
+/// focus following it, each change asked as `Effect::ArtOrder` and in force at once; the page scrolls to them.
+#[test]
+fn settings_art_sources() {
+    use model::{ArtOrder, ArtSource};
+    let mut stage = settings_stage();
+    stage.press(&[Down, Down, Right, Down, Down, Down, A, Down, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Download art online");
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source Steam, 1 of 4, on");
+    stage.press(&[Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source Xbox, 2 of 4, on");
+    stage.check("settings-art-sources");
+
+    // A turns PlayStation off, and on again.
+    stage.press(&[Down, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source PlayStation, 3 of 4, off");
+    let off = ArtOrder::default().switched(ArtSource::PlayStation);
+    assert_eq!(asked(&mut stage), [Effect::ArtOrder(off)]);
+    assert_eq!(stage.dashboard.options().art_order.text(), "steam,xbox,-playstation,steamgriddb");
+    stage.press(&[A]);
+    assert_eq!(asked(&mut stage), [Effect::ArtOrder(ArtOrder::default())]);
+
+    // SteamGridDB's menu: Move up alone, at the foot. Up twice, the menu staying, focus going with it.
+    stage.press(&[Down, Menu]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Menu(Move up) of SteamGridDB");
+    stage.check("settings-art-sources-menu");
+    stage.press(&[A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Menu(Move up) of SteamGridDB");
+    stage.press(&[A]);
+    let moved = ArtOrder::default().moved(ArtSource::SteamGridDb, -2);
+    assert_eq!(stage.dashboard.options().art_order, moved);
+    assert_eq!(moved.text(), "steam,steamgriddb,xbox,playstation");
+    stage.press(&[B]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Source SteamGridDB, 2 of 4, on");
+    let orders: Vec<_> = asked(&mut stage).into_iter().filter(|e| matches!(e, Effect::ArtOrder(_))).collect();
+    assert_eq!(orders.last(), Some(&Effect::ArtOrder(moved)));
+    // Up from the first source is Download art online; Left is back.
+    stage.press(&[Up, Up]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Art: Download art online");
+    stage.press(&[Down, Left]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Games & apps: Art");
 }
 

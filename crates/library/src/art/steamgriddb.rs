@@ -19,6 +19,10 @@ pub const SERVICE: &str = "https://www.steamgriddb.com/api/v2";
 /// What every list of pictures is narrowed to: static, neither adult nor a joke nor a flasher, PNG, JPEG or WebP.
 const SAFE: &str = "types=static&nsfw=false&humor=false&epilepsy=false&mimes=image/png,image/jpeg,image/webp";
 
+/// The style of grid and hero asked for first: the plainest the API has (`Styles` and `StylesHero` in its OpenAPI
+/// description, docs/research/art-sources.md; only logos and icons have an `official` style).
+pub const PLAIN: &str = "alternate";
+
 /// The largest picture taken.
 const MOST_BYTES: u64 = 24 << 20;
 
@@ -46,31 +50,15 @@ pub fn platform(source: &str) -> Option<&'static str> {
     }
 }
 
-/// A name as names are matched: lower case, its marks (™ ® ©) gone, `&` as "and", and every run of anything but
-/// letters and digits one space. "VESPER Eternal™" and "Vesper: Eternal" are one name; "Vesper" and "Vesper 3" are not.
-pub fn plain_name(name: &str) -> String {
-    let name = name.replace('&', " and ");
-    let mut out = String::new();
-    for c in name.chars().filter(|c| !matches!(c, '™' | '®' | '©')) {
-        if c.is_alphanumeric() {
-            out.extend(c.to_lowercase());
-        } else if !out.ends_with(' ') {
-            out.push(' ');
-        }
-    }
-    out.trim().to_string()
-}
+pub use super::names::plain_name;
 
-/// The game a search's results are, by the conservative rule: only one whose name is the game's (`plain_name`),
-/// the first verified one among those, else the first. A near name is no match: no art is better than another
-/// game's.
+/// The game a search's results are, by the matching rule (`names::pick`): only one that is the game's name once
+/// written plainly and set apart from its edition, the very name before an edition of it, a verified one before
+/// another, else the first. A near name is no match: no art is better than another game's.
 pub fn best_match(name: &str, results: &[(u64, String, bool)]) -> Option<u64> {
-    let wanted = plain_name(name);
-    if wanted.is_empty() {
-        return None;
-    }
-    let same: Vec<&(u64, String, bool)> = results.iter().filter(|(_, n, _)| plain_name(n) == wanted).collect();
-    same.iter().find(|(_, _, verified)| *verified).or(same.first()).map(|(id, _, _)| *id)
+    let ranked: Vec<(String, u64, u8)> =
+        results.iter().map(|(id, n, verified)| (n.clone(), *id, u8::from(!*verified))).collect();
+    super::names::pick(name, &ranked).copied()
 }
 
 pub struct Service {
@@ -155,7 +143,10 @@ impl Service {
     }
 
     /// The address of the game's first picture of this kind that is static, neither adult nor a joke nor a
-    /// flasher, and a PNG, JPEG or WebP; None when it has none.
+    /// flasher, and a PNG, JPEG or WebP; None when it has none. The plainest is asked for first: style [`PLAIN`]
+    /// (SteamGridDB has no "official" style for grids or heroes: its others, `blurred`, `white_logo`, `material` and
+    /// `no_logo`, are each a made treatment); only when the game has none of that style, any. The service's own
+    /// order is kept within each.
     pub fn picture(&self, game: u64, kind: Kind) -> Result<Option<String>, Error> {
         let path = match kind {
             Kind::Cover => format!("grids/game/{game}?dimensions=600x900&{SAFE}&limit=5"),
@@ -163,7 +154,14 @@ impl Service {
             Kind::Header => format!("grids/game/{game}?dimensions=920x430,460x215&{SAFE}&limit=5"),
             Kind::Square => format!("grids/game/{game}?dimensions=1024x1024,512x512&{SAFE}&limit=5"),
         };
-        let Some(pictures) = self.get(&path)? else { return Ok(None) };
+        if let Some(url) = self.first_safe(&format!("{path}&styles={PLAIN}"))? {
+            return Ok(Some(url));
+        }
+        self.first_safe(&path)
+    }
+
+    fn first_safe(&self, path: &str) -> Result<Option<String>, Error> {
+        let Some(pictures) = self.get(path)? else { return Ok(None) };
         let safe = |picture: &&Value| {
             let no = |field: &str| picture.get(field).and_then(Value::as_bool) != Some(true);
             let mime = picture.get("mime").and_then(Value::as_str).unwrap_or_default();
@@ -317,9 +315,6 @@ mod tests {
 
     #[test]
     fn names_match_only_when_they_are_the_same_name() {
-        assert_eq!(plain_name("VESPER Eternal™"), "vesper eternal");
-        assert_eq!(plain_name("Vesper: Eternal"), "vesper eternal");
-        assert_eq!(plain_name("Oda & the Blind Orchard"), "oda and the blind orchard");
         let results = [
             (1, "Hadrel II".to_string(), true),
             (2, "Hadrel's Star".to_string(), true),
