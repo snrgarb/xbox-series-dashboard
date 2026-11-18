@@ -195,7 +195,7 @@ try {
 
     # --- Install: the Store's page by its product id, the stand-in taking it.
     Search-Count 'Saltmarsh Run' -Open | Out-Null
-    Press A 'GameHub: \d+ Hub Install' '07-game-hub-install' | Out-Null
+    Press A 'GameHub: \S+ Hub Install' '07-game-hub-install' | Out-Null
     $mark = Get-DashboardLogLength
     Press A '.+' | Out-Null
     Expect-Logged '^store: asked Xbox to install Saltmarsh Run: ms-windows-store://pdp/\?ProductId=9ZZZGPASS101$' $mark 'Install' | Out-Null
