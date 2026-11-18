@@ -618,7 +618,7 @@ fn opening_with_more_unread_than_fit_puts_focus_on_the_first_unread_message() {
 fn triggers_page_by_as_many_messages_as_the_view_shows_to_the_oldest_and_the_newest() {
     let mut stage = in_a_conversation(Conversation { unread_from: None, ..many_unread() });
     let shown = stage.dashboard.guide().dms().chat().map(|chat| chat.shown).unwrap();
-    assert!(shown >= 3 && shown < 20, "{shown} messages in view");
+    assert!((3..20).contains(&shown), "{shown} messages in view");
     let dashboard = &mut stage.dashboard;
     press(dashboard, &[LeftTrigger]);
     assert_eq!(line(dashboard), format!("Conversation Message({}) of 20, theirs", shown.min(20) - 1));

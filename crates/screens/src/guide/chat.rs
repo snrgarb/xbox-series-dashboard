@@ -617,6 +617,7 @@ fn reaction_pills(
     }
     let room = if own { WIDTH } else { X1 - x };
     // Pills by row: (emoji, server?, count, mine, width).
+    #[allow(clippy::type_complexity)]
     let mut rows: Vec<Vec<(String, bool, String, bool, f32)>> = vec![Vec::new()];
     let mut used = 0.0f32;
     for reaction in reactions.iter().take(REACTIONS_SHOWN) {

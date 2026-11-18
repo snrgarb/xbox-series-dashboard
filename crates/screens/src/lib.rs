@@ -1366,6 +1366,7 @@ impl Dashboard {
     }
 
     /// Where the Guide's focus is, and the volume: a press that changed any of it moved something.
+    #[allow(clippy::type_complexity)]
     fn guide_place(&self) -> ((Tab, guide::Focus), Option<(Flyout, FlyoutFocus)>, u8, Option<String>) {
         (self.guide.focus(), self.guide.flyout(self.guide_around()), self.audio.volume, self.guide.direct_flyout_line())
     }
