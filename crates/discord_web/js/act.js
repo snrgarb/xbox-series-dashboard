@@ -164,12 +164,35 @@ api.ack = (op) => begin(op, async (my) => {
   const a = A.S.ack;
   if (!a || !fnOf(a, "ack")) return fail(my, "ack action not found");
   if (unreadOf(channel) === 0) return finish(my, { stage: "done" });
+  const read = () => unreadOf(channel) === 0;
+  // Discord's own shortcut first, Escape in the conversation (on the TV Discord's own ack function did nothing,
+  // 2026-11-19): the conversation's page, its message box focused, the host's trusted Escape.
+  let way = "no box";
+  const here = () => { try { return location.pathname.endsWith("/" + channel); } catch (e) { return false; } };
+  // Another conversation open in the Dashboard: the page goes back to it after.
+  const back = here() ? "" : location.pathname;
+  if (back) route("/channels/@me/" + channel);
+  let box = null;
+  await until(my, () => here() && (box = boxEl()), O.buttonCap);
+  if (my.dead) return;
+  if (box) {
+    try { box.focus(); } catch (e) {}
+    way = boxFocused(box) ? "escape" : "box not focused";
+    if (way === "escape") {
+      told({ seq: my.seq, stage: "press" });
+      await until(my, read, O.signCap);
+      if (my.dead) return;
+    }
+  }
+  if (back) route(back);
+  if (read()) return finish(my, { stage: "done" });
+  // Then the function, briefly: a failure here holds the one-at-a-time queue (a call waited behind it).
   let rejected = false;
   try { Promise.resolve(a.ack(channel)).catch(() => { rejected = true; }); } catch (e) { return fail(my, "ack action failed"); }
-  const ok = await until(my, () => unreadOf(channel) === 0 || rejected, O.doneCap);
+  await until(my, () => read() || rejected, O.ackCap);
   if (my.dead) return;
-  if (unreadOf(channel) === 0) return finish(my, { stage: "done" });
-  fail(my, ok && rejected ? "ack action failed" : "not shown");
+  if (read()) return finish(my, { stage: "done" });
+  fail(my, rejected ? "ack action failed" : "not shown (way " + way + ", action)");
 });
 
 // A failed message of ours dropped from Discord's own store, locally: the store's `deleteMessage(channel, id, true)`

@@ -159,9 +159,9 @@ pub(crate) enum Command {
         text: String,
         clear: bool,
     },
-    /// Enter pressed on what the page focused: Discord's own button for a join (Join Voice, Start Voice Call), as
-    /// trusted input.
-    Press,
+    /// A key pressed on what the page focused, as trusted input: Enter on Discord's own button (Join Voice, Start
+    /// Voice Call, Mute, Deafen, Disconnect), Escape in a conversation (Discord's own Mark As Read).
+    Press(WebKey),
     /// Close the web view, remove the folder, end.
     SignOut,
     /// Close the web view and end; the folder stays.
@@ -734,9 +734,9 @@ impl Session {
                         host.send(Command::Type { text, clear });
                     }
                 }
-                act::Out::Press => {
+                act::Out::Press(key) => {
                     if let Some(host) = &self.host {
-                        host.send(Command::Press);
+                        host.send(Command::Press(key));
                     }
                 }
                 act::Out::Event(event) => self.events.push(event),

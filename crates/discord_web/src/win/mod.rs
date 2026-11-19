@@ -162,7 +162,7 @@ fn run(
                         }
                     }
                 }
-                Command::Press => host.key(crate::WebKey::Enter),
+                Command::Press(key) => host.key(key),
                 Command::Type { text, clear } => {
                     host.type_message(&text, clear);
                     enter_at = Some(Instant::now() + ENTER_AFTER);

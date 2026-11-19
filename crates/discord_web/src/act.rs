@@ -199,8 +199,8 @@ pub enum Out {
     Op(ActOp),
     /// For the host: type this into the focused message box and press Enter; `clear` first empties a draft.
     Type { text: String, clear: bool },
-    /// For the host: press Enter on what the page focused (a join's own button).
-    Press,
+    /// For the host: press this key on what the page focused (a voice button's Enter, a conversation's Escape).
+    Press(crate::WebKey),
     /// For the screens (`Session::take_events`).
     Event(DirectEvent),
     /// A log line, in words.
@@ -492,13 +492,19 @@ impl Acts {
             _ => None,
         };
         match act.stage.as_str() {
-            // A join asks once for its button to be pressed.
+            // A join, a leave, a mute or a deafen asks once for the page's own button to be pressed (Enter); a mark read
+            // for Escape in the conversation, Discord's own shortcut.
             "press" => {
-                if !matches!(run.job.work, Work::Join { .. }) || run.typed {
+                let key = match run.job.work {
+                    Work::Join { .. } | Work::Leave | Work::Mute | Work::Deafen => crate::WebKey::Enter,
+                    Work::Read { .. } => crate::WebKey::Escape,
+                    _ => return Vec::new(),
+                };
+                if run.typed {
                     return Vec::new();
                 }
                 run.typed = true;
-                vec![Out::Press]
+                vec![Out::Press(key)]
             }
             "typing" => {
                 let Some(nonce) = nonce.filter(|_| !run.typed) else { return Vec::new() };
@@ -1027,7 +1033,7 @@ mod tests {
         a.join("44", false);
         a.tick(at(base, 3_300));
         // The page's own button: pressed once by the host, however often the page asks.
-        assert!(matches!(a.page(&act(3, "press", ""), at(base, 3_400))[..], [Out::Press]));
+        assert!(matches!(a.page(&act(3, "press", ""), at(base, 3_400))[..], [Out::Press(crate::WebKey::Enter)]));
         assert!(a.page(&act(3, "press", ""), at(base, 3_500)).is_empty(), "once");
         let outs = a.page(&Act { why: "not connected".into(), ..act(3, "failed", "") }, at(base, 23_300));
         assert_eq!(logs(&outs), ["discord web: join not done: not connected"]);
