@@ -705,7 +705,8 @@ fn name_line(ui: &mut Ui, x: f32, top: f32, face: &DirectFace) {
 }
 
 /// A picture in `rect`: a disc when `round`, else a square rounded by 16 (a server's icon, at 60 or 72); grey with
-/// Discord's mark (round) or the speaker (square) under it while there is none.
+/// Discord's mark (round) or the speaker (square) where there is none. The speaker is a glyph, which a layer draws over
+/// pictures, so it is drawn only where there is no picture (the TV, 2026-11-19: it showed over a server's icon).
 pub(super) fn picture_or(ui: &mut Ui, rect: Rect, picture: Option<&std::path::PathBuf>, round: bool, decoded: u32) {
     let radius = if round { rect.w / 2.0 } else { 16.0 };
     let (cx, cy) = rect.center();
@@ -713,7 +714,7 @@ pub(super) fn picture_or(ui: &mut Ui, rect: Rect, picture: Option<&std::path::Pa
     if round {
         let mark = rect.w * 34.0 / 72.0;
         marks::discord_mark(ui, Rect::new(cx - mark / 2.0, cy - mark / 2.0, mark, mark), TEXT_DIM);
-    } else {
+    } else if picture.is_none() {
         ui.icon(cx, cy, glyph::VOLUME, rect.w * 28.0 / 72.0, TEXT_DIM);
     }
     if let Some(path) = picture {
@@ -733,13 +734,15 @@ fn title(ui: &mut Ui, rect: Rect, title: &str, style: &TextStyle, lines: u8) {
     });
 }
 
-/// A person's avatar on a disc 48 across in the middle of `rect` (56 across), a grey disc with a figure under it
-/// while there is none, ringed in the accent while they speak.
+/// A person's avatar on a disc 48 across in the middle of `rect` (56 across), a grey disc with a figure where there is
+/// none (a glyph, drawn over pictures by its layer, so only then), ringed in the accent while they speak.
 fn avatar(ui: &mut Ui, rect: Rect, person: &Person) {
     let (cx, cy) = rect.center();
     let disc = Rect::new(cx - 24.0, cy - 24.0, 48.0, 48.0);
     ui.fill(disc, DISC, 24.0);
-    ui.icon(cx, cy, glyph::CONTACT, 22.0, TEXT_DIM);
+    if person.avatar.is_none() {
+        ui.icon(cx, cy, glyph::CONTACT, 22.0, TEXT_DIM);
+    }
     if let Some(path) = &person.avatar {
         let key = ArtKey { path: path.clone(), kind: ArtKind::Thumb(AVATAR_DECODED) };
         ui.art(disc, &key, Crop::Center, 1.0, 24.0);

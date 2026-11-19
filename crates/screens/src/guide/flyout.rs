@@ -590,7 +590,6 @@ fn now_playing(
     let session = card.session;
     let art = Rect::new(rect.x + 18.0, rect.y + (CARD_HEIGHT - ART) / 2.0, ART, ART);
     ui.fill(art, NO_ART, 4.0);
-    ui.icon(art.center().0, art.center().1, icon::MUSIC, 44.0, TEXT_DIM);
     let key = |path: &PathBuf| ArtKey { path: path.clone(), kind: Kind::Thumb(240) };
     let shown = match &session.art {
         Some(path) if ui.art(art, &key(path), Crop::Center, 1.0, 4.0) => Some(path.clone()),
@@ -598,6 +597,10 @@ fn now_playing(
         Some(_) => last.filter(|last| ui.art(art, &key(last), Crop::Center, 1.0, 4.0)),
         None => None,
     };
+    // The note is a glyph, which a layer draws over pictures: only where no art was drawn.
+    if shown.is_none() {
+        ui.icon(art.center().0, art.center().1, icon::MUSIC, 44.0, TEXT_DIM);
+    }
 
     // The text column: 22 right of the art, 16 short of the box's right, its lines together in the card's middle.
     let text_x = art.right() + 22.0;
