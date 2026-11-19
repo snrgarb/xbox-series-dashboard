@@ -669,6 +669,9 @@ impl Dashboard {
             DirectEvent::Mention { name, channel_name } => {
                 self.direct_mention_toast(name.as_str(), channel_name.as_str())
             }
+            DirectEvent::CallStarted { channel, name, group, picture } => {
+                self.call_started_toast(channel, name.as_str(), group.as_ref().map(|group| group.as_str()), picture)
+            }
             DirectEvent::Ring(ring) => self.ring_toast(ring),
             DirectEvent::RingEnded(channel) => self.toasts.withdraw(ToastKind::DiscordCall, channel),
             DirectEvent::Sent { channel, nonce, message } => self.guide.sent(channel, *nonce, message),
@@ -733,6 +736,36 @@ impl Dashboard {
         }
     }
 
+    /// Someone started a call in a DM: "Ana started a call" / "Ana started a call in Raid night", whatever Show what
+    /// they say says (there is no text to hide). None while the ring's own Toast for that DM is up, or with Direct
+    /// Messages' Toasts off; the conversation open in the Guide shows it already.
+    fn call_started_toast(
+        &mut self,
+        channel: &model::discord_dms::Id,
+        name: &str,
+        group: Option<&str>,
+        picture: &Option<model::discord_dms::Picture>,
+    ) {
+        if !self.discord_toast_allowed(ToastKind::DiscordDm)
+            || self.guide.conversation_open(channel)
+            || self.toasts.has(ToastKind::DiscordCall, channel)
+        {
+            return;
+        }
+        let text = match group {
+            Some(group) => format!("{name} started a call in {group}"),
+            None => format!("{name} started a call"),
+        };
+        let toast = Toast {
+            channel: Some(channel.clone()),
+            avatar: picture.clone(),
+            ..Toast::new(ToastKind::DiscordDm, text, self.options.use_guide)
+        };
+        if !self.toasts.replace_waiting(toast.clone()) {
+            self.toast(toast);
+        }
+    }
+
     /// A mention's Toast (7.2): "Ana mentioned you in #general", Discord's mark.
     fn direct_mention_toast(&mut self, name: &str, channel_name: &str) {
         if !self.discord_toast_allowed(ToastKind::DiscordMention) {
@@ -749,6 +782,11 @@ impl Dashboard {
         {
             return;
         }
+        // The call's "started a call" Toast, showing or waiting, gives way to the ring's, which can be answered.
+        // (A message's Toast names who sent it; a call started's does not.)
+        self.toasts.withdraw_where(|toast| {
+            toast.kind == ToastKind::DiscordDm && toast.channel.as_ref() == Some(&ring.channel) && toast.who.is_none()
+        });
         let text = format!("{} is calling", ring.caller.as_str());
         let toast = Toast {
             channel: Some(ring.channel.clone()),

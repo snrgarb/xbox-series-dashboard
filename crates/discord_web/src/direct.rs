@@ -103,6 +103,9 @@ pub struct RawLast {
     pub text: Option<String>,
     pub who: String,
     pub names: HashMap<String, String>,
+    /// Discord's message type: 3 is its "started a call" entry.
+    #[serde(rename = "type")]
+    pub kind: u32,
 }
 
 #[derive(Deserialize, Default, Clone, PartialEq)]
@@ -591,6 +594,9 @@ impl Reader {
     }
 }
 
+/// Discord's message type for its "started a call" entry.
+const CALL_MESSAGE: u32 = 3;
+
 /// `25 DMs, 5 unread in 2`: the spec's log line.
 pub fn counts(dms: &[RawDm]) -> String {
     let unread = dms.iter().filter(|d| d.unread > 0);
@@ -598,6 +604,15 @@ pub fn counts(dms: &[RawDm]) -> String {
 }
 
 fn message_event(dm: &RawDm) -> DirectEvent {
+    // A call started: Discord's own entry, with no text of its own (the TV, 2026-11-19: it made "sent you a message").
+    if let Some(last) = dm.last.as_ref().filter(|last| last.kind == CALL_MESSAGE) {
+        return DirectEvent::CallStarted {
+            channel: Id(dm.id.clone()),
+            name: Private(if dm.group && !last.who.is_empty() { last.who.clone() } else { dm.name.clone() }),
+            group: dm.group.then(|| Private(dm.name.clone())),
+            picture: None,
+        };
+    }
     let (line, from) = match &dm.last {
         Some(last) => (last.text.as_deref().map(|t| first_line(t, &last.names)).unwrap_or_default(), last.who.clone()),
         None => (String::new(), String::new()),
@@ -821,6 +836,17 @@ mod tests {
         // A new DM with unread messages is a message.
         let t = r.take(&dms(&[dm("1", "Ana", 4), dm("3", "Cy", 1), dm("2", "Bo", 0)]), None);
         assert_eq!(t.events.len(), 1);
+    }
+
+    #[test]
+    fn discords_started_a_call_entry_is_a_call_started_not_a_message() {
+        let mut r = Reader::new();
+        r.take(&dms(&[dm("1", "Jo", 0)]), None);
+        let called = r#"{"k":"dms","dms":[{"id":"1","name":"Jo","members":2,"unread":1,
+            "last":{"at":5,"text":"","who":"Jo","type":3}}]}"#;
+        let t = r.take(called, None);
+        assert!(matches!(&t.events[..], [DirectEvent::CallStarted { channel, name, group: None, .. }]
+            if channel.as_str() == "1" && name.as_str() == "Jo"));
     }
 
     #[test]

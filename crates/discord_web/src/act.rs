@@ -20,8 +20,9 @@ use crate::direct::{spans, Act};
 pub const PACE: Duration = Duration::from_millis(700);
 /// How long an action has to finish before it is called not done.
 pub const LIMIT: Duration = Duration::from_secs(15);
-/// How long a join has: the page gives up at 20 s (and leaves), this is the margin for its answer.
-pub const JOIN_LIMIT: Duration = Duration::from_secs(22);
+/// How long a join has: the page gives up after at most 31 s (5 s to find the channel's button, 6 s for its press to
+/// show, 20 s to connect; then it leaves), this is the margin for its answer.
+pub const JOIN_LIMIT: Duration = Duration::from_secs(34);
 /// Discord's limit for one message without Nitro.
 pub const LONGEST: usize = 2000;
 
@@ -198,6 +199,8 @@ pub enum Out {
     Op(ActOp),
     /// For the host: type this into the focused message box and press Enter; `clear` first empties a draft.
     Type { text: String, clear: bool },
+    /// For the host: press Enter on what the page focused (a join's own button).
+    Press,
     /// For the screens (`Session::take_events`).
     Event(DirectEvent),
     /// A log line, in words.
@@ -444,7 +447,7 @@ impl Acts {
         let mut out = Vec::new();
         if let Some(run) = &self.running {
             if now.saturating_duration_since(run.started) >= run.limit {
-                let said = if run.limit == JOIN_LIMIT { "no answer in 22 s" } else { "no answer in 15 s" };
+                let said = if run.limit == JOIN_LIMIT { "no answer in 34 s" } else { "no answer in 15 s" };
                 out.push(Out::Op(ActOp::Cancel));
                 out.extend(self.end(now, Err(said)));
             }
@@ -489,6 +492,14 @@ impl Acts {
             _ => None,
         };
         match act.stage.as_str() {
+            // A join asks once for its button to be pressed.
+            "press" => {
+                if !matches!(run.job.work, Work::Join { .. }) || run.typed {
+                    return Vec::new();
+                }
+                run.typed = true;
+                vec![Out::Press]
+            }
             "typing" => {
                 let Some(nonce) = nonce.filter(|_| !run.typed) else { return Vec::new() };
                 run.typed = true;
@@ -992,13 +1003,13 @@ mod tests {
         a.mute();
         let outs = a.tick(base);
         assert!(matches!(ops(&outs)[..], [ActOp::Join { seq: 1, channel, ring: false }] if channel == "42"));
-        assert!(a.tick(at(base, 21_900)).is_empty(), "still within its time");
-        let outs = a.tick(at(base, 22_000));
-        assert_eq!(logs(&outs), ["discord web: join not done: no answer in 22 s"]);
+        assert!(a.tick(at(base, 33_900)).is_empty(), "still within its time");
+        let outs = a.tick(at(base, 34_000));
+        assert_eq!(logs(&outs), ["discord web: join not done: no answer in 34 s"]);
         assert!(matches!(ops(&outs)[..], [ActOp::Cancel]));
-        let outs = a.tick(at(base, 22_800));
+        let outs = a.tick(at(base, 34_800));
         assert!(matches!(ops(&outs)[..], [ActOp::Mute { seq: 2 }]));
-        let outs = a.tick(at(base, 22_800 + 15_000));
+        let outs = a.tick(at(base, 34_800 + 15_000));
         assert_eq!(logs(&outs), ["discord web: mute not done: no answer in 15 s"]);
     }
 
@@ -1015,6 +1026,9 @@ mod tests {
         assert!(logs(&outs)[1].contains("ring not asked"));
         a.join("44", false);
         a.tick(at(base, 3_300));
+        // The page's own button: pressed once by the host, however often the page asks.
+        assert!(matches!(a.page(&act(3, "press", ""), at(base, 3_400))[..], [Out::Press]));
+        assert!(a.page(&act(3, "press", ""), at(base, 3_500)).is_empty(), "once");
         let outs = a.page(&Act { why: "not connected".into(), ..act(3, "failed", "") }, at(base, 23_300));
         assert_eq!(logs(&outs), ["discord web: join not done: not connected"]);
         a.leave();

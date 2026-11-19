@@ -371,13 +371,17 @@ pub enum DirectEvent {
     /// A message sent under this nonce was not sent: refused, a captcha, a failure Discord's page showed, or no answer
     /// within 15 s (#201). Its bubble stays under the nonce, [`Delivery::Failed`], until [`DirectAsk::Forget`].
     NotSent { channel: Id, nonce: u64 },
+    /// Someone started a call in a DM that is not open: Discord's own "started a call" entry came in place of a
+    /// message. Its Toast says so ("Jakob started a call"), never "sent you a message"; the ring's own Toast
+    /// ([`DirectEvent::Ring`]) takes its place when the call rings the user.
+    CallStarted { channel: Id, name: Private, group: Option<Private>, picture: Option<Picture> },
 }
 
 impl DirectEvent {
     /// The log's word for the Toast it raises (the spec's 10), if it raises one.
     pub fn toast(&self) -> Option<&'static str> {
         match self {
-            DirectEvent::Message { .. } => Some("DiscordDm"),
+            DirectEvent::Message { .. } | DirectEvent::CallStarted { .. } => Some("DiscordDm"),
             DirectEvent::Mention { .. } => Some("DiscordMention"),
             DirectEvent::Ring(_) => Some("DiscordCall"),
             _ => None,

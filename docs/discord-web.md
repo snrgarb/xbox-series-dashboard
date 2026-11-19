@@ -475,16 +475,22 @@ and stage channels with who is in each). Nothing is read until the required stor
 
 ### Acting
 
-Through the same paced queue as the Direct Messages (one at a time, 0.7 s apart, 15 s each, **a join 22 s**; the page
-gives a join 20 s). By id, and Discord's own functions found by shape: **`selectVoiceChannel(id)` is used directly, not
-the page's Join Voice button**: it is language-independent and needs no layout (the spike's button press depended on an
-English label). No call to Discord's web interface, nothing credential-like (`tests/scripts.rs` fails the build if
+Through the same paced queue as the Direct Messages (one at a time, 0.7 s apart, 15 s each, **a join 34 s**; the page
+gives a join at most 31 s). By id, and Discord's own functions found by shape, **but a join presses the page's own
+button first**: on the TV (2026-11-19) `selectVoiceChannel(id)` alone never connected a server channel or a DM call
+(`join not done: not connected` each time), while the spike's button press had. So a join routes to the channel's own
+page (`/channels/<server>/<channel>`, a DM's `/channels/@me/<id>`), finds its Join Voice (a server's) or Start Voice
+Call (a DM's, which rings by itself) button within 5 s, focuses it and asks the host for a trusted Enter
+(`{k:"act", stage:"press"}`, `Command::Press`); only with no button, or no sign within 6 s, does it call
+`selectVoiceChannel(id)`. The labels are English, so another language falls to the action. A failure names the way
+tried and what the stores showed, in fixed words: `join not done: not connected (way button, then action; selected
+yes, voice state no, rtc not connected)`. No call to Discord's web interface, nothing credential-like (`tests/scripts.rs` fails the build if
 `voice.js` holds the words).
 
 | Ask | Does | Done when |
 |---|---|---|
-| `Ask::Join(id)` (a Shortcut or a server's channel), `DirectAsk::Answer(dm)` | `selectVoiceChannel(id)`; nothing if it is the Call's already | the user's own voice state is in that channel, and RTC says connected if found, within 20 s; else the page leaves and reports `not connected` |
-| `DirectAsk::Call(dm)` | the same, then, if nobody else is in the call, `ring(dm)` | as above; the log says whether the ring was asked |
+| `Ask::Join(id)` (a Shortcut or a server's channel), `DirectAsk::Answer(dm)` | the channel's page and its button, else `selectVoiceChannel(id)`; nothing if it is the Call's already | the user's selected voice channel or own voice state is that channel, and RTC does not say otherwise, within 20 s; else the page leaves and reports `not connected (...)` |
+| `DirectAsk::Call(dm)` | the same; joined by the action (not the button, which rings), and nobody else in the call, then `ring(dm)` | as above; the log says whether the ring was asked |
 | `CallAsk::Mute` / `Deafen` | `toggleSelfMute()` / `toggleSelfDeaf()` | `MediaEngineStore` shows the flip |
 | `CallAsk::Leave` | `selectVoiceChannel(null)` | the user has no voice channel |
 | `DirectAsk::Decline(dm)` | `stopRinging(dm)` | `CallStore` no longer rings the user there |
