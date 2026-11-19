@@ -1,7 +1,8 @@
 # Handover
 
 Where the port stands and how work is done on it, for whoever picks it up next. First written 2026-11-15 for building
-M0 to M7; brought up to date on 2026-11-17 (#158), when M0 to M7 were built and M8 was under way.
+M0 to M7; brought up to date on 2026-11-17 (#158), when M0 to M7 were built and M8 was under way, and on 2026-11-19, when
+M0 to M8 were finished (the user's word) and M9 had started.
 
 Read this, then [plan.md](plan.md) (what each milestone is and what it holds now), [ui.md](ui.md) (how a screen is
 built) and the map issue (#14).
@@ -17,9 +18,9 @@ built) and the map issue (#14).
 | **M4** More stores, and installs | Built: Xbox and Game Pass, Epic, GOG, EA, Ubisoft and Battle.net read from their own files; Apps; install, uninstall, the Queue and Manage Queue; art from SteamGridDB with the user's own key. |
 | **M5** Start-up and the living room | Built: the Boot video, Who's playing today?, Profiles, the Idle screen, Now Playing. |
 | **M6** Discord and achievements | Built: the Discord tab, Calls, Shortcuts and Servers over Discord's local RPC with the user's own application; Steam achievements from local files, Score, Rare, the Achievements page and its Toast. |
-| **M7** Shipping | Built: shell mode (the Dashboard as the user's shell, set from Settings > System), versions, a per-user installer and a portable zip from CI, updates by handover, the Launchers screen. Not built, by the user's decision: the Xbox mode home-app package (#183) and an import from Playnite (#157). Open: #158 (this polish pass) and #159 (the M7 run on the TV PC and retiring the Bundle). |
-| **M8** Installs | Mostly built: the Installer interface; Steam's own install, pause, resume, cancel and uninstall through its client; Epic through legendary and GOG through gogdl, fetched on the user's Yes; Settings > Storage; setting up this PC (installing and removing the launchers' own apps); art chosen from SteamGridDB's candidates. Open: Xbox (#173), Battle.net (#172), EA and Ubisoft's windows (#177), Steam's licence and space questions (#230), the probe (#169), and the polish tickets in the milestone. |
-| **M9** Full Discord | Not started. Discord in full inside the Dashboard (servers, channels, DMs, messages, voice) by the route the Discord Bridge extension takes (docs/research/discord-bridge.md, #192). Comes after M8. |
+| **M7** Shipping | Finished (the user, 2026-11-19): shell mode (the Dashboard as the user's shell, set from Settings > System), versions, a per-user installer and a portable zip from CI, updates by handover, the Launchers screen. Not built, by the user's decision: the Xbox mode home-app package (#183) and an import from Playnite (#157). |
+| **M8** Installs | Finished (the user, 2026-11-19): the Installer interface; Steam's own install, pause, resume, cancel and uninstall through its client; Epic through legendary and GOG through gogdl, fetched on the user's Yes; Settings > Storage; setting up this PC; art chosen from SteamGridDB's candidates. |
+| **M9** Full Discord | **Started.** One Discord integration through the Dashboard's own hidden discord.com web session (WebView2, one per Profile), everything read from Discord's in-page Flux stores and pushed on their change events, acting by id through a paced one-at-a-time queue (docs/discord-web.md: Reading, Acting, Voice; docs/research/discord-web-voice.md section 0). Built and merged: the voice spike and its recommendation (#292), the model (`model::discord_dms`), Direct Messages read from the stores (#198), sending, replies, reactions and Mark As Read (#201), the Party & chats screens in the Guide (#200), the app wiring (#298), Toasts for DMs, mentions and calls (#202), voice through the web session with the tab using it once its stores are found (#297), the sign-in zoom (#294). On the TV PC on 2026-11-19 the real session signed in, listed 170 DMs and found every message and voice store. Open: the user's own test on the TV, the stand-in payloads `discord-web`, `discord-dms`, `discord-web-voice` (never run yet), mention Toasts (nothing raises a mention yet), retiring RPC and the Discord app (#299, after a 7-minute call with a game in front holds), servers' text channels (#203). |
 
 What only the TV PC can still settle, and the steps for each, is in **For the TV PC** below.
 
