@@ -491,8 +491,8 @@ yes, voice state no, rtc not connected)`. No call to Discord's web interface, no
 |---|---|---|
 | `Ask::Join(id)` (a Shortcut or a server's channel), `DirectAsk::Answer(dm)` | the channel's page and its button, else `selectVoiceChannel(id)`; nothing if it is the Call's already | the user's selected voice channel or own voice state is that channel, and RTC does not say otherwise, within 20 s; else the page leaves and reports `not connected (...)` |
 | `DirectAsk::Call(dm)` | the same; joined by the action (not the button, which rings), and nobody else in the call, then `ring(dm)` | as above; the log says whether the ring was asked |
-| `CallAsk::Mute` / `Deafen` | `toggleSelfMute()` / `toggleSelfDeaf()` | `MediaEngineStore` shows the flip |
-| `CallAsk::Leave` | `selectVoiceChannel(null)` | the user has no voice channel |
+| `CallAsk::Mute` / `Deafen` | the user panel's own Mute / Deafen switch by trusted Enter, else `toggleSelfMute()` / `toggleSelfDeaf()` (on the TV, 2026-11-19, the functions alone did nothing) | `MediaEngineStore` or the switch itself shows the flip |
+| `CallAsk::Leave` | the user panel's own Disconnect by trusted Enter, else `selectVoiceChannel(null)` | the user has no voice channel |
 | `DirectAsk::Decline(dm)` | `stopRinging(dm)` | `CallStore` no longer rings the user there |
 
 The Dashboard closing, the switch turned off or a sign-out while in a Call asks Discord's own leave first (best effort:
@@ -566,3 +566,14 @@ signs in to discord.com as you and reads the page for you."
   in by the QR code with no input at all** (the page opens with the QR shown and no field focused, the test plays the
   phone with `POST /standin/qr-confirm`); closed and started again still signed in; signed out with nothing left;
   then signed in again by typing on the stand-in's form with the pad and the Console keyboard, and signed out again.
+
+### Discord's own functions on the TV (2026-11-19)
+
+On the real discord.com every action that called one of Discord's functions found by shape did nothing:
+`selectVoiceChannel`, `toggleSelfMute`/`Deaf` and `ack` (`... not done: not shown`), while everything done by trusted
+input (sending, the voice buttons) worked. Why is not known yet (the likeliest: the object found by shape is not the
+live one among the page's several webpack runtimes). Until it is, voice and Mark As Read press the page's own controls
+first (Enter on the button; Escape in the conversation, Discord's own Mark As Read shortcut), and a function is only the
+fallback. A failed mark read held the one-at-a-time queue for 10 s, so a Call asked just after opening a conversation
+waited behind it; the fallback now has 2 s.
+

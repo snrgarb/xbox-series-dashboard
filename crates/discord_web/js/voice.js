@@ -269,6 +269,23 @@ const joinButton = (dm) => {
   return buttons.find((b) => /^join voice$/i.test(text(b)) || /^join voice$/i.test(label(b))) || null;
 };
 
+// Discord's user panel (Mute, Deafen, Disconnect), and a button of it by its English label, else anywhere on the page.
+const panelButton = (re) => {
+  const all = (q, root) => { try { return [...(root || document).querySelectorAll(q)]; } catch (e) { return []; } };
+  const panel = all('section[aria-label="User area"]')[0] || all('[class*="panels_"]')[0] || null;
+  const find = (root) => all('button, [role="button"], [role="switch"]', root).find((b) => re.test((b.getAttribute("aria-label") || "").trim())) || null;
+  return (panel && find(panel)) || find(null);
+};
+// A button's state as the page shows it: its aria-checked and its label.
+const shownState = (el) => { try { return (el.getAttribute("aria-checked") || "") + "|" + (el.getAttribute("aria-label") || ""); } catch (e) { return ""; } };
+// The page's own button focused and pressed by the host's trusted Enter; whether `sign` showed within 6 s.
+const pressOwn = async (my, el, sign) => {
+  try { el.scrollIntoView({ block: "center" }); el.focus(); } catch (e) {}
+  if (document.activeElement !== el) return false;
+  told({ seq: my.seq, stage: "press" });
+  return until(my, sign, O.signCap);
+};
+
 api.join = (op) => begin(op, async (my) => {
   const channel = op.channel;
   if (!isId(channel)) return fail(my, "page error");
@@ -289,12 +306,9 @@ api.join = (op) => begin(op, async (my) => {
     if (my.dead) return;
     if (button) {
       try { button.scrollIntoView({ block: "center" }); button.focus(); } catch (e) {}
-      if (document.activeElement === button) {
-        way = "button";
-        told({ seq: my.seq, stage: "press" });
-        await until(my, sign, O.signCap);
-        if (my.dead) return;
-      } else way = "button not focused";
+      way = document.activeElement === button ? "button" : "button not focused";
+      if (way === "button") await pressOwn(my, button, sign);
+      if (my.dead) return;
     } else way = "no button";
     // Way 2: Discord's own action, only if the button showed no sign.
     if (!sign()) {
@@ -329,28 +343,49 @@ api.join = (op) => begin(op, async (my) => {
 api.leave = (op) => begin(op, async (my) => {
   if (!needVoice(my)) return;
   const gone = () => !myChannel();
+  let way = "none";
   if (!gone()) {
-    try { Promise.resolve(A.S.voiceActions.selectVoiceChannel(null)).catch(() => {}); } catch (e) { return fail(my, "join action failed"); }
-    await until(my, gone, O.doneCap);
+    // The page's own Disconnect first (on the TV Discord's own function did nothing, 2026-11-19), then the function.
+    const el = panelButton(/^disconnect$/i);
+    way = el ? "button" : "no button";
+    if (el) await pressOwn(my, el, gone);
     if (my.dead) return;
+    if (!gone()) {
+      way += ", action";
+      try { Promise.resolve(A.S.voiceActions.selectVoiceChannel(null)).catch(() => {}); } catch (e) { return fail(my, "join action failed"); }
+      await until(my, gone, O.doneCap);
+      if (my.dead) return;
+    }
   }
-  if (!gone()) return fail(my, "not shown");
+  if (!gone()) return fail(my, "not shown (way " + way + ")");
   finish(my, { stage: "done" });
 });
 
-const toggle = (op, name, flag) => begin(op, async (my) => {
+const toggle = (op, name, flag, label) => begin(op, async (my) => {
   const a = A.S && A.S.mediaActions;
-  if (!a || !fnOf(a, name) || !A.S.media) return fail(my, "media action not found");
   const before = mediaFlag(flag);
-  try { Promise.resolve(a[name]()).catch(() => {}); } catch (e) { return fail(my, "media action failed"); }
-  await until(my, () => mediaFlag(flag) !== before, O.doneCap);
+  // The page's own switch in the user panel first (on the TV Discord's own function did nothing, 2026-11-19); done
+  // when the store or the switch itself shows the flip.
+  const el = panelButton(label);
+  const was = el ? shownState(el) : "";
+  const flipped = () => mediaFlag(flag) !== before || (!!el && shownState(el) !== was);
+  let way = el ? "button" : "no button";
+  if (el) await pressOwn(my, el, flipped);
   if (my.dead) return;
-  if (mediaFlag(flag) === before) return fail(my, "not shown");
+  if (!flipped()) {
+    if (!a || !fnOf(a, name) || !A.S.media) return fail(my, el ? "not shown (way button)" : "media action not found");
+    way += ", action";
+    try { Promise.resolve(a[name]()).catch(() => {}); } catch (e) { return fail(my, "media action failed"); }
+    await until(my, flipped, O.doneCap);
+    if (my.dead) return;
+  }
+  if (!flipped()) return fail(my, "not shown (way " + way + ")");
   scheduleVoice();
-  finish(my, { stage: "done", on: mediaFlag(flag) });
+  const on = mediaFlag(flag) !== before ? mediaFlag(flag) : !before;
+  finish(my, { stage: "done", on });
 });
-api.mute = (op) => toggle(op, "toggleSelfMute", "isSelfMute");
-api.deafen = (op) => toggle(op, "toggleSelfDeaf", "isSelfDeaf");
+api.mute = (op) => toggle(op, "toggleSelfMute", "isSelfMute", /^(mute|unmute)$/i);
+api.deafen = (op) => toggle(op, "toggleSelfDeaf", "isSelfDeaf", /^(deafen|undeafen)$/i);
 
 api.decline = (op) => begin(op, async (my) => {
   const channel = op.channel;

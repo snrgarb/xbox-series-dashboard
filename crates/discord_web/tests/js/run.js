@@ -10,7 +10,7 @@ const assert = require("assert");
 const script = fs.readFileSync(process.argv[2], "utf8");
 const { installFakeDiscord } = require(process.argv[3]);
 
-const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40, actPoll: 5, readyCap: 300, actCap: 900, readCap: 150, doneCap: 200, voiceWindow: 60, joinCap: 700, buttonCap: 60, signCap: 80 };
+const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40, actPoll: 5, readyCap: 300, actCap: 900, readCap: 150, doneCap: 200, voiceWindow: 60, joinCap: 700, buttonCap: 60, signCap: 80, ackCap: 100 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function page(opts, options) {
@@ -559,14 +559,15 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     assert.deepStrictEqual(acts(p, 1).map((x) => [x.stage, x.why]), [["failed", "not shown"]]);
   });
 
-  await check("marking read is Discord's own action, done when the unread count is 0", async () => {
+  await check("marking read asks the host for Escape in the conversation, then Discord's own action, done when the unread count is 0", async () => {
     const p = page({ markReadOnOpen: false });
     p.run();
     await sleep(150);
     assert.strictEqual(p.last("dms").dms.find((d) => d.id === F2).unread, 2);
     p.win.__xsdDirect.ack({ seq: 1, channel: F2 });
-    await sleep(80);
-    assert.deepStrictEqual(stages(p, 1), ["done"]);
+    await sleep(250);
+    // The made-up Discord has no Escape shortcut: the action after it.
+    assert.deepStrictEqual(stages(p, 1), ["press", "done"]);
     assert.deepStrictEqual(p.world.received, [{ kind: "read", channel: F2 }]);
     assert.strictEqual(p.last("dms").dms.find((d) => d.id === F2).unread, 0);
     p.win.__xsdDirect.ack({ seq: 2, channel: F2 });
