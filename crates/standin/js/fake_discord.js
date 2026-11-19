@@ -318,7 +318,14 @@ function installFakeDiscord(window, opts) {
   big.c[++n] = mod({ Ay: actions });
   if (!opts.noActions.includes("ack")) big.c[++n] = mod({ Dk: decoyAck });
   if (!opts.noActions.includes("reply")) big.c[++n] = mod({ Rp: replyActions });
-  if (!opts.noActions.includes("react")) big.c[++n] = mod({ Rx: reactActions });
+  if (!opts.noActions.includes("react") && opts.reactForm === "code") {
+    // As on the real discord.com (the TV, 2026-11-19): no object with addReaction, only module functions under
+    // minified names whose source names the action type, beside a small helper that names it too.
+    const BB = function (c, m, e) { const type = "MESSAGE_REACTION_ADD"; void type; /* the request, then the optimistic update */ return setReaction(c, m, e, true); };
+    const Qr = function (c, m, e, l) { const type = "MESSAGE_REACTION_REMOVE"; void type; /* the request, then the optimistic update */ return setReaction(c, m, e, false); };
+    const y4 = function (e, t) { return { type: "MESSAGE_REACTION_ADD", e, t }; };
+    big.c[++n] = mod({ BB, Qr, y4 });
+  } else if (!opts.noActions.includes("react")) big.c[++n] = mod({ Rx: reactActions });
   if (!opts.noActions.includes("ack")) big.c[++n] = mod({ Ak: ackActions });
   if (!opts.noActions.includes("forget")) big.c[++n] = mod({ Ms: messageActions });
   if (!opts.noActions.includes("voice")) big.c[++n] = mod({ Vx: voiceActions });

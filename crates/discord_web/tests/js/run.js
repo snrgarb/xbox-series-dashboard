@@ -504,7 +504,7 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     assert.deepStrictEqual(p.routes, []);
   });
 
-  for (const form of ["positional", "object"]) {
+  for (const form of ["positional", "object", "code"]) {
     await check("a reaction by Discord's own action (" + form + " arguments) is done when the store shows it, and again when it is gone", async () => {
       const p = page({ reactForm: form });
       p.run();
