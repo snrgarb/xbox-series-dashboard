@@ -238,6 +238,32 @@ fn a_ring_shows_for_30_seconds_before_those_waiting() {
     assert!(showing(&dashboard).is_none(), "gone after 30 s");
 }
 
+fn call_started(channel: &str, name: &str, group: Option<&str>) -> DirectEvent {
+    DirectEvent::CallStarted { channel: channel.into(), name: name.into(), group: group.map(Into::into), picture: None }
+}
+
+#[test]
+fn a_call_started_says_so_never_sent_you_a_message() {
+    let mut dashboard = dashboard();
+    dashboard.direct_event(&call_started("d1", "Ana", None));
+    assert_eq!(showing(&dashboard), Some((ToastKind::DiscordDm, "Ana started a call".into())));
+    let mut dashboard = self::dashboard();
+    dashboard.direct_event(&call_started("d2", "Ana", Some("Raid night")));
+    assert_eq!(showing(&dashboard), Some((ToastKind::DiscordDm, "Ana started a call in Raid night".into())));
+}
+
+#[test]
+fn the_ring_takes_the_place_of_its_call_started_and_none_comes_while_it_rings() {
+    let mut dashboard = dashboard();
+    dashboard.notify("one");
+    dashboard.direct_event(&call_started("d1", "Ana", None));
+    dashboard.direct_event(&DirectEvent::Ring(ring("d1", "Ana")));
+    let waiting: Vec<_> = dashboard.toasts().waiting_kinds();
+    assert_eq!(waiting, [ToastKind::DiscordCall], "the call started gave way to the ring");
+    dashboard.direct_event(&call_started("d1", "Ana", None));
+    assert_eq!(dashboard.toasts().waiting(), 1, "none while it rings");
+}
+
 #[test]
 fn a_ring_that_ends_takes_its_toast_away_showing_or_waiting() {
     let mut dashboard = dashboard();

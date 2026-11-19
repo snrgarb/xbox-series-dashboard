@@ -268,7 +268,11 @@ impl Toasts {
 
     /// A Toast of this kind for this channel is taken away: gone from the queue, or sent away if showing.
     pub fn withdraw(&mut self, kind: ToastKind, channel: &model::discord_dms::Id) {
-        let same = |toast: &Toast| toast.kind == kind && toast.channel.as_ref() == Some(channel);
+        self.withdraw_where(|toast| toast.kind == kind && toast.channel.as_ref() == Some(channel));
+    }
+
+    /// Takes away those waiting that `same` picks, and the one showing if it picks that.
+    pub fn withdraw_where(&mut self, same: impl Fn(&Toast) -> bool) {
         self.waiting.retain(|toast| !same(toast));
         if self.waiting.is_empty() {
             self.next_at = None;
@@ -383,6 +387,11 @@ impl Toasts {
     /// How many wait behind the one showing.
     pub fn waiting(&self) -> usize {
         self.waiting.len()
+    }
+
+    /// The kinds of those waiting, first first.
+    pub fn waiting_kinds(&self) -> Vec<ToastKind> {
+        self.waiting.iter().map(|toast| toast.kind).collect()
     }
 
     /// How many Toasts have shown since the Dashboard started: one more says another began.

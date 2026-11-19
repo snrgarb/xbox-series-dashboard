@@ -15,7 +15,7 @@
 // Idempotent: a second injection finds window.__xsdDirect and returns.
 if (window.__xsdDirect || window.top !== window) return;
 const O = Object.assign(
-  { poll: 500, settle: 2, cap: 15000, coalesce: 250, voiceWindow: 150, joinCap: 20000, tries: 5, gap: 2000, slow: 30000, actPoll: 40, readyCap: 8000, actCap: 20000, readCap: 3000, doneCap: 10000 },
+  { poll: 500, settle: 2, cap: 15000, coalesce: 250, voiceWindow: 150, joinCap: 20000, buttonCap: 5000, signCap: 6000, tries: 5, gap: 2000, slow: 30000, actPoll: 40, readyCap: 8000, actCap: 20000, readCap: 3000, doneCap: 10000 },
   window.__xsdDirectOptions || {}
 );
 const A = { S: null, me: "", open: null, anchor: null, older: false, timer: null, sent: {}, errors: new Set(), dm: new Map(), tries: 0, health: "", composer: false, voiceMissing: [], onInstall: [] };
@@ -66,7 +66,7 @@ const lastOf = (c) => {
   if (!at) return null;
   if (!m) return { at };
   const a = m.author || {};
-  return { at, text: str(m.content), who: nameOf(userOf(a.id) || a), names: namesIn(m.content) };
+  return { at, text: str(m.content), who: nameOf(userOf(a.id) || a), names: namesIn(m.content), type: Number(m.type) || 0 };
 };
 
 const privateIds = () => {

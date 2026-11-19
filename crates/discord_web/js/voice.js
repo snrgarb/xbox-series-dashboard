@@ -10,12 +10,18 @@
 //                                                                      host is browsing (`browse(id)`), with who is in each
 // A person's `avatar` is the hash only ("" for the default one); the host builds the CDN path.
 //
-// ACTING goes by id, through the host's paced queue (one at a time, with act.js): `selectVoiceChannel(id)` and the
-// other functions below are Discord's own, found by shape (stores.js), so they need no layout and no language. The page
-// has a Join Voice button, but its label is English, so it is not used (the spike's button press depended on it).
-//   join({seq, channel, ring})  selectVoiceChannel(channel); done when the user's own voice state is in that channel
-//                               (and RTC says connected, if that store was found), within 20 s, else the page leaves
-//                               and fails; with `ring`, once in and alone, Discord's own call action rings the DM
+// ACTING goes by id, through the host's paced queue (one at a time, with act.js).
+//   join({seq, channel, ring})  The way the spike proved on the TV first: the channel's own page opened by route
+//                               (`/channels/<server>/<channel>`, a DM's `/channels/@me/<id>`), the page's own Join
+//                               Voice (a server's) or Start Voice Call (a DM's, which also rings) button focused and
+//                               pressed by the host's trusted Enter (`{k:"act", stage:"press"}`). Only if there is no
+//                               such button, or pressing it shows no sign within 6 s, Discord's own
+//                               `selectVoiceChannel(channel)` (on the TV it alone never connected, 2026-11-19). Done
+//                               when the user's selected voice channel (or own voice state) is that channel and RTC
+//                               does not say otherwise, within 20 s, else the page leaves and fails, naming in fixed
+//                               words which way was tried and what was seen. With `ring` and joined by the action, once
+//                               in and alone, Discord's own call action rings the DM.
+// The buttons' labels are English (as the spike's were): another language finds none and falls to the action.
 //   leave({seq})                selectVoiceChannel(null); done when the user has no voice channel
 //   mute({seq}) / deafen({seq}) toggleSelfMute() / toggleSelfDeaf(); done when MediaEngineStore shows the flip
 //   decline({seq, channel})     stopRinging(channel); done when CallStore no longer rings the user there
@@ -253,22 +259,61 @@ const needVoice = (my) => {
   return true;
 };
 
+// The page's own button for joining `channel`: a server voice channel's Join Voice, a DM's Start Voice Call.
+const joinButton = (dm) => {
+  const all = (q) => { try { return [...document.querySelectorAll(q)]; } catch (e) { return []; } };
+  const label = (b) => (b.getAttribute("aria-label") || "").trim();
+  const text = (b) => (b.textContent || "").trim();
+  const buttons = all('button, [role="button"]');
+  if (dm) return buttons.find((b) => /^start (a )?voice call$/i.test(label(b))) || null;
+  return buttons.find((b) => /^join voice$/i.test(text(b)) || /^join voice$/i.test(label(b))) || null;
+};
+
 api.join = (op) => begin(op, async (my) => {
   const channel = op.channel;
   if (!isId(channel)) return fail(my, "page error");
   if (!needVoice(my)) return;
-  const connected = () => inChannel(channel) && rtcConnected() !== false;
+  // The sign: the user's selected voice channel, or their own voice state, is this channel.
+  const sign = () => myChannel() === channel || inChannel(channel);
+  const connected = () => sign() && rtcConnected() !== false;
+  let way = "none";
   let rejected = false;
   if (!connected()) {
-    try { Promise.resolve(A.S.voiceActions.selectVoiceChannel(channel)).catch(() => { rejected = true; }); } catch (e) { return fail(my, "join action failed"); }
+    const ch = call("channels", "getChannel", channel);
+    const guild = ch ? str(ch.guild_id || ch.guildId) : "";
+    const dm = !guild;
+    // Way 1: the channel's page and its own button, pressed by the host.
+    route(dm ? "/channels/@me/" + channel : "/channels/" + guild + "/" + channel);
+    let button = null;
+    await until(my, () => (button = joinButton(dm)), O.buttonCap);
+    if (my.dead) return;
+    if (button) {
+      try { button.scrollIntoView({ block: "center" }); button.focus(); } catch (e) {}
+      if (document.activeElement === button) {
+        way = "button";
+        told({ seq: my.seq, stage: "press" });
+        await until(my, sign, O.signCap);
+        if (my.dead) return;
+      } else way = "button not focused";
+    } else way = "no button";
+    // Way 2: Discord's own action, only if the button showed no sign.
+    if (!sign()) {
+      way = way === "button" ? "button, then action" : way + ", action";
+      try { Promise.resolve(A.S.voiceActions.selectVoiceChannel(channel)).catch(() => { rejected = true; }); } catch (e) { return fail(my, "join action failed"); }
+    }
     await until(my, () => connected() || rejected, O.joinCap);
     if (my.dead) return;
     if (!connected()) {
+      const rtc = rtcConnected();
+      const seen = `way ${way}; selected ${myChannel() === channel ? "yes" : myChannel() ? "another" : "none"}, ` +
+        `voice state ${inChannel(channel) ? "yes" : "no"}, rtc ${rtc === null ? "unknown" : rtc ? "connected" : "not connected"}`;
       // Not joined in time: the page leaves, so nothing half-joined is left behind.
       try { A.S.voiceActions.selectVoiceChannel(null); } catch (e) {}
-      return fail(my, rejected ? "join action failed" : "not connected");
+      return fail(my, (rejected ? "join action failed" : "not connected") + " (" + seen + ")");
     }
   }
+  // A DM's Start Voice Call rings by itself.
+  if (way === "button") op = Object.assign({}, op, { ring: false });
   let ring = "";
   if (op.ring) {
     const others = statesOf(channel).filter((s) => uidOf(s) !== A.me).length;

@@ -159,6 +159,9 @@ pub(crate) enum Command {
         text: String,
         clear: bool,
     },
+    /// Enter pressed on what the page focused: Discord's own button for a join (Join Voice, Start Voice Call), as
+    /// trusted input.
+    Press,
     /// Close the web view, remove the folder, end.
     SignOut,
     /// Close the web view and end; the folder stays.
@@ -731,6 +734,11 @@ impl Session {
                         host.send(Command::Type { text, clear });
                     }
                 }
+                act::Out::Press => {
+                    if let Some(host) = &self.host {
+                        host.send(Command::Press);
+                    }
+                }
                 act::Out::Event(event) => self.events.push(event),
                 act::Out::Log(line) => say(&line),
                 act::Out::Changed => {}
@@ -1233,6 +1241,10 @@ impl Session {
             DirectEvent::Message { channel, name, group, line, .. } => {
                 let picture = self.reader.dm(channel.as_str()).and_then(|d| self.pictures.get(&d.pic));
                 DirectEvent::Message { channel, name, group, line, picture }
+            }
+            DirectEvent::CallStarted { channel, name, group, .. } => {
+                let picture = self.reader.dm(channel.as_str()).and_then(|d| self.pictures.get(&d.pic));
+                DirectEvent::CallStarted { channel, name, group, picture }
             }
             DirectEvent::Ring(mut ring) => {
                 ring.picture = self

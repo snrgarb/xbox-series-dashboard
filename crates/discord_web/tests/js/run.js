@@ -10,7 +10,7 @@ const assert = require("assert");
 const script = fs.readFileSync(process.argv[2], "utf8");
 const { installFakeDiscord } = require(process.argv[3]);
 
-const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40, actPoll: 5, readyCap: 300, actCap: 900, readCap: 150, doneCap: 200, voiceWindow: 60, joinCap: 700 };
+const FAST = { poll: 5, settle: 2, cap: 400, coalesce: 20, tries: 3, gap: 10, slow: 40, actPoll: 5, readyCap: 300, actCap: 900, readCap: 150, doneCap: 200, voiceWindow: 60, joinCap: 700, buttonCap: 60, signCap: 80 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function page(opts, options) {
@@ -802,7 +802,9 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     await sleep(200);
     p.win.__xsdDirect.join({ seq: 1, channel: LOUNGE, ring: false });
     const d = await waitDone(p, 1);
-    assert.deepStrictEqual([d.stage, d.why], ["failed", "not connected"]);
+    assert.strictEqual(d.stage, "failed");
+    // The reason names which way was tried (the made-up page has no Join Voice button) and what the stores showed.
+    assert.strictEqual(d.why, "not connected (way no button, action; selected yes, voice state no, rtc not connected)");
     assert.strictEqual(p.world.received.filter((r) => r.kind === "leave").length, 1, "left, so nothing is half joined");
     assert.strictEqual(p.world.voiceChannel, null);
     const q = page({ noActions: ["voice", "media", "call"] });
