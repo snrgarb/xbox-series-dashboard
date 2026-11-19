@@ -119,17 +119,24 @@ api.send = (op) => begin(op, async (my) => {
   A.composer = !!box;
   schedule();
   if (!ready || !box) return fail(my, "composer not found");
+  const d = A.S.dispatcher;
   if (op.reply) {
     const a = actionOf("reply");
-    if (!a || !fnOf(a, "createPendingReply")) return fail(my, "reply action not found");
     const ch = call("channels", "getChannel", channel), m = messageOf(channel, op.reply);
     if (!ch || !m) return fail(my, "reply target not found");
-    try { a.createPendingReply({ channel: ch, message: m, shouldMention: true }); } catch (e) { return fail(my, "reply action not found"); }
-  } else if (actionOf("replyClear") && fnOf(A.S.replyClear, "deletePendingReply")) {
+    // Discord's action by name, else what it does: the pending reply dispatched.
+    try {
+      if (a && fnOf(a, "createPendingReply")) a.createPendingReply({ channel: ch, message: m, shouldMention: true });
+      else if (d && fnOf(d, "dispatch")) d.dispatch({ type: "CREATE_PENDING_REPLY", channel: ch, message: m, shouldMention: true, showMentionToggle: true });
+      else return fail(my, "reply action not found");
+    } catch (e) { return fail(my, "reply action failed"); }
+  } else {
     // A reply the Dashboard did not ask for (set in the page earlier) is cleared before a plain send.
     try {
       const store = A.S.pending;
-      if (!store || !fnOf(store, "getPendingReply") || store.getPendingReply(channel)) A.S.replyClear.deletePendingReply(channel);
+      const set = !store || !fnOf(store, "getPendingReply") || store.getPendingReply(channel);
+      if (set && actionOf("replyClear") && fnOf(A.S.replyClear, "deletePendingReply")) A.S.replyClear.deletePendingReply(channel);
+      else if (set && store && d && fnOf(d, "dispatch")) d.dispatch({ type: "DELETE_PENDING_REPLY", channelId: channel });
     } catch (e) {}
   }
   try { box.focus(); } catch (e) {}
@@ -178,8 +185,6 @@ api.react = (op) => begin(op, async (my) => {
 api.ack = (op) => begin(op, async (my) => {
   const channel = op.channel;
   if (!isId(channel)) return fail(my, "page error");
-  const a = actionOf("ack");
-  if (!a || !fnOf(a, "ack")) return fail(my, "ack action not found");
   if (unreadOf(channel) === 0) return finish(my, { stage: "done" });
   const read = () => unreadOf(channel) === 0;
   // Discord's own shortcut first, Escape in the conversation (on the TV Discord's own ack function did nothing,
@@ -203,9 +208,17 @@ api.ack = (op) => begin(op, async (my) => {
   }
   if (back) route(back);
   if (read()) return finish(my, { stage: "done" });
-  // Then the function, briefly: a failure here holds the one-at-a-time queue (a call waited behind it).
+  // Then Discord's action by name, else what it does, CHANNEL_ACK dispatched; briefly: a failure here holds the
+  // one-at-a-time queue (a call waited behind it).
+  const a = actionOf("ack"), d = A.S.dispatcher;
   let rejected = false;
-  try { Promise.resolve(a.ack(channel)).catch(() => { rejected = true; }); } catch (e) { return fail(my, "ack action failed"); }
+  try {
+    if (a && fnOf(a, "ack")) Promise.resolve(a.ack(channel)).catch(() => { rejected = true; });
+    else if (d && fnOf(d, "dispatch")) {
+      const c = call("channels", "getChannel", channel);
+      d.dispatch({ type: "CHANNEL_ACK", channelId: channel, messageId: c ? str(c.lastMessageId || c.last_message_id) : undefined, immediate: true, force: true, context: "APP" });
+    } else return fail(my, "ack action not found (way " + way + ")");
+  } catch (e) { return fail(my, "ack action failed"); }
   await until(my, () => read() || rejected, O.ackCap);
   if (my.dead) return;
   if (read()) return finish(my, { stage: "done" });
@@ -247,7 +260,12 @@ api.open = (id) => {
       let acked = false;
       if (!read || unreadOf(id) !== 0) {
         const a = actionOf("ack");
+        const d = A.S && A.S.dispatcher;
         if (a && fnOf(a, "ack")) { try { a.ack(id); acked = true; } catch (e) {} }
+        else if (d && fnOf(d, "dispatch")) {
+          const c = call("channels", "getChannel", id);
+          try { d.dispatch({ type: "CHANNEL_ACK", channelId: id, messageId: c ? str(c.lastMessageId || c.last_message_id) : undefined, immediate: true, force: true, context: "APP" }); acked = true; } catch (e) {}
+        }
         post({ k: "opened", read: false, acked });
       } else post({ k: "opened", read: true, acked });
     })().catch(() => {});

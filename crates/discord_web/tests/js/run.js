@@ -580,8 +580,10 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     assert.strictEqual(q.last("health").ok, true);
     assert.deepStrictEqual(q.last("health").found.ack, []);
     q.win.__xsdDirect.ack({ seq: 1, channel: F2 });
-    await sleep(30);
-    assert.deepStrictEqual(acts(q, 1).map((x) => x.why), ["ack action not found"]);
+    await sleep(300);
+    // Without the action: the conversation's page is opened for Escape, and this made-up Discord marks it read on
+    // opening, so it is done without the action.
+    assert.deepStrictEqual(stages(q, 1), ["press", "done"]);
   });
 
   await check("a conversation opened with unread messages says whether the page read it, and reads it itself if not", async () => {

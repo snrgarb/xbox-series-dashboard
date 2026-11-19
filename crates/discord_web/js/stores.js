@@ -138,6 +138,9 @@ const xsdFindStores = () => {
     voiceActions: shape(["selectVoiceChannel"]),
     mediaActions: shape(["toggleSelfMute", "toggleSelfDeaf"]),
     callActions: shape(["ring", "stopRinging"]) || shape(["stopRinging"]),
+    // Flux's dispatcher: replies and Mark As Read go through it when their action is not found by name (the TV,
+    // 2026-11-19: the real page has no `createPendingReply` or `ack` by those names; both only dispatch).
+    dispatcher: shapeBest(["dispatch", "subscribe", "unsubscribe"], ["register", "isDispatching"]),
   };
   out.S = S;
   // The copies line (TV, 2026-11-19: every action called by shape did nothing, every store read worked): how many
@@ -153,6 +156,28 @@ const xsdFindStores = () => {
       const all = [...candidates].filter((o) => fits(o, [m]));
       const len = (() => { try { return String(S[k] && S[k][m]).length; } catch (e) { return -1; } })();
       parts.push(k + " " + all.length + " (catch-alls passed over: " + [...candidates].filter((o) => typeof o === "object" && catchAll(o)).length + ") in [" + [...new Set(all.map(rt))].join(",") + "] picked " + rt(S[k]) + " src " + len);
+    }
+    parts.push("dispatcher " + (S.dispatcher ? "yes" : "no"));
+    // Where the reaction, reply and ack code lives: the functions whose source names Discord's action types, by their
+    // code names and sizes (code, never anything of the user's), the first three of each.
+    const markers = { react: "MESSAGE_REACTION_ADD", reply: "CREATE_PENDING_REPLY", ack: "CHANNEL_ACK" };
+    const fns = [];
+    for (const o of candidates) {
+      if (typeof o === "function") fns.push(["", o]);
+      else if (typeof o === "object" && !catchAll(o)) {
+        let ks = [];
+        try { ks = Object.getOwnPropertyNames(o); } catch (e) {}
+        for (const k of ks) { const v = get(o, k); if (typeof v === "function") fns.push([k, v]); }
+      }
+    }
+    for (const [k, m] of Object.entries(markers)) {
+      const hits = [];
+      for (const [key, f] of fns) {
+        let src = "";
+        try { src = Function.prototype.toString.call(f); } catch (e) { continue; }
+        if (src.includes('"' + m + '"') || src.includes("'" + m + "'")) hits.push((f.name || "?") + "/" + (key || "-") + "/" + f.length + "/" + src.length);
+      }
+      parts.push(k + " code " + hits.length + " [" + hits.slice(0, 3).join(" ").replace(/[^\w\/ ?$-]/g, "") + "]");
     }
     out.copies = parts.join("; ");
   } catch (e) { out.copies = "page error"; }
