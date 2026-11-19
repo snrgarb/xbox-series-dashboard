@@ -305,6 +305,11 @@ function installFakeDiscord(window, opts) {
   const big = { c: {}, m: {} };
   const small = { c: { 1: mod({ nothing: 1 }) }, m: {} };
   let n = 0;
+  // As on the real discord.com (the TV, 2026-11-19: about a hundred of them, ahead of the real actions): objects that
+  // answer every name with a function that does nothing. Searching by shape must pass them over.
+  const catchAll = () => new Proxy({}, { get: (_, k) => (typeof k === "string" ? function n() {} : undefined) });
+  big.c[++n] = mod({ Q: catchAll() });
+  big.c[++n] = mod(catchAll());
   for (const s of Object.values(world.stores)) {
     if (opts.hide.includes(s.constructor.displayName)) continue;
     big.c[++n] = mod({ Z: s });
