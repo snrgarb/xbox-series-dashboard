@@ -193,7 +193,7 @@ const sendHealth = (extra) => {
   const missing = [...A.missing, ...[...A.errors].filter((e) => !A.missing.includes(e))];
   // `composer` is the message box as last looked for by a send: yes or no, never a reason for a break.
   const found = Object.assign({}, A.found, { composer: A.composer ? ["textbox"] : [] });
-  sendIfChanged("health", Object.assign({ k: "health", ok: missing.length === 0, found, missing, voice_missing: A.voiceMissing, older: !!(A.S && A.S.older), tries: A.tries }, extra || {}));
+  sendIfChanged("health", Object.assign({ k: "health", ok: missing.length === 0, found, missing, voice_missing: A.voiceMissing, older: !!(A.S && A.S.older), tries: A.tries, copies: A.copies || "" }, extra || {}));
 };
 
 const flush = () => {
@@ -279,6 +279,7 @@ Object.defineProperty(window, "__xsdDirect", { value: api, enumerable: false, co
 
 const install = (found) => {
   A.S = found.S;
+  A.copies = found.copies || "";
   A.found = found.found;
   A.missing = found.missing;
   for (const k of ["channels", "privateSort", "users", "readState", "messages", "calls"]) {

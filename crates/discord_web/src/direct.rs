@@ -79,6 +79,9 @@ pub struct Health {
     /// Discord's own older-messages action was found.
     pub older: bool,
     pub tries: u32,
+    /// How many copies of each of Discord's actions the page has and in which of its runtimes (`js/stores.js`):
+    /// numbers and our keys only.
+    pub copies: String,
 }
 
 #[derive(Deserialize, Default, Clone, PartialEq)]
@@ -662,6 +665,9 @@ fn health_lines(before: Option<&Health>, now: &Health) -> Vec<String> {
             Some((key, method)) => format!("discord web: voice store \"{key}\" no longer answers ({method})"),
             None => format!("discord web: voice store \"{m}\" no longer answers"),
         });
+    }
+    if !now.copies.is_empty() && before.map(|b| b.copies.as_str()) != Some(now.copies.as_str()) {
+        out.push(format!("discord web: copies: {}", now.copies));
     }
     if now.ok && before.is_some_and(|b| !b.ok) {
         out.push("discord web: the stores answer again".into());

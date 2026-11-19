@@ -31,7 +31,7 @@ const xsdCacheSize = () => {
   return n;
 };
 const xsdFindStores = () => {
-  const out = { S: {}, found: {}, missing: [], why: "", modules: 0 };
+  const out = { S: {}, found: {}, missing: [], why: "", modules: 0, copies: "" };
   if (!window.webpackChunkdiscord_app || typeof window.webpackChunkdiscord_app.push !== "function") {
     out.why = "no chunk global";
     return out;
@@ -52,14 +52,19 @@ const xsdFindStores = () => {
   };
   const candidates = new Set();
   const byName = new Map();
+  // Which runtime (by its place, largest first) each candidate was first seen in: for the copies line.
+  const runtimeOf = new Map();
+  let ri = -1;
   const add = (o) => {
     if (!isObj(o) || isDom(o) || candidates.has(o)) return;
     candidates.add(o);
+    runtimeOf.set(o, ri);
     if (typeof o !== "object") return;
     const n = nameOf(o);
     if (n && !byName.has(n)) byName.set(n, o);
   };
   for (const req of reqs) {
+    ri++;
     const c = get(req, "c");
     let ids = [];
     try { ids = c ? Object.keys(c) : []; } catch (x) {}
@@ -130,6 +135,22 @@ const xsdFindStores = () => {
     callActions: shape(["ring", "stopRinging"]) || shape(["stopRinging"]),
   };
   out.S = S;
+  // The copies line (TV, 2026-11-19: every action called by shape did nothing, every store read worked): how many
+  // runtimes and modules, and for each action how many objects have its shape, in which runtimes, which was picked, and
+  // whether the picked function's own source looks like a forwarder (shorter than 120 characters). Numbers and our
+  // keys only.
+  try {
+    const sizes = reqs.map((r) => { try { return r.c ? Object.keys(r.c).length : 0; } catch (e) { return 0; } });
+    const rt = (o) => (o && runtimeOf.has(o) ? runtimeOf.get(o) : "?");
+    const parts = ["runtimes " + reqs.length + " (" + sizes.join("/") + ")", "stores in " + rt(S.channels) + "/" + rt(S.messages) + "/" + rt(S.voice)];
+    const acts = { voiceActions: "selectVoiceChannel", mediaActions: "toggleSelfMute", ack: "ack", react: "addReaction", reply: "createPendingReply", callActions: "stopRinging", older: "fetchMessages" };
+    for (const [k, m] of Object.entries(acts)) {
+      const all = [...candidates].filter((o) => typeof o === "object" && fn(o, m));
+      const len = (() => { try { return String(S[k] && S[k][m]).length; } catch (e) { return -1; } })();
+      parts.push(k + " " + all.length + " in [" + [...new Set(all.map(rt))].join(",") + "] picked " + rt(S[k]) + " src " + len);
+    }
+    out.copies = parts.join("; ");
+  } catch (e) { out.copies = "page error"; }
   // Discord's method names we call: [name, required]. A key is required when its first group is; `either` lists
   // alternatives of which one must be there.
   const wants = {
