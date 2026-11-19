@@ -571,8 +571,11 @@ signs in to discord.com as you and reads the page for you."
 
 On the real discord.com every action that called one of Discord's functions found by shape did nothing:
 `selectVoiceChannel`, `toggleSelfMute`/`Deaf` and `ack` (`... not done: not shown`), while everything done by trusted
-input (sending, the voice buttons) worked. Why is not known yet (the likeliest: the object found by shape is not the
-live one among the page's several webpack runtimes). Until it is, voice and Mark As Read press the page's own controls
+input (sending, the voice buttons) worked. The `copies` log line (`js/stores.js`) found why: about a hundred objects in
+the page's module cache answer **every** name with a function that does nothing (each action's picked function was 13
+characters, `function n(){}`), and the search by shape took one of them. Stores are found by their names, so reading
+was never touched. An object that also answers a made-up name is now passed over (`catchAll`), and the made-up Discord
+holds two such objects so the tests fail if it is not. Voice and Mark As Read still press the page's own controls
 first (Enter on the button; Escape in the conversation, Discord's own Mark As Read shortcut), and a function is only the
 fallback. A failed mark read held the one-at-a-time queue for 10 s, so a Call asked just after opening a conversation
 waited behind it; the fallback now has 2 s.

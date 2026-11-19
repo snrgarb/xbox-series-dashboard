@@ -91,9 +91,14 @@ const xsdFindStores = () => {
     }
     if (registered) break;
   }
-  const shape = (all) => [...byName.values(), ...candidates].find((o) => typeof o === "object" && all.every((n) => fn(o, n))) || null;
+  // An object that answers a name nobody would give with a function answers every name: a catch-all whose functions
+  // do nothing (the TV, 2026-11-19: about a hundred matched every action's shape ahead of the real one, so every
+  // action did nothing). Never picked by shape.
+  const catchAll = (o) => fn(o, "xsdNoSuchName" + Date.now().toString(36));
+  const fits = (o, all) => typeof o === "object" && all.every((n) => fn(o, n)) && !catchAll(o);
+  const shape = (all) => [...byName.values(), ...candidates].find((o) => fits(o, all)) || null;
   const shapeBest = (all, prefer) => {
-    const all_ = [...byName.values(), ...candidates].filter((o) => typeof o === "object" && all.every((n) => fn(o, n)));
+    const all_ = [...byName.values(), ...candidates].filter((o) => fits(o, all));
     return all_.find((o) => prefer.some((n) => fn(o, n))) || all_[0] || null;
   };
   const pick = (names, methods) => {
@@ -145,9 +150,9 @@ const xsdFindStores = () => {
     const parts = ["runtimes " + reqs.length + " (" + sizes.join("/") + ")", "stores in " + rt(S.channels) + "/" + rt(S.messages) + "/" + rt(S.voice)];
     const acts = { voiceActions: "selectVoiceChannel", mediaActions: "toggleSelfMute", ack: "ack", react: "addReaction", reply: "createPendingReply", callActions: "stopRinging", older: "fetchMessages" };
     for (const [k, m] of Object.entries(acts)) {
-      const all = [...candidates].filter((o) => typeof o === "object" && fn(o, m));
+      const all = [...candidates].filter((o) => fits(o, [m]));
       const len = (() => { try { return String(S[k] && S[k][m]).length; } catch (e) { return -1; } })();
-      parts.push(k + " " + all.length + " in [" + [...new Set(all.map(rt))].join(",") + "] picked " + rt(S[k]) + " src " + len);
+      parts.push(k + " " + all.length + " (catch-alls passed over: " + [...candidates].filter((o) => typeof o === "object" && catchAll(o)).length + ") in [" + [...new Set(all.map(rt))].join(",") + "] picked " + rt(S[k]) + " src " + len);
     }
     out.copies = parts.join("; ");
   } catch (e) { out.copies = "page error"; }
