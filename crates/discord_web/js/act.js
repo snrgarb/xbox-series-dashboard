@@ -19,6 +19,23 @@
 const D = { cur: null, reads: 0 };
 const nap = (ms) => new Promise((r) => setTimeout(r, ms));
 const told = (o) => post(Object.assign({ k: "act" }, o));
+// Discord loads some of its actions only once the chat is first used (the TV, 2026-11-19: reactions, replies and ack
+// were not in the cache at sign-in). An action asked for and not yet found is searched for again, at most once a second;
+// what is found then is kept.
+let refoundAt = 0;
+const actionOf = (k) => {
+  if (!A.S) return null;
+  if (A.S[k] || Date.now() - refoundAt < 1000) return A.S[k] || null;
+  refoundAt = Date.now();
+  try {
+    const f = xsdFindStores();
+    for (const [key, v] of Object.entries(f.S)) if (v && !A.S[key]) A.S[key] = v;
+    if (f.copies) A.copies = f.copies;
+    for (const [key, v] of Object.entries(f.found)) if (v.length && !(A.found[key] || []).length) A.found[key] = v;
+    sendHealth();
+  } catch (e) {}
+  return A.S[k] || null;
+};
 const isId = (v) => typeof v === "string" && /^\d+$/.test(v);
 const fnOf = (o, n) => { try { return !!o && typeof o[n] === "function"; } catch (e) { return false; } };
 
@@ -103,12 +120,12 @@ api.send = (op) => begin(op, async (my) => {
   schedule();
   if (!ready || !box) return fail(my, "composer not found");
   if (op.reply) {
-    const a = A.S.reply;
+    const a = actionOf("reply");
     if (!a || !fnOf(a, "createPendingReply")) return fail(my, "reply action not found");
     const ch = call("channels", "getChannel", channel), m = messageOf(channel, op.reply);
     if (!ch || !m) return fail(my, "reply target not found");
     try { a.createPendingReply({ channel: ch, message: m, shouldMention: true }); } catch (e) { return fail(my, "reply action not found"); }
-  } else if (A.S.replyClear && fnOf(A.S.replyClear, "deletePendingReply")) {
+  } else if (actionOf("replyClear") && fnOf(A.S.replyClear, "deletePendingReply")) {
     // A reply the Dashboard did not ask for (set in the page earlier) is cleared before a plain send.
     try {
       const store = A.S.pending;
@@ -145,7 +162,7 @@ api.send = (op) => begin(op, async (my) => {
 api.react = (op) => begin(op, async (my) => {
   const { channel, message, emoji, on } = op;
   if (!isId(channel) || !isId(message) || typeof emoji !== "string" || !emoji || emoji.length > 32 || typeof on !== "boolean") return fail(my, "page error");
-  const a = A.S.react;
+  const a = actionOf("react");
   if (!a || !fnOf(a, "addReaction") || !fnOf(a, "removeReaction")) return fail(my, "react action not found");
   if (!messageOf(channel, message)) return fail(my, "message not loaded");
   const shown = () => iReacted(messageOf(channel, message), emoji) === on;
@@ -161,7 +178,7 @@ api.react = (op) => begin(op, async (my) => {
 api.ack = (op) => begin(op, async (my) => {
   const channel = op.channel;
   if (!isId(channel)) return fail(my, "page error");
-  const a = A.S.ack;
+  const a = actionOf("ack");
   if (!a || !fnOf(a, "ack")) return fail(my, "ack action not found");
   if (unreadOf(channel) === 0) return finish(my, { stage: "done" });
   const read = () => unreadOf(channel) === 0;
@@ -199,7 +216,7 @@ api.ack = (op) => begin(op, async (my) => {
 // removes what was never sent and asks Discord for nothing. False unless it is ours and failed.
 api.forget = (channel, id) => {
   if (!isId(channel) || !isId(id)) return false;
-  const a = A.S && A.S.forget;
+  const a = actionOf("forget");
   const m = messageOf(channel, id);
   if (!a || !fnOf(a, "deleteMessage") || !m || !ownMessage(m) || stateOf(m) !== "SEND_FAILED") return false;
   try { a.deleteMessage(channel, id, true); } catch (e) { return false; }
@@ -229,7 +246,7 @@ api.open = (id) => {
       if (stale()) return;
       let acked = false;
       if (!read || unreadOf(id) !== 0) {
-        const a = A.S && A.S.ack;
+        const a = actionOf("ack");
         if (a && fnOf(a, "ack")) { try { a.ack(id); acked = true; } catch (e) {} }
         post({ k: "opened", read: false, acked });
       } else post({ k: "opened", read: true, acked });
