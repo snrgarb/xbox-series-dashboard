@@ -101,6 +101,25 @@ const xsdFindStores = () => {
     const all_ = [...byName.values(), ...candidates].filter((o) => fits(o, all));
     return all_.find((o) => prefer.some((n) => fn(o, n))) || all_[0] || null;
   };
+  // The real page has no object with addReaction (the TV, 2026-11-19): its reaction functions are module functions
+  // under minified names. Each is the longest function of three or more arguments whose source names its action type
+  // (a short helper that only builds the action names it too).
+  const reactByCode = () => {
+    const best = (type, not) => {
+      let found = null, size = 0;
+      for (const o of candidates) {
+        if (typeof o !== "function" || o.length < 3) continue;
+        let src = "";
+        try { src = Function.prototype.toString.call(o); } catch (e) { continue; }
+        if (!src.includes('"' + type + '"') || src.length <= size || o === not) continue;
+        found = o; size = src.length;
+      }
+      return found;
+    };
+    const add = best("MESSAGE_REACTION_ADD", null);
+    const remove = add && best("MESSAGE_REACTION_REMOVE", add);
+    return add && remove ? { addReaction: add, removeReaction: remove } : null;
+  };
   const pick = (names, methods) => {
     for (const n of names) if (byName.has(n)) return byName.get(n);
     return shape(methods);
@@ -119,7 +138,7 @@ const xsdFindStores = () => {
     reply: shape(["createPendingReply"]),
     replyClear: shape(["deletePendingReply"]),
     pending: pick(["PendingReplyStore"], ["getPendingReply"]),
-    react: shape(["addReaction", "removeReaction"]),
+    react: shape(["addReaction", "removeReaction"]) || reactByCode(),
     // `ack` alone is on more than one object: the one that also has its siblings is the channel read-state action.
     ack: shapeBest(["ack"], ["bulkAck", "ackCategory", "localAck", "ackChannel"]),
     forget: shape(["deleteMessage", "sendMessage"]) || shape(["deleteMessage"]),
