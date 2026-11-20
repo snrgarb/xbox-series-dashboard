@@ -154,11 +154,11 @@ try {
     $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Log '^discord web: mute on$' 10 $mark 'muted' | Out-Null
-    Walk-Guide Right 'Discord Entry\(\d+\) Deafen;' 3
+    Walk-Guide Down 'Discord Entry\(\d+\) Deafen;' 3
     $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Log '^discord web: deafen on$' 10 $mark 'deafened' | Out-Null
-    Walk-Guide Right 'Discord Entry\(\d+\) Leave;' 3
+    Walk-Guide Down 'Discord Entry\(\d+\) Leave;' 3
     $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Log '^discord web: left the call$' 10 $mark 'left' | Out-Null
@@ -178,7 +178,7 @@ try {
     $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Log '^discord web: joined in \d+ ms$' 25 $mark 'answered' | Out-Null
-    Walk-Guide Right 'Discord Entry\(\d+\) Leave;' 4
+    Walk-Guide Down 'Discord Entry\(\d+\) Leave;' 8
     $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Log '^discord web: left the call$' 10 $mark 'left again' | Out-Null

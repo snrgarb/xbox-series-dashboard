@@ -174,6 +174,9 @@ struct App {
     log_focus: bool,
     /// The Profile signed in as the log last said it (`profile: ...`), so that it is said again only as it changes.
     profile_said: String,
+    /// The Guide's line as the log last said it (`guide: ...`): said again only as it changes, wherever in a turn
+    /// (a press, the web session, the end of a game) it changed.
+    guide_said: String,
     /// What turns the machine off, restarts it and puts it to sleep: for real, or with --dry-power in the log only.
     power: Box<dyn Power>,
     /// What opens a store's address for a game, to install or uninstall it.
@@ -542,6 +545,7 @@ pub fn run(
         moving: false,
         log_focus: args.log_focus,
         profile_said: String::new(),
+        guide_said: "closed".into(),
         // The one place the machine's own power is in reach: a test or an offscreen frame never comes here.
         power: if args.dry_power { Box::new(DryPower::default()) } else { Box::new(SystemPower) },
         // A store's address goes to the program Windows has for it, or with --open-addresses-with to that program.
@@ -974,6 +978,23 @@ impl App {
     /// Discord messages' session (#197): the Profile signed in's, its sign-in page shown while that page has the pad
     /// and nothing is over it, and how it stands given to Settings. A sign-in done closes the page.
     fn follow_discord_web(&mut self) {
+        self.follow_discord_web_inner();
+        // What the session told (a message arrived, a conversation loaded) changes the Guide with no press.
+        self.say_guide();
+    }
+
+    /// With --log-focus: the Guide's line, if it is not what the log last said.
+    fn say_guide(&mut self) {
+        if self.log_focus {
+            let line = self.dashboard.guide_line();
+            if line != self.guide_said {
+                eprintln!("guide: {line}");
+                self.guide_said = line;
+            }
+        }
+    }
+
+    fn follow_discord_web_inner(&mut self) {
         self.discord_web.set_profile(Some(self.dashboard.profile().id));
         self.discord_web.set_signing_in(self.dashboard.discord_sign_in_open());
         let area = self.dashboard.discord_sign_in_shown().then_some(()).and(self.state.as_ref()).and_then(|state| {
@@ -1764,7 +1785,6 @@ impl ApplicationHandler for App {
         // Where focus and the Guide are before anything this turn changes them: a press, a game ending, time, an
         // update's check or install going on (Settings > About's line says where updates stand).
         let focus = self.dashboard.focus_line();
-        let guide = self.dashboard.guide_line();
         // Updates: how a check or an install goes, as a thread says; the daily check when it is due; and a Toast
         // for a version ready, never while a game runs.
         for event in self.updater.poll() {
@@ -2048,9 +2068,7 @@ impl ApplicationHandler for App {
         if self.log_focus && self.dashboard.focus_line() != focus {
             eprintln!("focus: {}", self.dashboard.focus_line());
         }
-        if self.log_focus && self.dashboard.guide_line() != guide {
-            eprintln!("guide: {}", self.dashboard.guide_line());
-        }
+        self.say_guide();
         // A held direction repeats at the pace of whatever has the pad now.
         self.pad.set_repeat(self.dashboard.repeat());
         self.overlay_stale |= pressed;
@@ -2059,7 +2077,7 @@ impl ApplicationHandler for App {
             self.toasts_changed();
         }
         self.stale |= self.dashboard.focus_line() != focus;
-        let said = (self.dashboard.focus_line(), self.dashboard.guide_line());
+        let said = self.dashboard.focus_line();
         let began = Instant::now();
         self.ledger.enter_at(Part::Effects, began);
         self.carry_out(event_loop);
@@ -2076,12 +2094,10 @@ impl ApplicationHandler for App {
         }
         // What was carried out may have changed what the page says (a Group shown or not, from the snapshot after),
         // or the Guide (Discord asked: a Flyout loading, a Shortcut removed).
-        if self.log_focus && self.dashboard.focus_line() != said.0 {
+        if self.log_focus && self.dashboard.focus_line() != said {
             eprintln!("focus: {}", self.dashboard.focus_line());
         }
-        if self.log_focus && self.dashboard.guide_line() != said.1 {
-            eprintln!("guide: {}", self.dashboard.guide_line());
-        }
+        self.say_guide();
         // Settings > Idle's times, which an --idle-after run keeps in place of them.
         self.keep_idle_after();
         let audio_wants = self.follow_audio();
@@ -2141,6 +2157,8 @@ impl ApplicationHandler for App {
         }
 
         self.ledger.enter(Part::End);
+        // The Guide may have closed or changed in the follow-ups above (a game ended behind it): said before the turn ends.
+        self.say_guide();
         self.follow_boot_video();
         let Some(state) = &self.state else { return };
         if let Some((frames, since)) = &mut self.frames {

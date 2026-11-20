@@ -8,7 +8,7 @@
 #      The session finds the stores (`discord web: stores found: ...`) and reads the list (`discord web: n DMs, ...`).
 #   2. The Guide, the right bumper to the Discord tab: focus on the first DM (`guide: Discord Entry(k) DM(0) of n`).
 #   3. A message arrives in another DM (`POST /standin/dm-message`): the counts on the tab's line change.
-#   4. A on the first DM: the conversation opens (`flyout Conversation`), down to the reply box.
+#   4. A on the first DM (the one the message arrived in, moved to the top): the conversation opens (`flyout Conversation`), down to the reply box.
 #   5. A: text entry (`focus: TextEntry: ...`), one letter typed, Menu sends it: `discord web: sent in n ms`, the
 #      stand-in received exactly that text in that DM (`GET /standin/sent`), the reply box empty again.
 #   6. B back to the tab; Right along the row to the sixth circle; A opens All Direct Messages.
@@ -162,7 +162,8 @@ try {
     }
     Save-Screen '2-arrived'
 
-    # --- 4. The conversation, down to the reply box.
+    # --- 4. The conversation, down to the reply box. The DM that got the message moved to the top of the list, so the
+    # first DM is now that one (100000000000000002).
     $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Guide '.*flyout Conversation' 10 $mark 'the conversation opened' | Out-Null
@@ -182,7 +183,7 @@ try {
     $sent = @((Invoke-WebRequest -Uri "$base/standin/sent" -UseBasicParsing).Content | ConvertFrom-Json)
     $messages = @($sent | Where-Object { $_.kind -eq 'message' })
     if ($messages.Count -ne 1) { Fail "the stand-in should have received one message, not $($messages.Count)" }
-    elseif ($messages[0].channel -ne '100000000000000001' -or $messages[0].text.Length -ne 1) {
+    elseif ($messages[0].channel -ne '100000000000000002' -or $messages[0].text.Length -ne 1) {
         Fail "the message went to the wrong DM or with the wrong text ($($messages[0].text.Length) chars)"
     }
 
