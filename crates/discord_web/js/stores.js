@@ -105,19 +105,22 @@ const xsdFindStores = () => {
   // under minified names. Each is the longest function of three or more arguments whose source names its action type
   // (a short helper that only builds the action names it too).
   const reactByCode = () => {
-    const best = (type, not) => {
+    // `objectForm`: a function of one argument (an object) counts too when its source names "@me", our own reaction
+    // (the TV, 2026-11-20: Discord's removing function takes one object and was passed over for having one argument).
+    const best = (type, not, objectForm) => {
       let found = null, size = 0;
       for (const o of candidates) {
-        if (typeof o !== "function" || o.length < 3) continue;
+        if (typeof o !== "function" || !(o.length >= 3 || (objectForm && o.length === 1))) continue;
         let src = "";
         try { src = Function.prototype.toString.call(o); } catch (e) { continue; }
+        if (o.length === 1 && !src.includes("@me")) continue;
         if (!src.includes('"' + type + '"') || src.length <= size || o === not) continue;
         found = o; size = src.length;
       }
       return found;
     };
     const add = best("MESSAGE_REACTION_ADD", null);
-    const remove = add && best("MESSAGE_REACTION_REMOVE", add);
+    const remove = add && best("MESSAGE_REACTION_REMOVE", add, true);
     // Adding is not held back by a removing not found (the TV, 2026-11-20: only the adding function was found, so
     // neither was used); a removal then fails plainly.
     return add ? (remove ? { addReaction: add, removeReaction: remove } : { addReaction: add }) : null;

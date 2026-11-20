@@ -379,6 +379,12 @@ store (Discord's gateway sends the removal back). With neither a removing functi
 unreact action not found`. The copies line says `http yes`/`no` and names every function of the adding function's module
 (`react module`: code name, arguments, size, `A`/`R`/`M` for the action types and `@me` its source names).
 
+On the TV the HTTP utility's removal was refused (later on 2026-11-20), and the module line showed the removing function:
+`et`, one argument, naming the removal, the adding (its rollback) and `@me`. Discord's removing function takes one object.
+So a removing function of one argument counts too when its source names `"@me"` (a one-object function without it is
+never called), and is called with `{ channelId, messageId, emoji }` as `callReaction` does for `length` 1. A refused
+HTTP removal now says Discord's status: `react action failed (http <status>)`.
+
 ### MarkRead (`DirectAsk::MarkRead(channel)`)
 
 Discord's own `ack(channelId)` from the exports object with a function `ack` (preferring one that also has `bulkAck`,
