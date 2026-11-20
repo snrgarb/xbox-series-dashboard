@@ -71,8 +71,8 @@ pub fn tabs(ui: &mut Ui, tabs: &[Tab], showing: Tab, picture: &model::Picture, u
         let colour = if selected { Color::WHITE } else { UNSELECTED };
         let square = |side: f32| Rect::new(cx - side / 2.0, cy - side / 2.0, side, side);
         match tab {
-            // The picture's size, where the Bundle's Xbox mark is 33: the user's (#269).
-            Tab::Landing => marks::xbox(ui, square(PICTURE), colour),
+            // The Bundle's 33, smaller than the picture as on the console: #269's 54 was too big on the TV.
+            Tab::Landing => marks::xbox(ui, square(33.0), colour),
             Tab::Discord => {
                 marks::discord_mark(ui, square(36.0), colour);
                 // With any unread DM, a dot 12 across in the accent at the mark's top right.
