@@ -118,7 +118,9 @@ const xsdFindStores = () => {
     };
     const add = best("MESSAGE_REACTION_ADD", null);
     const remove = add && best("MESSAGE_REACTION_REMOVE", add);
-    return add && remove ? { addReaction: add, removeReaction: remove } : null;
+    // Adding is not held back by a removing not found (the TV, 2026-11-20: only the adding function was found, so
+    // neither was used); a removal then fails plainly.
+    return add ? (remove ? { addReaction: add, removeReaction: remove } : { addReaction: add }) : null;
   };
   const pick = (names, methods) => {
     for (const n of names) if (byName.has(n)) return byName.get(n);
@@ -179,7 +181,7 @@ const xsdFindStores = () => {
     parts.push("dispatcher " + (S.dispatcher ? "yes" : "no"));
     // Where the reaction, reply and ack code lives: the functions whose source names Discord's action types, by their
     // code names and sizes (code, never anything of the user's), the first three of each.
-    const markers = { react: "MESSAGE_REACTION_ADD", reply: "CREATE_PENDING_REPLY", ack: "CHANNEL_ACK" };
+    const markers = { react: "MESSAGE_REACTION_ADD", unreact: "MESSAGE_REACTION_REMOVE", reply: "CREATE_PENDING_REPLY", ack: "CHANNEL_ACK" };
     const fns = [];
     for (const o of candidates) {
       if (typeof o === "function") fns.push(["", o]);
@@ -196,8 +198,26 @@ const xsdFindStores = () => {
         try { src = Function.prototype.toString.call(f); } catch (e) { continue; }
         if (src.includes('"' + m + '"') || src.includes("'" + m + "'")) hits.push((f.name || "?") + "/" + (key || "-") + "/" + f.length + "/" + src.length);
       }
-      parts.push(k + " code " + hits.length + " [" + hits.slice(0, 3).join(" ").replace(/[^\w\/ ?$-]/g, "") + "]");
+      parts.push(k + " code " + hits.length + " [" + hits.slice(0, k === "react" || k === "unreact" ? 8 : 3).join(" ").replace(/[^\w\/ ?$-]/g, "") + "]");
     }
+    // The module the reaction adding function is exported from: each of its functions by code name, arguments, size,
+    // and whether its source names the adding (A) or removing (R) action type. Code only.
+    const added = S.react && S.react.addReaction;
+    const home = added && [...candidates].find((o) => typeof o === "object" && !catchAll(o) && (() => { try { return Object.getOwnPropertyNames(o).some((k) => get(o, k) === added); } catch (e) { return false; } })());
+    if (home) {
+      const sibs = [];
+      let ks = [];
+      try { ks = Object.getOwnPropertyNames(home); } catch (e) {}
+      for (const k of ks) {
+        const f = get(home, k);
+        if (typeof f !== "function") continue;
+        let src = "";
+        try { src = Function.prototype.toString.call(f); } catch (e) {}
+        const flag = (src.includes("MESSAGE_REACTION_ADD") ? "A" : "") + (src.includes("MESSAGE_REACTION_REMOVE") ? "R" : "");
+        sibs.push(k + "/" + f.length + "/" + src.length + (flag ? "/" + flag : ""));
+      }
+      parts.push("react module " + sibs.length + " [" + sibs.slice(0, 16).join(" ").replace(/[^\w\/ ?$-]/g, "") + "]");
+    } else parts.push("react module none");
     out.copies = parts.join("; ");
   } catch (e) { out.copies = "page error"; }
   // Discord's method names we call: [name, required]. A key is required when its first group is; `either` lists
@@ -211,7 +231,7 @@ const xsdFindStores = () => {
     calls: { either: ["getCall", "getCalls"], opt: [], optional: true },
     older: { need: ["fetchMessages"], opt: [], optional: true },
     reply: { need: ["createPendingReply"], opt: ["deletePendingReply"], optional: true },
-    react: { need: ["addReaction", "removeReaction"], opt: [], optional: true },
+    react: { need: ["addReaction"], opt: ["removeReaction"], optional: true },
     ack: { need: ["ack"], opt: [], optional: true },
     forget: { need: ["deleteMessage"], opt: [], optional: true },
     // Voice keys never make `missing` (the DM reading goes on without them); js/voice.js says what voice lacks.

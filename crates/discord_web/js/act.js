@@ -170,7 +170,7 @@ api.react = (op) => begin(op, async (my) => {
   const { channel, message, emoji, on } = op;
   if (!isId(channel) || !isId(message) || typeof emoji !== "string" || !emoji || emoji.length > 32 || typeof on !== "boolean") return fail(my, "page error");
   const a = actionOf("react");
-  if (!a || !fnOf(a, "addReaction") || !fnOf(a, "removeReaction")) return fail(my, "react action not found");
+  if (!a || !fnOf(a, on ? "addReaction" : "removeReaction")) return fail(my, on ? "react action not found" : "unreact action not found");
   if (!messageOf(channel, message)) return fail(my, "message not loaded");
   const shown = () => iReacted(messageOf(channel, message), emoji) === on;
   if (shown()) return finish(my, { stage: "done" });

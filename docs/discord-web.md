@@ -367,6 +367,13 @@ Discord's own reaction action, from the exports object with both `addReaction` a
 Done when the store's message shows the reaction with `me` true (or no such reaction with `me`, for `on: false`); if it
 already does, it is done without asking Discord. Not shown within 10 s: `reaction not done: not shown`.
 
+The real page has no such object: its reaction functions are module functions found by the action type in their
+source (the longest of three or more arguments naming `"MESSAGE_REACTION_ADD"`, and another naming
+`"MESSAGE_REACTION_REMOVE"`). On the TV (2026-11-20) only the adding one was found, and the search then gave up on both.
+Adding now goes ahead alone; removing without its function fails as `reaction not done: unreact action not found`. The
+copies line names every function of the adding function's module (`react module`: code name, arguments, size, `A`/`R`
+for the action types its source names), to find where the removing lives.
+
 ### MarkRead (`DirectAsk::MarkRead(channel)`)
 
 Discord's own `ack(channelId)` from the exports object with a function `ack` (preferring one that also has `bulkAck`,
