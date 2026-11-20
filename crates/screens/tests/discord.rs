@@ -42,11 +42,7 @@ fn person(id: &str, name: &str) -> Person {
 
 /// Signed in as E2E Tester, out of a Call.
 fn signed_in() -> Discord {
-    Discord {
-        connected: true,
-        user: Some("E2E Tester".into()),
-        ..Discord::default()
-    }
+    Discord { connected: true, user: Some("E2E Tester".into()), ..Discord::default() }
 }
 
 /// In General with these people, the user first.

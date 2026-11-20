@@ -1369,19 +1369,13 @@ fn settings_discord() {
     stage.press(&[Down, Right, Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord");
     stage.press(&[A]);
-    assert_eq!(
-        stage.dashboard.focus_line(),
-        "Settings: Discord: Direct Messages from discord.com; dms off, off"
-    );
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages from discord.com; dms off, off");
     stage.check("settings-discord-off");
     // Off, Sign in and Sign out are dimmed and take no focus: Down is the first Notification, Up the switch.
     stage.press(&[Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages; dms off, off");
     stage.press(&[Up]);
-    assert_eq!(
-        stage.dashboard.focus_line(),
-        "Settings: Discord: Direct Messages from discord.com; dms off, off"
-    );
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages from discord.com; dms off, off");
 
     // On: saved, and the session tells how it stands.
     stage.press(&[A]);
@@ -1436,10 +1430,7 @@ fn settings_discord_notifications() {
     use screens::settings::{Change, Setting, WhilePlaying, DISCORD_WHILE_PLAYING};
     let mut stage = settings_stage();
     stage.press(&[Down, Right, Down, A]);
-    assert_eq!(
-        stage.dashboard.focus_line(),
-        "Settings: Discord: Direct Messages from discord.com; dms off, off"
-    );
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages from discord.com; dms off, off");
     // They take focus with the switch off: Down is the first, then each of the four, then While playing.
     stage.press(&[Down]);
     assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages; dms off, off");
