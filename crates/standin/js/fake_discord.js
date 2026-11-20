@@ -7,7 +7,7 @@
 //
 // installFakeDiscord(window, opts) -> world. opts: { seed: true, hide: [store names left out], noMethod: ["Store.method"],
 // markReadOnOpen: true, noActions: ["reply", "react", "ack", "forget"] (action objects left out), reactForm:
-// "positional" | "object" | "code" | "code-add-only" (how the reaction action takes its arguments) }.
+// "positional" | "object" | "code" | "code-add-only" | "code-object-remove" (how the reaction action takes its arguments) }.
 //
 // Acting (#201): the page "changes as the real one does". A message box exists while a conversation is the page's route:
 // `world.type(text)` and `world.enter()` play the host's trusted input in node (the stand-in page has a real box,
@@ -318,24 +318,29 @@ function installFakeDiscord(window, opts) {
   big.c[++n] = mod({ Ay: actions });
   if (!opts.noActions.includes("ack")) big.c[++n] = mod({ Dk: decoyAck });
   if (!opts.noActions.includes("reply")) big.c[++n] = mod({ Rp: replyActions });
-  if (!opts.noActions.includes("react") && (opts.reactForm === "code" || opts.reactForm === "code-add-only")) {
+  const codeForm = ["code", "code-add-only", "code-object-remove"].includes(opts.reactForm);
+  if (!opts.noActions.includes("react") && codeForm) {
     // As on the real discord.com (the TV, 2026-11-19): no object with addReaction, only module functions under
     // minified names whose source names the action type, beside a small helper that names it too.
     const BB = function (c, m, e) { const type = "MESSAGE_REACTION_ADD"; void type; /* the request, then the optimistic update */ return setReaction(c, m, e, true); };
     const Qr = function (c, m, e, l) { const type = "MESSAGE_REACTION_REMOVE"; void type; /* the request, then the optimistic update */ return setReaction(c, m, e, false); };
     const y4 = function (e, t) { return { type: "MESSAGE_REACTION_ADD", e, t }; };
     // "code-add-only": as on the TV (2026-11-20), the removing function is not found by its source.
-    big.c[++n] = mod(opts.reactForm === "code" ? { BB, Qr, y4 } : { BB, y4 });
+    // "code-object-remove": as on the TV (later on 2026-11-20), the removing function takes one object and names our
+    // own reaction ("@me"), beside a one-object function that names the removal but not "@me" (never to be called).
+    const et = function (a) { const t = ["MESSAGE_REACTION_REMOVE", "MESSAGE_REACTION_ADD", "@me"]; void t; return setReaction(a.channelId, a.messageId, a.emoji, false); };
+    const Xo = function (a) { const t = "MESSAGE_REACTION_REMOVE"; void t; world.received.push({ kind: "wrong remove" }); return Promise.resolve(); };
+    big.c[++n] = mod(opts.reactForm === "code" ? { BB, Qr, y4 } : opts.reactForm === "code-object-remove" ? { BB, y4, et, Xo } : { BB, y4 });
   } else if (!opts.noActions.includes("react")) big.c[++n] = mod({ Rx: reactActions });
   // Discord's own HTTP utility (code forms only): `del` on a reaction's URL removes our reaction, as the gateway then
   // would. Anything else is refused.
-  if (opts.reactForm === "code" || opts.reactForm === "code-add-only") {
-    const refuse = () => Promise.reject(new Error("unsupported"));
+  if (codeForm) {
+    const refuse = () => Promise.reject(Object.assign(new Error("refused"), { status: 403 }));
     const http = {
       get: refuse, post: refuse, put: refuse, patch: refuse,
       del(o) {
         const m = o && typeof o.url === "string" && /^\/channels\/(\d+)\/messages\/(\d+)\/reactions\/([^/]+)\/@me$/.exec(o.url);
-        if (!m) return Promise.reject(new Error("bad url"));
+        if (!m || opts.reactForm === "code-object-remove") return refuse();
         return setReaction(m[1], m[2], { id: null, name: decodeURIComponent(m[3]) }, false);
       },
     };

@@ -176,17 +176,18 @@ api.react = (op) => begin(op, async (my) => {
   if (!messageOf(channel, message)) return fail(my, "message not loaded");
   const shown = () => iReacted(messageOf(channel, message), emoji) === on;
   if (shown()) return finish(my, { stage: "done" });
-  let rejected = false;
+  let rejected = false, status = 0;
   try {
     const sent = viaHttp
       ? A.S.http.del({ url: "/channels/" + channel + "/messages/" + message + "/reactions/" + encodeURIComponent(emoji) + "/@me", oldFormErrors: true })
       : callReaction(a, on, channel, message, emoji);
-    Promise.resolve(sent).catch(() => { rejected = true; });
+    // What Discord answered a refused request with: its HTTP status, a number only.
+    Promise.resolve(sent).catch((e) => { rejected = true; try { status = Number(e && e.status) || 0; } catch (x) {} });
   } catch (e) { return fail(my, "react action failed"); }
   const ok = await until(my, () => shown() || rejected, O.doneCap);
   if (my.dead) return;
   if (shown()) return finish(my, { stage: "done" });
-  fail(my, ok && rejected ? "react action failed" : "not shown");
+  fail(my, ok && rejected ? "react action failed" + (viaHttp ? " (http" + (status ? " " + status : "") + ")" : "") : "not shown");
 });
 
 api.ack = (op) => begin(op, async (my) => {
