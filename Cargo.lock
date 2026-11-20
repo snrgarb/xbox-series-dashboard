@@ -89,7 +89,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "audio",
- "discord",
  "discord_web",
  "helpers",
  "image",
@@ -484,19 +483,6 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
-]
-
-[[package]]
-name = "discord"
-version = "0.1.0"
-dependencies = [
- "image",
- "log-line",
- "model",
- "serde_json",
- "tempfile",
- "ureq",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1873,12 +1859,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
-name = "qrcodegen"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4339fc7a1021c9c1621d87f5e3505f2805c8c105420ba2f2a4df86814590c142"
-
-[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2173,7 +2153,6 @@ dependencies = [
  "input",
  "library",
  "model",
- "qrcodegen",
  "render",
  "shots",
  "tiny-skia",
@@ -2544,7 +2523,6 @@ name = "standin"
 version = "0.1.0"
 dependencies = [
  "audio",
- "discord",
  "helpers",
  "image",
  "library",

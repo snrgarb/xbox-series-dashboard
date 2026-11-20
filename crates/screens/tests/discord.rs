@@ -44,11 +44,7 @@ fn person(id: &str, name: &str) -> Person {
 fn signed_in() -> Discord {
     Discord {
         connected: true,
-        has_tokens: true,
-        has_secret: true,
-        client_id: Some("1".into()),
         user: Some("E2E Tester".into()),
-        status: "Connected as E2E Tester".into(),
         ..Discord::default()
     }
 }
@@ -73,26 +69,6 @@ fn on_tab(discord: &Discord) -> Dashboard {
     dashboard.take_effects();
     assert_eq!(focus(&dashboard).0, Tab::Discord);
     dashboard
-}
-
-#[test]
-fn while_it_cant_show_discord_the_tab_says_why_and_nothing_else() {
-    let lost = Discord { connected: false, retrying: true, user: None, ..signed_in() };
-    let mut dashboard = on_tab(&lost);
-    assert_eq!(items(&dashboard), [Item::Unavailable]);
-    assert_eq!(dashboard.guide().entries()[0].title, "Discord isn't running");
-    press(&mut dashboard, &[Down, A]);
-    assert_eq!(focus(&dashboard), (Tab::Discord, Focus::Entry(0)));
-    assert!(asked(&mut dashboard).is_empty());
-    assert_eq!(dashboard.guide_line(), "Discord Entry(0) Unavailable; \"Discord isn't running\"");
-
-    for (discord, line) in [
-        (Discord { connecting: true, ..lost.clone() }, "Connecting to Discord"),
-        (Discord { needs_reconnect: true, ..lost.clone() }, "Reconnect Discord in settings"),
-    ] {
-        dashboard.set_discord(&discord);
-        assert_eq!(dashboard.guide().entries()[0].title, line);
-    }
 }
 
 #[test]
@@ -202,29 +178,26 @@ fn focus_stays_with_its_person_or_entry_as_people_come_and_go() {
 }
 
 #[test]
-fn discord_going_mid_call_leaves_the_tab_saying_so_and_disconnect_takes_the_tab_away() {
+fn the_voice_going_mid_call_takes_the_tab_away() {
     let mut dashboard = on_tab(&in_call(&[("2", "Ana")]));
-    let gone = Discord { connected: false, retrying: true, user: None, voice: Voice::default(), ..signed_in() };
+    let gone = Discord { connected: false, user: None, voice: Voice::default(), ..signed_in() };
     dashboard.set_discord(&gone);
-    assert_eq!(items(&dashboard), [Item::Unavailable]);
-    assert_eq!(focus(&dashboard), (Tab::Discord, Focus::Entry(0)));
-    dashboard.set_discord(&Discord::default());
     assert_eq!(dashboard.guide().tabs(), [Tab::Landing, Tab::ProfileAndSystem]);
     assert_eq!(focus(&dashboard).0, Tab::Landing);
 }
 
 #[test]
-fn the_tab_is_there_from_connect_until_disconnect_discord_running_or_not() {
+fn the_tab_is_there_while_the_web_sessions_voice_is_ready() {
     let mut dashboard = Dashboard::new(screens::fake_library());
-    // Discord out of reach, with tokens saved: the tab is there, and says why.
-    dashboard.set_discord(&Discord { connected: false, retrying: true, user: None, ..signed_in() });
-    press(&mut dashboard, &[Guide]);
-    assert_eq!(dashboard.guide().tabs(), [Tab::Landing, Tab::Discord, Tab::ProfileAndSystem]);
-    press(&mut dashboard, &[B]);
-    // Never connected: none.
-    dashboard.set_discord(&Discord { client_id: Some("1".into()), has_secret: true, ..Discord::default() });
+    // Not ready: none.
+    dashboard.set_discord(&Discord { connected: false, user: None, ..signed_in() });
     press(&mut dashboard, &[Guide]);
     assert_eq!(dashboard.guide().tabs(), [Tab::Landing, Tab::ProfileAndSystem]);
+    press(&mut dashboard, &[B]);
+    // Ready: it stands between the two.
+    dashboard.set_discord(&signed_in());
+    press(&mut dashboard, &[Guide]);
+    assert_eq!(dashboard.guide().tabs(), [Tab::Landing, Tab::Discord, Tab::ProfileAndSystem]);
 }
 
 fn shortcut(id: &str, name: &str, server: Option<&str>) -> Shortcut {
@@ -474,7 +447,7 @@ fn the_flyout_closes_as_discord_goes() {
     let mut dashboard = on_tab(&signed_in());
     press(&mut dashboard, &[A]);
     dashboard.set_discord(&browsing(servers(&THREE)));
-    let gone = Discord { connected: false, retrying: true, user: None, ..signed_in() };
+    let gone = Discord { connected: false, user: None, ..signed_in() };
     dashboard.set_discord(&gone);
     assert_eq!(dashboard.flyout(), None);
 }
@@ -592,18 +565,6 @@ fn four() -> Discord {
     people[3].avatar = Some(avatar("cy", [0x30, 0x90, 0x70]));
     (people[3].muted, people[3].deafened) = (true, true);
     call
-}
-
-#[test]
-fn discord_tab_not_running() {
-    let lost = Discord { connected: false, retrying: true, user: None, ..signed_in() };
-    Stage::on_tab(&lost).check("discord-tab-not-running");
-}
-
-#[test]
-fn discord_tab_reconnect() {
-    let lost = Discord { connected: false, needs_reconnect: true, user: None, ..signed_in() };
-    Stage::on_tab(&lost).check("discord-tab-reconnect");
 }
 
 #[test]

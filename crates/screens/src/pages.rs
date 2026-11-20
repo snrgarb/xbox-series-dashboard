@@ -33,7 +33,7 @@ pub struct Around<'a> {
     pub now: Instant,
     /// Settings' Now Playing source and the apps it may be (Settings > Guide).
     pub now_playing: &'a crate::now_playing::NowPlaying,
-    /// The Discord connection as Settings > Discord shows it (docs/discord.md).
+    /// The web session's voice as the Discord tab shows it (docs/discord.md).
     pub discord: &'a model::discord::Discord,
 }
 
@@ -65,7 +65,7 @@ pub enum Open {
     /// A licence agreement a store's install asks the user to accept, over whatever is up (#230,
     /// `Dashboard::ask_agreement`).
     Agreement(crate::agreement::Entry),
-    /// Discord's sign-in page, over Settings > Account > Discord messages (#197, `discord_sign_in`).
+    /// Discord's sign-in page, over Settings > Account > Discord (#197, `discord_sign_in`).
     DiscordSignIn,
 }
 

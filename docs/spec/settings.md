@@ -241,7 +241,7 @@ E/ThemeSettingsPane.xaml:19-32. Four boxes, two wide, each a line icon and a nam
 | Personalisation | (0, 0) | 520, 210, 437, 131 | U+E771 | section 6.2 |
 | Idle | (1, 0) | 975, 210, 437, 131 | U+E708 | section 6.7 |
 | Guide | (0, 1) | 520, 359, 437, 131 | U+E7FC | section 6.8 |
-| Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 |
+| Discord | (1, 1) | 975, 359, 437, 131 | U+E8F2 | section 6.9 (the Bundle's; removed by #299) |
 
 **The port has no Theme settings** (#194): its rail lists four generic categories, General, Account, Games & apps and System, as the console's Settings does, and these four boxes, with Personalisation's that open pages and the port's own (Games & apps, Launchers, Art, Storage, Helpers, System, About), are placed among them: section 16.1.
 
@@ -356,7 +356,11 @@ With L1 and L2 lines in the two descriptions: checkbox top = 246.58 + 34.58 L1; 
 - **Pause the game while the Guide is open** (the port's own, #270): on by default, which is the Bundle's freeze (guide.md 7.2). Off, the running game is never suspended under the Guide: the Guide still shows over it, Quit game and force quit still work, and a game frozen at the moment it is turned off is let go at once. It has no description on the page, as nothing here has since #261: what the freeze is for, and what happens without it, is guide.md 7.2. In force at once, saved, shared by every Profile.
 - **Now Playing source** choices: **Any**, **Spotify** (the default), then every other app that has had a media session this run (C/ExtensionCore.NowPlayingSource.cs:48-59, 107-108). A source saved in an earlier run whose app has had no session yet is among them, first after Spotify, so that the list always holds what the box shows. What it does: docs/spec/now-playing.md.
 
-### 6.9 Theme settings > Discord - built in #143 ([../discord.md](../discord.md))
+### 6.9 Theme settings > Discord - the Bundle's page, **removed by #299** ([../discord.md](../discord.md))
+
+> **The port does not have this page.** It connected the user's own Discord application over Discord's local RPC, which
+> #299 removed (`crates/discord`, its Settings page and its pictures). Account > Discord is the web session's page,
+> 16.12. What follows is the Bundle's page, kept as the record of what the port once matched.
 
 As built, without the intro line (1. below) since #261 (16.11): the steps and the code start at y 190, everything under them 65 higher than the Bundle's picture. Before that, the y positions below were the Bundle's picture's (`artifacts/e2e/port-reference-20261115-192720/36-settings-discord.jpg` in the Bundle): the steps and the code from y 255; the address under the code in four centred lines, broken after each slash ("https://", "discord.com/", "developers/", "applications"); the Client ID row's buttons at y 645, the Secret's at 734, Connect and Disconnect at 833, the status line 24 under them. The QR code is a plain stand-in (a white square, the corner marks' places outlined): the Bundle's picture is not copied, and a real code is for later (discord.md). The value under "Client ID" and the status line are white, as in the picture. The focus log: `Settings: Discord: <button>; client id <set|not set>, secret <saved|not set>, "<status>"`.
 
@@ -457,7 +461,7 @@ Settings is also closed, without B, by a game exiting back to Home, by the Guide
 | Home's top bar, Settings button (T/Views/Main.xaml:563-575; C/ExtensionCore.cs:1683) | Theme settings' boxes | the rail's **Theme settings** | rail -> Home, focus on the top bar's Settings button (E/SettingsControl.xaml.cs:862-880, 917-926) |
 | The Guide's Settings entry (C/ExtensionCore.cs:2139-2144; the Guide closes, the Dashboard comes to the front) | the same | the rail's Theme settings | rail -> Home, its rows taking focus where they last had it |
 | Tile menu, **Customise Home** (a Home tile) or **Customise games & apps** (a My games & apps tile) (C/ExtensionCore.TileMenu.cs:103-104; C/ExtensionCore.cs:1746-1748) | Theme settings > **Personalisation** | the **Boot video** box | Personalisation -> Theme settings' boxes (focus on Personalisation) -> rail -> back to the tile the menu was opened on: on Home, or My games & apps reopened on that game (C/ExtensionCore.cs:1815-1835) |
-| Home's **Discord** tile, when there is no Discord tab to show or the Guide is off (C/ExtensionCore.cs:1710-1726; E/PromoRow.xaml.cs:65) (built in #143; until #144 the tile always comes here) | Theme settings > **Discord** | **Type** (Client ID) | Discord -> Theme settings' boxes (focus on Discord) -> rail -> the tile |
+| Home's **Discord** tile, when there is no Discord tab to show or the Guide is off (C/ExtensionCore.cs:1710-1726; E/PromoRow.xaml.cs:65) (built in #143; until #144 the tile always comes here) | Theme settings > **Discord** | the switch of Account > Discord (the web session's page since #299; the Bundle's was **Type**, Client ID) | Discord -> Theme settings' boxes (focus on Discord) -> rail -> the tile |
 | Home's **Playnite settings** tile (C/ExtensionCore.cs:1729; E/PromoRow.xaml.cs:69) | the **Playnite settings** category | its **Playnite settings** box (E/SettingsControl.xaml.cs:887-911) | boxes -> rail -> the tile |
 
 B never skips a level: an entry point that opens deep still climbs page, boxes, rail, out. "Opened in a pane" is forgotten as soon as focus leaves that first page (C/ExtensionCore.cs:1779-1786). CT/ThemeSettingsTests.cs:30-288 states these.
@@ -759,7 +763,7 @@ The Bundle's rail has one category of its own, Theme settings, and the port had 
 | Category | Boxes | Layout |
 |---|---|---|
 | **General** | Personalisation (0, 0), Idle (1, 0), Guide (0, 1), **Boot video** (1, 1) | rows; the Bundle's Theme settings' first three at their places, Boot video in Discord's |
-| **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1), **Direct Messages** (1, 1; #197 and #200, 16.12; was Discord messages) | rows |
+| **Account** | **Profiles** (0, 0), **Who's playing today?** (1, 0), **Discord** (0, 1; the web session's page, 16.12; #299 removed the RPC page that was here, and the web page, once Direct Messages or Discord messages, took its name) | rows |
 | **Games & apps** | **Library**: Launchers, Games & apps, Groups, Art. **Installs**: Storage, Helpers, Set up this PC ([set-up.md](set-up.md), #178) | sections |
 | **System** | System (0, 0), About (1, 0) | rows |
 
@@ -787,7 +791,7 @@ The Bundle's picture 31 has the focused box's ring cut at the pane's left edge (
 | Home's top bar button; the Guide's Settings (`Entry::Rail`) | General's boxes | the rail's General | Home: the button; from the Guide, Home's rows |
 | Home's **Settings** wide tile (the Bundle's "Playnite settings" tile, whose category is gone; `Entry::Tile`) | General's boxes | its first box, Personalisation | the rail, then the tile |
 | The Tile menu's Customise Home (`Entry::CustomiseHome`) | Games & apps' boxes | **Groups** (#57), the box that customises Home; the Bundle's is Personalisation's first box, Boot video | the rail on Games & apps, then the tile |
-| Home's **Discord** tile with no Discord tab or the Guide off (`Entry::Discord`) | Account > Discord | Type | Account's boxes on Discord, the rail, then the tile |
+| Home's **Discord** tile with no Discord tab or the Guide off (`Entry::Discord`) | Account > Discord | its switch (**Direct Messages from discord.com**) | Account's boxes on Discord, the rail, then the tile |
 | Manage Queue's row of a game stopped for want of space (`Entry::Storage`, #230; not the Bundle's) | Games & apps > Storage | its first folder | **straight back to the row** (the lead's decision on #235). The Bundle's own entries above keep 8.2's rule, every level climbed; a link from a place the Bundle has none goes back to that place |
 
 Left from a pane's first column is B, on the boxes and on the Guide page. From the boxes to the rail and into the category again is the box focus was on (16.1).
@@ -966,12 +970,12 @@ The user, 2026-11-18: "remove all the text paragraphs underneath setting heading
 | System | the line under the checkbox (Off, On, refused, failed); "Getting to the desktop" and "If the Dashboard won't start" with their text | how things stand; the way out of shell mode, which no control on the page does |
 | About | the version; where updates stand once checked; "Third-party licences" and "Sounds and boot videos" with their text | how things stand; where the licences are, and where the media files go |
 
-### 16.12 Direct Messages (the port's own; #197, #200)
+### 16.12 Discord (the port's own; #197, #200, #299)
 
-Account's fourth box, beside Discord at (1, 1): **Direct Messages** (icon U+E8BD; named Discord messages until #200, which
-brought it to [party-chats.md](party-chats.md) 8.2), the Dashboard's own discord.com session that the Guide's Direct
-Messages are read through (docs/discord-web.md). Voice stays on Discord's page (6.9), whose connection this page never
-touches. The rows are party-chats.md 8.2's, from y 190 at x 520: the checkbox row **Direct Messages from discord.com**
+Account's **Discord** box, under Profiles (icon U+E8F2): the Dashboard's own discord.com session that the Guide's Direct
+Messages and its Discord tab's voice go through (docs/discord-web.md), and the one Discord page there is. It was
+named Discord messages (#197), then Direct Messages (#200, [party-chats.md](party-chats.md) 8.2), beside a Discord box
+for the user's own application over RPC; #299 removed that connection and its page and gave this page its name. The rows are party-chats.md 8.2's, from y 190 at x 520: the checkbox row **Direct Messages from discord.com**
 (the switch), the risk said plainly 14 under it (kept, 16.11), **Sign in** and **Sign out** side by side 20 apart
 (dimmed, and out of focus, while the switch is off), the status line, then **Notifications** (Bahnschrift 30) with the
 checkboxes **Direct Messages**, **Show what they say**, **Mentions** and **Incoming Calls**, and the dropdown **While

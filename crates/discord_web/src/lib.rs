@@ -1,7 +1,7 @@
 //! Discord's web session (#197; docs/discord-web.md): the Dashboard's own discord.com in a WebView2, on a thread of
 //! its own, signed in by the user on Discord's own page and kept in the data folder, one session per Profile.
 //!
-//! Nothing here runs until Settings > Account > Discord messages is turned on ([`Session::set_on`]). On, the host
+//! Nothing here runs until Settings > Account > Discord is turned on ([`Session::set_on`]). On, the host
 //! thread opens discord.com in a web view that is never shown, to learn whether the session is signed in; the sign-in
 //! page shows it over the Dashboard ([`Session::show`]) and the pad drives it by keys. Sign out removes the session's
 //! folder, and with it everything the web view kept.
@@ -562,7 +562,7 @@ impl Session {
     }
 
     /// What the Discord tab asks of voice: Mute, Deafen, Leave, joining a Shortcut or a server's voice channel,
-    /// Remove shortcut and the Servers Flyouts. The RPC connection's own asks (Settings') are ignored.
+    /// Remove shortcut and the Servers Flyouts.
     pub fn ask_voice(&mut self, ask: Ask) {
         match ask {
             Ask::Call(call) => {
@@ -612,7 +612,6 @@ impl Session {
                 }
                 self.refresh_voice();
             }
-            _ => {}
         }
     }
 

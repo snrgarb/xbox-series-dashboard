@@ -229,9 +229,6 @@ fn voice_in_a_call() -> Discord {
     let call = Call { id: "500".into(), title: "General".into(), people: vec![me, ana] };
     Discord {
         connected: true,
-        has_tokens: true,
-        has_secret: true,
-        client_id: Some("1".into()),
         user: Some("E2E Tester".into()),
         voice: Voice { call: Some(call), mute: false, deaf: false },
         ..Discord::default()
@@ -328,11 +325,7 @@ fn the_sections_stand_in_the_specs_order_answer_the_call_the_voice_line_direct_m
     // In a Call without a ring: Mute.
     let in_call = on_tab(&voice, &ready(seven()));
     assert_eq!(on(&in_call), Some(Mute));
-    // Voice can't show: its line, then Direct Messages, and no Shortcuts or Servers.
-    let lost = Discord { connected: false, retrying: true, ..voice_idle() };
-    let dashboard = on_tab(&lost, &ready(seven()));
-    assert_eq!(items(&dashboard), [Unavailable, DM(0), DM(1), DM(2), DM(3), DM(4), AllDMs]);
-    // Never set up, Direct Messages on: the section alone.
+    // Voice not ready, Direct Messages on: the section alone, with no voice line, Shortcuts or Servers.
     let dashboard = direct_only(&ready(seven()));
     assert_eq!(items(&dashboard)[0], DM(0));
 }
@@ -408,7 +401,7 @@ fn the_section_says_why_it_cant_show_the_list() {
         (
             state(DirectState::SignedOut),
             Note::SignedOut,
-            "Sign in to Discord in Settings > Account > Direct Messages",
+            "Sign in to Discord in Settings > Account > Discord",
             "SignedOut",
         ),
         (

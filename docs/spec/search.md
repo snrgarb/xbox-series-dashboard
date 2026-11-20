@@ -593,8 +593,8 @@ Every text the Bundle asks for outside Search is typed here, in place of Playnit
 | "Gamertag" | Settings, Add profile | Empty | no | - | A profile is added with that gamertag (a blank one adds nothing) | Nothing added | M5 | C/ExtensionCore.TextEntry.cs:59-65; CT/TextEntryTests.cs:41, 108, 121 |
 | "Gamertag" | Settings, a Profile's Gamertag box | Its gamertag | no | - | The profile is renamed | Unchanged | M5 | C/ExtensionCore.TextEntry.cs:68-75 |
 | "Real name" | Settings, a Profile's Real name box | Its real name | no | - | Saved | Unchanged | M5 | C/ExtensionCore.TextEntry.cs:78-85 |
-| "Client ID" | Settings, Discord | The saved Client ID | no | - | Saved | Unchanged | M6 | C/ExtensionCore.TextEntry.cs:88-94 |
-| "Client Secret" | Settings, Discord | **Empty** (the saved one is never shown) | **yes** | - | Saved; kept empty or blank, the saved one stays | Unchanged | M6 | C/ExtensionCore.TextEntry.cs:100-112; CT/TextEntryTests.cs:221-270 |
+| "Client ID" | Settings, Discord (removed by #299) | The saved Client ID | no | - | Saved | Unchanged | M6 | C/ExtensionCore.TextEntry.cs:88-94 |
+| "Client Secret" | Settings, Discord (removed by #299) | **Empty** (the saved one is never shown) | **yes** | - | Saved; kept empty or blank, the saved one stays | Unchanged | M6 | C/ExtensionCore.TextEntry.cs:100-112; CT/TextEntryTests.cs:221-270 |
 
 So the reusable piece takes: a caption, a starting text, a masked flag, and three callbacks: on every edit, on keep, on drop (`ShowTextEntry`, C/ExtensionCore.TextEntry.cs:120-136). It opens only over Settings or Full library (lines 28-32), and it goes, **dropping** the text, if that page goes under it (the Guide's Home, another page taking its place, a game exiting; lines 167-173; CT/TextEntryTests.cs:361-389).
 

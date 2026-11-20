@@ -1,5 +1,5 @@
 //! Discord's web session (#197; docs/discord-web.md): the Dashboard's own discord.com, signed in by the user in
-//! Discord's own page and kept in the data folder, one per Profile. Off unless Settings > Account > Discord messages
+//! Discord's own page and kept in the data folder, one per Profile. Off unless Settings > Account > Discord
 //! turns it on. Voice stays on the RPC connection (`discord`); this is what text will come through (#198).
 //!
 //! What the screens see of it: how it stands, and the kind of field focus is on while its sign-in page is shown.

@@ -131,10 +131,9 @@ pub struct Args {
     notify: Vec<String>,
     /// The Idle screen's two times in seconds, in place of Settings' and not saved: a test's, a few seconds long.
     idle_after: Option<screens::idle::Times>,
-    /// Where Discord is (docs/discord.md): `--discord-pipe` names a test's pipe (`standin discord`) in place of
-    /// Discord's own, `--discord-token-url` its token endpoint and `--discord-cdn-url` where avatars come from. With
-    /// a pipe and no endpoint or CDN there is none: a test never reaches the real Discord.
-    discord: discord::Place,
+    /// `--discord-cdn-url`: where the web session's avatars and icons come from in place of Discord's own CDN: a
+    /// test's stand-in (`standin serve-discord-web`).
+    discord_cdn_url: Option<String>,
     /// `--discord-web-url`: where Discord's web session goes in place of discord.com (#197): a test's stand-in
     /// (`standin serve-discord-web`), which a test never leaves.
     discord_web_url: Option<String>,
@@ -196,8 +195,7 @@ const USAGE: &str = "usage: dashboard [--steam <steam root> | --library <file.js
                  [--log-queue-sources]
                  [--toast <text>]... [--notify <text>]... [--allow-toast-posts] [--open-addresses-with <program>]
                  [--art-service <url>] [--store-art-service <url>] [--idle-after <dim s>,<show s>]
-                 [--discord-pipe <name> [--discord-token-url <url>] [--discord-cdn-url <url>]]
-                 [--discord-web-url <url>]
+                 [--discord-web-url <url> [--discord-cdn-url <url>]]
                  [--from-shell] [--dry-shell] [--log-file <file>]
                  [--update-source <url>] [--pretend-version <x.y.z>] [--helper-table <file>]
                  [--helper-home <dir>] [--client-table <file>] [--setup-registry <file>]
@@ -291,9 +289,7 @@ fn parse_args(given: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--art-service" => args.art_service = Some(value()?),
             "--store-art-service" => args.store_art_service = Some(value()?),
             "--idle-after" => args.idle_after = Some(screens::idle::Times::parse_seconds(&value()?)?),
-            "--discord-pipe" => args.discord.pipe = Some(value()?),
-            "--discord-token-url" => args.discord.token_url = Some(value()?),
-            "--discord-cdn-url" => args.discord.cdn_url = Some(value()?),
+            "--discord-cdn-url" => args.discord_cdn_url = Some(value()?),
             "--discord-web-url" => args.discord_web_url = Some(value()?),
             "--from-shell" => args.from_shell = true,
             "--dry-shell" => args.dry_shell = true,
@@ -483,23 +479,10 @@ mod tests {
     }
 
     #[test]
-    fn discord_pipe_and_token_url_point_the_dashboard_at_a_tests_discord() {
-        let args = parse(&[
-            "--discord-pipe",
-            "e2e-discord",
-            "--discord-token-url",
-            "http://127.0.0.1:1/t",
-            "--discord-cdn-url",
-            "http://127.0.0.1:1",
-        ])
-        .unwrap();
-        let place = discord::Place {
-            pipe: Some("e2e-discord".into()),
-            token_url: Some("http://127.0.0.1:1/t".into()),
-            cdn_url: Some("http://127.0.0.1:1".into()),
-        };
-        assert_eq!(args.discord, place);
-        assert_eq!(parse(&[]).unwrap().discord, discord::Place::default());
-        assert!(parse(&["--discord-pipe"]).is_err());
+    fn discord_cdn_url_points_the_web_sessions_pictures_at_a_tests_stand_in() {
+        let args = parse(&["--discord-cdn-url", "http://127.0.0.1:1"]).unwrap();
+        assert_eq!(args.discord_cdn_url.as_deref(), Some("http://127.0.0.1:1"));
+        assert_eq!(parse(&[]).unwrap().discord_cdn_url, None);
+        assert!(parse(&["--discord-cdn-url"]).is_err());
     }
 }

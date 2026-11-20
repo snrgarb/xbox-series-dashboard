@@ -4,7 +4,7 @@
 # `--discord-web-url` and `--discord-cdn-url`. discord.com is never reached; no account of anyone's is used; the data
 # folder is the test's own, and the voice connection is pointed at a pipe nobody serves.
 #
-#   1. Settings > Account > Direct Messages: the switch on, Sign in, the stand-in's phone confirms the QR code.
+#   1. Settings > Account > Discord: the switch on, Sign in, the stand-in's phone confirms the QR code.
 #      The session finds the stores (`discord web: stores found: ...`) and reads the list (`discord web: n DMs, ...`).
 #   2. The Guide, the right bumper to the Discord tab: focus on the first DM (`guide: Discord Entry(k) DM(0) of n`).
 #   3. A message arrives in another DM (`POST /standin/dm-message`): the counts on the tab's line change.
@@ -119,7 +119,7 @@ try {
     if (-not $listening) { throw 'the stand-in discord.com never said it was listening' }
 
     $script:dashboard = Start-Dashboard @('--log-focus', '--data-dir', "`"$data`"", '--discord-web-url', $base,
-        '--discord-cdn-url', $base, '--discord-pipe', 'e2e-nobody')
+        '--discord-cdn-url', $base)
     if (-not (Wait-DashboardLog 'first frame presented' 60 0)) { throw 'The Dashboard never presented a frame' }
     Wait-Greeting | Out-Null
 
@@ -129,10 +129,10 @@ try {
     Press Down 'Settings: Rail: Account' | Out-Null
     Press Right 'Settings: Account: Profiles' | Out-Null
     Press Right "Settings: Account: Who's playing today\?" | Out-Null
-    Press Down 'Settings: Account: Direct Messages' | Out-Null
-    Press A 'Settings: Direct Messages: Direct Messages from discord.com; dms off, off' 30 | Out-Null
-    Press A 'Settings: Direct Messages: Direct Messages from discord.com; dms on, .*' | Out-Null
-    Press Down 'Settings: Direct Messages: Sign in; dms on, signed out' | Out-Null
+    Press Down 'Settings: Account: Discord' | Out-Null
+    Press A 'Settings: Discord: Direct Messages from discord.com; dms off, off' 30 | Out-Null
+    Press A 'Settings: Discord: Direct Messages from discord.com; dms on, .*' | Out-Null
+    Press Down 'Settings: Discord: Sign in; dms on, signed out' | Out-Null
     $mark = Get-DashboardLogLength
     Press A "DiscordSignIn: Discord's page" | Out-Null
     if (-not (Expect-Log '^discord web: QR code shown yes$' 30 $mark 'the QR code')) { throw 'no sign-in page' }

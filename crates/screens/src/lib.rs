@@ -181,10 +181,11 @@ pub enum Effect {
     /// Settings > General > Boot video chose this one, or Off (docs/spec/start-up.md). The Dashboard has it
     /// already: this is for whoever keeps the settings to save, and it plays from the next start.
     BootVideo(BootVideo),
-    /// Settings > Discord: a Client ID or Secret typed, a Paste, Connect or Disconnect (docs/discord.md). The
-    /// connection answers with how it is now (`Dashboard::set_discord`). Its `Debug` never shows what was typed.
+    /// The Discord tab's Call (Mute, Deafen, Leave), a Shortcut or voice channel joined, a Shortcut removed, the
+    /// Servers Flyouts (docs/discord-web.md, "Voice"). The web session answers with how it is now
+    /// (`Dashboard::set_discord`).
     Discord(model::discord::Ask),
-    /// Settings > Account > Discord messages and its sign-in page (#197, docs/discord-web.md): show or put away
+    /// Settings > Account > Discord and its sign-in page (#197, docs/discord-web.md): show or put away
     /// Discord's sign-in page, a key from the pad, text the Console keyboard kept, Sign out. The session answers with
     /// how it stands (`Options::discord_web`). Its `Debug` never shows the text.
     DiscordWeb(model::discord_web::WebAsk),
@@ -192,7 +193,7 @@ pub enum Effect {
     /// messages, send, react, mark read. Each is shown done only once the session's stores say so; the session does
     /// one at a time, paced. Its `Debug` never shows a name, an id or a message.
     Direct(model::discord_dms::DirectAsk),
-    /// Settings > Account > Direct Messages > While playing chose this: the Dashboard has it already
+    /// Settings > Account > Discord > While playing chose this: the Dashboard has it already
     /// (`Options::while_playing`); whoever keeps the settings saves it as `settings::DISCORD_WHILE_PLAYING`.
     DiscordWhilePlaying(settings::WhilePlaying),
     /// Settings > System: turn shell mode on (the user has said yes) or off (docs/spec/shell-mode.md). The
@@ -319,7 +320,7 @@ pub struct Dashboard {
     now_playing: now_playing::NowPlaying,
     /// The Now Playing card's time, in whole seconds, as last drawn: a turn of it is something to draw.
     now_playing_second: Option<u64>,
-    /// The Discord connection as the shell last told it (docs/discord.md): what Settings > Discord shows.
+    /// The web session's voice as the shell last told it (docs/discord.md): what the Discord tab shows.
     discord: model::discord::Discord,
     /// Discord's Direct Messages as the web session last said (docs/spec/party-chats.md).
     direct: model::discord_dms::Direct,
@@ -609,8 +610,8 @@ impl Dashboard {
         self.refresh_guide();
     }
 
-    /// The Discord connection as it is now (docs/discord.md): Settings > Discord shows it, the Guide has its
-    /// Discord tab while it has one (docs/spec/discord-tab.md), and Home's Discord tile opens that tab then.
+    /// The web session's voice as it is now (docs/discord-web.md, "Voice"): the Guide has its Discord tab while it is
+    /// ready or Direct Messages are on (docs/spec/discord-tab.md), and Home's Discord tile opens that tab then.
     pub fn set_discord(&mut self, discord: &model::discord::Discord) {
         let tab = discord.has_tab() || self.direct.state != model::discord_dms::DirectState::Off;
         if self.discord != *discord || self.status.discord != tab {
@@ -1627,7 +1628,7 @@ impl Dashboard {
                 self.back_to_button = on_button && press.button == Button::A;
             }
             // The Guide on its Discord tab while Discord is connected (M6); with no such tab, or the Guide off,
-            // Settings on Discord.
+            // Settings > Account > Discord.
             Some(HomeAction::Discord) if !press.repeat => {
                 if self.status.discord && self.options.use_guide {
                     self.open_guide_on(Tab::Discord);
@@ -1850,8 +1851,6 @@ impl Dashboard {
         }
         match self.pages.top().map(|page| page.state()) {
             Some(state) if !state.is_empty() => format!("{place}; {state}"),
-            // Settings > Discord: how the connection is, which the page has from the shell, not of its own.
-            _ if place.starts_with("Settings: Discord: ") => format!("{place}; {}", self.discord.state_line()),
             // Settings > About: where updates stand, which the page has from the shell, not of its own, so the line
             // follows a check or an install at once rather than at the page's next draw.
             _ if place.starts_with("Settings: About: ") => format!("{place}; {}", self.options.updates.state()),
@@ -1915,7 +1914,7 @@ impl Dashboard {
             // With a game running the Guide stays, under the question.
             GuideAction::Launch(game) => self.play(game),
             GuideAction::Asked => {}
-            // "Sign in to Discord in Settings > Account > Direct Messages": the Guide closes onto that page.
+            // "Sign in to Discord in Settings > Account > Discord": the Guide closes onto that page.
             GuideAction::DirectSettings => self.guide_opens(Open::Settings(settings::Entry::DirectMessages)),
             // Asked of Discord: the tab shows it done once Discord says so.
             GuideAction::Discord(ask) => {

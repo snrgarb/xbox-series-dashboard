@@ -110,7 +110,7 @@ try {
     } 20
     if (-not $listening) { throw 'the stand-in discord.com never said it was listening' }
     $script:dashboard = Start-Dashboard @('--log-focus', '--data-dir', "`"$data`"", '--discord-web-url', $base,
-        '--discord-cdn-url', $base, '--discord-pipe', 'e2e-nobody')
+        '--discord-cdn-url', $base)
     if (-not (Wait-DashboardLog 'first frame presented' 60 0)) { throw 'The Dashboard never presented a frame' }
     Wait-Greeting | Out-Null
 
@@ -120,10 +120,10 @@ try {
     Press Down 'Settings: Rail: Account' | Out-Null
     Press Right 'Settings: Account: Profiles' | Out-Null
     Press Right "Settings: Account: Who's playing today\?" | Out-Null
-    Press Down 'Settings: Account: Direct Messages' | Out-Null
-    Press A 'Settings: Direct Messages: Direct Messages from discord.com; dms off, off' 30 | Out-Null
-    Press A 'Settings: Direct Messages: Direct Messages from discord.com; dms on, .*' | Out-Null
-    Press Down 'Settings: Direct Messages: Sign in; dms on, signed out' | Out-Null
+    Press Down 'Settings: Account: Discord' | Out-Null
+    Press A 'Settings: Discord: Direct Messages from discord.com; dms off, off' 30 | Out-Null
+    Press A 'Settings: Discord: Direct Messages from discord.com; dms on, .*' | Out-Null
+    Press Down 'Settings: Discord: Sign in; dms on, signed out' | Out-Null
     $mark = Get-DashboardLogLength
     Press A "DiscordSignIn: Discord's page" | Out-Null
     if (-not (Expect-Log '^discord web: QR code shown yes$' 30 $mark 'the QR code')) { throw 'no sign-in page' }

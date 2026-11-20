@@ -1,18 +1,18 @@
-# Discord messages: the web session (#197)
+# Discord: the web session (#197)
 
 The Dashboard's own discord.com, in a WebView2, signed in by the user on Discord's own page: what the Guide's Party
 will read DMs and notifications through (#198 to #202; reading: below), and, since #297, Discord voice ("Voice", below), in the
-RPC connection's place (docs/discord.md: kept until the app is wired to this and the voice has run on the TV). The decisions are #192's (D1 opt-in, D2 our own web session, D6 messages in memory only, D7 our
+place of the RPC connection to the Discord app, which #299 removed (docs/discord.md). The decisions are #192's (D1 opt-in, D2 our own web session, D6 messages in memory only, D7 our
 own code); what the spike found on the TV PC is docs/research/discord-web-spike.md.
 
 Code: `crates/discord_web` (the session and its host thread), `crates/model/src/discord_web.rs` (what the screens see),
-`crates/screens/src/settings/discord_web.rs` (Settings > Account > Discord messages, docs/spec/settings.md 16.12),
+`crates/screens/src/settings/discord_web.rs` (Settings > Account > Discord, docs/spec/settings.md 16.12),
 `crates/screens/src/discord_sign_in.rs` (the sign-in page), `crates/standin/src/discord_web.rs` (the stand-in
 discord.com), `e2e/payloads/discord-web` (the payload).
 
 ## When anything runs
 
-Nothing, until Settings > Account > Discord messages' switch is on (`discord.messages`, off by default), beside the
+Nothing, until Settings > Account > Discord' switch is on (`discord.messages`, off by default), beside the
 terms said plainly (below). On:
 
 | Kept session for this Profile | Sign-in page | What runs |
@@ -429,7 +429,7 @@ Code: `crates/discord_web/js/voice.js` (the page's half, the last file of the pa
 `model::discord`), `src/shortcuts.rs` (Known channels), `src/art.rs` (pictures on disk), `src/act.rs` (the queue),
 `src/win/host.rs` (permissions), `Session::{voice, browse, shortcuts, me, voice_ready, ask_voice}`. Decided by #192's
 overturn (docs/research/discord-web-voice.md, 0): voice is the web session's, so the Discord app and the RPC connection
-are no longer needed (`crates/discord` stays until the app is wired to this and the voice has run on the TV).
+are not needed: `crates/discord` was removed by #299.
 
 ### Reading, pushed
 
@@ -470,15 +470,14 @@ and stage channels with who is in each). Nothing is read until the required stor
   position, only those `can(CONNECT)` allows: where it says no to every one it is not trusted and all are listed),
   with who is in each, kept up to date until Back or Close.
 - **Pictures** are `Option<PathBuf>` in these types: fetched host-side from the CDN (`discord_web::CDN`,
-  `--discord-cdn-url`) into the **same on-disk art cache and names the RPC connection uses**,
+  `--discord-cdn-url`) into the **on-disk art cache and names the RPC connection used**,
   `<data>/art/discord/avatars/<user>/<hash>.png`, `embed/<n>.png` (the default avatar), `icons/<guild>/<hash>.png`, so
-  the screens need no change and a picture the RPC crate kept is used at once (`src/art.rs`, a copy of the part of that
-  crate that names, fetches and keeps one). Unlike the DMs' pictures (memory only) these stay on disk, as the spec has
+  a picture the RPC crate kept is used at once (`src/art.rs`, the part of that crate that named, fetched and kept one). Unlike the DMs' pictures (memory only) these stay on disk, as the spec has
   them (docs/spec/discord-tab.md); a hash changes with the picture, so none is stale. Never logged.
 - **Shortcuts** (the six most recently joined Known channels): a Call the user is really in, once, is learned at the
-  front, by the RPC crate's rules (a DM stays until removed, a server's channel only while among the six, a removed
+  front, by the RPC connection's rules (a DM stays until removed, a server's channel only while among the six, a removed
   one is not brought back by its Call going on, the servers joined in remembered most recent first). **Not the RPC
-  crate's store**: that is its encrypted secret store behind its connection, which is to be deleted. A file of its own
+  crate's store** (its encrypted secret store, removed with the crate, #299). A file of its own
   in the same shape (`{Id, GuildId, Name, Image, ServerName}`, `Image` the CDN path) at
   `<data>/discord-web/known-profile-<id>.json`, plain, read when the session signs in and written when it changes. Off
   and a sign-out of the page forget it from memory; **a sign-out in Settings removes the file**. `Ask::RemoveShortcut`
@@ -572,7 +571,7 @@ signs in to discord.com as you and reads the page for you."
   Profile's folder untouched), the model (`WebAsk` never shows text), the screens (Settings' state line; text entry's
   text goes to the session and nowhere else), the stand-in (a filled form signs in; the app page has Discord's shape;
   the phone's scan signs the page in, once), the zoom (`VIEW_MIN` kept at every scale).
-- Screenshots: Settings > Account with the new box, Discord messages off and signed in, the sign-in page's band.
+- Screenshots: Settings > Account with the Discord box, Discord off and signed in, the sign-in page's band.
 - `e2e/payloads/discord-web` on the TV PC, against `standin serve-discord-web`, whose login page has a made-up QR
   block (hidden under 830 CSS pixels, as Discord's) and an e-mail field that focuses itself: the switch on; **signed
   in by the QR code with no input at all** (the page opens with the QR shown and no field focused, the test plays the

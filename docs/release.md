@@ -60,7 +60,7 @@ Exactly four files; `tools/package.sh` fails if the folder holds anything else.
 | File | What |
 |---|---|
 | `dashboard.exe` | The Dashboard: one exe, which is also shell mode's (`--shell`, `--sentinel`, `--shell-on`, `--shell-off`) |
-| `WebView2Loader.dll` | Microsoft's redistributable WebView2 loader, which Discord messages (#197, docs/discord-web.md) loads at run time from beside `dashboard.exe`. Taken from beside the exe given to `tools/package.sh`, where the Windows build puts it from webview2-com-sys's build; never committed. Without it the Dashboard runs and Discord messages says there is no runtime |
+| `WebView2Loader.dll` | Microsoft's redistributable WebView2 loader, which Discord (#197, docs/discord-web.md) loads at run time from beside `dashboard.exe`. Taken from beside the exe given to `tools/package.sh`, where the Windows build puts it from webview2-com-sys's build; never committed. Without it the Dashboard runs and Discord says there is no runtime |
 | `README.txt` | `packaging/README.txt`: installed or portable, where data lives, and how to fill the media folder from a Bundle the user already has |
 | `THIRD-PARTY-LICENSES.txt` | Every crate `dashboard.exe` is built from for Windows and its licence, gathered by cargo-about (`packaging/about.toml`, `packaging/about.hbs`). A dependency under a licence not in `about.toml`'s `accepted` list fails the package |
 

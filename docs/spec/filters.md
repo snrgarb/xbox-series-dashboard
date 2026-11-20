@@ -277,7 +277,7 @@ Nothing of this exists in the Bundle (NOT FOUND: section 1). It is built only fr
 | Pane button (58 tall, at least 180 wide) | 4.4 | Discord's Type and Paste |
 | Dropdown box and its list (560 x 58; the list opens in the page under it) | 4.5, 4.6 | Idle's two times |
 | Checkbox row (560 x 58, U+E739 / U+E73A at its right) | 4.7 | The Guide page's Use the Guide |
-| Text entry on the Console keyboard, over the dimmed page | [search.md](search.md) section 10 | Gamertag, Client ID |
+| Text entry on the Console keyboard, over the dimmed page | [search.md](search.md) section 10 | Gamertag (the Client ID went with the RPC page, #299) |
 | The menu panel and its prompt | [tile-menu.md](tile-menu.md) sections 2 and 5 | The Tile menu, "Remove <game>?" |
 
 Focus, the ring and glow, the fly-in, B's levels and sounds are those of the Settings page ([settings.md](settings.md) sections 5, 8 to 10).

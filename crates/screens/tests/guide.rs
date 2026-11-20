@@ -313,7 +313,6 @@ fn with_discord_connected_its_tab_stands_between_the_two() {
     let mut guide = Dashboard::new(screens::fake_library());
     let signed_in = model::discord::Discord {
         connected: true,
-        has_tokens: true,
         user: Some("E2E Tester".into()),
         ..Default::default()
     };

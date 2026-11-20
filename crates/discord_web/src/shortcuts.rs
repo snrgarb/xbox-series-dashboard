@@ -1,11 +1,10 @@
 //! Known channels and Shortcuts for the web session (docs/discord-web.md, "Voice"): the DMs, group DMs and server voice
 //! channels the user has been in a Call in through this session, most recently joined first; the first six are the Discord
-//! tab's Shortcuts. The same rules as the RPC connection's (`crates/discord/src/shortcuts.rs`, docs/discord.md, "Known
+//! tab's Shortcuts. The same rules as the RPC connection's, which #299 removed (docs/discord.md, "Known
 //! channels"): a DM is kept until removed, a server's voice channel only while among the six most recent, a removed
 //! one is not brought back by its Call going on, the servers joined in are remembered most recent first.
 //!
-//! **Not shared with the RPC crate's store**, which is its encrypted secret store (`discord-secrets.dat`, DPAPI) behind
-//! that crate's connection: it cannot be opened without it, and that crate is to be deleted. This is a small file of its
+//! **Not the RPC crate's store** (its encrypted `discord-secrets.dat`, gone with that crate, #299). This is a small file of its
 //! own, in the same shape (`{Id, GuildId, Name, Image, ServerName}`, `Image` the CDN path), at
 //! `<data>/discord-web/known-profile-<id>.json`, plain text (names of channels and servers, never a message). It is
 //! read when the session signs in, written when it changes, and **removed by a sign-out**; switching the session off

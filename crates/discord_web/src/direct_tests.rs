@@ -865,10 +865,6 @@ fn the_asks_go_to_the_page_one_at_a_time_paced_and_joining_the_call_one_is_in_do
     std::thread::sleep(crate::act::PACE + std::time::Duration::from_millis(50));
     s.pump();
     assert_eq!(fake.asked(), ["Leave(#3)"]);
-    // RPC-only asks are ignored.
-    s.ask_voice(Ask::Connect);
-    s.ask_voice(Ask::ClientId("x".into()));
-    assert!(fake.asked().is_empty());
 }
 
 #[test]

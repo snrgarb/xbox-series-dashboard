@@ -232,8 +232,6 @@ struct App {
     input_clock: Box<dyn LastInput>,
     /// `--idle-after`'s times: in force in place of Settings' whatever Settings says, and never saved.
     idle_after: Option<screens::idle::Times>,
-    /// The Discord connection (docs/discord.md): Discord's own pipe, or with --discord-pipe a test's.
-    discord: discord::Connection,
     /// Discord messages' web session (#197, docs/discord-web.md): nothing runs until Settings turns it on.
     discord_web: discord_web::Session,
     /// Settings > About's updates and the daily check (docs/spec/updates.md).
@@ -445,15 +443,7 @@ pub fn run(
     let data_dir = args.data_dir.clone().or_else(library::data_dir);
     let mut freezer = Freezer::new(data_dir.as_deref());
     freezer.thaw_leftovers();
-    // Discord, signed in with the tokens saved before, if any: its secrets are kept in the data folder.
-    let mut discord = discord::Connection::new(&args.discord, data_dir.as_deref(), {
-        let wake = std::sync::Mutex::new(event_loop.create_proxy());
-        move || {
-            let _ = wake.lock().map(|proxy| proxy.send_event(()));
-        }
-    });
-    discord.start();
-    dashboard.set_discord(discord.discord());
+    dashboard.set_discord(&model::discord::Discord::default());
     // Discord messages' own session, the Profile signed in's, started only with Settings' switch on.
     let mut discord_web = discord_web::Session::new(args.discord_web_url.as_deref(), data_dir.as_deref(), {
         let wake = std::sync::Mutex::new(event_loop.create_proxy());
@@ -463,7 +453,7 @@ pub fn run(
     });
     discord_web.set_profile(Some(dashboard.profile().id));
     discord_web.set_on(dashboard.options().discord_messages);
-    if let Some(cdn) = &args.discord.cdn_url {
+    if let Some(cdn) = &args.discord_cdn_url {
         discord_web.set_cdn(Some(cdn));
     }
     dashboard.set_options(screens::Options { discord_web: discord_web.web(), ..dashboard.options() });
@@ -604,7 +594,6 @@ pub fn run(
         picker_events: mpsc::channel(),
         input_clock: shell::idle::system(),
         idle_after: args.idle_after,
-        discord,
         discord_web,
         updater,
         helpers,
@@ -963,16 +952,12 @@ impl App {
         self.now_playing_said = line;
     }
 
-    /// Discord as the screens are to show it: the RPC connection's, with the Call, the user, the Servers Flyout and
-    /// the Shortcuts the web session's while its voice is ready (#297, docs/discord-web.md "Voice"). The RPC
-    /// connection's settings (its application, tokens and status line) stay its own.
+    /// Discord as the screens are to show it: the web session's, once its voice is ready (#297, docs/discord-web.md
+    /// "Voice"): the Call, the user, the Servers Flyout and the Shortcuts. Until then it is not connected.
     fn discord_for_screens(&self) -> model::discord::Discord {
-        let mut discord = self.discord.discord().clone();
+        let mut discord = model::discord::Discord::default();
         if self.discord_web.voice_ready() {
             discord.connected = true;
-            discord.connecting = false;
-            discord.retrying = false;
-            discord.needs_reconnect = false;
             discord.user = self.discord_web.me().map(|me| me.as_str().to_string());
             discord.voice = self.discord_web.voice().clone();
             discord.browse = self.discord_web.browse().clone();
@@ -984,26 +969,6 @@ impl App {
     fn push_discord(&mut self) {
         let discord = self.discord_for_screens();
         self.dashboard.set_discord(&discord);
-    }
-
-    /// Takes in what Discord said and the time, and has the Dashboard show how the connection is now. How soon it
-    /// wants another turn: its next timer (a try again, a refresh), None with none.
-    fn follow_discord(&mut self) -> Option<Duration> {
-        let (focus, guide) = (self.dashboard.focus_line(), self.dashboard.guide_line());
-        if self.discord.pump(SystemTime::now()) {
-            self.push_discord();
-            self.stale = true;
-            // The Discord tab on the Overlay follows the Call too.
-            self.overlay_stale = true;
-        }
-        if self.log_focus && self.dashboard.focus_line() != focus {
-            eprintln!("focus: {}", self.dashboard.focus_line());
-        }
-        if self.log_focus && self.dashboard.guide_line() != guide {
-            eprintln!("guide: {}", self.dashboard.guide_line());
-        }
-        let next = self.discord.next_timer()?;
-        Some(next.duration_since(SystemTime::now()).unwrap_or(Duration::ZERO))
     }
 
     /// Discord messages' session (#197): the Profile signed in's, its sign-in page shown while that page has the pad
@@ -1121,7 +1086,7 @@ impl App {
                         self.store.set_game_pass(change.on, options.game_pass_region);
                         self.update_launchers(Some(vec!["xbox".to_string()]));
                     }
-                    // Settings > Account > Discord messages: on starts the session, off ends it (#197).
+                    // Settings > Account > Discord: on starts the session, off ends it (#197).
                     if change.setting == Setting::DiscordMessages {
                         self.discord_web.set_on(change.on);
                         self.follow_discord_web();
@@ -1173,7 +1138,7 @@ impl App {
                         self.start_art();
                     }
                 }
-                // Settings > Account > Discord messages and its sign-in page: the session does it (#197).
+                // Settings > Account > Discord and its sign-in page: the session does it (#197).
                 Effect::DiscordWeb(ask) => {
                     self.discord_web.ask(ask);
                     self.follow_discord_web();
@@ -1184,26 +1149,16 @@ impl App {
                     self.discord_web.ask_direct(ask);
                     self.follow_discord_web();
                 }
-                // Settings > Account > Direct Messages > While playing: saved; the Toasts (#202) read it.
+                // Settings > Account > Discord > While playing: saved; the Toasts (#202) read it.
                 Effect::DiscordWhilePlaying(choice) => {
                     self.store.set_text(screens::settings::DISCORD_WHILE_PLAYING, choice.key());
                 }
-                // Settings > Discord: the connection does it, and the page shows how it is after.
+                // The Discord tab's Call, joining, Servers Flyout and Shortcuts: the web session's voice does it, once
+                // it is ready (#297), and the tab shows how it is after.
                 Effect::Discord(ask) => {
-                    // Voice (the Call, joining, the Servers Flyout, Shortcuts) goes through the web session once it
-                    // is ready (#297); the application's settings and the rest stay with the RPC connection.
-                    let voice = matches!(
-                        ask,
-                        model::discord::Ask::Call(_)
-                            | model::discord::Ask::Join(_)
-                            | model::discord::Ask::RemoveShortcut(_)
-                            | model::discord::Ask::Browse(_)
-                    );
-                    if voice && self.discord_web.voice_ready() {
+                    if self.discord_web.voice_ready() {
                         self.discord_web.ask_voice(ask);
                         self.follow_discord_web();
-                    } else {
-                        self.discord.ask(ask, shell::clipboard::text);
                     }
                     self.push_discord();
                     self.stale = true;
@@ -2131,7 +2086,6 @@ impl ApplicationHandler for App {
         self.keep_idle_after();
         let audio_wants = self.follow_audio();
         self.follow_media();
-        let discord_wants = self.follow_discord();
         self.follow_discord_web();
         // The web session's paced actions: a send's timeout, the next action's turn.
         let discord_web_wants = self.discord_web.next_timer();
@@ -2261,7 +2215,6 @@ impl ApplicationHandler for App {
             timer,
             audio_wants,
             idle,
-            discord_wants,
             discord_web_wants,
         ];
         let wait = wants.into_iter().flatten().min().unwrap_or(IDLE);

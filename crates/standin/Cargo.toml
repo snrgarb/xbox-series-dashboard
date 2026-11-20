@@ -18,8 +18,6 @@ model = { path = "../model" }
 library = { path = "../library" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 audio = { path = "../audio" }
-# discord: the fake Discord, on a named pipe of the test's naming.
-discord = { path = "../discord" }
 # serve-updates: the stand-in update address, and the release it serves.
 update = { path = "../update" }
 # serve-helpers: the stand-in helpers' release pages, and the table that points at them.

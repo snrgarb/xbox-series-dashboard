@@ -17,7 +17,6 @@ mod boot_video;
 pub mod boxes;
 pub mod categories;
 pub mod controls;
-mod discord;
 pub mod discord_web;
 mod group;
 pub mod groups;
@@ -58,10 +57,10 @@ pub enum Entry {
     Tile,
     /// Games & apps' boxes, focus on Groups: the Tile menu's Customise Home.
     CustomiseHome,
-    /// Home's Discord tile while there is no Discord tab in the Guide: Account > Discord, focus on the Client ID's
-    /// Type; B goes back to Account's boxes with focus on Discord.
+    /// Home's Discord tile while there is no Discord tab in the Guide: Account > Discord, focus on its switch; B goes
+    /// back to Account's boxes with focus on Discord.
     Discord,
-    /// The Guide's "Sign in to Discord in Settings > Account > Direct Messages": that page, focus on Sign in.
+    /// The Guide's "Sign in to Discord in Settings > Account > Discord": that page, focus on Sign in.
     DirectMessages,
     /// Manage Queue's row of a game stopped for want of space (#230): Games & apps > Storage; B goes straight back
     /// to the row, as the page was opened from there (`Settings::returns_at`); a page opened from Storage, closed,
@@ -200,13 +199,14 @@ impl Settings {
                 let (row, column) = categories::DISCORD;
                 let mut settings = Self::on(Category::Account);
                 settings.categories[Category::Account.index()] = Category::Account.boxes().with_focus(row, column);
-                settings.pages.push(Box::new(discord::Discord::default()));
+                settings.pages.push(Box::new(discord_web::DiscordWeb::default()));
                 settings
             }
             // The Guide's sign-in line (Sign in to Discord in Settings): that page, focus on Sign in.
             Entry::DirectMessages => {
+                let (row, column) = categories::DISCORD;
                 let mut settings = Self::on(Category::Account);
-                settings.categories[Category::Account.index()] = Category::Account.boxes().with_focus(1, 1);
+                settings.categories[Category::Account.index()] = Category::Account.boxes().with_focus(row, column);
                 settings.pages.push(Box::new(discord_web::DiscordWeb::at_sign_in()));
                 settings
             }

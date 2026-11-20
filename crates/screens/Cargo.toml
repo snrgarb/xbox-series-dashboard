@@ -10,8 +10,6 @@ model = { path = "../model" }
 ui = { path = "../ui" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
-# Settings > Discord's QR code: Project Nayuki's encoder, pure Rust with no dependencies of its own.
-qrcodegen = "1.8"
 
 [dev-dependencies]
 # The tests' libraries come by way of the library database, which works Home's Groups out.

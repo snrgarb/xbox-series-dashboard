@@ -116,7 +116,7 @@ pub enum GuideAction {
     Power(PowerChoice),
     /// What the Discord tab or its Flyout asks of Discord: shown done only once Discord says so.
     Discord(DiscordAsk),
-    /// A on "Sign in to Discord in Settings > Account > Direct Messages": the Guide closes onto that page.
+    /// A on "Sign in to Discord in Settings > Account > Discord": the Guide closes onto that page.
     DirectSettings,
 }
 
@@ -573,7 +573,7 @@ impl Guide {
 
     /// "Discord wants to check it's you": a prompt over the Guide (docs/spec/party-chats.md, 6.4).
     pub fn ask_captcha(&mut self) {
-        let message = "Sign in again in Settings > Account > Direct Messages to carry on.";
+        let message = "Sign in again in Settings > Account > Discord to carry on.";
         self.ask_ok("Discord wants to check it's you", message);
     }
 
