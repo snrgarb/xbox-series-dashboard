@@ -2,7 +2,7 @@
 
 Where the port stands and how work is done on it, for whoever picks it up next. First written 2026-11-15 for building
 M0 to M7; brought up to date on 2026-11-17 (#158), when M0 to M7 were built and M8 was under way, and on 2026-11-19, when
-M0 to M8 were finished (the user's word) and M9 had started.
+M0 to M8 were finished (the user's word) and M9 had started, and on 2026-11-20, when M9 was finished.
 
 Read this, then [plan.md](plan.md) (what each milestone is and what it holds now), [ui.md](ui.md) (how a screen is
 built) and the map issue (#14).
@@ -20,7 +20,7 @@ built) and the map issue (#14).
 | **M6** Discord and achievements | Built: the Discord tab, Calls, Shortcuts and Servers over Discord's local RPC with the user's own application; Steam achievements from local files, Score, Rare, the Achievements page and its Toast. |
 | **M7** Shipping | Finished (the user, 2026-11-19): shell mode (the Dashboard as the user's shell, set from Settings > System), versions, a per-user installer and a portable zip from CI, updates by handover, the Launchers screen. Not built, by the user's decision: the Xbox mode home-app package (#183) and an import from Playnite (#157). |
 | **M8** Installs | Finished (the user, 2026-11-19): the Installer interface; Steam's own install, pause, resume, cancel and uninstall through its client; Epic through legendary and GOG through gogdl, fetched on the user's Yes; Settings > Storage; setting up this PC; art chosen from SteamGridDB's candidates. |
-| **M9** Full Discord | **Started.** One Discord integration through the Dashboard's own hidden discord.com web session (WebView2, one per Profile), everything read from Discord's in-page Flux stores and pushed on their change events, acting by id through a paced one-at-a-time queue (docs/discord-web.md: Reading, Acting, Voice; docs/research/discord-web-voice.md section 0). Built and merged: the voice spike and its recommendation (#292), the model (`model::discord_dms`), Direct Messages read from the stores (#198), sending, replies, reactions and Mark As Read (#201), the Party & chats screens in the Guide (#200), the app wiring (#298), Toasts for DMs, mentions and calls (#202), voice through the web session with the tab using it once its stores are found (#297), the sign-in zoom (#294). On the TV PC on 2026-11-19 the real session signed in, listed 170 DMs and found every message and voice store. Open: the user's own test on the TV, the stand-in payloads `discord-web`, `discord-dms`, `discord-web-voice` (never run yet), mention Toasts (nothing raises a mention yet), retiring RPC and the Discord app (#299, after a 7-minute call with a game in front holds), servers' text channels (#203). |
+| **M9** Full Discord | **Finished** (the user's tests on the TV PC, 2026-11-20; report: [reports/m9.md](reports/m9.md)). One Discord integration: the Dashboard's own hidden discord.com web session (WebView2, one per Profile), read from Discord's in-page Flux stores, acting by id through a paced queue (docs/discord-web.md). Direct Messages, sending, replies, reactions (adding and removing), Mark As Read, Toasts for DMs and calls ("X started a call"), and voice (joining server channels, calling DMs, Mute, Deafen, Leave) work on the TV with the user's real account. The RPC connection and the Discord app are retired (#318): Settings > Account has one Discord page. Out of scope, moved to a later milestone: servers' text channels, threads and forums (#203). |
 
 What only the TV PC can still settle, and the steps for each, is in **For the TV PC** below.
 
@@ -117,7 +117,7 @@ Things only the TV PC can settle. Each lists the run, the log lines to read, and
   display timeout. Read the log for the Idle screen's lines and look: the screen must neither dim nor turn off while
   the Dashboard is up and Never is chosen. Closed by that sight, or a note of which of Windows' timeouts still wins.
 - **The Achievement Toast and the Discord tab, by eye.** `e2e/htpc/run.sh achievement-toast` and
-  `e2e/htpc/run.sh discord-tab` bring back pictures in `artifacts/e2e/htpc-<test>-<time>/`; set them beside the
+  `e2e/htpc/run.sh discord-web-voice` bring back pictures in `artifacts/e2e/htpc-<test>-<time>/`; set them beside the
   Bundle's (Toast 60-61, the Guide 50-58 in the Bundle's port-reference set). Closed by a short note per screen on
   #158: what matches, what differs.
 - **Gamerpics** wait on the user.
@@ -142,5 +142,5 @@ Things only the TV PC can settle. Each lists the run, the log lines to read, and
 - **Publishing** a release, signing, and making this repository public (docs/release.md).
 - **Microsoft's sounds and boot videos** (#10, decided): never in this repository. They are read at run time from a
   media folder; tests use generated tones (`standin make-tones <dir>`).
-- **Credentials:** Discord's application id, SteamGridDB's key, the stores' sign-ins.
+- **Credentials:** the Discord sign-in (in the web session), SteamGridDB's key, the stores' sign-ins.
 - **Gamerpics.**
