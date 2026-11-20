@@ -170,12 +170,19 @@ api.react = (op) => begin(op, async (my) => {
   const { channel, message, emoji, on } = op;
   if (!isId(channel) || !isId(message) || typeof emoji !== "string" || !emoji || emoji.length > 32 || typeof on !== "boolean") return fail(my, "page error");
   const a = actionOf("react");
-  if (!a || !fnOf(a, on ? "addReaction" : "removeReaction")) return fail(my, on ? "react action not found" : "unreact action not found");
+  // Removing without a found removing function goes through Discord's own HTTP utility (it signs its own requests).
+  const viaHttp = !on && !(a && fnOf(a, "removeReaction")) && !!actionOf("http") && fnOf(A.S.http, "del");
+  if (!viaHttp && (!a || !fnOf(a, on ? "addReaction" : "removeReaction"))) return fail(my, on ? "react action not found" : "unreact action not found");
   if (!messageOf(channel, message)) return fail(my, "message not loaded");
   const shown = () => iReacted(messageOf(channel, message), emoji) === on;
   if (shown()) return finish(my, { stage: "done" });
   let rejected = false;
-  try { Promise.resolve(callReaction(a, on, channel, message, emoji)).catch(() => { rejected = true; }); } catch (e) { return fail(my, "react action failed"); }
+  try {
+    const sent = viaHttp
+      ? A.S.http.del({ url: "/channels/" + channel + "/messages/" + message + "/reactions/" + encodeURIComponent(emoji) + "/@me", oldFormErrors: true })
+      : callReaction(a, on, channel, message, emoji);
+    Promise.resolve(sent).catch(() => { rejected = true; });
+  } catch (e) { return fail(my, "react action failed"); }
   const ok = await until(my, () => shown() || rejected, O.doneCap);
   if (my.dead) return;
   if (shown()) return finish(my, { stage: "done" });

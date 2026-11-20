@@ -197,6 +197,7 @@ network call.
 | `messages` | `MessageStore` | `getMessages` (its `toArray()` or `_array`, `ready`, `hasMoreBefore`); optional `getMessage`, `getLastMessage` | yes |
 | `calls` | `CallStore` | `getCall` or `getCalls` (`ringing`) | no: no rings without it |
 | `older` | an exports object with `fetchMessages` (found by shape) | `fetchMessages({channelId, before, limit: 50})` | no: `Older` does nothing |
+| `http` | Discord's own HTTP utility: an exports object with `get`, `post`, `put`, `patch`, `del` (found by shape) | `del({url, oldFormErrors: true})`, to remove our reaction | no: a removal then needs a removing function |
 | `reply`, `react`, `ack`, `forget` | exports objects found by shape: `createPendingReply`; `addReaction` + `removeReaction`; `ack`; `deleteMessage` | see "Acting" | no: the ask each serves fails plainly |
 
 A required key or method missing, or a required method that throws, is the **health** `ok: false`: the session's
@@ -370,9 +371,13 @@ already does, it is done without asking Discord. Not shown within 10 s: `reactio
 The real page has no such object: its reaction functions are module functions found by the action type in their
 source (the longest of three or more arguments naming `"MESSAGE_REACTION_ADD"`, and another naming
 `"MESSAGE_REACTION_REMOVE"`). On the TV (2026-11-20) only the adding one was found, and the search then gave up on both.
-Adding now goes ahead alone; removing without its function fails as `reaction not done: unreact action not found`. The
-copies line names every function of the adding function's module (`react module`: code name, arguments, size, `A`/`R`
-for the action types its source names), to find where the removing lives.
+Adding goes ahead alone. Removing without a found removing function goes through Discord's own HTTP utility (health key
+`http`, found by shape: `get`, `post`, `put`, `patch`, `del`, not a catch-all; it adds the authorization itself):
+`del({ url: "/channels/<channel>/messages/<message>/reactions/<emoji, URL-encoded>/@me", oldFormErrors: true })`, which
+removes only our own reaction. A rejection is `reaction not done: react action failed`; done is still decided by the
+store (Discord's gateway sends the removal back). With neither a removing function nor the utility: `reaction not done:
+unreact action not found`. The copies line says `http yes`/`no` and names every function of the adding function's module
+(`react module`: code name, arguments, size, `A`/`R`/`M` for the action types and `@me` its source names).
 
 ### MarkRead (`DirectAsk::MarkRead(channel)`)
 

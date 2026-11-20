@@ -141,6 +141,9 @@ const xsdFindStores = () => {
     replyClear: shape(["deletePendingReply"]),
     pending: pick(["PendingReplyStore"], ["getPendingReply"]),
     react: shape(["addReaction", "removeReaction"]) || reactByCode(),
+    // Discord's own HTTP utility (get, post, put, patch, del; it signs its own requests): removes our reaction
+    // when no removing function is found (the TV, 2026-11-20: Discord's code has no clear removeReaction).
+    http: shape(["get", "post", "put", "patch", "del"]),
     // `ack` alone is on more than one object: the one that also has its siblings is the channel read-state action.
     ack: shapeBest(["ack"], ["bulkAck", "ackCategory", "localAck", "ackChannel"]),
     forget: shape(["deleteMessage", "sendMessage"]) || shape(["deleteMessage"]),
@@ -179,6 +182,7 @@ const xsdFindStores = () => {
       parts.push(k + " " + all.length + " (catch-alls passed over: " + [...candidates].filter((o) => typeof o === "object" && catchAll(o)).length + ") in [" + [...new Set(all.map(rt))].join(",") + "] picked " + rt(S[k]) + " src " + len);
     }
     parts.push("dispatcher " + (S.dispatcher ? "yes" : "no"));
+    parts.push("http " + (S.http ? "yes" : "no"));
     // Where the reaction, reply and ack code lives: the functions whose source names Discord's action types, by their
     // code names and sizes (code, never anything of the user's), the first three of each.
     const markers = { react: "MESSAGE_REACTION_ADD", unreact: "MESSAGE_REACTION_REMOVE", reply: "CREATE_PENDING_REPLY", ack: "CHANNEL_ACK" };
@@ -213,7 +217,7 @@ const xsdFindStores = () => {
         if (typeof f !== "function") continue;
         let src = "";
         try { src = Function.prototype.toString.call(f); } catch (e) {}
-        const flag = (src.includes("MESSAGE_REACTION_ADD") ? "A" : "") + (src.includes("MESSAGE_REACTION_REMOVE") ? "R" : "");
+        const flag = (src.includes("MESSAGE_REACTION_ADD") ? "A" : "") + (src.includes("MESSAGE_REACTION_REMOVE") ? "R" : "") + (src.includes("@me") ? "M" : "");
         sibs.push(k + "/" + f.length + "/" + src.length + (flag ? "/" + flag : ""));
       }
       parts.push("react module " + sibs.length + " [" + sibs.slice(0, 16).join(" ").replace(/[^\w\/ ?$-]/g, "") + "]");
@@ -232,6 +236,7 @@ const xsdFindStores = () => {
     older: { need: ["fetchMessages"], opt: [], optional: true },
     reply: { need: ["createPendingReply"], opt: ["deletePendingReply"], optional: true },
     react: { need: ["addReaction"], opt: ["removeReaction"], optional: true },
+    http: { need: ["del"], opt: ["get", "post", "put", "patch"], optional: true },
     ack: { need: ["ack"], opt: [], optional: true },
     forget: { need: ["deleteMessage"], opt: [], optional: true },
     // Voice keys never make `missing` (the DM reading goes on without them); js/voice.js says what voice lacks.
