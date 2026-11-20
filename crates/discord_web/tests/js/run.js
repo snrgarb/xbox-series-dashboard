@@ -529,6 +529,22 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     });
   }
 
+  await check("a reaction is added when only Discord's adding function is found; a removal then fails plainly", async () => {
+    const p = page({ reactForm: "code-add-only" });
+    p.run();
+    await sleep(150);
+    p.win.__xsdDirect.open(F1);
+    await sleep(60);
+    const target = p.world.pool[F1][0].id;
+    p.win.__xsdDirect.react({ seq: 1, channel: F1, message: target, emoji: "\u{1F525}", on: true });
+    await sleep(80);
+    assert.deepStrictEqual(stages(p, 1), ["done"]);
+    p.win.__xsdDirect.react({ seq: 2, channel: F1, message: target, emoji: "\u{1F525}", on: false });
+    await sleep(40);
+    assert.deepStrictEqual(acts(p, 2).map((x) => x.why), ["unreact action not found"]);
+    assert.match(p.last("health").copies, /react module 2 \[BB\/3\/\d+\/A y4\/2\/\d+\/A\]/);
+  });
+
   await check("a reaction fails plainly without the action, or on a message not loaded", async () => {
     const p = page({ noActions: ["react"] });
     p.run();
