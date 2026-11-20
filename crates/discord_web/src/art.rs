@@ -5,8 +5,8 @@
 //! default avatar), `<art>/icons/<guild>/<hash>.png`. A picture's hash changes with the picture, so a kept one is never
 //! stale. (The Direct Messages' pictures are another thing: memory only, `pictures.rs`.)
 //!
-//! A copy of the small part of `crates/discord/src/avatars.rs` and `voice.rs` that names, fetches and keeps a picture:
-//! that crate is to be deleted, so nothing is shared. A test points the session at a stand-in CDN, never Discord's; with
+//! The small part of the RPC crate's `avatars.rs` and `voice.rs` (removed by #299) that names, fetches and keeps a picture:
+//! that crate is gone, so nothing is shared. A test points the session at a stand-in CDN, never Discord's; with
 //! none given nothing is fetched. Nothing is logged by address or name: ids are in them.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

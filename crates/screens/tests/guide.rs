@@ -311,12 +311,7 @@ fn a_game_starting_with_the_guide_open_appears_as_running() {
 #[test]
 fn with_discord_connected_its_tab_stands_between_the_two() {
     let mut guide = Dashboard::new(screens::fake_library());
-    let signed_in = model::discord::Discord {
-        connected: true,
-        has_tokens: true,
-        user: Some("E2E Tester".into()),
-        ..Default::default()
-    };
+    let signed_in = model::discord::Discord { connected: true, user: Some("E2E Tester".into()), ..Default::default() };
     guide.set_discord(&signed_in);
     press(&mut guide, &[Guide]);
     assert_eq!(guide.guide().tabs(), [LANDING, Tab::Discord, PROFILE]);

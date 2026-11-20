@@ -1720,12 +1720,7 @@ fn guide_long_names() {
 #[test]
 fn guide_discord_tab() {
     let mut stage = Stage::on_row(library_with_art(), HD);
-    let signed_in = model::discord::Discord {
-        connected: true,
-        has_tokens: true,
-        user: Some("E2E Tester".into()),
-        ..Default::default()
-    };
+    let signed_in = model::discord::Discord { connected: true, user: Some("E2E Tester".into()), ..Default::default() };
     stage.dashboard.set_discord(&signed_in);
     stage.press(&[Button::Guide, Button::RightBumper]);
     stage.check("guide-discord");

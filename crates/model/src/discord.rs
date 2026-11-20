@@ -1,30 +1,11 @@
-//! Discord as the screens see it: the user's own application and the connection to the Discord running on this PC
-//! (docs/discord.md). The `discord` crate keeps it; Settings > Account > Discord shows it and asks for
-//! changes with [`Ask`]; the Guide's Discord tab names why it can't show Discord with [`Discord::tab_line`], and shows
-//! the [`Call`] the user is in ([`Voice`]), asking Mute, Deafen and Leave of Discord with [`CallAsk`], the
-//! [`Shortcut`]s to the channels joined before, and the user's servers and their voice channels ([`Browse`]).
-//! Nothing secret is ever in it: the Client Secret only as whether one is saved, the tokens not at all.
+//! Discord's voice as the screens see it, from the Dashboard's own web session (docs/discord-web.md, "Voice"): the
+//! Guide's Discord tab shows the [`Call`] the user is in ([`Voice`]), asking Mute, Deafen and Leave of Discord with
+//! [`CallAsk`], the [`Shortcut`]s to the channels joined before, and the user's servers and their voice channels
+//! ([`Browse`]). The session itself, and Direct Messages, are `discord_web` and `discord_dms`.
 use std::path::PathBuf;
 
-/// Discord's developer portal, where the user makes the application: the page names it and shows it as a QR code.
-pub const PORTAL_URL: &str = "https://discord.com/developers/applications";
-
-/// The Connect checklist, in order.
-pub const STEPS: [&str; 4] = [
-    "Create an application at discord.com/developers/applications.",
-    "Under OAuth2, add the redirect http://127.0.0.1.",
-    "Under App Testers, add yourself.",
-    "Paste its Client ID and Client Secret here, then select Connect.",
-];
-
-/// The status line's words, and the Discord tab's, as the Bundle has them.
-pub const NOT_CONNECTED: &str = "Not connected";
-pub const CONNECTING: &str = "Connecting...";
-pub const NOT_RUNNING: &str = "Discord isn't running";
-pub const APPROVE: &str = "Approve the request in Discord";
-pub const RECONNECT_IN_SETTINGS: &str = "Reconnect Discord in settings";
-/// The Discord tab's line while a connect is under way; Settings' status line says [`CONNECTING`].
-pub const CONNECTING_TO_DISCORD: &str = "Connecting to Discord";
+/// What the Discord tab says while the web session's voice is not ready.
+pub const NOT_CONNECTED: &str = "Discord isn't connected";
 /// The Discord tab's line under who is signed in, out of a Call.
 pub const NOT_IN_A_CALL: &str = "You're not in a voice channel";
 /// A DM's heading while nobody else has been seen in it.
@@ -39,32 +20,16 @@ pub const EMPTY: &str = "Empty";
 /// A Shortcut's one menu option.
 pub const REMOVE_SHORTCUT: &str = "Remove shortcut";
 
-/// What Settings' Discord page shows, and whether the Guide has a Discord tab.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the Discord tab shows: whether the web session's voice is ready, and what it says.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Discord {
-    /// The application's Client ID, or None for none yet. It is public: the page shows it.
-    pub client_id: Option<String>,
-    /// Whether a Client Secret is saved. The Secret itself is never here.
-    pub has_secret: bool,
-    /// Whether tokens are saved, from a Connect until Disconnect.
-    pub has_tokens: bool,
-    /// The status line: "Not connected", "Connected as X", or what went wrong.
-    pub status: String,
-    /// Discord has signed the user in.
+    /// The web session's voice is ready: its stores are found and the Discord tab can show a Call.
     pub connected: bool,
-    /// A connect is under way: the handshake, a refresh, the Authorize prompt, the token exchange or signing in.
-    pub connecting: bool,
-    /// Discord stopped taking the saved tokens and would not authorize again either: the user has to Connect once
-    /// more. Connect signing in, or Disconnect, clears it.
-    pub needs_reconnect: bool,
-    /// Discord is out of reach and is tried again later by itself (a try is waiting to come).
-    pub retrying: bool,
     /// Who is signed in, by display name, else username, while connected.
     pub user: Option<String>,
     /// The Call the user is in and their own mute and deafen, as Discord last said: what the Discord tab shows.
     pub voice: Voice,
-    /// The six most recently joined Known channels, most recently first: the Discord tab's Shortcuts. Kept while
-    /// Discord is away, and across Disconnect.
+    /// The six most recently joined Known channels, most recently first: the Discord tab's Shortcuts.
     pub shortcuts: Vec<Shortcut>,
     /// The Servers Flyout, or a server's, as Discord last answered it.
     pub browse: Browse,
@@ -253,85 +218,25 @@ pub enum CallAsk {
     Leave,
 }
 
-impl Default for Discord {
-    fn default() -> Self {
-        Self {
-            client_id: None,
-            has_secret: false,
-            has_tokens: false,
-            status: NOT_CONNECTED.into(),
-            connected: false,
-            connecting: false,
-            needs_reconnect: false,
-            retrying: false,
-            user: None,
-            voice: Voice::default(),
-            shortcuts: Vec::new(),
-            browse: Browse::Closed,
-        }
-    }
-}
-
 impl Discord {
-    /// Whether Connect does anything: with a Client ID and Secret, and not connected or connecting already.
-    pub fn can_connect(&self) -> bool {
-        self.client_id.is_some() && self.has_secret && !self.connected && !self.connecting
-    }
-
-    /// Whether Disconnect does anything: while connected or connecting, or with tokens saved from before.
-    pub fn can_disconnect(&self) -> bool {
-        self.connected || self.connecting || self.has_tokens
-    }
-
-    /// Whether the Guide has a Discord tab: signed in, or with tokens saved, from the first Connect until
-    /// Disconnect.
+    /// Whether the Guide has a Discord tab for the voice: while the session's voice is ready.
     pub fn has_tab(&self) -> bool {
-        self.connected || self.has_tokens
+        self.connected
     }
 
-    /// The page's state for the focus log, naming neither the Client ID nor the Secret: `client id set, secret
-    /// saved, "Connected as E2E Tester"` (`not set` for either; the status line in quotes).
-    pub fn state_line(&self) -> String {
-        let id = if self.client_id.is_some() { "set" } else { "not set" };
-        let secret = if self.has_secret { "saved" } else { "not set" };
-        format!("client id {id}, secret {secret}, {:?}", self.status)
-    }
-
-    /// What the Discord tab says in Discord's place while it can't show it, or None while signed in: connecting,
-    /// Discord isn't running while it is tried again, else the user has to reconnect in Settings.
+    /// What the Discord tab says in the voice's place while it can't show it, or None while it can.
     pub fn tab_line(&self) -> Option<&'static str> {
         if self.connected {
             None
-        } else if self.needs_reconnect {
-            Some(RECONNECT_IN_SETTINGS)
-        } else if self.connecting {
-            Some(CONNECTING_TO_DISCORD)
-        } else if self.retrying {
-            Some(NOT_RUNNING)
         } else {
-            Some(RECONNECT_IN_SETTINGS)
+            Some(NOT_CONNECTED)
         }
     }
 }
 
-/// Which of the application's two fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Field {
-    ClientId,
-    ClientSecret,
-}
-
-/// What Settings' Discord page asks of the connection.
-#[derive(Clone, PartialEq, Eq)]
+/// What the Discord tab asks of the web session's voice.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ask {
-    /// The Client ID typed: saved at once, trimmed; empty forgets it.
-    ClientId(String),
-    /// The Client Secret typed: saved at once, trimmed. Never shown, never in a log line or `Debug`.
-    ClientSecret(String),
-    /// Paste: the clipboard's text into the field, as typed. A clipboard with no text pastes nothing.
-    Paste(Field),
-    Connect,
-    Disconnect,
     /// The Discord tab's Mute, Deafen or Leave.
     Call(CallAsk),
     /// A on a Shortcut or a server's voice channel: join it, by its id (nothing if it is the Call's already).
@@ -342,51 +247,16 @@ pub enum Ask {
     Browse(BrowseAsk),
 }
 
-impl std::fmt::Debug for Ask {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Ask::ClientId(_) => f.write_str("ClientId(..)"),
-            Ask::ClientSecret(_) => f.write_str("ClientSecret(..)"),
-            Ask::Paste(field) => write!(f, "Paste({field:?})"),
-            Ask::Connect => f.write_str("Connect"),
-            Ask::Disconnect => f.write_str("Disconnect"),
-            Ask::Call(ask) => write!(f, "Call({ask:?})"),
-            Ask::Join(id) => write!(f, "Join({id:?})"),
-            Ask::RemoveShortcut(id) => write!(f, "RemoveShortcut({id:?})"),
-            Ask::Browse(ask) => write!(f, "Browse({ask:?})"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn connect_needs_both_fields_and_nothing_under_way() {
-        let mut discord = Discord { client_id: Some("1".into()), ..Discord::default() };
-        assert!(!discord.can_connect());
-        discord.has_secret = true;
-        assert!(discord.can_connect());
-        discord.connecting = true;
-        assert!(!discord.can_connect());
-        assert!(discord.can_disconnect());
-    }
-
-    #[test]
     fn the_tab_says_why_it_cant_show_discord() {
-        let saved = Discord { has_tokens: true, ..Discord::default() };
-        assert!(saved.has_tab());
-        assert_eq!(saved.tab_line(), Some(RECONNECT_IN_SETTINGS));
-        assert_eq!(Discord { retrying: true, ..saved.clone() }.tab_line(), Some(NOT_RUNNING));
-        assert_eq!(Discord { connecting: true, ..saved.clone() }.tab_line(), Some(CONNECTING_TO_DISCORD));
-        assert_eq!(Discord { connected: true, ..saved }.tab_line(), None);
         assert!(!Discord::default().has_tab());
-    }
-
-    #[test]
-    fn a_secret_is_never_in_debug() {
-        let said = format!("{:?}", Ask::ClientSecret("s3cr3t".into()));
-        assert!(!said.contains("s3cr3t"));
+        assert_eq!(Discord::default().tab_line(), Some(NOT_CONNECTED));
+        let ready = Discord { connected: true, ..Discord::default() };
+        assert!(ready.has_tab());
+        assert_eq!(ready.tab_line(), None);
     }
 }

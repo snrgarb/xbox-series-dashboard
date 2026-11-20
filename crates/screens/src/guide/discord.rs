@@ -101,7 +101,7 @@ impl Note {
     pub fn text(self) -> &'static str {
         match self {
             Note::Loading => "Loading Direct Messages",
-            Note::SignedOut => "Sign in to Discord in Settings > Account > Direct Messages",
+            Note::SignedOut => "Sign in to Discord in Settings > Account > Discord",
             Note::NoRuntime => "Messages need Microsoft Edge WebView2, which isn't on this PC",
             Note::Unreachable => "Can't reach Discord. Trying again",
             Note::PageChanged => {
@@ -187,13 +187,9 @@ pub fn entries(discord: &Discord, direct: &Direct) -> Vec<Entry> {
         entries.push(entry(Item::Answer, "Answer"));
     }
     if !voice {
-        // With Direct Messages on, the voice connection says so only when it has been set up; the rest of the tab
-        // is Direct Messages' own.
+        // With Direct Messages on, the voice part says nothing of why; the rest of the tab is Direct Messages' own.
         if !messages {
             return vec![entry(Item::Unavailable, discord.tab_line().unwrap_or_default())];
-        }
-        if discord.has_tab() {
-            entries.push(entry(Item::Unavailable, discord.tab_line().unwrap_or_default()));
         }
     }
     match &discord.voice.call {
@@ -803,7 +799,7 @@ mod tests {
         let people = people.iter().map(|(id, name)| person(id, name)).collect();
         let call = Call { id: "500".into(), title: "Late night".into(), people };
         let voice = Voice { call: Some(call), mute: false, deaf: false };
-        Discord { connected: true, has_tokens: true, user: Some("gabe".into()), voice, ..Discord::default() }
+        Discord { connected: true, user: Some("gabe".into()), voice, ..Discord::default() }
     }
 
     fn shortcut(id: &str, name: &str) -> Shortcut {
@@ -825,9 +821,9 @@ mod tests {
 
     #[test]
     fn the_tab_says_why_it_cant_show_discord_or_who_is_signed_in_or_the_call_then_servers() {
-        let lost = Discord { has_tokens: true, retrying: true, ..Discord::default() };
+        let lost = Discord::default();
         assert_eq!(items(&lost), [Item::Unavailable]);
-        assert_eq!(entries(&lost)[0].title, "Discord isn't running");
+        assert_eq!(entries(&lost)[0].title, "Discord isn't connected");
 
         assert_eq!(items(&idle()), [Item::Account, Item::Idle, Item::Servers]);
         assert_eq!(entries(&idle())[0].title, "gabe");

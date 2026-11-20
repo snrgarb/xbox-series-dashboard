@@ -111,7 +111,7 @@ try {
     Press Down 'Recent\(\d+\)'
     Press Down 'Wide\(\d\)'
     Walk Left 'Wide\(0\)' 4
-    Press A 'Settings: Discord: Client ID Type; client id not set, secret not set, "Not connected"'
+    Press A 'Settings: Discord: Direct Messages from discord.com; dms off, off'
     Press B 'Settings: Account: Discord'
     Press B 'Settings: Rail: Account'
     Press B 'Wide\(0\)'

@@ -3,7 +3,7 @@
 # the Dashboard pointed at it with `--discord-web-url`, so discord.com is never reached and no account of anyone's is
 # used. The data folder is the test's own.
 #
-# Settings > Account > Direct Messages is opened from the top bar's Settings; the switch is turned on (the session
+# Settings > Account > Discord is opened from the top bar's Settings; the switch is turned on (the session
 # starts, finds it is signed out); Sign in shows the stand-in's page over the Dashboard. **The QR code first**: the
 # page opens with its QR block shown (`discord web: QR code shown yes`), no field focused though the stand-in's e-mail
 # field takes focus by itself as Discord's does, and no keyboard; the test plays the phone (`POST
@@ -15,7 +15,7 @@
 # and kept with Menu; the same for the password (typed as dots); Down to the form's button and A presses it. Signed in
 # again, then signed out again.
 #
-# Judged by the Dashboard's log: the focus log (`focus: Settings: Direct Messages: Direct Messages from discord.com; dms on, signed
+# Judged by the Dashboard's log: the focus log (`focus: Settings: Discord: Direct Messages from discord.com; dms on, signed
 # in`, `focus: DiscordSignIn: Tab`) and the session's own lines (`discord web: signed out`, `discord web: focus
 # on a password field`, `discord web: signed in`, `discord web: signed out: nothing is left, ... is gone`); and by the
 # folder. What was typed is never in dashboard.log or standin.log. Needs Microsoft Edge WebView2 and
@@ -122,15 +122,15 @@ function Start-Test-Dashboard {
     Wait-Greeting | Out-Null
 }
 
-# From Home to Settings > Account > Direct Messages.
+# From Home to Settings > Account > Discord.
 function Open-DiscordMessages([string] $State) {
     Walk Right 'TopBar\(Settings\)' 6
     Press A 'Settings: Rail: General' | Out-Null
     Press Down 'Settings: Rail: Account' | Out-Null
     Press Right 'Settings: Account: Profiles' | Out-Null
     Press Right "Settings: Account: Who's playing today\?" | Out-Null
-    Press Down 'Settings: Account: Direct Messages' | Out-Null
-    Press A "Settings: Direct Messages: Direct Messages from discord.com; $State" '' 30 | Out-Null
+    Press Down 'Settings: Account: Discord' | Out-Null
+    Press A "Settings: Discord: Direct Messages from discord.com; $State" '' 30 | Out-Null
 }
 
 # One letter on the Console keyboard, over the sign-in page, kept with Menu.
@@ -164,13 +164,13 @@ try {
     Start-Test-Dashboard
     Open-DiscordMessages 'dms off, off'
     $mark = Get-DashboardLogLength
-    Press A 'Settings: Direct Messages: Direct Messages from discord.com; dms on, .*' | Out-Null
+    Press A 'Settings: Discord: Direct Messages from discord.com; dms on, .*' | Out-Null
     Expect-Log '^discord web: switched on$' 5 $mark 'the switch' | Out-Null
     # Nothing kept: signed out at once, and nothing runs until Sign in.
     Expect-Log '^discord web: signed out$' 10 $mark 'signed out at first' | Out-Null
     if (Test-Path (Join-Path $data 'discord-web')) { $failures += 'the switch alone should make no session folder' }
     Save-Screen '1-switched-on'
-    Press Down 'Settings: Direct Messages: Sign in; dms on, signed out' | Out-Null
+    Press Down 'Settings: Discord: Sign in; dms on, signed out' | Out-Null
     $mark = Get-DashboardLogLength
     $focusMark = @(Focus-Lines).Count
     Press A "DiscordSignIn: Discord's page" | Out-Null
@@ -187,7 +187,7 @@ try {
     $phone = Invoke-WebRequest -Uri "$base/standin/qr-confirm" -Method Post -UseBasicParsing
     Say "the phone: $($phone.Content)"
     Expect-Log '^discord web: signed in$' 20 $mark 'signed in by the QR code' | Out-Null
-    $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Direct Messages: .*; dms on, signed in$' } | Select-Object -Last 1 } 10
+    $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Discord: .*; dms on, signed in$' } | Select-Object -Last 1 } 10
     if ($back) { Say "back on Settings: $back" } else { $failures += "the sign-in page should have closed on Settings, signed in: $(Focus-Now)" }
     $lines = @(Focus-Lines)
     $keyboard = @($lines[$focusMark..($lines.Count - 1)] | Where-Object { $_ -match '^focus: (TextEntry|DiscordSignIn: keyboard)' })
@@ -206,8 +206,8 @@ try {
 
     # --- Sign out: nothing is left.
     Open-DiscordMessages 'dms on, signed in'
-    Press Down 'Settings: Direct Messages: Sign in; .*' | Out-Null
-    Press Right 'Settings: Direct Messages: Sign out; .*' | Out-Null
+    Press Down 'Settings: Discord: Sign in; .*' | Out-Null
+    Press Right 'Settings: Discord: Sign out; .*' | Out-Null
     $mark = Get-DashboardLogLength
     Tap A
     Expect-Log '^discord web: signed out: nothing is left, .* is gone$' 30 $mark 'signed out' | Out-Null
@@ -215,11 +215,11 @@ try {
     Save-Screen '4-signed-out'
     $left = @(Get-ChildItem (Join-Path $data 'discord-web') -Recurse -Force -ErrorAction SilentlyContinue)
     if ($left.Count -gt 0) { $failures += "nothing of the session should be left: $($left.Count) files and folders under discord-web" }
-    $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Direct Messages: .*; dms on, signed out$' } | Select-Object -Last 1 } 10
+    $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Discord: .*; dms on, signed out$' } | Select-Object -Last 1 } 10
     if (-not $back) { $failures += "Settings should say signed out, nothing kept: $(Focus-Now)" }
 
     # --- Typing second: signed in on the stand-in's form with the pad and the Console keyboard.
-    Walk Left 'Settings: Direct Messages: Sign in; dms on, signed out' 2
+    Walk Left 'Settings: Discord: Sign in; dms on, signed out' 2
     $mark = Get-DashboardLogLength
     Press A "DiscordSignIn: Discord's page" | Out-Null
     Expect-Log '^discord web: the sign-in page is shown' 20 $mark 'the sign-in page again' | Out-Null
@@ -239,7 +239,7 @@ try {
     Expect-Log '^discord web: focus on no field$' 10 $mark 'the button' | Out-Null
     Tap A
     Expect-Log '^discord web: signed in$' 20 $mark 'signed in by typing' | Out-Null
-    $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Direct Messages: .*; dms on, signed in$' } | Select-Object -Last 1 } 10
+    $back = Wait-Until { Focus-Lines | Where-Object { $_ -match '^focus: Settings: Discord: .*; dms on, signed in$' } | Select-Object -Last 1 } 10
     if ($back) { Say "back on Settings: $back" } else { $failures += "the sign-in page should have closed on Settings, signed in: $(Focus-Now)" }
     $asked = @(Get-Content $standinLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '^.*serve-discord-web: POST /login' })
     if ($asked.Count -ne 1) { $failures += "the form should have been sent once, not $($asked.Count) times" }
@@ -247,7 +247,7 @@ try {
     Save-Screen '6-signed-in-by-typing'
 
     # And signed out again: nothing left.
-    Press Right 'Settings: Direct Messages: Sign out; .*' | Out-Null
+    Press Right 'Settings: Discord: Sign out; .*' | Out-Null
     $mark = Get-DashboardLogLength
     Tap A
     Expect-Log '^discord web: signed out: nothing is left, .* is gone$' 30 $mark 'signed out again' | Out-Null

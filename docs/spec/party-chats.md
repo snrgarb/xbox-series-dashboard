@@ -2,7 +2,7 @@
 
 **Approved by the user on 2026-11-18 (#199, M9 Full Discord); section 12. Built in #200 (section 15 says what was decided there).** How Discord's Direct Messages show in the Guide, in the
 manner of the console's Parties & chats tab, drawn with the Guide's own measures and parts. The decisions it rests
-on are #192's (D1 opt-in with RPC kept for voice; D2 our own web session; D3 our own screens under Party in the
+on are #192's (D1 opt-in, with RPC kept for voice until #299 removed it; D2 our own web session; D3 our own screens under Party in the
 Guide; D4 DMs and notifications first; D5 no video; D6 memory only; D7 our own code). What the web session can do is
 #196's spike: read the DM list by name with unread marks and counts, open a conversation, read its messages, send
 text. Section 12 has the decisions as approved, section 12.1 the wording, section 13 sketches of the three views.
@@ -126,7 +126,7 @@ the Call and the voice parts the tab has now. The layout is the console's; the w
 | When it is there | Signed in to the voice connection or tokens saved (as now, `Discord::has_tab()`), **or** Direct Messages switched on (section 8). Either alone is enough; each part of the tab says for itself when it can't show (section 3.5) |
 | Code name | The tab stays `Tab::Discord`, and `--log-focus` keeps `Discord` (section 10), so the payloads written for the tab stand |
 
-**Why one tab** (D1): voice and text come over two connections, RPC and the web session, which are up and down on
+**Why one tab** (D1): voice and text were two connections, RPC and the web session (RPC is gone, #299: both are the web session's now), up and down on
 their own. In one tab each section says its own state and the other goes on working, as the console's tab holds the
 party and the chats together. Two tabs would show or hide a whole tab as a connection comes and goes, add a bumper
 press between the landing tab and Profile & system, and split what the console keeps together.
@@ -150,7 +150,7 @@ With Direct Messages off the tab is exactly discord-tab.md's. With Direct Messag
 |---|---|---|---|
 | 1 | **Answer** | A DM call is ringing (section 7.3) | One entry, as the Bundle's ring (CONTEXT.md: Answer atop the tab): 96 tall, the caller's avatar 60 across 18 in, "Answer" at 96 in, under it dim "{caller} is calling" |
 | 2 | **The Call** | In a Call | discord-tab.md 2 and 4, unchanged: its heading, the people, a divider, Mute, Deafen, Leave. The console's party entry |
-| 2' | Voice's line | The voice connection can't show (`Connecting to Discord`, `Discord isn't running`, `Reconnect Discord in settings`) | discord-tab.md's line, unchanged |
+| 2' | Voice's line | The voice connection can't show (`Discord isn't connected`) | discord-tab.md's line, unchanged |
 | 3 | **Direct Messages** | Always, with Direct Messages on | A divider (only with something above), the "Direct Messages" line, the avatar row, the name line (3.2) |
 | 4 | **Shortcuts** and **Servers** | Signed in to the voice connection | As built (discord-tab.md 2), under a divider |
 
@@ -210,7 +210,7 @@ form (discord-tab.md 4: 75 tall, its glyph at 26 dim, its text at 69, dim, up to
 | State | Glyph | Text | A |
 |---|---|---|---|
 | Starting (the web session coming up, the list not yet read) | the Guide's spinner, 36 across, its middle 36 in | "Loading Direct Messages" | Nothing |
-| Signed out (never signed in, or Discord ended the session) | U+E77B (Contact) | "Sign in to Discord in Settings > Account > Direct Messages" | Closes the Guide and opens Settings there, as the Guide's Settings does (guide.md 3.3), focus on Sign in |
+| Signed out (never signed in, or Discord ended the session) | U+E77B (Contact) | "Sign in to Discord in Settings > Account > Discord" | Closes the Guide and opens Settings there, as the Guide's Settings does (guide.md 3.3), focus on Sign in |
 | No WebView2 runtime | U+E7BA | "Messages need Microsoft Edge WebView2, which isn't on this PC" | Nothing |
 | Can't reach Discord (no network, Discord down) | U+E7BA | "Can't reach Discord. Trying again" | Nothing; it tries again by itself |
 | Discord's page changed (the health probe, #198, finds a store or method of Discord's page that no longer answers) | U+E7BA | "Discord has changed its page, so Direct Messages can't be read until the Dashboard is updated" | Nothing |
@@ -226,7 +226,7 @@ The Guide's menu panel (guide.md 6.1), titled with the DM's name:
 | Option | Icon | When | Does |
 |---|---|---|---|
 | Mark As Read | U+E8FB (Accept) | Unread | Asks the page to mark it read (#201); the dot goes when the page shows it read |
-| Call | U+E717 (Phone) | Signed in to the voice connection | Asks Discord over RPC to join the DM's call (`Ask::Join`, as a DM Shortcut does); the Call shows when Discord says so |
+| Call | U+E717 (Phone) | Signed in to the voice connection | Asks Discord to join the DM's call (`Ask::Join`, as a DM Shortcut does); the Call shows when Discord says so |
 | Cancel | U+E72B | Always | Closes the menu |
 
 **Not offered** (decision 7): Open in the Discord app, which would bring the app in front of a game.
@@ -431,7 +431,7 @@ back to the message's menu.
   its menu has Retry and Delete. The draft is not put back: the text is in the bubble.
 - **Discord asks for a check** (a captcha) or **refuses** (rate limit, blocked, not allowed): the message is Not sent
   and a prompt (guide.md 6.1, 6.4) says so plainly, once: "Discord wants to check it's you" / "Sign in again in
-  Settings > Account > Direct Messages to carry on.", or "Discord didn't send it" / "{Discord's own reason, as the
+  Settings > Account > Discord to carry on.", or "Discord didn't send it" / "{Discord's own reason, as the
   page shows it}", with one option, OK.
 - **Mark As Read** is 3.6's; a conversation is otherwise read as the page counts it (5.4).
 
@@ -465,7 +465,7 @@ The Bundle's ring, not yet built in the port (discord-tab.md 9): **"{caller} is 
 Discord's mark at 48, the Call kind, guide.md 9.6), shown up to **30 s** (`RingToastDuration`, the Bundle's
 `ExtensionCore.DiscordRing.cs`), cutting in before waiting notifications, with the notification sound; the Answer
 entry atop the tab while it rings (3.1). The tap opens the Guide on the tab, focus on Answer. A on Answer joins the
-DM's call **through the voice connection** (RPC, D1), asking "Leave {X} and answer?" first when in another Call, as
+DM's call **through the web session's voice**, asking "Leave {X} and answer?" first when in another Call, as
 the Bundle. **Without the voice connection** nothing can answer: the Toast says "{caller} is calling", the tap opens
 the conversation, and there is no Answer. A ring seen by both connections is one ring (by channel).
 
@@ -481,7 +481,12 @@ the conversation, and there is no Answer. A ring seen by both connections is one
 
 ---
 
-## 8. Settings > Account > Direct Messages
+## 8. Settings > Account > Discord
+
+> **#299 merged this page into Discord.** The RPC connection and its Discord page are gone; the Account box at (1, 0)
+> is named **Discord** and opens this page, the one Discord page (settings.md 16.12). Where this section says
+> "Direct Messages" for the box, the page or its header, read Discord; the row and its words, "Direct Messages from
+> discord.com", are as built.
 
 ### 8.1 Where: a box of its own (approved)
 
@@ -516,7 +521,7 @@ Rows from y 190 at x 520, the Guide page's controls (settings.md 4.4, 4.5, 4.7),
   including by using any robot, spider, crawler, scraper, or other automatic device, process, or software") and the
   support article [Automated user accounts (self-bots)](https://support.discord.com/hc/articles/115002192352), as
   read in discord-bridge.md section 4.
-- Focus and B as settings.md 9.4 and 16.1; the log: `Settings: Direct Messages: <row>; dms <on|off>,
+- Focus and B as settings.md 9.4 and 16.1; the log: `Settings: Discord: <row>; dms <on|off>,
   <signed in|signed out|starting|no runtime|unreachable|page changed>` (no name, section 10).
 
 ---
@@ -599,7 +604,7 @@ the one that flips.
 | 10 | Mention Toasts | **Now**, opening the tab (7.2) |
 | 11 | Toasts' text and games | **The message's text shown, and Toasts during games**, both switchable (7.4, 8.2) |
 | 12 | The Notifications list | **Discord's Toasts are not added to it** (7.4) |
-| 13 | Where the settings are | **Settings > Account > Direct Messages, a page of its own** (8.1) |
+| 13 | Where the settings are | **Settings > Account > Discord, a page of its own** (8.1) |
 | 14 | Switching off | **Keeps the sign-in** (8.2) |
 | 15 | Avatars of people messaged | **Memory only** (9) |
 | 16 | New DM and Message Requests | **Not in M9** (11) |
@@ -738,7 +743,7 @@ this spec was approved, and a few things it left open were decided:
 
 **Changed after approval**
 
-- **Voice is moving to the web session too** (the user, 2026-11-18): the spec's RPC wording for the DM's **Call** (3.6)
+- **Voice is the web session's too** (the user, 2026-11-18; the RPC connection removed, #299): the spec's RPC wording for the DM's **Call** (3.6)
   and the Answer entry's **A** (7.3) will change in another ticket. For now they emit `DirectAsk::Call(id)` and
   `DirectAsk::Answer(id)`, and Call is offered whenever Direct Messages are `Ready` (not "signed in to the voice
   connection"); Answer asks nothing about being in another Call.
@@ -783,7 +788,7 @@ this spec was approved, and a few things it left open were decided:
 13. **Closing the Guide** drops the conversation (`DirectAsk::Close`) and keeps the drafts; turning Direct Messages off
     (`DirectState::Off`) forgets drafts, messages going out and every view.
 14. **A menu's log**: `dialog Menu { prompt: false, row: 0 } (dm)` (`(message)`, `(reaction)`), never its title.
-15. **Settings** (8): the page's focus log is `Settings: Direct Messages: <row>; dms on, signed in`; the status line
+15. **Settings** (8): the page's focus log is `Settings: Discord: <row>; dms on, signed in`; the status line
     says "Signed in" until the web session gives a name; Sign out's "Signed out. Discord lists this PC under Devices..."
     stays the Devices line under the status line while a session is kept. The Notifications and While playing are
     options (`Options::notify_*`, `Options::while_playing`) for the Toasts (#202).

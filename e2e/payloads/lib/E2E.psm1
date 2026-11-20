@@ -423,8 +423,6 @@ function Get-SafeArguments([string[]] $Given) {
     # Settings > System says what it would write to turn shell mode on or off, and writes nothing
     # (docs/spec/shell-mode.md): the TV PC never has shell mode turned on by a test.
     if ($Given -notcontains '--dry-shell') { $added += '--dry-shell' }
-    # A pipe no Discord listens on, and no token endpoint: the user's own Discord is never reached (docs/discord.md).
-    if ($Given -notcontains '--discord-pipe') { $added += '--discord-pipe', 'e2e-no-discord' }
     if ($Given -notcontains '--data-dir') {
         $data = Get-DashboardDataDir
         New-Item $data -ItemType Directory -Force | Out-Null

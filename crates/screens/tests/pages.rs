@@ -71,7 +71,7 @@ fn there_and_back(dashboard: &mut Dashboard, open: Button, line: &str, back: Foc
 }
 
 /// Settings > Discord as Home's Discord tile opens it, nothing set up.
-const DISCORD_PAGE: &str = "Settings: Discord: Client ID Type; client id not set, secret not set, \"Not connected\"";
+const DISCORD_PAGE: &str = "Settings: Discord: Direct Messages from discord.com; dms off, off";
 
 /// Presses A on Home as it is, expects Settings with focus where `line` says and Home unchanged under it; then B
 /// `levels` times, one level each, and Home again with focus on `back`.
@@ -195,7 +195,7 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[Down]);
     assert_eq!(home.home_focus(), Focus::Wide(0));
     let at_rest = rests(&home);
-    // Discord, with no Discord tab in the Guide: Settings > Discord, on the Client ID's Type. B is Account's
+    // Discord, with no Discord tab in the Guide: Settings > Account > Discord, on its switch. B is Account's
     // boxes, the rail, then the tile.
     settings_and_back(&mut home, DISCORD_PAGE, 3, Focus::Wide(0));
     press(&mut home, &[Right]);
@@ -216,7 +216,7 @@ fn the_wide_tiles_open_their_pages_and_b_comes_back_on_the_tile() {
     press(&mut home, &[A]);
     assert!(!home.guide_open() && home.page().is_none());
     // Nor Discord's Guide: its tile opens Settings then, connected or not.
-    let connected = model::discord::Discord { connected: true, has_tokens: true, ..Default::default() };
+    let connected = model::discord::Discord { connected: true, ..Default::default() };
     home.set_discord(&connected);
     press(&mut home, &[Left, Left]);
     settings_and_back(&mut home, DISCORD_PAGE, 3, Focus::Wide(0));

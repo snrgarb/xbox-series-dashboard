@@ -5,8 +5,9 @@
 
 The Guide's tab in the console's Parties & chats slot, between the landing tab and Profile & system: Discord's
 account, the Call the user is in, and Mute, Deafen and Leave (#144); the Shortcuts to the channels joined before, and
-Servers, a Flyout of the user's servers and their voice channels (#145). How it connects to Discord, and what the
-Call, the Known channels and the Servers follow, is [../discord.md](../discord.md).
+Servers, a Flyout of the user's servers and their voice channels (#145). It comes from the Dashboard's own Discord web session (the RPC connection to the Discord app was removed by #299):
+what the Call, the Known channels and the Servers follow is [../discord.md](../discord.md), how the session runs
+[../discord-web.md](../discord-web.md).
 
 Sources: the Bundle's C/ExtensionCore.DiscordCall.cs (the Call's items, the focus, Mute, Deafen and Leave),
 C/DiscordCall.cs (people, names, avatars, titles), C/ExtensionCore.DiscordShortcuts.cs (Known channels, the tiles,
@@ -22,9 +23,9 @@ together), `discord::avatars` (the pictures), `app` (`follow_discord`).
 
 ## 1. When it is there
 
-From the first Connect until Disconnect (`Discord::has_tab()`: signed in, or tokens saved), whether Discord is
-running or not. Home's Discord tile opens the Guide on it then, and Settings > Discord otherwise, or with the Guide
-off. Disconnect while it shows: the Guide goes back to the landing tab.
+While Settings > Account > Discord's session is on and signed in and its voice is ready (`Discord::has_tab()`), or
+with Direct Messages on. Home's Discord tile opens the Guide on it then, and Settings > Account > Discord otherwise, or
+with the Guide off. Signing out or switching the session off while it shows: the Guide goes back to the landing tab.
 
 ## 2. What it lists
 
@@ -32,7 +33,7 @@ Under the heading "Discord" (as Profile & system's), from the top:
 
 | Discord | Entries |
 | --- | --- |
-| Can't show it | One line saying why: `Connecting to Discord`, `Discord isn't running` (tried again by itself), `Reconnect Discord in settings`. Nothing else |
+| Can't show it | One line saying why: `Discord isn't connected` (the session's voice is not ready). Nothing else |
 | Signed in, out of a Call | The account: Discord's mark on its blurple, who is signed in. Then "You're not in a voice channel" |
 | In a Call | The Call's heading: its channel's name, else the other people in it, else "Call". Then everyone in it, the user first, then Discord's order. Then, under a divider, Mute, Deafen and Leave |
 | Signed in, either way | Then the Shortcuts, tiles three to a row, the first row under a divider; then Servers under a divider |
@@ -40,8 +41,8 @@ Under the heading "Discord" (as Profile & system's), from the top:
 **Shortcuts** are the six most recently joined Known channels, most recently first (discord.md, "Known channels"):
 a voice channel joined, a DM or a group DM. A on one asks Discord to join it (`Ask::Join`; nothing is asked when it
 is the Call's already); the Menu button opens its menu, titled with its name, with one option, Remove shortcut.
-Remove shortcut forgets the channel for good. Shortcuts are kept while Discord is away and across Disconnect: they
-show again once signed in.
+Remove shortcut forgets the channel for good. Shortcuts are kept while the voice is not ready and across signing out of the page: they
+show again once it is.
 
 **Servers** opens the Servers Flyout (section 5).
 
@@ -146,7 +147,7 @@ Discord confirms it, focus on the next Shortcut, else on Servers.
 `crates/screens/tests/reference/`: `guide-discord.png` (signed in, out of a Call), `discord-tab-call.png` (four
 people: the user's default avatar, Ana speaking, Bo with no avatar yet and muted, a long name muted and deafened; focus
 on Mute; the Status area's mark), `discord-tab-call-muted-deafened.png` (both switches on, focus on Leave, the mark
-badged deafened), `discord-tab-not-running.png`, `discord-tab-reconnect.png`, `discord-tab-shortcuts.png` (five
+badged deafened), `discord-tab-shortcuts.png` (five
 Shortcuts, two of them DMs, three with made-up pictures), `discord-servers-loading.png`, `discord-servers.png`,
 `discord-server-channels.png` (three people in one channel, one Empty, one not known yet), `discord-audio-in-call.png`
 (Mute in Discord on, focus on it), `discord-home-mark.png` (Home's top bar, the user speaking). Every picture in them

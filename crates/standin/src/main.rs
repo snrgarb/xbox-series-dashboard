@@ -221,29 +221,6 @@
 //!   scriptinterpreter.exe | unins000.exe <args>...
 //!       A GOG build's script interpreter, which writes its arguments in `/DIR=`'s `standin-set-up.txt`; a GOG game's
 //!       uninstaller, which empties `/dir=` but for itself. Both say their arguments in standin.log.
-//!   standin discord --pipe <name> [--port <n>]
-//!       A fake Discord (`discord::fake`), for `dashboard --discord-pipe <name> --discord-token-url
-//!       http://127.0.0.1:<n>/api/oauth2/token --discord-cdn-url http://127.0.0.1:<n>`: listens on the named pipe
-//!       <name> (never Discord's own `discord-ipc-N`), answers the handshake and AUTHORIZE at once, as if the user had
-//!       approved, signs the user in as "E2E Tester", and grants tokens at its own endpoint on 127.0.0.1 at <n> (any
-//!       free port without one), where it also serves every avatar and server icon asked as a plain picture of one
-//!       colour. It has three made-up servers (Stand-in Server, Another Server, art club) with their voice, stage
-//!       and text channels, and DMs made as `discord-say` puts the user in them. Says
-//!       `discord fake: listening on <name>, tokens at <url>, avatars at <url>`, then a line a command, until it is
-//!       killed.
-//!   standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel> |
-//!                       dm <person> | group <person>... | join <person> | leave <person> | speak <who> |
-//!                       hush <who> | mute <who> | unmute <who> | deafen <who> | undeafen <who> | hold | confirm |
-//!                       refuse [message] | hang-up | go-away | come-back | close <message>
-//!       Tells the fake Discord on <name> to put the user in a Call in the voice channel <channel> (General,
-//!       Late_night, Lobby or Town_hall) with those people, to put people in a voice channel without the user (who
-//!       a server's Flyout shows in it), to join a voice channel as from another device, to put the user in a DM or
-//!       group DM with those people, to have someone join or leave the Call, start or stop speaking, or be muted or
-//!       deafened (<who> is a name, or `me` for the user, whose mute and deafen are their voice settings), to hold
-//!       the voice commands (Mute, Deafen, Leave) until told to confirm (carry them out) or refuse them, to leave the
-//!       Call, to go away as Discord quitting does (the connection dropped, nothing listening) and come back, or to
-//!       close the connection with <message>. Says what it answered. Exits 1 when no fake is on <name> or it
-//!       refused.
 //!
 //! It has no console on Windows, so nothing it starts shows one: what it has to say goes to `standin.log` in
 //! `%E2E_OUT%`, when that is set, and `make-steam`'s failure to `standin-error.txt` beside <dir> as well.
@@ -282,11 +259,6 @@ const USAGE: &str = "usage: standin make-steam <dir> [--json <file>] [--full-she
        standin serve-discord-web [--port <n>]
        standin-setup-<key>.exe | standin-uninstall-<key>.exe <switches>...
        legendary.exe | gogdl.exe [--version | <args>...]
-       standin discord --pipe <name> [--port <n>]
-       standin discord-say <name> call <channel> <person>... | in <channel> [person]... | select <channel>
-                               | dm <person> | group <person>... | join <person> | leave <person> | speak <who>
-                               | hush <who> | mute|unmute|deafen|undeafen <who> | hold | confirm
-                               | refuse [message] | hang-up | go-away | come-back | close <message>
        standin toast <text>
        standin wake
        standin media [--title <t>] [--artist <a>] [--picture <file>] [--position <s>] [--length <s>] [--paused]
@@ -1192,23 +1164,6 @@ fn run(args: &[String]) -> i32 {
         Some("serve-helpers") => serve_helpers(&args[1..]),
         Some("serve-gog-web") => serve_gog_web(&args[1..]),
         Some("serve-discord-web") => serve_discord_web(&args[1..]),
-        Some("discord") => serve_discord(&args[1..]),
-        Some("discord-say") => match &args[1..] {
-            [name, words @ ..] if !words.is_empty() => match discord::fake::say_to(name, &words.join(" ")) {
-                Ok(answer) => {
-                    note(&format!("discord-say: {answer}"));
-                    i32::from(!answer.starts_with("ok"))
-                }
-                Err(e) => {
-                    note(&format!("discord-say: no fake Discord on {name}: {e}"));
-                    1
-                }
-            },
-            _ => {
-                note(USAGE);
-                2
-            }
-        },
         Some("game") => parsed_game(&args[1..]),
         Some("steam-url") => match args.get(1) {
             Some(url) => steam_address(url, None),
@@ -1458,43 +1413,6 @@ fn candidate_picture(kind: library::art::Kind, n: usize, thumb: bool) -> Vec<u8>
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).expect("a PNG in memory");
     png.into_inner()
-}
-
-fn serve_discord(args: &[String]) -> i32 {
-    let (mut pipe, mut port) = (None, 0u16);
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        match (arg.as_str(), it.next()) {
-            ("--pipe", Some(value)) => pipe = Some(value.clone()),
-            ("--port", Some(value)) => match value.parse() {
-                Ok(value) => port = value,
-                Err(_) => {
-                    note(&format!("discord: bad --port {value}"));
-                    return 2;
-                }
-            },
-            _ => {
-                note(USAGE);
-                return 2;
-            }
-        }
-    }
-    let Some(pipe) = pipe else {
-        note(USAGE);
-        return 2;
-    };
-    let log: discord::fake::Log = std::sync::Arc::new(note);
-    // It says it is listening itself, and runs until this is killed.
-    let _fake = match discord::fake::FakeDiscord::start(&pipe, port, log) {
-        Ok(fake) => fake,
-        Err(e) => {
-            note(&format!("discord: {pipe}: {e}"));
-            return 1;
-        }
-    };
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(60));
-    }
 }
 
 fn serve_updates(args: &[String]) -> i32 {

@@ -1,10 +1,9 @@
-//! Account > Direct Messages (#197 and #200; docs/spec/party-chats.md 8; docs/discord-web.md): the Dashboard's own
-//! discord.com session, which the Guide's Direct Messages are read through. The port's own page, laid out as System's:
+//! Account > Discord (#197 and #200; docs/spec/party-chats.md 8; docs/discord-web.md): the Dashboard's own
+//! discord.com session, which the Guide's Direct Messages and its Discord tab's voice go through, and the one Discord
+//! page there is (the RPC connection's was retired, #299). The port's own page, laid out as System's:
 //! the switch from y 190, the risk said plainly under it, Sign in and Sign out, how the session stands, then the
 //! Notifications the Toasts will read (Direct Messages, Show what they say, Mentions, Incoming Calls, and While
 //! playing). The switch is off until the user turns it on, and nothing of the session starts before.
-//!
-//! Voice is not here: it stays on Settings > Discord's connection (`discord`), which this page never touches.
 use model::discord_dms::DirectState;
 use model::discord_web::{Web, WebAsk, WebState, DEVICES};
 use ui::{Button, Color, HAlign, Press, Rect, Ui, VAlign};
@@ -16,7 +15,7 @@ use crate::pages::{Around, Open, PageAction};
 use crate::theme::{BODY, TEXT_DIM};
 use crate::Effect;
 
-pub const TITLE: &str = "Direct Messages";
+pub const TITLE: &str = "Discord";
 pub const SWITCH: &str = "Direct Messages from discord.com";
 /// What turning it on does, as the user must know first (docs/spec/party-chats.md, 8.2).
 pub const RISK: &str = "This signs in to discord.com as you, then reads and sends your messages for you. Discord's terms don't allow programs to do that with a user account, and Discord could close your account for it.";
@@ -144,7 +143,7 @@ impl Pane for DiscordWeb {
         TITLE.into()
     }
 
-    /// `Direct Messages: Direct Messages from discord.com`, `Direct Messages: Sign in`, `Direct Messages: While
+    /// `Discord: Direct Messages from discord.com`, `Discord: Sign in`, `Discord: While
     /// playing`.
     fn focus(&self) -> String {
         match self.while_playing.focused() {

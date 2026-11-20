@@ -35,10 +35,10 @@ pub enum Setting {
     DailyUpdateCheck,
     /// Settings > Launchers' Show Game Pass games (#277): the PC Game Pass catalogue's games are listed with Xbox's.
     ShowGamePass,
-    /// Settings > Account > Discord messages (#197, docs/discord-web.md): the Dashboard's own discord.com session.
+    /// Settings > Account > Discord (#197, docs/discord-web.md): the Dashboard's own discord.com session.
     /// Off by default: nothing of it starts until the user turns it on, beside the terms said plainly.
     DiscordMessages,
-    /// Settings > Account > Direct Messages > Notifications (docs/spec/party-chats.md, 8.2): a Toast for a direct
+    /// Settings > Account > Discord > Notifications (docs/spec/party-chats.md, 8.2): a Toast for a direct
     /// message; with Show what they say off it names the sender and not the words; a mention in a server's channel; an
     /// incoming call. The Toasts (#202) read them.
     NotifyDirectMessages,
@@ -96,7 +96,7 @@ impl Setting {
     }
 }
 
-/// The settings row that holds Settings > Account > Direct Messages' While playing: a [`WhilePlaying::key`].
+/// The settings row that holds Settings > Account > Discord' While playing: a [`WhilePlaying::key`].
 pub const DISCORD_WHILE_PLAYING: &str = "discord.notify.while_playing";
 
 /// Which of Discord's Toasts show while a game is running (docs/spec/party-chats.md, 7.4 and 8.2).
@@ -195,7 +195,7 @@ pub struct Options {
     pub daily_update_check: bool,
     /// The PC Game Pass catalogue's games are listed (Settings > Launchers, #277): on by default.
     pub show_game_pass: bool,
-    /// The Dashboard's own Discord session may run (Settings > Account > Discord messages, #197): off by default.
+    /// The Dashboard's own Discord session may run (Settings > Account > Discord, #197): off by default.
     pub discord_messages: bool,
     /// The region whose PC Game Pass catalogue is listed, as chosen (`model::game_pass::REGION_KEY`); None is
     /// Windows' own.
@@ -206,13 +206,13 @@ pub struct Options {
     /// Whether the account has PC Game Pass, as the executable judged it as it started (#173 follow-up): not an
     /// option, but Settings > Launchers' status line.
     pub game_pass_subscription: model::game_pass::Subscription,
-    /// Discord's web session as the executable last found it (Settings > Account > Discord messages, #197): not an
+    /// Discord's web session as the executable last found it (Settings > Account > Discord, #197): not an
     /// option, but how the session stands, and the kind of field focus is on in its sign-in page.
     pub discord_web: model::discord_web::Web,
     /// Direct Messages as the web session last said, for Settings' status line and focus log (not an option):
     /// `Dashboard::set_direct` keeps it.
     pub direct_state: model::discord_dms::DirectState,
-    /// Discord's Toasts, as Settings > Account > Direct Messages > Notifications has them (docs/spec/party-chats.md,
+    /// Discord's Toasts, as Settings > Account > Discord > Notifications has them (docs/spec/party-chats.md,
     /// 8.2): Direct Messages, Show what they say, Mentions, Incoming Calls, and While playing. The Toasts (#202)
     /// read them; kept as the rows `Setting::key` and [`DISCORD_WHILE_PLAYING`].
     pub notify_messages: bool,

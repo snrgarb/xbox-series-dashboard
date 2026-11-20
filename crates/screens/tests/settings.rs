@@ -148,10 +148,8 @@ fn a_pane_of_boxes_is_walked_by_row_and_column_and_left_from_the_first_column_go
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Rail: General");
 
-    // Account: Profiles and Who's playing today?, Discord under Profiles and Discord messages beside it (#197).
-    press(&mut dashboard, &[Down, Right, Right, Down]);
-    assert_eq!(dashboard.focus_line(), "Settings: Account: Direct Messages");
-    press(&mut dashboard, &[Left]);
+    // Account: Profiles and Who's playing today?, Discord under Profiles (#299).
+    press(&mut dashboard, &[Down, Right, Down]);
     assert_eq!(dashboard.focus_line(), "Settings: Account: Discord");
     press(&mut dashboard, &[Left]);
     assert_eq!(dashboard.focus_line(), "Settings: Rail: Account");
@@ -279,7 +277,7 @@ fn storage_from_its_box_climbs_back_and_from_the_queue_goes_straight_back() {
 #[test]
 fn the_settings_tile_opens_general_on_its_first_box_and_the_discord_tile_account_on_discord() {
     let database = database();
-    let discord = "Settings: Discord: Client ID Type; client id not set, secret not set, \"Not connected\"";
+    let discord = "Settings: Discord: Direct Messages from discord.com; dms off, off";
     for (tile, opens, rail) in [(0, discord, "Account"), (1, "Settings: General: Personalisation", "General")] {
         let mut dashboard = start(&database);
         press(&mut dashboard, &[Down, Down]);
@@ -1359,120 +1357,25 @@ fn settings_about_checking() {
     stage.check("settings-about-checking");
 }
 
-/// Account > Discord (docs/spec/settings.md, 6.9 and 9.5; docs/discord.md): the Bundle's picture 36, its
-/// three rows of two walked, Type and Paste asked of the shell, the Secret never on screen or in the log, and the
-/// page following the connection as the shell tells it.
-#[test]
-fn settings_discord() {
-    use model::discord::{Ask, Discord, Field};
-    const ID: &str = "1290000000000000001";
-    const SECRET: &str = "s3cr3t-s3cr3t-s3cr3t-s3cr3t-0001";
-    let mut stage = settings_stage();
-    stage.press(&[Down, Right, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord");
-    stage.press(&[A]);
-    let line = |rest: &str| format!("Settings: Discord: {rest}; client id not set, secret not set, \"Not connected\"");
-    assert_eq!(stage.dashboard.focus_line(), line("Client ID Type"));
-    stage.check("settings-discord");
-
-    // Three rows of two: Up and Down keep the column, Left and Right stay in the row; dimmed buttons take focus.
-    for (button, at) in [
-        (Right, "Client ID Paste"),
-        (Right, "Client ID Paste"),
-        (Down, "Client Secret Paste"),
-        (Down, "Disconnect"),
-        (Down, "Disconnect"),
-        (Left, "Connect"),
-        (Up, "Client Secret Type"),
-        (Up, "Client ID Type"),
-        (Up, "Client ID Type"),
-    ] {
-        stage.press(&[button]);
-        assert_eq!(stage.dashboard.focus_line(), line(at), "after {button:?}");
-    }
-    // Connect and Disconnect do nothing with nothing set up.
-    stage.press(&[Down, Down, A, Right, A]);
-    assert!(asked(&mut stage).is_empty());
-
-    // Paste asks the shell, which reads the clipboard.
-    stage.press(&[Up, Up, A, Down, A]);
-    let pastes = [Ask::Paste(Field::ClientId), Ask::Paste(Field::ClientSecret)].map(Effect::Discord);
-    assert_eq!(asked(&mut stage), pastes);
-
-    // Type: the Client ID from empty; the Secret as dots, never in the log or an effect's Debug.
-    stage.press(&[Up, Left, A]);
-    assert!(stage.dashboard.typed(screens::keyboard::Typed::Text(ID)));
-    stage.press(&[Menu]);
-    assert_eq!(asked(&mut stage), [Effect::Discord(Ask::ClientId(ID.into()))]);
-    stage.press(&[Down, A]);
-    assert!(stage.dashboard.typed(screens::keyboard::Typed::Text(SECRET)));
-    assert!(!stage.dashboard.focus_line().contains(SECRET), "{}", stage.dashboard.focus_line());
-    stage.check("settings-discord-secret-entry");
-    stage.press(&[Menu]);
-    let effects = asked(&mut stage);
-    assert_eq!(effects, [Effect::Discord(Ask::ClientSecret(SECRET.into()))]);
-    assert!(!format!("{effects:?}").contains(SECRET));
-    // An empty Secret kept leaves the saved one alone: nothing is asked.
-    stage.press(&[A, Menu]);
-    assert!(asked(&mut stage).is_empty());
-
-    // The shell answers with how the connection is: the page follows it, the Client ID shown, the Secret not.
-    let saved = Discord { client_id: Some(ID.into()), has_secret: true, ..Discord::default() };
-    stage.dashboard.set_discord(&saved);
-    stage.press(&[Down]);
-    let line =
-        |rest: &str, status: &str| format!("Settings: Discord: {rest}; client id set, secret saved, \"{status}\"");
-    assert_eq!(stage.dashboard.focus_line(), line("Connect", "Not connected"));
-    stage.press(&[A]);
-    assert_eq!(asked(&mut stage), [Effect::Discord(Ask::Connect)]);
-    // Type on the Client ID starts from the one saved.
-    stage.press(&[Up, Up, A]);
-    assert!(stage.dashboard.focus_line().contains(&format!("\"{ID}|\"")), "{}", stage.dashboard.focus_line());
-    stage.press(&[B]);
-    let connected = Discord {
-        has_tokens: true,
-        connected: true,
-        status: "Connected as E2E Tester".into(),
-        user: Some("E2E Tester".into()),
-        ..saved
-    };
-    stage.dashboard.set_discord(&connected);
-    stage.press(&[Down, Down, Right]);
-    assert_eq!(stage.dashboard.focus_line(), line("Disconnect", "Connected as E2E Tester"));
-    stage.check("settings-discord-connected");
-    stage.press(&[A]);
-    assert_eq!(asked(&mut stage), [Effect::Discord(Ask::Disconnect)]);
-
-    // Left from the first column, as B, goes back to Account's boxes on Discord.
-    stage.press(&[Left, Left]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord");
-}
-
 /// What the Dashboard asked of the shell since last time, but its sounds.
-/// Account > Direct Messages (#197, #200; docs/spec/settings.md 16.12, docs/discord-web.md): off by default with the terms
+/// Account > Discord (#197, #200; docs/spec/settings.md 16.12, docs/discord-web.md): off by default with the terms
 /// said under the switch; on, Sign in opens Discord's sign-in page, where the pad sends keys and A on a field opens
 /// the Console keyboard, whose text goes to the session alone; signed in, the page closes itself; Sign out asks the
 /// session.
 #[test]
-fn settings_direct_messages() {
+fn settings_discord() {
     use model::discord_web::{Web, WebAsk, WebField, WebKey, WebState};
     let mut stage = settings_stage();
-    stage.press(&[Down, Right, Right, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Direct Messages");
+    stage.press(&[Down, Right, Down]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Account: Discord");
     stage.press(&[A]);
-    assert_eq!(
-        stage.dashboard.focus_line(),
-        "Settings: Direct Messages: Direct Messages from discord.com; dms off, off"
-    );
-    stage.check("settings-direct-messages-off");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages from discord.com; dms off, off");
+    stage.check("settings-discord-off");
     // Off, Sign in and Sign out are dimmed and take no focus: Down is the first Notification, Up the switch.
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Direct Messages; dms off, off");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages; dms off, off");
     stage.press(&[Up]);
-    assert_eq!(
-        stage.dashboard.focus_line(),
-        "Settings: Direct Messages: Direct Messages from discord.com; dms off, off"
-    );
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages from discord.com; dms off, off");
 
     // On: saved, and the session tells how it stands.
     stage.press(&[A]);
@@ -1483,8 +1386,8 @@ fn settings_direct_messages() {
     };
     set(&mut stage, Web { state: WebState::SignedOut, ..Web::default() });
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Sign in; dms on, signed out");
-    stage.check("settings-direct-messages-signed-out");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Sign in; dms on, signed out");
+    stage.check("settings-discord-signed-out");
 
     // Sign in: the sign-in page over Settings, shown while it has the pad.
     stage.press(&[A]);
@@ -1507,12 +1410,12 @@ fn settings_direct_messages() {
     assert!(!format!("{effects:?}").contains("hunter2"));
     assert!(stage.dashboard.discord_sign_in_shown());
 
-    // Signed in: the page closes itself, back on Discord messages.
+    // Signed in: the page closes itself, back on Discord.
     set(&mut stage, Web { state: WebState::SignedIn, field: None, kept: true });
     stage.dashboard.discord_signed_in();
     assert!(!stage.dashboard.discord_sign_in_open());
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Sign in; dms on, signed in");
-    stage.check("settings-direct-messages-signed-in");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Sign in; dms on, signed in");
+    stage.check("settings-discord-signed-in");
     // Sign in does nothing now; Sign out asks the session.
     stage.press(&[A]);
     assert_eq!(stage.dashboard.page(), Some("Settings"));
@@ -1520,34 +1423,31 @@ fn settings_direct_messages() {
     assert_eq!(asked(&mut stage), [Effect::DiscordWeb(WebAsk::SignOut)]);
 }
 
-/// Account > Direct Messages > Notifications and While playing (docs/spec/party-chats.md 8.2): four checkboxes that
+/// Account > Discord > Notifications and While playing (docs/spec/party-chats.md 8.2): four checkboxes that
 /// are on until turned off, and a dropdown of what shows while a game runs; each is an option the Toasts read, kept.
 #[test]
-fn settings_direct_messages_notifications() {
+fn settings_discord_notifications() {
     use screens::settings::{Change, Setting, WhilePlaying, DISCORD_WHILE_PLAYING};
     let mut stage = settings_stage();
-    stage.press(&[Down, Right, Right, Down, A]);
-    assert_eq!(
-        stage.dashboard.focus_line(),
-        "Settings: Direct Messages: Direct Messages from discord.com; dms off, off"
-    );
+    stage.press(&[Down, Right, Down, A]);
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages from discord.com; dms off, off");
     // They take focus with the switch off: Down is the first, then each of the four, then While playing.
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Direct Messages; dms off, off");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Direct Messages; dms off, off");
     stage.press(&[A]);
     let off = Change { setting: Setting::NotifyDirectMessages, on: false };
     assert_eq!(asked(&mut stage), [Effect::Set(off)]);
     assert!(!stage.dashboard.options().notify_messages && stage.dashboard.options().notify_text);
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Show what they say; dms off, off");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Show what they say; dms off, off");
     stage.press(&[Down, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: Incoming Calls; dms off, off");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: Incoming Calls; dms off, off");
     stage.press(&[Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: While playing; dms off, off");
-    stage.check("settings-direct-messages-notifications");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: While playing; dms off, off");
+    stage.check("settings-discord-notifications");
     // The list opens on Show all; None is chosen, in force at once and asked to be kept.
     stage.press(&[A, Down, Down]);
-    assert_eq!(stage.dashboard.focus_line(), "Settings: Direct Messages: While playing: None; dms off, off");
+    assert_eq!(stage.dashboard.focus_line(), "Settings: Discord: While playing: None; dms off, off");
     stage.press(&[A]);
     assert_eq!(asked(&mut stage), [Effect::DiscordWhilePlaying(WhilePlaying::None)]);
     assert_eq!(stage.dashboard.options().while_playing, WhilePlaying::None);

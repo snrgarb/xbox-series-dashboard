@@ -1,5 +1,5 @@
 //! Text entry on the Console keyboard, through the Dashboard (docs/spec/search.md, sections 8 to 10): opened by the
-//! stand-in page that Full library's name box, Settings' Groups and Discord's Secret will take the place of
+//! stand-in page that Full library's name box, Settings' Groups will take the place of
 //! (`screens::keyboard::stand_in`), typed on by walking the keys, by the pad's shortcuts and on a physical
 //! keyboard, kept and dropped. Judged by the focus log's line, as a test on the VM judges. The board's own rules,
 //! every edge of it among them, are unit tests beside it (`keyboard/board.rs`); the pictures are tests/shots.rs.
