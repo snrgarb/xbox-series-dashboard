@@ -529,7 +529,7 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     });
   }
 
-  await check("a reaction is added when only Discord's adding function is found; a removal then fails plainly", async () => {
+  await check("a reaction is added when only Discord's adding function is found; a removal goes through Discord's HTTP utility", async () => {
     const p = page({ reactForm: "code-add-only" });
     p.run();
     await sleep(150);
@@ -540,8 +540,11 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     await sleep(80);
     assert.deepStrictEqual(stages(p, 1), ["done"]);
     p.win.__xsdDirect.react({ seq: 2, channel: F1, message: target, emoji: "\u{1F525}", on: false });
-    await sleep(40);
-    assert.deepStrictEqual(acts(p, 2).map((x) => x.why), ["unreact action not found"]);
+    await sleep(80);
+    assert.deepStrictEqual(stages(p, 2), ["done"]);
+    assert.deepStrictEqual(p.world.received.map((r) => r.on), [true, false]);
+    assert.deepStrictEqual(p.world.pool[F1][0].reactions, []);
+    assert.match(p.last("health").copies, /http yes/);
     assert.match(p.last("health").copies, /react module 2 \[BB\/3\/\d+\/A y4\/2\/\d+\/A\]/);
   });
 

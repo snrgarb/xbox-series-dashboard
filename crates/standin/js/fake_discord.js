@@ -327,6 +327,20 @@ function installFakeDiscord(window, opts) {
     // "code-add-only": as on the TV (2026-11-20), the removing function is not found by its source.
     big.c[++n] = mod(opts.reactForm === "code" ? { BB, Qr, y4 } : { BB, y4 });
   } else if (!opts.noActions.includes("react")) big.c[++n] = mod({ Rx: reactActions });
+  // Discord's own HTTP utility (code forms only): `del` on a reaction's URL removes our reaction, as the gateway then
+  // would. Anything else is refused.
+  if (opts.reactForm === "code" || opts.reactForm === "code-add-only") {
+    const refuse = () => Promise.reject(new Error("unsupported"));
+    const http = {
+      get: refuse, post: refuse, put: refuse, patch: refuse,
+      del(o) {
+        const m = o && typeof o.url === "string" && /^\/channels\/(\d+)\/messages\/(\d+)\/reactions\/([^/]+)\/@me$/.exec(o.url);
+        if (!m) return Promise.reject(new Error("bad url"));
+        return setReaction(m[1], m[2], { id: null, name: decodeURIComponent(m[3]) }, false);
+      },
+    };
+    big.c[++n] = mod({ Hh: http });
+  }
   if (!opts.noActions.includes("ack")) big.c[++n] = mod({ Ak: ackActions });
   if (!opts.noActions.includes("forget")) big.c[++n] = mod({ Ms: messageActions });
   if (!opts.noActions.includes("voice")) big.c[++n] = mod({ Vx: voiceActions });
