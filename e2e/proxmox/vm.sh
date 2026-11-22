@@ -18,16 +18,15 @@
 #   own CA signs the certificate and isn't trusted here, so the key is pinned instead; compute it on the host with
 #     openssl x509 -in /etc/pve/local/pve-ssl.pem -pubkey -noout | openssl pkey -pubin -outform der |
 #       openssl dgst -sha256 -binary | base64
-# and optionally PVE_BRIDGE (default vmbr2, the DMZ), PVE_VMID_FROM (default 9000, where test VM ids start), PVE_MAC (the
-# one MAC every test VM gets) and PVE_FALLBACK_IP (an unused address on the bridge's /24 for when DHCP gives none).
+# PVE_MAC (the one MAC every test VM gets), and optionally PVE_BRIDGE (default vmbr2, the DMZ), PVE_VMID_FROM (default
+# 9000, where test VM ids start) and PVE_FALLBACK_IP (an unused address on the bridge's /24 for when DHCP gives none).
 set -euo pipefail
 
 ENV_FILE="${XBOX_E2E_ENV:-$HOME/.config/xbox-e2e/proxmox.env}"
 [[ -r "$ENV_FILE" ]] || { echo "No settings at $ENV_FILE" >&2; exit 2; }
 set -a; . "$ENV_FILE"; set +a
-: "${PVE_HOST:?}" "${PVE_NODE:?}" "${PVE_TOKEN:?}" "${PVE_TEMPLATE:?}" "${PVE_PINNEDPUBKEY:?}"
+: "${PVE_HOST:?}" "${PVE_NODE:?}" "${PVE_TOKEN:?}" "${PVE_TEMPLATE:?}" "${PVE_PINNEDPUBKEY:?}" "${PVE_MAC:?}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr2}"
-PVE_MAC="${PVE_MAC:-BC:24:11:E2:E0:01}"
 PVE_FALLBACK_IP="${PVE_FALLBACK_IP:-}"
 PVE_VMID_FROM="${PVE_VMID_FROM:-9000}"
 TAG="xbox-e2e"
