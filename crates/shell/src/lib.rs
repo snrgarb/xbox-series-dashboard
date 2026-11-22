@@ -14,6 +14,7 @@ macro_rules! eprintln {
 }
 
 pub mod account;
+mod app_front;
 pub mod audio;
 pub mod clipboard;
 pub mod drives;

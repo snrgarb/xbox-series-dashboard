@@ -56,7 +56,7 @@ pub fn start_app(library: &Library, app: i64, addresses: &mut dyn Addresses) {
         return;
     };
     let start = app.start();
-    match addresses.open(&start) {
+    match addresses.open_app(&start, &app.name) {
         Ok(()) => eprintln!("apps: started {}: {start}", app.name),
         Err(why) => eprintln!("apps: nothing took {start} ({why}): {} isn't started", app.name),
     }

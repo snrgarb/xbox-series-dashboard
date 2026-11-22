@@ -19,6 +19,12 @@ use crate::{Game, Start};
 pub trait Opener {
     fn open(&mut self, start: &Start) -> Result<(), String>;
 
+    /// Opens an App the user started from its tile (docs/spec/apps.md): as [`Opener::open`], and where it opens
+    /// a window, that window comes up in front of the Dashboard, maximised. Just [`Opener::open`] by default.
+    fn open_app(&mut self, start: &Start, _name: &str) -> Result<(), String> {
+        self.open(start)
+    }
+
     /// An opener of its own, the same as this one, that a thread may keep: for an installer whose own route answers
     /// later, on a thread of its own, and falls back to the store's way only then (Steam's client over its
     /// debugger, which may not answer). None (the default) where there is none to give: the installer then takes
