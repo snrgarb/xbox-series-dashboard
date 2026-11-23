@@ -1,6 +1,7 @@
-# CI: every pull request and every push to main, on the repository's own runner (self-hosted, Linux): it keeps its
-# checkout and `target/` between runs, which is the cache. One runner takes one job at a time.
-# Before the repository goes public, back to GitHub's runners: a public repository's pull requests must not run on it.
+# CI: every pull request and every push to main, on GitHub's own runners (ubuntu-24.04). The repository is public, so
+# they cost nothing, and a pull request from a fork runs on GitHub's machine, never on one of the owner's. Nothing is
+# kept between runs but the caches: Cargo's registry and target/ (Swatinem/rust-cache, one cache per job) and the
+# llvm-mingw toolchain (by its version).
 #   Test      formatting, clippy, the unit tests and the screenshot tests, on Linux (cargo-nextest: many at once). The screenshot tests draw offscreen
 #             through lavapipe and compare with the committed reference images (crates/shots); a failed run uploads
 #             what it drew and where it differs.
@@ -33,20 +34,19 @@ env:
 jobs:
   test:
     name: Test
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          clean: false
       - name: The runner
         run: |
           . /etc/os-release && echo "$PRETTY_NAME, $(nproc) cores, $(free -g | awk '/Mem:/ {print $2}') GB memory, $(df -h --output=avail . | tail -1 | tr -d ' ') free"
-          command -v rustup >/dev/null || curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Rust
         run: |
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
       - name: lavapipe and the tests' fonts
         run: |
           need=""
@@ -57,7 +57,7 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets
-      - name: cargo-nextest, fetched once and kept on the runner
+      - name: cargo-nextest
         env:
           NEXTEST: 0.9.100
         run: |
@@ -79,24 +79,28 @@ jobs:
 
   windows:
     name: Windows
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     env:
       LLVM_MINGW: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
       LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
     steps:
       - uses: actions/checkout@v4
-        with:
-          clean: false
       - name: The runner
         run: |
           . /etc/os-release && echo "$PRETTY_NAME, $(nproc) cores, $(free -g | awk '/Mem:/ {print $2}') GB memory, $(df -h --output=avail . | tail -1 | tr -d ' ') free"
-          command -v rustup >/dev/null || curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Rust
         run: |
           rustup toolchain install stable --profile minimal --target x86_64-pc-windows-gnullvm
           rustup default stable
-      - name: llvm-mingw, fetched once and kept on the runner
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+      - name: llvm-mingw, cached by its version
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-mingw/${{ env.LLVM_MINGW }}
+          key: ${{ env.LLVM_MINGW }}
+      - name: llvm-mingw, fetched where the cache had none
         run: |
           if [ ! -x "$HOME/llvm-mingw/$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" ]; then
             curl -fsSL -o "$RUNNER_TEMP/llvm-mingw.tar.xz" "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW.tar.xz"
@@ -141,7 +145,7 @@ jobs:
     name: Package
     needs: [test, windows]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     env:
       CARGO_ABOUT_VERSION: 0.9.3
       CARGO_ABOUT_SHA256: 3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4
@@ -151,13 +155,9 @@ jobs:
       SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          clean: false
       - name: The runner
         run: |
           . /etc/os-release && echo "$PRETTY_NAME, $(nproc) cores, $(free -g | awk '/Mem:/ {print $2}') GB memory, $(df -h --output=avail . | tail -1 | tr -d ' ') free"
-          command -v rustup >/dev/null || curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Rust, for cargo-about's look at the dependencies
         run: |
           rustup toolchain install stable --profile minimal
@@ -167,18 +167,12 @@ jobs:
         run: |
           version="$(awk '/^\[workspace\.package\]/ { s = 1; next } /^\[/ { s = 0 } s && $1 == "version" { gsub(/"/, "", $3); print $3 }' Cargo.toml)"
           [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "the tag $GITHUB_REF_NAME is not v$version, the workspace's version" >&2; exit 1; }
-      - name: NSIS, unpacked from the distribution's own package once and kept on the runner (no root needed)
+      - name: NSIS, the distribution's own package
         run: |
-          nsis="$HOME/nsis"
-          if [ ! -x "$nsis/usr/bin/makensis" ]; then
-            rm -rf "$RUNNER_TEMP/nsis-debs" && mkdir -p "$RUNNER_TEMP/nsis-debs" && cd "$RUNNER_TEMP/nsis-debs"
-            apt-get download nsis nsis-common
-            for deb in ./*.deb; do dpkg-deb -x "$deb" "$nsis"; done
-          fi
-          echo "MAKENSIS=$nsis/usr/bin/makensis" >> "$GITHUB_ENV"
-          echo "NSISDIR=$nsis/usr/share/nsis" >> "$GITHUB_ENV"
-          NSISDIR="$nsis/usr/share/nsis" "$nsis/usr/bin/makensis" -VERSION
-      - name: cargo-about, fetched once and kept on the runner
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nsis
+          makensis -VERSION
+      - name: cargo-about
         run: |
           if ! cargo-about --version 2>/dev/null | grep -q "$CARGO_ABOUT_VERSION"; then
             archive="cargo-about-$CARGO_ABOUT_VERSION-x86_64-unknown-linux-musl"

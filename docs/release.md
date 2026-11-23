@@ -86,8 +86,8 @@ files above, so it does not include `LICENSE.md`; `THIRD-PARTY-LICENSES.txt` is 
 
 NSIS, `packaging/installer.nsi`, built by `makensis` on the same Linux runner that cross-builds the exe. Chosen over
 Inno Setup because NSIS builds on Linux (`makensis` is in Debian and Ubuntu, and unpacks without root), so the
-package job runs on the repository's own Linux runner beside the build, taking its artifact, with no Windows runner
-(which a private repository pays for by the minute) and no Wine. The script is in the repository and the tools are
+package job runs on a Linux runner (GitHub's `ubuntu-24.04`) beside the build, taking its artifact, with no Windows
+runner and no Wine. The script is in the repository and the tools are
 pinned (cargo-about by version and checksum; NSIS by the runner's distribution). Built twice from the same files on
 the same machine, both the zip and the installer came out byte for byte the same; across NSIS versions they need not.
 
