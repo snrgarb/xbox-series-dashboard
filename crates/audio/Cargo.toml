@@ -2,6 +2,7 @@
 name = "audio"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "Short sounds: WAV files decoded once, mixed, and played through WASAPI. Silent anywhere but Windows."
 

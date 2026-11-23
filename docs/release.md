@@ -37,7 +37,14 @@ else `git rev-parse --short=7 HEAD`):
 5. **Publishing is the user's.** A published release is what the Dashboard's updates find (docs/spec/updates.md): its
    tag, its portable zip and `SHA256SUMS.txt`, under those names, are what an update reads, so a release needs all
    three as CI makes them. To publish, they download the artifact and make the release by hand (`gh release
-   create v0.2.0 <files> --draft`, then look and publish). Nothing in this repository does it.
+   create v0.2.0 <files> --draft --latest`, then look and publish). Nothing in this repository does it.
+
+   **Alphas are published as the latest release, not as pre-releases.** The Dashboard's updates ask GitHub for
+   `/releases/latest` (`crates/update/src/lib.rs`, `SOURCE`), which never returns a draft or anything marked
+   pre-release, so an alpha marked as a pre-release would be invisible to every install. The version is how an alpha
+   says what it is: `0.y.z`, still numbers only (the tag parser and the installer take nothing after `x.y.z`).
+   GitHub marks the newest published release latest by default; `--latest` makes it explicit, and `--prerelease`
+   is never used. Check the published release's page says "Latest" before telling anyone to update.
 
 A package of any commit, without a tag: run CI by hand, `gh workflow run ci.yml --ref <branch>`, or from the
 Actions tab. Package then runs after Test and Windows on that branch, and its artifact is named by the workspace's
@@ -72,8 +79,8 @@ The installed copy has `uninstall.exe` beside them. Never in the package:
   (`crates/app/src/media_folder.rs`). The README says which of the Bundle's folders to copy there.
 - **Store and Discord marks.** Their places are plain shapes in the code.
 
-The repository has no licence of its own yet (plan.md, open question 5): the package carries none for the Dashboard
-itself until one is chosen.
+The repository's own licence is PolyForm Noncommercial 1.0.0 (`LICENSE.md`). The package carries only the four
+files above, so it does not include `LICENSE.md`; `THIRD-PARTY-LICENSES.txt` is for the dependencies.
 
 ## The installer
 

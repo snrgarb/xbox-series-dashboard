@@ -2,6 +2,7 @@
 name = "helpers"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "The helper programs some stores install through (legendary, gogdl; docs/spec/helpers.md): one table of each's fixed version, address and SHA-256, fetched on the user's Yes into the data folder, checked, and removed. Never bundled or linked into the Dashboard."
 

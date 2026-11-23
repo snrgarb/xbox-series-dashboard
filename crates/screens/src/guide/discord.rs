@@ -799,7 +799,7 @@ mod tests {
         let people = people.iter().map(|(id, name)| person(id, name)).collect();
         let call = Call { id: "500".into(), title: "Late night".into(), people };
         let voice = Voice { call: Some(call), mute: false, deaf: false };
-        Discord { connected: true, user: Some("gabe".into()), voice, ..Discord::default() }
+        Discord { connected: true, user: Some("cal".into()), voice, ..Discord::default() }
     }
 
     fn shortcut(id: &str, name: &str) -> Shortcut {
@@ -826,10 +826,10 @@ mod tests {
         assert_eq!(entries(&lost)[0].title, "Discord isn't connected");
 
         assert_eq!(items(&idle()), [Item::Account, Item::Idle, Item::Servers]);
-        assert_eq!(entries(&idle())[0].title, "gabe");
+        assert_eq!(entries(&idle())[0].title, "cal");
         assert_eq!(first_focus(&entries(&idle())), 2, "Servers");
 
-        let call = in_call(&[("1", "gabe"), ("2", "ana")]);
+        let call = in_call(&[("1", "cal"), ("2", "ana")]);
         let all =
             [Item::Channel, Item::Person(0), Item::Person(1), Item::Mute, Item::Deafen, Item::Leave, Item::Servers];
         assert_eq!(items(&call), all);
@@ -851,8 +851,8 @@ mod tests {
 
     #[test]
     fn focus_stays_on_its_entry_or_person_and_starts_afresh_into_or_out_of_a_call() {
-        let three = in_call(&[("1", "gabe"), ("2", "ana"), ("3", "bo")]);
-        let two = in_call(&[("1", "gabe"), ("3", "bo")]);
+        let three = in_call(&[("1", "cal"), ("2", "ana"), ("3", "bo")]);
+        let two = in_call(&[("1", "cal"), ("3", "bo")]);
         let (e3, e2) = (entries(&three), entries(&two));
         // On bo, ana leaving: still bo. On ana, ana leaving: the entry now in her place, bo.
         assert_eq!(focus_after((&e3, &three), (&e2, &two), 3), 2);
@@ -911,14 +911,14 @@ mod tests {
 
     #[test]
     fn the_focus_line_names_the_entry_and_the_call() {
-        let mut discord = in_call(&[("1", "gabe"), ("2", "ana")]);
+        let mut discord = in_call(&[("1", "cal"), ("2", "ana")]);
         if let Some(call) = &mut discord.voice.call {
             call.people[1].speaking = true;
             call.people[1].muted = true;
         }
         discord.voice.mute = true;
         let line = line(&entries(&discord), Some(2), &discord, &Direct::default());
-        assert_eq!(line, " Person ana; in \"Late night\" with gabe, ana (speaking, muted); mute on, deafen off");
+        assert_eq!(line, " Person ana; in \"Late night\" with cal, ana (speaking, muted); mute on, deafen off");
 
         let discord = with_shortcuts(idle(), 1);
         let line = super::line(&entries(&discord), Some(2), &discord, &Direct::default());
