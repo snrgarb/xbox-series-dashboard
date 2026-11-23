@@ -231,6 +231,15 @@ impl Drop for Picker {
     }
 }
 
+/// Why a request for the picker came to nothing, as the page says it.
+fn failure(error: Error) -> Failure {
+    match error {
+        Error::KeyRefused => Failure::KeyRefused,
+        Error::Busy(_) => Failure::Busy,
+        Error::Failed(why) => Failure::Failed(why),
+    }
+}
+
 /// One page of the game's candidates of a kind: the game found first, once for the picker's life.
 fn page_of(
     service: &Service,
@@ -242,11 +251,6 @@ fn page_of(
     page: u32,
 ) -> Result<model::art_picker::Reply, Failure> {
     let api = host(service.base());
-    let failure = |error: Error| match error {
-        Error::KeyRefused => Failure::KeyRefused,
-        Error::Busy(_) => Failure::Busy,
-        Error::Failed(why) => Failure::Failed(why),
-    };
     let id = match games.get(game) {
         Some(id) => *id,
         None => {
@@ -268,11 +272,6 @@ fn search(
     source: ArtSource,
     words: &str,
 ) -> Result<Vec<Hit>, Failure> {
-    let failure = |error: Error| match error {
-        Error::KeyRefused => Failure::KeyRefused,
-        Error::Busy(_) => Failure::Busy,
-        Error::Failed(why) => Failure::Failed(why),
-    };
     match (Store::of(source), stores, service) {
         (Some(store), Some(stores), _) => {
             gates.ask(source.key(), || stores.find(store, words).unwrap_or(Ok(Vec::new()))).map_err(failure)

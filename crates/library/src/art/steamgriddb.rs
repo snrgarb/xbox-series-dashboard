@@ -62,11 +62,6 @@ pub fn best_match(name: &str, results: &[(u64, String, bool)]) -> Option<u64> {
     super::names::pick(name, &ranked).copied()
 }
 
-/// A hit's id as SteamGridDB's own number: its search gives no other.
-fn hit_id(hit: &Hit) -> u64 {
-    hit.id.parse().unwrap_or_default()
-}
-
 /// The year of a time in Unix seconds, by the proleptic Gregorian calendar; None before 1970 or past 9999.
 pub(crate) fn year_of(seconds: i64) -> Option<u16> {
     if seconds < 0 {
@@ -147,8 +142,11 @@ impl Service {
         if plain_name(name).is_empty() {
             return Ok(None);
         }
-        let results: Vec<(u64, String, bool)> =
-            self.autocomplete(name)?.into_iter().map(|(hit, verified)| (hit_id(&hit), hit.name, verified)).collect();
+        let results: Vec<(u64, String, bool)> = self
+            .autocomplete(name)?
+            .into_iter()
+            .filter_map(|(hit, v)| Some((hit.id.parse().ok()?, hit.name, v)))
+            .collect();
         Ok(best_match(name, &results))
     }
 

@@ -835,7 +835,7 @@ impl Store {
 
     /// The art picker's network (docs/spec/art-picker.md): SteamGridDB with the user's key while art online is on
     /// (none without: the picker then asks for nothing), its thumbnails in the data folder. None with no data folder.
-    /// The stores' art online is there for Match game's searches while art online is on.
+    /// Match game's searches go through it too: the stores' while art online is on, SteamGridDB's with the key.
     pub fn art_picker(&self, tell: impl Fn(model::art_picker::Answer) + Send + Sync + 'static) -> Option<art::Picker> {
         let thumbs = self.art_dir()?.root().parent()?.join(art::picker::THUMBS);
         let service =
