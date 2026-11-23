@@ -2,6 +2,7 @@
 name = "source-epic"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "The Epic Games Launcher's games, from its own files."
 

@@ -2,6 +2,7 @@
 name = "source-xbox"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "Xbox and Microsoft Store PC games: the packages registered for the user that carry a MicrosoftGame.config."
 

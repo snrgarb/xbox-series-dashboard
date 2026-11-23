@@ -2,6 +2,7 @@
 name = "discord-spike"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "Spike (#196, #292): discord.com in a WebView2 hosted from Rust, signed in with the pad on the TV PC; its voice, hidden. Throwaway."
 
