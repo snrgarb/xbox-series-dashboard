@@ -444,6 +444,7 @@ pub fn load(steam_root: &Path) -> Result<Library> {
                     play_count: 0,
                     art: Default::default(),
                     game_pass: false,
+                    matches: Vec::new(),
                 },
             ))
         })

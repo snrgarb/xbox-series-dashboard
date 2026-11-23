@@ -119,6 +119,8 @@ A choice is the database's row `art_choices(source, source_id, kind, chosen)`, `
 
 A download that fails keeps nothing and says so in a Toast.
 
+**A matched game** (match-game.md): a game the user matched on SteamGridDB has that game's candidates listed, by the match's id, and is not looked for by its store id or name.
+
 **Privacy:** only the store id (or the name, to search) goes to SteamGridDB; to a thumbnail's or picture's host nothing but its address. The log names no game: `art: picker: square page 1: 50 of 60 candidates`, `art: picker: square is SteamGridDB picture 123`, `art: picker: SteamGridDB refused the key`.
 
 ## 8. The focus log

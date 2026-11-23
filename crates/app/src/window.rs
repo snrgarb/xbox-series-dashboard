@@ -1260,6 +1260,15 @@ impl App {
                     }
                     None => self.keep_art_choice(choice, None),
                 },
+                // Match game's choice: kept, and the game's art looked up again by it, that game first.
+                Effect::MatchGame { game, source, matched } => {
+                    let shown = self.store.match_game(&game, source, matched.as_ref());
+                    self.show(shown);
+                    if self.art_started {
+                        self.art = None;
+                        self.start_art_with(Some(game));
+                    }
+                }
                 Effect::RefreshArt(Some(game)) => {
                     let forgotten = self.store.refresh_art_of(&game);
                     self.show(forgotten);

@@ -89,3 +89,27 @@ fn the_stores_searches_by_name_against_the_real_services() {
         println!("| {} |", row.join(" | "));
     }
 }
+
+/// Match game's searches (docs/spec/match-game.md) against the REAL stores: what each finds for the words, as the
+/// page lists them. `ARTLIVE_WORDS` picks the words (default "World of Warcraft").
+///
+/// ```sh
+/// cargo test -p library --test art_live match_game -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "asks the real stores: run by hand"]
+fn match_games_searches_against_the_real_stores() {
+    let words = std::env::var("ARTLIVE_WORDS").unwrap_or_else(|_| "World of Warcraft".into());
+    let stores = StoreArt::new(Hosts::default());
+    for store in [Store::Steam, Store::Microsoft, Store::PlayStation] {
+        match stores.find(store, &words) {
+            Some(Ok(hits)) => {
+                println!("\n=== {} for {words:?}: {} found", store.name(), hits.len());
+                for hit in hits {
+                    println!("  {}  {}", hit.id, hit.name);
+                }
+            }
+            other => println!("\n=== {} for {words:?}: {other:?}", store.name()),
+        }
+    }
+}

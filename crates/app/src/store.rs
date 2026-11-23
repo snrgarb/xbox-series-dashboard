@@ -835,12 +835,35 @@ impl Store {
 
     /// The art picker's network (docs/spec/art-picker.md): SteamGridDB with the user's key while art online is on
     /// (none without: the picker then asks for nothing), its thumbnails in the data folder. None with no data folder.
+    /// Match game's searches go through it too: the stores' while art online is on, SteamGridDB's with the key.
     pub fn art_picker(&self, tell: impl Fn(model::art_picker::Answer) + Send + Sync + 'static) -> Option<art::Picker> {
         let thumbs = self.art_dir()?.root().parent()?.join(art::picker::THUMBS);
         let service =
             self.art_online().then(|| self.art_key()).flatten().map(|key| Service::new(&self.art_service, &key));
+        let hosts = self.store_art_service.as_deref().map_or_else(Hosts::default, Hosts::all_at);
+        let stores = self.art_online().then(|| StoreArt::new(hosts));
         let log: art::Log = Arc::new(|line| eprintln!("{line}"));
-        Some(art::Picker::start(service, &thumbs, Pace::default(), log, tell))
+        Some(art::Picker::start(service, stores, &thumbs, Pace::default(), log, tell))
+    }
+
+    /// Keeps Match game's choice (docs/spec/match-game.md): the game is that one of the source's games, or found by
+    /// its name again (`None`). Its downloaded art is forgotten with it, to be looked up again by the match. The
+    /// log names the source and the match's id, never a game. Gives the snapshot after.
+    pub fn match_game(
+        &self,
+        game: &model::GameKey,
+        source: model::ArtSource,
+        matched: Option<&model::art_match::Match>,
+    ) -> Option<Library> {
+        let database = self.database.as_ref()?;
+        match database.match_game(&game.source, &game.source_id, source, matched) {
+            Ok(()) => match matched {
+                Some(m) => eprintln!("art: match: {} is {}", source.name(), m.id),
+                None => eprintln!("art: match: {} is Automatic", source.name()),
+            },
+            Err(e) => eprintln!("art: match: {} not kept: {e:#}", source.name()),
+        }
+        self.refresh_art_of(game)
     }
 
     /// Keeps the art picker's choice as the user's own (`picture`: a SteamGridDB picture's bytes, downloaded). The

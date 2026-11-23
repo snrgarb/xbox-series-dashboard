@@ -49,7 +49,9 @@ function Start-LiveShell([scriptblock] $Note) {
     # conhost --headless: no console window flashes on the TV (as shell mode's own safety net). start: cmd ends at once.
     $action = New-ScheduledTaskAction -Execute (Join-Path $system 'conhost.exe') `
         -Argument "--headless `"$(Join-Path $system 'cmd.exe')`" /c start `"`" `"$LiveShellExe`" --shell"
-    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+    # Over ssh USERDOMAIN may be unset: the account is then the machine's own, by its name.
+    $domain = if ($env:USERDOMAIN) { $env:USERDOMAIN } else { $env:COMPUTERNAME }
+    $principal = New-ScheduledTaskPrincipal -UserId "$domain\$env:USERNAME" -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 1)
     try {
         Register-ScheduledTask -TaskName $LiveShellTask -Action $action -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null

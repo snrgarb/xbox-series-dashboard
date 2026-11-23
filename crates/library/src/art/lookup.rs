@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use model::art_match::Match;
 use model::{ArtSource, Library, OnlineArt};
 
 use super::cache::{ArtDir, Kind, Online};
@@ -35,6 +36,16 @@ pub struct Want {
     pub has: Vec<PathBuf>,
     /// What its client said of its art online.
     pub online: OnlineArt,
+    /// The user's matches of it to the online sources' own entries (docs/spec/match-game.md): a matched source is
+    /// asked by the match's id, never by the game's name.
+    pub matches: Vec<Match>,
+}
+
+impl Want {
+    /// The user's match of the game on `source`, if there is one.
+    pub fn matched(&self, source: ArtSource) -> Option<&Match> {
+        self.matches.iter().find(|m| m.source == source)
+    }
 }
 
 /// Every game of the library that is a store's, with the pictures it lacks, in its order (the most recently played
@@ -54,6 +65,7 @@ pub fn wanted(library: &Library) -> Vec<Want> {
                 kinds,
                 has: pictures.into_iter().flatten().cloned().collect(),
                 online: game.online.clone(),
+                matches: game.matches.clone(),
             }
         })
         .collect()
@@ -454,8 +466,39 @@ impl Run {
         out.asked = true;
         out.tried.extend(&kinds);
         let missed = |kinds: &[Kind]| kinds.iter().for_each(|&kind| self.miss(want, kind, store.online()));
-        let mut id = stores.own_id(store, want);
+        let matched = store.source().and_then(|source| want.matched(source));
+        let mut id = matched.map(|m| m.id.clone()).or_else(|| stores.own_id(store, want));
         let mut item = None;
+        // A game matched on the PlayStation Store: its pictures come with the search's results, so it is searched
+        // for again by its name there, and taken by its id.
+        if let Some(m) = matched.filter(|_| store == Store::PlayStation) {
+            let found = match stores.search_for(store, &m.name) {
+                None => None,
+                Some(search) => match self.ask(search.name, || stores.get(&search)) {
+                    Ok(answer) => answer.and_then(|answer| stores.matched_item(store, &m.id, &answer)),
+                    Err(Halt::Stop) => {
+                        out.stopped = true;
+                        return;
+                    }
+                    Err(Halt::Failed) => {
+                        out.failed = true;
+                        return;
+                    }
+                },
+            };
+            match found {
+                Some(found) => item = found.item,
+                None => {
+                    (self.log)(&format!(
+                        "art: {} {}: {}: the game matched is not in its search",
+                        want.source,
+                        want.source_id,
+                        store.name()
+                    ));
+                    return missed(&kinds);
+                }
+            }
+        }
         if id.is_none() && store != Store::Own {
             // Each search in turn until one finds the game: its name's words, then without the last.
             let searches = stores.searches(store, want);
@@ -532,7 +575,12 @@ impl Run {
         }
         out.asked = true;
         out.tried.extend(&kinds);
-        let game = match self.ask(NAME, || service.find_game(&want.source, &want.source_id, &want.name)) {
+        let matched = want.matched(ArtSource::SteamGridDb).and_then(|m| m.id.parse::<u64>().ok());
+        let found = match matched {
+            Some(game) => Ok(Some(game)),
+            None => self.ask(NAME, || service.find_game(&want.source, &want.source_id, &want.name)),
+        };
+        let game = match found {
             Ok(Some(game)) => game,
             Ok(None) => {
                 kinds.into_iter().for_each(|kind| self.miss(want, kind, Online::SteamGridDb));

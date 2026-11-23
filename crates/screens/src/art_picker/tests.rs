@@ -44,7 +44,7 @@ fn serve(picker: &mut ArtPicker, total: u64, limit: usize) -> Vec<u32> {
             .into_iter()
             .filter_map(|ask| match ask {
                 Ask::Page { tab, page, .. } => Some((tab, page)),
-                Ask::Thumb { .. } => None,
+                _ => None,
             })
             .collect();
         if pages.is_empty() {

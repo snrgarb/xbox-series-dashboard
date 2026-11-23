@@ -324,8 +324,10 @@ const F1 = "100000000000000001", F2 = "100000000000000002", GROUP = "10000000000
     const p = page({}, { cap: 60 });
     delete p.win.webpackChunkdiscord_app;
     p.run();
-    await sleep(350);
+    // Until its health is said: a slow runner takes longer than the cap's few tries (CI on GitHub's runners).
+    for (let waited = 0; !p.last("health") && waited < 3000; waited += 50) await sleep(50);
     const h = p.last("health");
+    assert.ok(h, "health was said");
     assert.strictEqual(h.ok, false);
   });
 
