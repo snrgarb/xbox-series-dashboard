@@ -46,6 +46,9 @@ pub struct Product {
 /// What confirmed Tony Hawk's Pro Skater 3 + 4's uid.
 const LBRA_SEEN: &str = "the TV PC's Battle.net client, 2026-11-18: its Battle.net.config Games key and its product \
                          state are lbra";
+/// What confirmed the World of Warcraft flavours' uids.
+const WOW_SEEN: &str = "the TV PC's Battle.net client, 2026-11-23: its log's product states are wow_classic, \
+                        wow_classic_era, wow_classic_anniversary and wowf";
 /// What confirmed Hearthstone's.
 const HSB_SEEN: &str = "Blizzard's product configuration for hsb: valid_uids [hs_beta]";
 
@@ -81,6 +84,12 @@ const BUILT_IN: &[(&str, &str, &str, &str)] = &[
     ("w3", "w3", "W3", "Warcraft III: Reforged"),
     ("wlby", "wlby", "WLBY", "Crash Bandicoot 4: It's About Time"),
     ("wow", "wow", "WoW", "World of Warcraft"),
+    // World of Warcraft's other flavours (#338): each its own product, its own uid (the client's: its log's `Game
+    // product state created`), launched as the product the client files it under (`WoWC`: Classic's three).
+    ("wow_anniversary", "wow_classic_anniversary", "WoWC", "Burning Crusade Anniversary"),
+    ("wow_classic", "wow_classic", "WoWC", "Mists of Pandaria Classic"),
+    ("wow_classic_era", "wow_classic_era", "WoWC", "World of Warcraft Classic Era"),
+    ("wowf", "wowf", "WoWF", "WoW: Forever"),
     ("zeus", "zeus", "ZEUS", "Call of Duty: Black Ops Cold War"),
 ];
 
@@ -89,6 +98,7 @@ fn verified(code: &str) -> Option<&'static str> {
     match code {
         "lbra" => Some(LBRA_SEEN),
         "hsb" => Some(HSB_SEEN),
+        "wow_anniversary" | "wow_classic" | "wow_classic_era" | "wowf" => Some(WOW_SEEN),
         _ => None,
     }
 }
@@ -139,10 +149,17 @@ mod tests {
         assert_eq!((thps.uid.as_str(), thps.launch.as_deref()), ("lbra", Some("LBRA")));
         assert!(thps.verified.is_some());
         let verified: Vec<&str> = table.iter().filter(|p| p.verified.is_some()).map(|p| p.code.as_str()).collect();
-        assert_eq!(verified, ["hsb", "lbra"], "only what something on the current client confirmed");
+        assert_eq!(
+            verified,
+            ["hsb", "lbra", "wow_anniversary", "wow_classic", "wow_classic_era", "wowf"],
+            "only what something on the current client confirmed"
+        );
         for (i, product) in table.iter().enumerate() {
             assert!(table[i + 1..].iter().all(|p| p.code != product.code && p.uid != product.uid), "{product:?}");
-            assert!(product.code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()), "{product:?}");
+            assert!(
+                product.code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "{product:?}"
+            );
         }
     }
 }
