@@ -77,8 +77,8 @@ const OPEN: Effect = Effect::Sound(Sound::PromptOpen);
 const MOVE: Effect = Effect::Sound(Sound::GuideMove);
 const ENTER: Effect = Effect::Sound(Sound::GuideSelect);
 const CLOSE: Effect = Effect::Sound(Sound::PromptClose);
-/// The More options flyout's height: its title, then Hide this game, Refresh art and Change art.
-const FLYOUT: f32 = 99.6 + 3.0 * 72.0;
+/// The More options flyout's height: its title, then Hide this game, Refresh art, Change art and Match game.
+const FLYOUT: f32 = 99.6 + 4.0 * 72.0;
 
 // ------------------------------------------------------------------------------------------------- what opens it
 
@@ -322,15 +322,17 @@ fn more_options_opens_the_flyout_and_hide_this_game_hides_it() {
     menu.take_effects();
     assert_eq!(pressed(&mut menu, &[A]), [ENTER]);
     assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Hide this game) of Hadrel II");
-    // Three rows: Up from the first goes nowhere, Down to Refresh art and Change art and back. Left does not close
-    // it.
+    // Four rows: Up from the first goes nowhere, Down to Refresh art, Change art and Match game and back. Left does
+    // not close it.
     assert_eq!(pressed(&mut menu, &[Up, Left, Right]), []);
     assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
     assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Refresh art) of Hadrel II");
     assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
     assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Change art) of Hadrel II");
+    assert_eq!(pressed(&mut menu, &[Down]), [MOVE]);
+    assert_eq!(menu.focus_line(), "TileMenu: MoreOptions(Match game) of Hadrel II");
     assert_eq!(pressed(&mut menu, &[Down]), []);
-    assert_eq!(pressed(&mut menu, &[Up, Up]), [MOVE, MOVE]);
+    assert_eq!(pressed(&mut menu, &[Up, Up, Up]), [MOVE, MOVE, MOVE]);
     assert_eq!(pressed(&mut menu, &[A]), [ENTER, Effect::Hidden { game: game.id, on: true }]);
     assert_eq!(menu.page(), None);
 
