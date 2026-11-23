@@ -10,6 +10,7 @@ members = ["crates/model", "crates/library", "crates/source-steam", "crates/sour
 [workspace.package]
 version = "0.1.0"
 publish = false
+license = "PolyForm-Noncommercial-1.0.0"
 
 [profile.release]
 opt-level = 3

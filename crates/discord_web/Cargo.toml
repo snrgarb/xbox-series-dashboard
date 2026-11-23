@@ -2,6 +2,7 @@
 name = "discord_web"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "Discord's web session (#197): discord.com in a WebView2 on a thread of its own, one session per Profile in the data folder, signed in by the user on Discord's own page."
 

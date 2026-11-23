@@ -2,6 +2,7 @@
 name = "source-kit"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "What the store sources share: the registry or a file standing in for it, protobuf, command lines, and running the helper programs some stores install through."
 

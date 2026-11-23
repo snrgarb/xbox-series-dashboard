@@ -2,6 +2,7 @@
 name = "update"
 version.workspace = true
 publish.workspace = true
+license.workspace = true
 edition = "2021"
 description = "Updates (docs/spec/updates.md): the newest release asked of one address, its portable zip downloaded and checked against SHA256SUMS.txt, and dashboard.exe put in place by renaming, the old one kept."
 
