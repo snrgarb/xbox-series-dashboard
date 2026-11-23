@@ -8,7 +8,9 @@
 //! Agent says what.
 //!
 //! **When an install is over** ([`Judge`]), and only then: `product.db` says installed, playable and its update
-//! complete (done: `product::Product::done`; installed alone is taken as done only once it has stayed so for
+//! complete (done: `product::Product::done`; **playable is not done**: Blizzard games stream-install, so one that is
+//! playable but not update complete is followed while its download moves, [`taken_as_done`] only once nothing has moved
+//! for [`STALLED_PLAYABLE`]; installed alone is taken as done only once it has stayed so, quiet, for
 //! [`SETTLE`]), after which the Agent is given time to finish ([`settle`]); the Agent names an
 //! error (failed, its code shown); the user cancels; or every path, the game's too, has said nothing for [`SILENT`]
 //! with the Agent's process gone (or for [`FORGOTTEN`] with it there). **A 404 on one path is never by itself the
@@ -345,6 +347,9 @@ pub fn follow(
         let mut installed_said = false;
         let mut client_said = false;
         let mut round: u32 = 0;
+        // What the progress last said, and since when it has said anything else (bytes, share or rate moving).
+        let mut last_seen: Option<Seen> = None;
+        let mut moved_at = Instant::now();
         loop {
             std::thread::sleep(EVERY);
             round = round.wrapping_add(1);
@@ -375,6 +380,11 @@ pub fn follow(
                     let tenth = |s: InstallState| (std::mem::discriminant(&s), s.percent().map(|p| p / 10));
                     // A round in which nothing said anything leaves the Queue's word as it was.
                     if progress.says_anything() {
+                        let now_seen = Seen::of(progress);
+                        if last_seen != Some(now_seen) || progress.rate.unwrap_or(0) > 0 {
+                            moved_at = Instant::now();
+                        }
+                        last_seen = Some(now_seen);
                         if said.is_none_or(|before| tenth(before) != tenth(state)) {
                             let line = format!("{code}: {}; {answer}", say(&state, progress.rate));
                             crate::log(&session.http.mask(&line));
@@ -412,14 +422,17 @@ pub fn follow(
             if done || round.is_multiple_of(LOOK_EVERY) {
                 if let Some(product) = product().filter(|p| p.installed) {
                     let since = *installed_at.get_or_insert_with(Instant::now);
-                    if product.done() || since.elapsed() >= SETTLE {
+                    if product.done() || taken_as_done(&product, since.elapsed(), moved_at.elapsed()) {
                         let how = if product.done() {
                             String::new()
                         } else {
-                            format!(" (taken as done: still so {} s on)", SETTLE.as_secs())
+                            format!(
+                                " (taken as done: still so, and nothing moving, {} s on)",
+                                moved_at.elapsed().as_secs()
+                            )
                         };
                         crate::log(&format!("{code}: done: product.db says {}{how}", product.said()));
-                        settle(&mut session, &watch);
+                        settle(&mut session, &watch, moved_at);
                         jobs.end(&code);
                         return;
                     }
@@ -464,6 +477,33 @@ pub fn follow(
     });
 }
 
+/// What a progress says that changes as the download moves.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Seen {
+    done: Option<u64>,
+    fraction: Option<f64>,
+}
+
+impl Seen {
+    fn of(progress: &calls::Progress) -> Self {
+        Self { done: progress.done, fraction: progress.fraction }
+    }
+}
+
+/// How long a game `product.db` lists as installed and playable but not update complete may go with nothing moving
+/// before it is taken as done all the same. Blizzard's games are playable early (stream installs: World of Warcraft at
+/// about 10% of 132 GB), so "playable" is not "done": the update-complete flag is, and this is only the way out for
+/// a game whose Agent never sets it.
+pub const STALLED_PLAYABLE: Duration = Duration::from_secs(15 * 60);
+
+/// Whether an install `product.db` lists as installed, not (all of) done, is taken as done: it has stayed so for
+/// [`SETTLE`] and nothing has moved for as long (a game not yet playable), or, where it is playable, for
+/// [`STALLED_PLAYABLE`]: a download that keeps moving is never taken as done.
+fn taken_as_done(product: &Product, installed_for: Duration, quiet_for: Duration) -> bool {
+    let patience = if product.playable { STALLED_PLAYABLE } else { SETTLE };
+    installed_for >= patience && quiet_for >= patience
+}
+
 /// How long, once `product.db` says the install is done, the Agent is waited on to be done with it too.
 pub const IDLE_WAIT: Duration = Duration::from_secs(60);
 
@@ -471,16 +511,25 @@ pub const IDLE_WAIT: Duration = Duration::from_secs(60);
 /// the Agent is waited on, [`IDLE_WAIT`] at most, to say the game is installed and playable on its own path
 /// (`/game/<uid>`) and to have nothing more under way on the install's (each `404 {}`, says nothing, or is idle:
 /// `calls::Progress::idle`); then the Agent is given [`agent::GRACE_AFTER_INSTALL`] to go by itself.
-fn settle(session: &mut Session, watch: &Watch) {
+/// While the Agent's paths keep moving it is waited on however long that takes (a stream install goes on after
+/// `product.db` says playable): [`IDLE_WAIT`] counts from when they last changed.
+fn settle(session: &mut Session, watch: &Watch, moved_at: Instant) {
     let code = &watch.code;
-    let begun = Instant::now();
+    let mut begun = moved_at.min(Instant::now());
+    let mut last: Vec<Seen> = Vec::new();
     loop {
         let read =
             |answer: Result<Answer, String>| answer.ok().filter(Answer::ok).map(|a| calls::read_progress(&a, None));
-        let ready = read(session.get_silent(&watch.game_path)).is_some_and(|game| game.ready());
-        let idle = watch.paths.iter().all(|path| {
-            read(session.get_silent(path)).is_none_or(|progress| !progress.says_anything() || progress.idle())
-        });
+        let game = read(session.get_silent(&watch.game_path));
+        let ready = game.is_some_and(|game| game.ready());
+        let paths: Vec<Option<calls::Progress>> =
+            watch.paths.iter().map(|path| read(session.get_silent(path))).collect();
+        let idle = paths.iter().all(|p| p.is_none_or(|progress| !progress.says_anything() || progress.idle()));
+        let seen: Vec<Seen> = paths.iter().flatten().chain(game.iter()).map(Seen::of).collect();
+        if seen != last || paths.iter().flatten().any(|p| p.rate.unwrap_or(0) > 0) {
+            begun = Instant::now();
+            last = seen;
+        }
         if ready && idle {
             crate::log(&format!(
                 "{code}: the Agent is done with it: {} says installed and playable, nothing under way, {} ms on",
@@ -545,6 +594,42 @@ fn say(state: &InstallState, rate: Option<u64>) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The TV PC's World of Warcraft (#338): `product.db` said installed and playable, not update complete, from
+    /// about 10% of 132 GB on; taken as done after two minutes, and the Agent and its download stopped.
+    #[test]
+    fn a_game_playable_before_its_update_is_complete_is_not_done_while_it_moves() {
+        let streaming = Product {
+            uid: "wow".into(),
+            code: "wow".into(),
+            installed: true,
+            playable: true,
+            update_complete: false,
+            ..Product::default()
+        };
+        assert!(!streaming.done());
+        let min = |m: u64| Duration::from_secs(m * 60);
+        // Moving (quiet for no time at all): never taken as done, however long it has been listed as installed.
+        assert!(!taken_as_done(&streaming, min(600), Duration::ZERO));
+        assert!(!taken_as_done(&streaming, SETTLE + Duration::from_secs(1), Duration::ZERO));
+        // Quiet two minutes, as the TV PC's was while it still downloaded: not yet.
+        assert!(!taken_as_done(&streaming, min(30), SETTLE));
+        // Nothing moved for a long while: the way out for an Agent that never says it complete.
+        assert!(taken_as_done(&streaming, min(30), STALLED_PLAYABLE));
+        // Update complete: done, whatever else.
+        assert!(Product { update_complete: true, ..streaming.clone() }.done());
+        // Not yet playable: the shorter patience, as before.
+        let early = Product { playable: false, ..streaming };
+        assert!(taken_as_done(&early, SETTLE, SETTLE));
+        assert!(!taken_as_done(&early, SETTLE, Duration::ZERO));
+    }
+
+    #[test]
+    fn the_downloads_moving_is_seen_in_its_bytes_and_its_share() {
+        let at = |done: u64| calls::Progress { done: Some(done), fraction: Some(0.1), ..Default::default() };
+        assert_eq!(Seen::of(&at(5)), Seen::of(&at(5)));
+        assert_ne!(Seen::of(&at(5)), Seen::of(&at(6)));
+    }
 
     #[test]
     fn the_agents_word_is_the_queues() {
