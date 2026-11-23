@@ -3,7 +3,7 @@
 //! **Who's playing today?**, the Profiles in a row, focus on the one signed in last, A signing the focused one in;
 //! then **Signing you in**, the Profile's picture alone with the Spinner turning round it for three seconds; then
 //! Home, and the greeting's Toast. With Who's playing today? turned off on Settings, the Profile signed in last goes
-//! straight to Signing you in. Switch profile on the Guide, and waking from sleep, ask again without the video.
+//! straight to Signing you in. Switch profile on the Guide asks again without the video.
 //!
 //! The video itself is played by the executable (the `media` crate): it tells the Dashboard which texture holds
 //! the picture (`Dashboard::boot_video_picture`) and when the video has ended (`Dashboard::boot_video_ended`).

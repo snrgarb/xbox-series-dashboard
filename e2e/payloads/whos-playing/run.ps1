@@ -8,15 +8,13 @@
 #     until the other, A; Signing you in, then Home, the `profile:` line and the greeting for it.
 #  3. The Guide's Switch profile: the Guide goes and Who's playing today? asks, focus on the one signed in; Left until
 #     the Windows user's, A; signed in and greeted again.
-#  4. A wake from sleep, pretended by `standin wake` (--allow-toast-posts): Who's playing today? asks again; A.
-#  5. Settings > Account > Who's playing today?: Sign in the last profile. A pretended wake asks nothing now;
-#     started again, no Who's playing today?: Signing you in for the one signed in last, then Home and its greeting.
+#  4. Settings > Account > Who's playing today?: Sign in the last profile; started again, no Who's playing today?:
+#     Signing you in for the one signed in last, then Home and its greeting.
 #
 # Judged by the Dashboard's log, times in ms since the process started:
 #   startup: who's playing shown at <N> ms, <n> profiles, focus on "<gamertag>"
 #   startup: signing in "<gamertag>" at <N> ms
 #   startup: signed in at <N> ms
-#   startup: woke from sleep at <N> ms: Who's playing today? asks | nothing asked
 #   profile: "<gamertag>", real name "...", <picture>     (the Profile signed in)
 #   toasts: shown "Hi <name>!" ... (Greeting)
 #   settings: startup.ask_whos_playing = false
@@ -96,7 +94,7 @@ function Type-In([string] $Text, [string] $Expect) {
 
 # Started on the test's folders: at Home, or with Start-up.
 function Start-Here([switch] $Startup) {
-    $arguments = @('--log-focus', '--allow-toast-posts', '--data-dir', "`"$data`"", '--media', "`"$media`"")
+    $arguments = @('--log-focus', '--data-dir', "`"$data`"", '--media', "`"$media`"")
     $script:dashboard = if ($Startup) { Start-Dashboard -Startup $arguments } else { Start-Dashboard $arguments }
     $first = Wait-DashboardLog 'first frame presented' 60
     if (-not $first) { throw 'The Dashboard never presented a frame' }
@@ -219,17 +217,7 @@ try {
         $failures += 'Switch profile should not play the Boot video'
     }
 
-    # --- 4. A wake from sleep, pretended: asked again, as Settings has it ask.
-    $mark = Get-DashboardLogLength
-    $sent = Start-Process (Join-Path $Payload 'standin.exe') -ArgumentList 'wake' -Wait -PassThru
-    if ($sent.ExitCode -ne 0) { $failures += "standin wake exited with $($sent.ExitCode)" }
-    Expect-Log "^startup: woke from sleep at \d+ ms: Who's playing today\? asks$" 'the wake' 10 $mark | Out-Null
-    if (Expect-Asked $mark 2 $me 'Who''s playing today? on waking' '07-woken') {
-        Ensure-Front
-        Sign-In $me 'on waking' -Same | Out-Null
-    }
-
-    # --- 5. Settings: Sign in the last profile. Waking asks nothing; the next start signs the last one in by itself.
+    # --- 4. Settings: Sign in the last profile; the next start signs the last one in by itself.
     Ensure-Front
     Walk Right 'TopBar\(Settings\)' 5
     Press A 'Settings: Rail: General'
@@ -241,10 +229,6 @@ try {
     $mark = Get-DashboardLogLength
     Press A "Settings: Who's playing today\?: Sign in the last profile; ticked" '09-setting-off'
     Expect-Log '^settings: startup\.ask_whos_playing = false$' 'the setting saved' 10 $mark | Out-Null
-    $mark = Get-DashboardLogLength
-    $sent = Start-Process (Join-Path $Payload 'standin.exe') -ArgumentList 'wake' -Wait -PassThru
-    if ($sent.ExitCode -ne 0) { $failures += "standin wake exited with $($sent.ExitCode)" }
-    Expect-Log '^startup: woke from sleep at \d+ ms: nothing asked$' 'the wake with it off' 10 $mark | Out-Null
 
     Stop-Dashboard
     Start-Sleep -Seconds 2

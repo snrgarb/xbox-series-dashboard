@@ -294,7 +294,7 @@ The port's page (start-up.md 2): no line over the Rows (#261, 16.11), which star
 
 ### 6.4 ... > Personalisation > Who's playing today? - built in #127 (start-up.md 9)
 
-E/PersonalisationPane.xaml:289-294; E/PersonalisationPane.xaml.cs:194-200. As Boot video: "Choose who's playing as Playnite starts in Fullscreen and wakes from sleep." then two Rows at y 270.58 and 344.58: **Ask every time** (the default) and **Sign in the last profile**. Opens with focus on the ticked one.
+E/PersonalisationPane.xaml:289-294; E/PersonalisationPane.xaml.cs:194-200. As Boot video: "Choose who's playing as Playnite starts in Fullscreen and wakes from sleep." (the port's reads "...as the Dashboard starts.": waking from sleep does not ask, start-up.md 8) then two Rows at y 270.58 and 344.58: **Ask every time** (the default) and **Sign in the last profile**. Opens with focus on the ticked one.
 
 The port has no line (#261, 16.11): the two Rows are at y 210 and 284.
 
@@ -421,7 +421,7 @@ A box either opens its page (focus on its first box) or acts and stays.
 | ... > Profiles > {Profile} > Real name | text entry | text | The Profile's real name | as above | **M5** |
 | ... > Profiles > {Profile} > Picture | box, opens a picker | the Windows account picture, then the Gamerpics folder's images (the Bundle fills it with the 100 most liked Xbox 360 gamerpics from xboxgamer.pics, E/PopularGamerpics.cs; the user may add more) | The Profile's picture | as above | **M5**; fetching those gamerpics is open question 8 |
 | ... > Profiles > {Profile} > Remove profile | action, with a prompt | Yes / No | Forgets the Profile; never the last one | as above | **M5**; the prompt becomes ours |
-| ... > Personalisation > Who's playing today? | box, opens a two-row picker | **Ask every time**, Sign in the last profile | Whether Start-up and waking from sleep ask who is playing | `StartUp`.AskWhosPlaying | **Bundle's own: M5** |
+| ... > Personalisation > Who's playing today? | box, opens a two-row picker | **Ask every time**, Sign in the last profile | Whether Start-up asks who is playing | `StartUp`.AskWhosPlaying | **Bundle's own: M5** |
 | ... > Personalisation > Background delay | checkbox box | **on**, off | On: Home's background waits 1.5 s on a game before showing its art; off: 150 ms (home.md) | `StartUp`.BackgroundDelay, only once set | **Bundle's own: M3** |
 | ... > Personalisation > Reduce motion | checkbox box | on, **off** | Section 10.4; in force at once (C/ExtensionCore.Startup.cs:175-180) | `StartUp`.ReduceMotion, only once set | **Bundle's own: M3** (`ui`'s `slide` already honours it, docs/ui.md) |
 | ... > Personalisation > Show Play history | checkbox box | **on**, off | On: the Recent row is seven games and the Play history tile; off: eight games. The row is rebuilt at once | `StartUp`.ShowPlayHistory, only once set | **Bundle's own: M3** |
@@ -704,7 +704,7 @@ Not confirmable from any picture: type at 26; Theme settings' four boxes; Reduce
 | **More Playnite options** | Playnite's main menu | **Replace** by our own entries for Update library and Exit, if wanted (12.2; open question 4) |
 | Playnite's Fullscreen Settings window, main menu, custom menus | Playnite's windows | **Not ported.** Section 12.1's table lists the few options that need an entry of ours: interface volume, perhaps display, language, A/B swap (open questions 3, 10) |
 | Download metadata; Update after downloads | Playnite's metadata and library plugins | **M4**: our own fetch of missing art and details; the library refreshing itself after an install (open question 5) |
-| Wording: "Plays as Playnite starts in Fullscreen", "... as Playnite starts in Fullscreen and wakes from sleep", "Each puts up a Toast, as Playnite's own would" | Names the host | Reword: "Plays as the Dashboard starts. Any button skips it."; "Choose who's playing as the Dashboard starts and wakes from sleep." |
+| Wording: "Plays as Playnite starts in Fullscreen", "... as Playnite starts in Fullscreen and wakes from sleep", "Each puts up a Toast, as Playnite's own would" | Names the host | Reword: "Plays as the Dashboard starts. Any button skips it."; "Choose who's playing as the Dashboard starts." (no waking from sleep: the user, 2026-11-23) |
 | Guide page's "Turn it off to leave the Guide button to Steam or another app." | True of the port too | Keep |
 | The store: a DPAPI file named `discord-secrets.dat` in the extension's data folder | The extension had no settings file of its own that Playnite would not own | A plain settings file of the port's own for options; an encrypted store only for Discord's secrets and tokens (open question 6) |
 | Message boxes (Remove profile, no gamerpics) | Playnite's dialog | Our own prompt, in the look of the port's other prompts (open question 12) |
@@ -938,7 +938,7 @@ The user, 2026-11-18: "remove all the text paragraphs underneath setting heading
 | Personalisation | the five checkbox boxes' info texts: "Waits a moment on a game...", "Shows pages, rows and tiles in place...", "Ends Home's recent games with the Play history tile...", "Marks each of Home's recent games...", "Shows how much charge is left..." (6.2) |
 | Guide | "Opens the Guide with the Guide button and from Home...", "The app the Audio flyout's Now Playing follows..." (6.8) |
 | Boot video | "Plays as the Dashboard starts. Any button skips it." (the Bundle's line, 6.3) |
-| Who's playing today? | "Choose who's playing as the Dashboard starts and wakes from sleep." (the Bundle's line, 6.4) |
+| Who's playing today? | "Choose who's playing as the Dashboard starts." (the Bundle's line, 6.4, without "and wakes from sleep": the Dashboard does not ask on waking) |
 | Discord | "Connect your own Discord application, so the Guide can show you on Discord." (the Bundle's intro, 6.9) |
 | Launchers | "Your games come in from the launchers switched on here..."; beside Update now at rest, "Looks for new games, play time, Groups, art and achievements." (launchers.md 2) |
 | Games & apps | "Add games that no store brings in, and apps to start from My games & apps..." (apps.md 4.1) |

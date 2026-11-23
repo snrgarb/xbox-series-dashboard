@@ -258,12 +258,6 @@ pub fn toast(text: &str) -> i32 {
     post(model::post::COPYDATA_ID, text, "toast")
 }
 
-/// Tells the running Dashboard the machine has woken from sleep, as Windows would: Who's playing today? asks, if it
-/// asks on waking. 0 when the Dashboard took it.
-pub fn wake() -> i32 {
-    post(model::post::WAKE_ID, "wake", "wake")
-}
-
 /// Sends `text` to the Toast strip's window as `id`, and says so as `what`.
 fn post(id: usize, text: &str, what: &str) -> i32 {
     let class = wide(model::post::WINDOW_CLASS);

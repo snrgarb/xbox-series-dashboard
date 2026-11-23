@@ -1,10 +1,9 @@
 //! Start-up (docs/spec/start-up.md): the Boot video, which a press skips; Who's playing today?, the Profiles in a
 //! row, A signing the focused one in; Signing you in for three seconds; then Home and the greeting. Start-up has the
-//! pad and the Guide button to itself while it shows. Switch profile on the Guide, and waking from sleep, ask again
+//! pad and the Guide button to itself while it shows. Switch profile on the Guide asks again
 //! without the video. The pictures are tests/whos_playing.rs.
 use model::{Library, Profile, ProfileChange};
 use screens::guide::{Focus, Tab};
-use screens::settings::{Change, Setting};
 use screens::toasts::ToastKind;
 use screens::{fake_library, Dashboard, Effect, OverlayShows, Phase, Sound};
 use ui::Button::{self, Down, Guide, Left, Right, RightBumper, A, B};
@@ -309,7 +308,7 @@ fn the_greeting_has_the_guide_button_open_the_guide_on_profile_and_system() {
     assert_eq!(dashboard.guide().focus(), (Tab::ProfileAndSystem, Focus::Entry(0)));
 }
 
-// --- Switch profile, and waking from sleep ---
+// --- Switch profile ---
 
 /// Started straight to Home (`--no-startup`) on a library of these Profiles, greeted, the Guide open on Profile &
 /// system with focus on Switch profile.
@@ -366,35 +365,4 @@ fn over_a_game_switch_profile_does_nothing() {
     press(&mut dashboard, Guide);
     presses(&mut dashboard, &[RightBumper, Down, A]);
     assert!(dashboard.guide_open() && !dashboard.starting_up());
-}
-
-#[test]
-fn waking_from_sleep_asks_without_the_video_if_settings_has_it_ask() {
-    let mut dashboard = on_switch_profile(&["Alpha", "Beta"], 1);
-    assert!(dashboard.woke_from_sleep());
-    assert!(!dashboard.guide_open(), "the Guide goes first");
-    assert_eq!(dashboard.focus_line(), "Startup: WhosPlaying \"Beta\"");
-    // A second wake while it asks changes nothing.
-    assert!(!dashboard.woke_from_sleep());
-
-    // Turned off, waking asks nothing.
-    let mut dashboard = Dashboard::new(library(&["Alpha", "Beta"], 1));
-    let change = Change { setting: Setting::AskWhosPlaying, on: false };
-    let mut options = dashboard.options();
-    options.set(change.setting, change.on);
-    dashboard.set_options(options);
-    assert!(!dashboard.woke_from_sleep());
-    assert!(!dashboard.starting_up());
-}
-
-#[test]
-fn waking_with_a_game_running_brings_the_dashboard_in_front_of_it_first() {
-    let mut dashboard = Dashboard::new(library(&["Alpha", "Beta"], 0));
-    dashboard.launch_started(2);
-    dashboard.game_booted();
-    dashboard.take_effects();
-    assert!(dashboard.woke_from_sleep());
-    assert!(dashboard.take_effects().contains(&Effect::ShowHome));
-    assert!(!dashboard.home_covered());
-    assert_eq!(dashboard.focus_line(), "Startup: WhosPlaying \"Alpha\"");
 }

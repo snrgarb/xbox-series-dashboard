@@ -18,7 +18,6 @@ use shell::idle::LastInput;
 use shell::media::{self, MediaSessions};
 use shell::power::{DryPower, Power, SystemPower};
 use shell::store::{Addresses, Ask, Asking, ProgramAddresses, SystemAddresses, Word};
-use shell::wake::{SystemWakes, Wakes};
 use shell::{Freezer, Key as OverlayKey, Launch, Mode, Overlay, Step, ToastStrip};
 use ui::{Button, Host, Press};
 use winit::application::ApplicationHandler;
@@ -147,8 +146,6 @@ struct App {
     /// Where Start-up was as the log last said it (`startup: who's playing shown ...`, `signing in`, `signed in`),
     /// by the frames presented.
     startup_said: Option<Phase>,
-    /// What says the machine has woken from sleep: Who's playing today? asks again (docs/spec/start-up.md, 8).
-    wakes: Box<dyn Wakes>,
     launch: Option<Launch>,
     /// When Home's window is drawn while it is a game's backdrop (docs/spec/launch-screen.md).
     backdrop: crate::backdrop::Frames,
@@ -526,13 +523,6 @@ pub fn run(
         home_presented: None,
         boot_video,
         startup_said: None,
-        wakes: Box::new(SystemWakes::new({
-            let proxy = event_loop.create_proxy();
-            let wake = std::sync::Mutex::new(proxy);
-            move || {
-                let _ = wake.lock().map(|proxy| proxy.send_event(()));
-            }
-        })),
         launch: None,
         backdrop: Default::default(),
         freezer,
@@ -2020,14 +2010,6 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Woken from sleep: Who's playing today? asks again, if it asks on waking.
-        if self.wakes.woke() {
-            let asked = self.dashboard.woke_from_sleep();
-            let what = if asked { "Who's playing today? asks" } else { "nothing asked" };
-            eprintln!("startup: woke from sleep at {:.0} ms: {what}", since_start());
-            self.stale = true;
-            self.overlay_stale = true;
-        }
         self.ledger.enter(Part::Input);
         let pressed = typed || !presses.is_empty() || !events.is_empty();
         let began = Instant::now();

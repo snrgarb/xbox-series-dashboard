@@ -1,8 +1,8 @@
 # Start-up specification
 
-Start-up is the console's start-up sequence, full screen before Home (the Bundle's glossary, `CONTEXT.md`: Start-up, Boot video, Start-up's first frame). As in the Bundle it is the **Boot video** (#126), then **Who's playing today?** (or, with that not asking, straight to **Signing you in**), then Home with the "Hi X!" Toast (#127). The Guide's **Switch profile** and **waking from sleep** ask Who's playing today? again, without the video.
+Start-up is the console's start-up sequence, full screen before Home (the Bundle's glossary, `CONTEXT.md`: Start-up, Boot video, Start-up's first frame). As in the Bundle it is the **Boot video** (#126), then **Who's playing today?** (or, with that not asking, straight to **Signing you in**), then Home with the "Hi X!" Toast (#127). The Guide's **Switch profile** asks Who's playing today? again, without the video. Waking from sleep does not ask (section 8).
 
-Sources: the Bundle's `StartupSequence` and `BootVideo` (C/ExtensionCore.Startup.cs:147-215, 337-384; C/StartupSequence.cs), its start-up window (StartupWindow.xaml and .xaml.cs), its `LoadingSpinner` (Spinner.cs), its Personalisation page (E/PersonalisationPane.xaml:281-294, E/PersonalisationPane.xaml.cs:29-40, 194-200, 355-359). Pictures: the Bundle's `port-reference-20261115-200355/whos-playing.jpg` (its artifacts) and the console's, the Bundle's `docs/reference/startup/1-whos-playing.jpg` to `4-home.jpg`. Code: `crates/screens/src/startup.rs` (the sequence, as the core keeps it, and its pictures), `crates/screens/src/settings/boot_video.rs` and `whos_playing.rs` (its Settings pages), `crates/shell/src/wake.rs` (waking from sleep), `crates/app/src/startup.rs` (the video found, chosen and played), `crates/media` (Media Foundation playback, from the `video-spike`; docs/research/video-media-foundation.md).
+Sources: the Bundle's `StartupSequence` and `BootVideo` (C/ExtensionCore.Startup.cs:147-215, 337-384; C/StartupSequence.cs), its start-up window (StartupWindow.xaml and .xaml.cs), its `LoadingSpinner` (Spinner.cs), its Personalisation page (E/PersonalisationPane.xaml:281-294, E/PersonalisationPane.xaml.cs:29-40, 194-200, 355-359). Pictures: the Bundle's `port-reference-20261115-200355/whos-playing.jpg` (its artifacts) and the console's, the Bundle's `docs/reference/startup/1-whos-playing.jpg` to `4-home.jpg`. Code: `crates/screens/src/startup.rs` (the sequence, as the core keeps it, and its pictures), `crates/screens/src/settings/boot_video.rs` and `whos_playing.rs` (its Settings pages), `crates/app/src/startup.rs` (the video found, chosen and played), `crates/media` (Media Foundation playback, from the `video-spike`; docs/research/video-media-foundation.md).
 
 ## 1. The Boot video
 
@@ -66,6 +66,7 @@ The choice is the settings table's `startup.boot_video` row (settings.md 16.4), 
 ## 3. Not playing it
 
 - **`--no-startup`** starts at Home with no Start-up, whatever is chosen, the Profile signed in last signed in and greeted once Home has come to rest, as before Start-up was built. Every e2e payload starts so but `boot-video` and `whos-playing` (`Start-Dashboard -Startup`); tests and `--screenshot` never have Start-up.
+- **Waking from sleep** does not ask Who's playing today? (section 8).
 - **Anywhere but Windows** the video cannot play (`media::Video` fails at once): Start-up goes on at once. `--screenshot` draws Home as ever.
 
 ## 4. After the Boot video
@@ -104,9 +105,7 @@ The Guide's Switch profile (guide.md 4.3), with A: the Guide goes **at once**, w
 
 ## 8. Waking from sleep
 
-When Windows wakes from sleep, Who's playing today? asks again, without the Boot video, **if Settings has it ask**; with Sign in the last profile nothing happens. Over a running game the Dashboard first comes in front of it, as Home from the Guide does. A wake while Start-up already shows changes nothing. An Idle screen that was up goes at once. Waking the **Idle screen** (idle-screen.md) is not waking from sleep, and never asks. The Idle screen's count waits while any of Start-up shows, and starts from zero as Home shows after it.
-
-The wake is heard from `PowerRegisterSuspendResumeNotification`, a callback that needs no window, on `PBT_APMRESUMEAUTOMATIC` (the same event as `WM_POWERBROADCAST`'s, which only a top-level window asking for it gets), behind `shell::wake::Wakes`. For a test, a Dashboard started with `--allow-toast-posts` takes a pretended wake from `standin wake` (a `WM_COPYDATA` to the Toast strip's window, `model::post::WAKE_ID`), which goes the same way. Sleeping the machine itself is checked by hand on the TV PC.
+Waking from sleep shows nothing of Start-up: the Dashboard does not ask Who's playing today? again, does not come in front of a running game, and does not take the Idle screen down (waking the Idle screen is its own, idle-screen.md). The Dashboard listens for nothing from Windows's power events. This is a difference from the Bundle (section 10), decided by the user on 2026-11-23. Who's playing today? asks at the Dashboard's start (when Settings has it ask) and from the Guide's Switch profile, and nowhere else.
 
 ## 9. Settings > Personalisation > Who's playing today?
 
@@ -122,7 +121,7 @@ The choice is the settings table's `startup.ask_whos_playing` row (settings.md 1
 - **Sounds**: the Bundle's own Navigate, Enter and Login. The port plays the Guide's move and select sounds for the first two and `Login.wav` for the third, from the media folder like every sound.
 - **The swirl** is Home's swirl drawn behind, where the Bundle's start-up window has its own copy of the animation.
 - **The Spinner's ends** are flat, as the Bundle's `LoadingSpinner`'s; the Guide's Spinner elsewhere keeps its round ends.
-- **Waking over a game**: the Bundle activates Playnite's window; the port brings Home in front of the game as Home from the Guide does, the game left running.
+- **Waking from sleep asks nothing** (the user, 2026-11-23): the Bundle asks Who's playing today? again on waking (its `OnResumedFromSleep`) and activates Playnite's window over a game; the port does neither, and has no listener for the wake.
 - **Signing you in's three seconds** are counted by the Dashboard's clock from the press, which a slow renderer's frames do not stretch; the Bundle's timer is the same, by the wall clock.
 
 ## 11. The log
@@ -144,8 +143,6 @@ Times are milliseconds since the process started. The `boot-video` and `whos-pla
 | `startup: who's playing shown at <N> ms, <n> profiles, focus on "<gamertag>"` | Who's playing today?'s first frame has been presented, each time it asks |
 | `startup: signing in "<gamertag>" at <N> ms` | Signing you in's first frame has been presented |
 | `startup: signed in at <N> ms` | Start-up is over, Home's frame presented |
-| `startup: woke from sleep at <N> ms: Who's playing today? asks` / `...: nothing asked` | Windows woke from sleep (or `standin wake`) |
-| `wake: the machine woke from sleep at <N> ms` / `wake: woken by a post, as from sleep at <N> ms` | What heard the wake (`shell::wake`) |
 | `startup: Home's first frame at <N> ms` | Home's first frame has been presented: always, with Start-up or without |
 
 The `media` crate says what it opened and how (`video: opened ...`, `video: sound started on ...`), as the spike did.

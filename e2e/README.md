@@ -253,8 +253,7 @@ its first frame, its end and Home's first frame logged in that order, then Off s
 Dashboard straight to Who's playing today? at the next start; it needs `video-spike.exe`, so build `-p video-spike` too),
 `whos-playing` (Start-up with the Boot video Off in folders of the test's own: a second Profile added, Who's playing
 today? at the next start and the other Profile picked, Signing you in, Home and its greeting; the Guide's Switch profile
-back to the first; a wake from sleep pretended by `standin wake`; then Sign in the last profile set, a wake asking
-nothing, and the next start straight to Signing you in), `idle` (the
+back to the first; then Sign in the last profile set and the next start straight to Signing you in), `idle` (the
 Idle screen with `--idle-after 3,6`: Dimmed then Showing things over Home and over the stand-in game, a picture of
 each, and a press that wakes it seen to move no focus and start nothing; a stage woken early by someone else's input
 on the TV PC is said in the steps and waited for again), `launch-backdrop` (the desktop never seen round a game: the

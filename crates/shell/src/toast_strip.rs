@@ -106,11 +106,6 @@ mod win {
                     return 0;
                 }
                 let data = lparam as *const COPYDATASTRUCT;
-                // A wake from sleep, pretended by a test.
-                if !data.is_null() && (*data).dwData == model::post::WAKE_ID {
-                    crate::wake::pretend();
-                    return 1;
-                }
                 if data.is_null() || (*data).dwData != model::post::COPYDATA_ID || (*data).lpData.is_null() {
                     return 0;
                 }

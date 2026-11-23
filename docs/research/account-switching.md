@@ -294,7 +294,7 @@ The user's idea, assessed squarely.
    - wait for "signed in": Steam's `loginusers.vdf` target row with the new `Timestamp`, or the CEF debugger answering with that account; Epic's `auth` folder rewritten; Battle.net's newest log naming the account. **Limit 60 s** per launcher.
 3. Home then shows. A launcher that did not come up signed in gets a Toast: "<launcher> needs you to sign in" and stays on its own sign-in window, as today when a session has expired; the backup is put back if the client failed to start at all.
 4. **Same account already, or only one account remembered, or "Any"**: nothing is done; no delay.
-5. **Waking from sleep** signs the Profile in again (start-up.md 8); nothing is switched unless the Profile changed.
+5. **Waking from sleep** does nothing (start-up.md 8: it asks nothing and signs nobody in again; the user, 2026-11-23).
 
 **How long**: 0 s when nothing differs; about 15 to 40 s per launcher that switches [inferred; T1 to T3 measure it]. The order and the "skip it" rule keep the worst case from blocking Home: after **30 s in total**, Home shows and the rest finish behind it, each with its Toast.
 

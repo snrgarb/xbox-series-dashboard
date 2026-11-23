@@ -2606,19 +2606,6 @@ impl Dashboard {
         self.ask_whos_playing();
     }
 
-    /// Windows woke from sleep: Who's playing today? asks again, without the Boot video, if Settings has it ask
-    /// (the Bundle's `OnResumedFromSleep`); over a running game the Dashboard comes in front of it first. Nothing
-    /// while Start-up already shows. Waking the Idle screen is not waking from sleep, and never asks. True when it
-    /// asked.
-    pub fn woke_from_sleep(&mut self) -> bool {
-        if !self.options.ask_whos_playing || self.startup.is_some() {
-            return false;
-        }
-        self.show_dashboard();
-        self.ask_whos_playing();
-        true
-    }
-
     /// Who's playing today? over everything, asked afresh: the Guide goes at once, with a dialog page, and the
     /// Toast on screen; Toasts wait until the greeting has shown (the Bundle's `CoverForStartup`).
     fn ask_whos_playing(&mut self) {
@@ -2633,7 +2620,7 @@ impl Dashboard {
         self.greeting_owed = true;
         let (profiles, last) = self.whos_playing_profiles();
         self.startup = Some(Startup::after_video(profiles, last, true));
-        // Woken from sleep, the Idle screen may be up: it goes at once, and waits until Start-up is over.
+        // The Idle screen may be up (Switch profile): it goes at once, and waits until Start-up is over.
         self.idle.wait(true, self.now);
     }
 

@@ -30,7 +30,6 @@ pub mod running;
 pub mod steam;
 pub mod store;
 pub mod toast_strip;
-pub mod wake;
 
 use std::sync::OnceLock;
 use std::time::Instant;

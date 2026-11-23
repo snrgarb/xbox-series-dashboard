@@ -324,19 +324,6 @@ fn startup_holds_it_off_and_it_counts_from_zero_after() {
     assert_eq!(dashboard.idle_stage(), IdleStage::Dimmed);
 }
 
-/// Waking from sleep with the Idle screen up: it goes at once, not drawn over Who's playing today?, and stays away
-/// while that asks.
-#[test]
-fn waking_from_sleep_takes_it_down_at_once_for_whos_playing_today() {
-    let mut dashboard = dashboard();
-    wait(&mut dashboard, SHOW + 0.1);
-    assert_eq!(dashboard.idle_stage(), IdleStage::ShowingThings);
-    assert!(dashboard.woke_from_sleep());
-    assert_eq!(dashboard.idle_stage(), IdleStage::Awake);
-    wait(&mut dashboard, SHOW * 2.0);
-    assert_eq!(dashboard.idle_stage(), IdleStage::Awake);
-}
-
 // --- Pictures ---
 
 /// Dimmed over Home: the whole screen under 70% black.

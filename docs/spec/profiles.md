@@ -77,7 +77,7 @@ Always logged, with or without `--log-focus`:
 
 ## 6. Choosing who plays
 
-- `Dashboard::sign_in(id)` signs a Profile in: everything shows it at once, and it asks the database to remember it (`ProfileChange::SignIn`). Signing you in calls it (start-up.md 6): after Who's playing today? at the start, from the Guide's Switch profile, and on waking from sleep.
+- `Dashboard::sign_in(id)` signs a Profile in: everything shows it at once, and it asks the database to remember it (`ProfileChange::SignIn`). Signing you in calls it (start-up.md 6): after Who's playing today? at the start, and from the Guide's Switch profile. Waking from sleep signs nobody in and asks nothing (start-up.md 8).
 - Who's playing today? shows the Profiles in the database's order, focus on the one signed in last; its Personalisation box (0, 1) chooses whether it asks at the start (start-up.md 9).
 
 ## 7. Differences from the Bundle

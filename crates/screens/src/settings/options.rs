@@ -27,7 +27,7 @@ pub enum Setting {
     /// Art is downloaded for the games that have none on the PC: the stores' own online, and SteamGridDB's with a
     /// key (Settings > Art). Off, nothing is asked of any service.
     DownloadArtOnline,
-    /// Who's playing today? asks on every start and on waking from sleep; off, the Profile signed in last signs in
+    /// Who's playing today? asks on every start; off, the Profile signed in last signs in
     /// by itself (Settings > Account > Who's playing today?, docs/spec/start-up.md).
     AskWhosPlaying,
     /// Settings > About's Check for updates every day (docs/spec/updates.md): off by default, while the
@@ -189,7 +189,7 @@ pub struct Options {
     /// The online art sources' order, and which are on (Settings > Art's sources): kept as the row
     /// `model::art_order::KEY`. Playnite's order, all on, until it is set.
     pub art_order: model::ArtOrder,
-    /// Who's playing today? asks on every start and on waking from sleep: on by default, as the Bundle's.
+    /// Who's playing today? asks on every start: on by default, as the Bundle's.
     pub ask_whos_playing: bool,
     /// Settings > About checks for updates once a day: off by default.
     pub daily_update_check: bool,
