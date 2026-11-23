@@ -23,6 +23,7 @@
 //! never the network (docs/sources.md), and every request for art, with its pace and its manners, is the lookup's.
 use serde_json::Value;
 
+use model::art_match::{Hit, MOST_HITS};
 use model::ArtSource;
 
 use super::cache::{Kind, Online};
@@ -94,6 +95,16 @@ impl Store {
             ArtSource::Xbox => Some(Store::Microsoft),
             ArtSource::PlayStation => Some(Store::PlayStation),
             ArtSource::SteamGridDb => None,
+        }
+    }
+
+    /// The online art source it is; None for the game's own store, which is no such source.
+    pub fn source(self) -> Option<ArtSource> {
+        match self {
+            Store::Own => None,
+            Store::Steam => Some(ArtSource::Steam),
+            Store::Microsoft => Some(ArtSource::Xbox),
+            Store::PlayStation => Some(ArtSource::PlayStation),
         }
     }
 
@@ -190,7 +201,8 @@ impl StoreArt {
         self.search(store, want).into_iter().chain(more).collect()
     }
 
-    fn search_for(&self, store: Store, name: &str) -> Option<Ask> {
+    /// The store's search for these words; None for a store with no search, or words that are no name.
+    pub fn search_for(&self, store: Store, name: &str) -> Option<Ask> {
         if plain_name(name).is_empty() {
             return None;
         }
@@ -216,6 +228,30 @@ impl StoreArt {
                 name: "the PlayStation Store",
             }),
         }
+    }
+
+    /// The games the store's search finds for these words, in its order, each once: for the Match game page
+    /// (docs/spec/match-game.md). Only the words are sent. None for a store that has no search (`Store::Own`).
+    pub fn find(&self, store: Store, words: &str) -> Option<Result<Vec<Hit>, Error>> {
+        let ask = self.search_for(store, words)?;
+        let answer = match self.get(&ask) {
+            Ok(answer) => answer,
+            Err(e) => return Some(Err(e)),
+        };
+        let mut hits: Vec<Hit> = Vec::new();
+        for (name, found, _) in answer.map(|answer| self.candidates(store, &answer)).unwrap_or_default() {
+            if !hits.iter().any(|hit| hit.id == found.id) {
+                hits.push(Hit { id: found.id, name, year: None });
+            }
+        }
+        hits.truncate(MOST_HITS);
+        Some(Ok(hits))
+    }
+
+    /// The game the user matched on the PlayStation Store (`model::art_match::Match`), found again among its
+    /// search's results by its id: those carry its pictures, which no request by the id alone gives.
+    pub fn matched_item(&self, store: Store, id: &str, answer: &Value) -> Option<Found> {
+        self.candidates(store, answer).into_iter().map(|(_, found, _)| found).find(|found| found.id == id)
     }
 
     /// Of a search's answer, the game that is the one wanted by the matching rule (`names::pick`); None when none

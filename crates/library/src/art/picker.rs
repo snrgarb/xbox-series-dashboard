@@ -14,12 +14,14 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use model::art_match::Hit;
 use model::art_picker::{Answer, Ask, Failure};
-use model::GameKey;
+use model::{ArtSource, GameKey};
 
 use super::cache::extension;
 use super::lookup::{host, Log, Pace};
 use super::steamgriddb::{agent, download, Error, Service};
+use super::store_online::{Store, StoreArt};
 
 /// The thumbnails' folder, under the data folder: emptied each time a picker starts.
 pub const THUMBS: &str = "art-picker";
@@ -100,9 +102,11 @@ pub struct Picker {
 
 impl Picker {
     /// Starts the two threads. `service` is SteamGridDB with the user's key, or None without one: every page is
-    /// then `Failure::NoKey` at once. Thumbnails go into `thumbs`, emptied first. `tell` hears every answer.
+    /// then `Failure::NoKey` at once. `stores` is the stores' art online, None with art online off: their searches
+    /// are then `Failure::Offline`. Thumbnails go into `thumbs`, emptied first. `tell` hears every answer.
     pub fn start(
         service: Option<Service>,
+        stores: Option<StoreArt>,
         thumbs: &Path,
         pace: Pace,
         log: Log,
@@ -122,28 +126,50 @@ impl Picker {
                     if gates.stop.load(Ordering::Relaxed) {
                         return;
                     }
-                    let Ask::Page { game, name, tab, page } = ask else { continue };
-                    let result = match (&service, refused) {
-                        (None, _) | (_, true) => Err(Failure::NoKey),
-                        (Some(service), false) => page_of(service, &gates, &mut games, &game, &name, tab, page),
-                    };
-                    match &result {
-                        Ok(reply) => log(&format!(
-                            "art: picker: {} page {page}: {} of {} candidates",
-                            tab.key(),
-                            reply.items.len(),
-                            reply.total
-                        )),
-                        Err(Failure::KeyRefused) => {
-                            refused = true;
-                            log("art: picker: SteamGridDB refused the key");
+                    let answer = match ask {
+                        Ask::Page { game, name, matched, tab, page } => {
+                            let result = match (&service, refused) {
+                                (None, _) | (_, true) => Err(Failure::NoKey),
+                                (Some(service), false) => {
+                                    let found = matched.map(|id| (game.clone(), Some(id)));
+                                    games.extend(found);
+                                    page_of(service, &gates, &mut games, &game, &name, tab, page)
+                                }
+                            };
+                            match &result {
+                                Ok(reply) => log(&format!(
+                                    "art: picker: {} page {page}: {} of {} candidates",
+                                    tab.key(),
+                                    reply.items.len(),
+                                    reply.total
+                                )),
+                                Err(Failure::KeyRefused) => {
+                                    refused = true;
+                                    log("art: picker: SteamGridDB refused the key");
+                                }
+                                Err(why) => log(&format!("art: picker: {} page {page} failed: {why:?}", tab.key())),
+                            }
+                            Answer::Page { game, tab, page, result }
                         }
-                        Err(why) => log(&format!("art: picker: {} page {page} failed: {why:?}", tab.key())),
-                    }
+                        Ask::Search { game, source, words } => {
+                            let service = service.as_ref().filter(|_| !refused);
+                            let result = search(service, stores.as_ref(), &gates, source, &words);
+                            match &result {
+                                Ok(hits) => log(&format!("art: match: {} found {}", source.name(), hits.len())),
+                                Err(Failure::KeyRefused) => {
+                                    refused = true;
+                                    log("art: match: SteamGridDB refused the key");
+                                }
+                                Err(why) => log(&format!("art: match: {} failed: {why:?}", source.name())),
+                            }
+                            Answer::Results { game, source, words, result }
+                        }
+                        Ask::Thumb { .. } => continue,
+                    };
                     if gates.stop.load(Ordering::Relaxed) {
                         return;
                     }
-                    tell(Answer::Page { game, tab, page, result });
+                    tell(answer);
                 }
             });
         }
@@ -233,6 +259,30 @@ fn page_of(
     gates.ask(&api, || service.candidates(id, tab, page)).map_err(failure)
 }
 
+/// An online source's search for the Match game page (docs/spec/match-game.md): the games it finds for `words`.
+/// Only the words are sent.
+fn search(
+    service: Option<&Service>,
+    stores: Option<&StoreArt>,
+    gates: &Gates,
+    source: ArtSource,
+    words: &str,
+) -> Result<Vec<Hit>, Failure> {
+    let failure = |error: Error| match error {
+        Error::KeyRefused => Failure::KeyRefused,
+        Error::Busy(_) => Failure::Busy,
+        Error::Failed(why) => Failure::Failed(why),
+    };
+    match (Store::of(source), stores, service) {
+        (Some(store), Some(stores), _) => {
+            gates.ask(source.key(), || stores.find(store, words).unwrap_or(Ok(Vec::new()))).map_err(failure)
+        }
+        (Some(_), None, _) => Err(Failure::Offline),
+        (None, _, Some(service)) => gates.ask(&host(service.base()), || service.search(words)).map_err(failure),
+        (None, _, None) => Err(Failure::NoKey),
+    }
+}
+
 /// Keeps a picture's bytes as `<dir>/<name>.<ext>` if they are a PNG, JPEG or WebP; gives where.
 fn keep(dir: &Path, name: &str, bytes: &[u8]) -> Option<PathBuf> {
     let ext = extension(bytes)?;
@@ -289,6 +339,7 @@ mod tests {
         let sender = Mutex::new(sender);
         let picker = Picker::start(
             Some(Service::new(&fake.url(), KEY)),
+            None,
             &dir.path().join(THUMBS),
             pace(),
             Arc::new(|_| {}),
@@ -302,7 +353,7 @@ mod tests {
         loop {
             while let Some(want) = pager.want(page) {
                 pager.asking(want);
-                picker.ask(Ask::Page { game: key(), name: "Made-up Game".into(), tab, page: want });
+                picker.ask(Ask::Page { game: key(), name: "Made-up Game".into(), matched: None, tab, page: want });
                 match answers.recv_timeout(Duration::from_secs(10)).expect("an answer") {
                     Answer::Page { result: Ok(reply), .. } => pager.took(reply),
                     other => panic!("{other:?}"),
@@ -361,10 +412,10 @@ mod tests {
         let (sender, answers) = mpsc::channel();
         let sender = Mutex::new(sender);
         let dir = tempfile::tempdir().unwrap();
-        let picker = Picker::start(None, &dir.path().join(THUMBS), pace(), Arc::new(|_| {}), move |answer| {
+        let picker = Picker::start(None, None, &dir.path().join(THUMBS), pace(), Arc::new(|_| {}), move |answer| {
             let _ = sender.lock().unwrap().send(answer);
         });
-        picker.ask(Ask::Page { game: key(), name: "Made-up Game".into(), tab: Tab::Square, page: 0 });
+        picker.ask(Ask::Page { game: key(), name: "Made-up Game".into(), matched: None, tab: Tab::Square, page: 0 });
         let answer = answers.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(matches!(answer, Answer::Page { result: Err(Failure::NoKey), .. }), "{answer:?}");
 
@@ -376,6 +427,7 @@ mod tests {
         let kept = lines.clone();
         let picker = Picker::start(
             Some(Service::new(&fake.url(), KEY)),
+            None,
             &dir.path().join(THUMBS),
             pace(),
             Arc::new(move |line| kept.lock().unwrap().push(line.to_string())),
@@ -384,7 +436,7 @@ mod tests {
             },
         );
         let started = Instant::now();
-        picker.ask(Ask::Page { game: key(), name: "Made-up Game".into(), tab: Tab::Square, page: 0 });
+        picker.ask(Ask::Page { game: key(), name: "Made-up Game".into(), matched: None, tab: Tab::Square, page: 0 });
         let answer = answers.recv_timeout(Duration::from_secs(10)).unwrap();
         assert!(started.elapsed() >= Duration::from_secs(1));
         let Answer::Page { result: Ok(reply), .. } = answer else { panic!("{answer:?}") };
@@ -407,5 +459,64 @@ mod tests {
             let _ = done.send(bytes);
         });
         assert_eq!(got.recv_timeout(Duration::from_secs(10)).unwrap().unwrap(), PNG);
+    }
+
+    #[test]
+    fn a_search_for_the_match_game_page_asks_the_source_named_with_the_words_alone() {
+        use super::super::fake::StoreScript;
+        use super::super::store_online::Hosts;
+        use model::ArtSource;
+
+        let mut stores = StoreScript::new(Arc::new(|_, _, _| PNG.to_vec()));
+        stores.named = vec![
+            ("steam".into(), "Made-up Realm".into(), "70".into()),
+            ("steam".into(), "Made-up Realm Classic".into(), "71".into()),
+        ];
+        let games = vec![
+            FakeGame { id: 9, name: "Made-up Realm".into(), platforms: vec![], kinds: Kind::ALL.to_vec() },
+            FakeGame { id: 8, name: "Another Made-up Game".into(), platforms: vec![], kinds: Kind::ALL.to_vec() },
+        ];
+        let script = Script { games, stores: Some(stores), ..Script::new(KEY, Arc::new(|_, _| PNG.to_vec())) };
+        let fake = FakeService::start(0, script).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let start = |service: Option<Service>, stores: Option<StoreArt>| {
+            let (sender, answers) = mpsc::channel();
+            let sender = Mutex::new(sender);
+            let picker = Picker::start(service, stores, &dir.path().join(THUMBS), pace(), Arc::new(|_| {}), move |a| {
+                let _ = sender.lock().unwrap().send(a);
+            });
+            (picker, answers)
+        };
+        let search = |source| Ask::Search { game: key(), source, words: "Made-up Realm".into() };
+        let hits = |answer: Answer| match answer {
+            Answer::Results { result: Ok(hits), words, .. } if words == "Made-up Realm" => {
+                hits.into_iter().map(|hit| (hit.id, hit.name)).collect::<Vec<_>>()
+            }
+            other => panic!("{other:?}"),
+        };
+
+        let (picker, answers) =
+            start(Some(Service::new(&fake.url(), KEY)), Some(StoreArt::new(Hosts::all_at(&fake.stores_url()))));
+        picker.ask(search(ArtSource::SteamGridDb));
+        let found = hits(answers.recv_timeout(Duration::from_secs(10)).unwrap());
+        assert_eq!(found, [("9".to_string(), "Made-up Realm".to_string())]);
+        picker.ask(search(ArtSource::Steam));
+        let found = hits(answers.recv_timeout(Duration::from_secs(10)).unwrap());
+        assert_eq!(found, [("70".into(), "Made-up Realm".into()), ("71".into(), "Made-up Realm Classic".into())]);
+        // The key went to SteamGridDB's API alone; Steam's search was sent the words and nothing else.
+        for request in fake.requests() {
+            let to_api = request.path.starts_with("/search/");
+            assert_eq!(request.authorization.is_some(), to_api, "{request:?}");
+        }
+        drop(picker);
+
+        // With art online off the stores are not asked; with no key, SteamGridDB is not.
+        let (_picker, answers) = start(None, None);
+        _picker.ask(search(ArtSource::Steam));
+        let answer = answers.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(answer, Answer::Results { result: Err(Failure::Offline), .. }), "{answer:?}");
+        _picker.ask(search(ArtSource::SteamGridDb));
+        let answer = answers.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(matches!(answer, Answer::Results { result: Err(Failure::NoKey), .. }), "{answer:?}");
     }
 }

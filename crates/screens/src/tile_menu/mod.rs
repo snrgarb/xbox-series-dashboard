@@ -120,6 +120,8 @@ enum More {
     RefreshArt,
     /// Choose the game's pictures from SteamGridDB's candidates (#213).
     ChangeArt,
+    /// Say which of the online sources' games this one is (docs/spec/match-game.md).
+    MatchGame,
     /// Hide the game, or show it again.
     Hide(bool),
 }
@@ -202,6 +204,7 @@ fn more_rows(game: &Game) -> Vec<Row<More>> {
     if !game.source.is_empty() && !game.source_id.is_empty() {
         rows.push(Row::new(icon::REFRESH, "Refresh art", More::RefreshArt));
         rows.push(Row::new(icon::CHANGE_ART, "Change art", More::ChangeArt));
+        rows.push(Row::new(icon::MATCH_GAME, "Match game", More::MatchGame));
     }
     rows
 }
@@ -385,6 +388,11 @@ impl Page for TileMenu {
                 // The picker in the menu's place, over what the menu was over: B there comes back to that.
                 Answer::Chose(More::ChangeArt) => Some(match find(around.library, &self.game) {
                     Some(game) => PageAction::Replace(crate::art_picker::open(&game)),
+                    None => PageAction::Close,
+                }),
+                // Match game the same way.
+                Answer::Chose(More::MatchGame) => Some(match find(around.library, &self.game) {
+                    Some(game) => PageAction::Replace(crate::match_game::open(&game)),
                     None => PageAction::Close,
                 }),
                 Answer::Declined => {

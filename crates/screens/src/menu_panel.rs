@@ -93,6 +93,8 @@ pub mod icon {
     pub const REFRESH: char = '\u{E895}';
     /// Change art (Segoe Fluent Icons' Photo): choose a game's pictures.
     pub const CHANGE_ART: char = '\u{E91B}';
+    /// Match game (Segoe Fluent Icons' Search): say which of a source's games a game is.
+    pub const MATCH_GAME: char = '\u{E721}';
 }
 
 /// One row: what it shows, and what choosing it means to whoever made the panel.

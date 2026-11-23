@@ -62,6 +62,8 @@ pub enum Open {
     Achievements(crate::achievements::Entry),
     /// A game's art picker, over whatever asked for it (`art_picker::open`).
     ArtPicker(art_picker::Entry),
+    /// A game's Match game page, over whatever asked for it (`match_game::open`).
+    MatchGame(crate::match_game::Entry),
     /// A licence agreement a store's install asks the user to accept, over whatever is up (#230,
     /// `Dashboard::ask_agreement`).
     Agreement(crate::agreement::Entry),
@@ -90,6 +92,7 @@ impl Open {
             Open::InstallFrom(entry) => Box::new(crate::install_from::InstallFrom::open(entry, around)?),
             Open::Achievements(entry) => Box::new(crate::achievements::Achievements::open(entry, around)?),
             Open::ArtPicker(entry) => Box::new(art_picker::ArtPicker::open(entry, around)?),
+            Open::MatchGame(entry) => Box::new(crate::match_game::MatchGame::open(entry, around)?),
             Open::Agreement(entry) => Box::new(crate::agreement::AgreementPrompt::open(entry)),
             Open::DiscordSignIn => Box::new(crate::discord_sign_in::DiscordSignIn::open()),
         })
@@ -249,7 +252,8 @@ pub trait Page {
     /// The game's whole list, in its store's order, as the library database has it now.
     fn set_achievements(&mut self, _game: i64, _list: Vec<model::achievement::Achievement>) {}
 
-    /// For the art picker: what it wants fetched now, each thing once (`art_picker::ArtPicker::art_asks`).
+    /// For the art picker and Match game: what it wants fetched now, each thing once
+    /// (`art_picker::ArtPicker::art_asks`).
     fn art_asks(&mut self) -> Vec<model::art_picker::Ask> {
         Vec::new()
     }
@@ -257,7 +261,7 @@ pub trait Page {
     /// For the art picker: what was fetched.
     fn art_answer(&mut self, _answer: model::art_picker::Answer) {}
 
-    /// Whether this is an art picker.
+    /// Whether this is an art picker, or another page that asks the art picker's network (Match game).
     fn is_art_picker(&self) -> bool {
         false
     }

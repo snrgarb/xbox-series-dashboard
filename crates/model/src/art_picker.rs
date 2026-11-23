@@ -199,8 +199,11 @@ impl Failure {
 /// What the picker asks of whoever has the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ask {
-    /// A page of the service's list of the game's candidates of this kind.
-    Page { game: GameKey, name: String, tab: Tab, page: u32 },
+    /// A page of the service's list of the game's candidates of this kind. `matched`: the game's id at SteamGridDB
+    /// where the user matched it there (docs/spec/match-game.md), which is then not looked for.
+    Page { game: GameKey, name: String, matched: Option<u64>, tab: Tab, page: u32 },
+    /// An online source's search for these words, for the Match game page (docs/spec/match-game.md).
+    Search { game: GameKey, source: crate::ArtSource, words: String },
     /// A candidate's thumbnail, downloaded to a file the grid can draw.
     Thumb { id: u64, url: String },
 }
@@ -218,6 +221,13 @@ pub enum Answer {
     Thumb {
         id: u64,
         path: Option<PathBuf>,
+    },
+    /// What a source's search found, at most `art_match::MOST_HITS`, in its order.
+    Results {
+        game: GameKey,
+        source: crate::ArtSource,
+        words: String,
+        result: Result<Vec<crate::art_match::Hit>, Failure>,
     },
 }
 

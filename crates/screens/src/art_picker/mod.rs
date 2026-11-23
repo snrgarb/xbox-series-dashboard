@@ -119,6 +119,8 @@ impl TabState {
 pub struct ArtPicker {
     game: GameKey,
     name: String,
+    /// The game's id at SteamGridDB where the user matched it there (docs/spec/match-game.md).
+    matched: Option<u64>,
     art: GameArt,
     tab: Tab,
     tabs: Vec<TabState>,
@@ -148,7 +150,8 @@ impl ArtPicker {
                 TabState::new(fixed, tab, service.clone())
             })
             .collect();
-        Some(Self { game: entry.game, name: game.name.clone(), art: game.art.clone(), tab: Tab::Square, tabs })
+        let matched = game.matched(model::ArtSource::SteamGridDb).and_then(|m| m.id.parse().ok());
+        Some(Self { game: entry.game, name: game.name.clone(), matched, art: game.art.clone(), tab: Tab::Square, tabs })
     }
 
     fn current(&self) -> &TabState {
@@ -162,12 +165,12 @@ impl ArtPicker {
     /// What the shell is to fetch now: the next page of the list the tab's page shown needs, and the thumbnails of
     /// its candidates not asked for yet. Each is asked once.
     pub fn art_asks(&mut self) -> Vec<Ask> {
-        let (game, name, tab) = (self.game.clone(), self.name.clone(), self.tab);
+        let (game, name, matched, tab) = (self.game.clone(), self.name.clone(), self.matched, self.tab);
         let state = self.current_mut();
         let mut asks = Vec::new();
         if let Some(page) = state.pager.want(state.page) {
             state.pager.asking(page);
-            asks.push(Ask::Page { game, name, tab, page });
+            asks.push(Ask::Page { game, name, matched, tab, page });
         }
         let wanted: Vec<(u64, String)> = state
             .pager
@@ -212,7 +215,7 @@ impl ArtPicker {
                     }
                 }
             }
-            Answer::Page { .. } => {}
+            Answer::Page { .. } | Answer::Results { .. } => {}
         }
     }
 

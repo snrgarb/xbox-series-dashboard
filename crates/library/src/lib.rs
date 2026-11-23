@@ -36,6 +36,7 @@ pub mod filters;
 pub mod game_pass;
 pub mod history;
 pub mod launchers;
+pub mod matches;
 pub mod profiles;
 pub mod queue;
 pub mod refresh;
@@ -137,6 +138,8 @@ const MIGRATIONS: &[&str] = &[
     "INSERT OR REPLACE INTO settings (key, value) VALUES ('steam.last_played', 'retake');",
     // 11: the games of the PC Game Pass catalogue (`Game::game_pass`, #277).
     "ALTER TABLE games ADD COLUMN game_pass INTEGER NOT NULL DEFAULT 0;",
+    // 12: the user's matches of a game to the online sources' own entries (docs/spec/match-game.md).
+    matches::MIGRATION,
 ];
 
 /// What a sync changed.
@@ -594,6 +597,7 @@ impl Database {
                 community_score: score(16)?,
                 play_count: row.get::<_, i64>(17)?.clamp(0, u32::MAX as i64) as u32,
                 game_pass: row.get(18)?,
+                matches: Vec::new(),
                 cover: None,
                 hero: None,
                 header: None,
@@ -649,6 +653,7 @@ impl Database {
         }
         // And over all of it, what the user chose.
         self.apply_choices(&mut games)?;
+        self.apply_matches(&mut games)?;
         Ok(games)
     }
 

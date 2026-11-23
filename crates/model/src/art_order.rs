@@ -44,7 +44,8 @@ impl ArtSource {
         }
     }
 
-    fn from_key(key: &str) -> Option<Self> {
+    /// The source of this key; None for one it does not know.
+    pub fn from_key(key: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|source| source.key() == key)
     }
 }

@@ -24,6 +24,7 @@ pub mod install_where;
 pub mod keyboard;
 pub mod launch;
 pub mod manage_queue;
+pub mod match_game;
 pub mod menu_panel;
 pub mod my_games;
 pub mod now_playing;
@@ -162,6 +163,10 @@ pub enum Effect {
     /// in the library database, the full picture downloaded first for a SteamGridDB one; `chosen: None` puts the
     /// Dashboard's own pick back. A new snapshot follows.
     ChooseArt(model::art_picker::Choice),
+    /// Match game's choice (docs/spec/match-game.md): the game is that one of the source's games (`matched`), or,
+    /// with none, found by its name again. Kept in the library database; the game's downloaded art is then forgotten
+    /// and looked up again, that game first, as Refresh art does. A new snapshot follows.
+    MatchGame { game: model::GameKey, source: model::ArtSource, matched: Option<model::art_match::Match> },
     /// Settings > Launchers switched the launcher with this key (`Game::source`) on or off (docs/spec/launchers.md).
     /// A new snapshot follows, in which its games are back, or in no list at all.
     Launcher { key: String, on: bool },

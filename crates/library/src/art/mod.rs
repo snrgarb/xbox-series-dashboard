@@ -715,4 +715,71 @@ mod tests {
         assert_eq!(squares.len(), 2, "{squares:?}");
         assert!(squares[0].ends_with("&styles=alternate") && !squares[1].contains("styles="), "{squares:?}");
     }
+
+    /// The user's match of a game on a source (docs/spec/match-game.md).
+    fn matched(source: model::ArtSource, id: &str, name: &str) -> model::art_match::Match {
+        model::art_match::Match { source, id: id.into(), name: name.into() }
+    }
+
+    #[test]
+    fn a_game_matched_on_steamgriddb_is_asked_for_by_the_match_never_by_its_name() {
+        // Battle.net's name for it is no name SteamGridDB knows; the user matched it to the game it is there.
+        let fake = FakeService::start(0, script(vec![known(9, "Made-up Realm", &[], &Kind::ALL)])).unwrap();
+        let mut forever = game("battlenet", "realm", "Made-up Realm: Forever");
+        forever.matches = vec![matched(model::ArtSource::SteamGridDb, "9", "Made-up Realm")];
+        let unmatched = game("battlenet", "other", "Made-up Realm: Forever");
+        let library = Library { games: vec![forever, unmatched], ..Library::default() };
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        let ran = run(&art, &fake, KEY, &library);
+        for kind in Kind::ALL {
+            assert!(art.find("battlenet", "realm", kind).is_some(), "{kind:?}");
+            assert!(art.find("battlenet", "other", kind).is_none(), "{kind:?}: its name finds none");
+        }
+        assert_eq!((ran.summary.found, ran.summary.none), (1, 1));
+        let asked = api(&fake.requests());
+        assert!(asked.iter().any(|path| path.starts_with("/grids/game/9?")), "{asked:?}");
+        // The unmatched one is searched for by its name, once; the matched one never.
+        assert_eq!(asked.iter().filter(|path| path.starts_with("/search/autocomplete/")).count(), 1, "{asked:?}");
+    }
+
+    #[test]
+    fn a_game_matched_on_a_store_is_asked_for_by_the_stores_id_for_it() {
+        use model::ArtSource::*;
+        let library = || {
+            let mut forever = game("battlenet", "realm", "Made-up Realm: Forever");
+            forever.matches = vec![
+                matched(Steam, "77", "Made-up Realm Classic"),
+                matched(PlayStation, "UP0000-MADEUP77", "Made-up Realm"),
+            ];
+            Library { games: vec![forever], ..Library::default() }
+        };
+        let fake = || {
+            with_named(
+                vec![],
+                vec![
+                    ("steam", "Made-up Realm Classic", "77", &[Kind::Cover, Kind::Hero, Kind::Header]),
+                    // Two of the PlayStation Store's games its search finds for the name: the one matched is taken.
+                    ("playstation", "Made-up Realm", "UP0000-MADEUP76", &[Kind::Square, Kind::Hero]),
+                    ("playstation", "Made-up Realm", "UP0000-MADEUP77", &[Kind::Square, Kind::Hero]),
+                ],
+            )
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let art = ArtDir::under(dir.path());
+        let service = fake();
+        run_in(&art, &service, None, &library(), &[Steam, PlayStation]);
+        assert_eq!(whose(&art, "battlenet", "realm", Kind::Cover), "store steam 77 cover");
+        assert_eq!(whose(&art, "battlenet", "realm", Kind::Square), "store playstation UP0000-MADEUP77 square");
+        let asked: Vec<String> = service.requests().into_iter().map(|r| r.path).collect();
+        assert!(!asked.iter().any(|path| path.contains("steam-store")), "Steam's search not asked: {asked:?}");
+
+        // A PlayStation match its search no longer finds: none, and said by the game's id.
+        let service = with_named(vec![], vec![("playstation", "Made-up Realm", "UP0000-MADEUP76", &[Kind::Square])]);
+        let art = ArtDir::under(&dir.path().join("second"));
+        let ran = run_in(&art, &service, None, &library(), &[PlayStation]);
+        assert_eq!(whose(&art, "battlenet", "realm", Kind::Square), "none");
+        let said = "art: battlenet realm: PlayStation: the game matched is not in its search";
+        assert!(ran.log.iter().any(|line| line == said), "{:?}", ran.log);
+    }
 }

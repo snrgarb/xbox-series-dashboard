@@ -1,5 +1,6 @@
 //! The domain: what a game is, the library of them, a saved filter, a Play session. No I/O.
 pub mod achievement;
+pub mod art_match;
 pub mod art_order;
 pub mod art_picker;
 pub mod audio;
@@ -133,6 +134,10 @@ pub struct Game {
     /// "Xbox"; #277). Only what Microsoft's public catalogue lists: whether the user has a subscription is not known.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub game_pass: bool,
+    /// The user's matches of the game to the online sources' own entries for it (docs/spec/match-game.md), one a
+    /// source at most. Only a snapshot says; a source reads none.
+    #[serde(skip)]
+    pub matches: Vec<art_match::Match>,
 }
 
 /// What a store's client on this PC says of the game's own art online: the id its public catalogue knows the game by
@@ -194,6 +199,11 @@ pub struct GameKey {
 impl Game {
     pub fn key(&self) -> GameKey {
         GameKey { id: self.id, source: self.source.clone(), source_id: self.source_id.clone() }
+    }
+
+    /// The user's match of the game on `source`, if there is one.
+    pub fn matched(&self, source: ArtSource) -> Option<&art_match::Match> {
+        self.matches.iter().find(|m| m.source == source)
     }
 
     /// Whether this is the game `key` names.

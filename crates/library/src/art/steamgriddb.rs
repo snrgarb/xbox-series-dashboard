@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use model::art_match::{Hit, MOST_HITS};
 use model::art_picker::{Candidate, Reply, Tab, LIMIT};
 
 use super::cache::Kind;
@@ -59,6 +60,27 @@ pub fn best_match(name: &str, results: &[(u64, String, bool)]) -> Option<u64> {
     let ranked: Vec<(String, u64, u8)> =
         results.iter().map(|(id, n, verified)| (n.clone(), *id, u8::from(!*verified))).collect();
     super::names::pick(name, &ranked).copied()
+}
+
+/// A hit's id as SteamGridDB's own number: its search gives no other.
+fn hit_id(hit: &Hit) -> u64 {
+    hit.id.parse().unwrap_or_default()
+}
+
+/// The year of a time in Unix seconds, by the proleptic Gregorian calendar; None before 1970 or past 9999.
+pub(crate) fn year_of(seconds: i64) -> Option<u16> {
+    if seconds < 0 {
+        return None;
+    }
+    // Days since 1970-01-01 to a civil year (Howard Hinnant's `civil_from_days`).
+    let days = seconds / 86_400 + 719_468;
+    let era = days / 146_097;
+    let doe = days - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let year = yoe + era * 400 + i64::from(mp >= 10);
+    u16::try_from(year).ok().filter(|y| *y <= 9999)
 }
 
 pub struct Service {
@@ -125,8 +147,23 @@ impl Service {
         if plain_name(name).is_empty() {
             return Ok(None);
         }
-        let Some(found) = self.get(&format!("search/autocomplete/{}", segment(name)))? else { return Ok(None) };
-        let results: Vec<(u64, String, bool)> = found
+        let results: Vec<(u64, String, bool)> =
+            self.autocomplete(name)?.into_iter().map(|(hit, verified)| (hit_id(&hit), hit.name, verified)).collect();
+        Ok(best_match(name, &results))
+    }
+
+    /// The games SteamGridDB's search finds for these words, in its order, each with whether it is verified: for
+    /// the Match game page (docs/spec/match-game.md), and for finding a game by its name. Only the words are sent.
+    pub fn search(&self, words: &str) -> Result<Vec<Hit>, Error> {
+        if plain_name(words).is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self.autocomplete(words)?.into_iter().map(|(hit, _)| hit).take(MOST_HITS).collect())
+    }
+
+    fn autocomplete(&self, words: &str) -> Result<Vec<(Hit, bool)>, Error> {
+        let Some(found) = self.get(&format!("search/autocomplete/{}", segment(words)))? else { return Ok(Vec::new()) };
+        Ok(found
             .as_array()
             .map(|games| {
                 games
@@ -134,12 +171,13 @@ impl Service {
                     .filter_map(|game| {
                         let id = game.get("id")?.as_u64()?;
                         let name = game.get("name")?.as_str()?.to_string();
-                        Some((id, name, game.get("verified").and_then(Value::as_bool).unwrap_or(false)))
+                        let year = game.get("release_date").and_then(Value::as_i64).and_then(year_of);
+                        let verified = game.get("verified").and_then(Value::as_bool).unwrap_or(false);
+                        Some((Hit { id: id.to_string(), name, year }, verified))
                     })
                     .collect()
             })
-            .unwrap_or_default();
-        Ok(best_match(name, &results))
+            .unwrap_or_default())
     }
 
     /// The address of the game's first picture of this kind that is static, neither adult nor a joke nor a
@@ -328,6 +366,15 @@ mod tests {
         assert_eq!(best_match("Hadrel II", &results[..1]), Some(1));
         assert_eq!(best_match("", &results), None);
         assert_eq!(best_match("™", &results), None);
+    }
+
+    #[test]
+    fn a_release_date_is_its_year() {
+        assert_eq!(year_of(0), Some(1970));
+        assert_eq!(year_of(1_100_563_200), Some(2004), "2004-11-16");
+        assert_eq!(year_of(1_704_067_199), Some(2023), "the last second of 2023");
+        assert_eq!(year_of(1_704_067_200), Some(2024));
+        assert_eq!(year_of(-1), None);
     }
 
     #[test]

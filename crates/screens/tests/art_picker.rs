@@ -115,6 +115,7 @@ impl Service {
                         let tab = Tab::ALL.into_iter().find(|t| format!("{t:?}") == tab).unwrap();
                         Answer::Thumb { id: picture, path: Some(thumb(tab, n.parse().unwrap())) }
                     }
+                    Ask::Search { .. } => unreachable!("the art picker searches nothing"),
                 });
             }
         }
