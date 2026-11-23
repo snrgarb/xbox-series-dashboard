@@ -44,7 +44,15 @@
 //! any such line says which programs and regions the account has a game account for, and `game_account` holds for
 //! those (the program case-blind, a rule with no `region` for any region). A game so reached is listed as owned,
 //! as the client lists it, even where the subscription has lapsed. With no log, or none with such a line, `game_account`
-//! holds for no game, as before. (The Bundle, `xbox-series-theme`, says nothing of Battle.net ownership or WoW.)
+//! holds for no game, as before.
+//!
+//! **Flavours** (#338). World of Warcraft is one program and one base product (`WoW`) with a product *type* for each
+//! flavour (`wow_classic`, `wow_classic_era`, `wow_classic_anniversary`, `wowf`: WoW: Forever), each with its own uid
+//! (the client's log makes a product state for each), its own install (`wow_anniversary` is the NGDP code of
+//! `wow_classic_anniversary`) and its own name; the program's rules add each for any game account. The types of the
+//! categories in [`FLAVOUR_CATEGORIES`] are games of their own; test realms, betas and vendor builds are not. A flavour
+//! launches as the product the client files it under (`override_product_id`: `WoWC` for the three Classics, `WoWF`);
+//! that `launch WoWC` picks among the Classics is not confirmed. (The Bundle, `xbox-series-theme`, says nothing of Battle.net ownership or WoW.)
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -196,13 +204,30 @@ fn root(db: &Connection, cache: &Path) -> Result<Value> {
     bail!("the catalogue catalog_cache names is not in {}", cache.display())
 }
 
+/// The catalogue's categories of product type that are games to play in their own right, not test realms or builds:
+/// World of Warcraft's `cat_wow_classic_live` (Classic, Classic Era, Anniversary) and `cat_wow_forever` (WoW: Forever).
+/// A type of one of these categories, and not `deprecated`, is a **flavour** (#338): a rule that adds it to the
+/// account gives a game of its own, with the type's own uid, code, launch product and name.
+const FLAVOUR_CATEGORIES: &[&str] = &["cat_wow_classic_live", "cat_wow_forever"];
+
+/// A product type of a base product: what it says of itself.
+#[derive(Debug, Clone, Default)]
+struct Kind {
+    uid: Option<String>,
+    /// Its own name, where it has one (`name`, a key into the fragment's strings).
+    name: Option<String>,
+    /// The product the client launches it as (`override_product_id`: Classic's `WoWC`).
+    launch: Option<String>,
+    deprecated: bool,
+}
+
 /// A product of the catalogue, from its base fragment.
 #[derive(Debug, Clone)]
 struct Product {
     program: String,
     name: String,
-    /// Product type to uid, where the type names one.
-    types: BTreeMap<String, Option<String>>,
+    /// Product type to what it says of itself.
+    types: BTreeMap<String, Kind>,
 }
 
 /// The catalogue's fragments, put together.
@@ -214,6 +239,8 @@ struct Catalogue {
     variants: HashMap<String, String>,
     /// Uid (lower case) to NGDP code.
     installs: HashMap<String, String>,
+    /// Product type to its category, from the fragments' `types.definitions`.
+    categories: HashMap<String, String>,
     /// Each program's rules, `run_each_rule` then `run_first_rule`.
     rules: Vec<(Vec<Value>, Vec<Value>)>,
 }
@@ -251,13 +278,27 @@ impl Catalogue {
             }
             let key = base.get("name").and_then(Value::as_str).unwrap_or_default();
             let types = base.get("types").and_then(Value::as_object).into_iter().flatten();
+            let text = |t: &Value, key: &str| t.get(key).and_then(Value::as_str).map(str::to_string);
             let types = types
-                .map(|(kind, t)| (kind.clone(), t.get("uid").and_then(Value::as_str).map(str::to_ascii_lowercase)))
+                .map(|(kind, t)| {
+                    let name = text(t, "name").and_then(|key| strings(&key));
+                    let uid = text(t, "uid").map(|uid| uid.to_ascii_lowercase());
+                    let deprecated = t.get("deprecated").and_then(Value::as_bool) == Some(true);
+                    (kind.clone(), Kind { uid, name, launch: text(t, "override_product_id"), deprecated })
+                })
                 .collect();
             let name = strings(key).unwrap_or_else(|| id.to_string());
             self.products.insert(id.to_string(), Product { program: program.to_string(), name, types });
             for variant in product.get("variants").and_then(Value::as_object).into_iter().flatten().map(|(v, _)| v) {
                 self.variants.entry(variant.clone()).or_insert_with(|| id.to_string());
+            }
+        }
+        let definitions = fragment.get("types").and_then(|t| t.get("definitions")).and_then(Value::as_array);
+        for definition in definitions.into_iter().flatten() {
+            if let (Some(id), Some(category)) =
+                (definition.get("id").and_then(Value::as_str), definition.get("category").and_then(Value::as_str))
+            {
+                self.categories.entry(id.to_string()).or_insert_with(|| category.to_string());
             }
         }
         for (uid, install) in fragment.get("installs").and_then(Value::as_object).into_iter().flatten() {
@@ -271,21 +312,39 @@ impl Catalogue {
         }
     }
 
-    /// The game a product id (or a variant's) is, by its retail install: None where it has none.
-    fn game(&self, id: &str) -> Option<Listed> {
+    /// Whether a product type is a flavour: a game of its own (see [`FLAVOUR_CATEGORIES`]).
+    fn flavour(&self, kind: &str, of: &Kind) -> bool {
+        !of.deprecated && self.categories.get(kind).is_some_and(|c| FLAVOUR_CATEGORIES.contains(&c.as_str()))
+    }
+
+    /// The game a product id (or a variant's) is as product type `kind`: by its retail install for `retail`, by the
+    /// flavour's own uid (which it must name) for a flavour; None for any other type, and where it has no install.
+    fn game(&self, id: &str, kind: &str) -> Option<Listed> {
         let id = if self.products.contains_key(id) { id } else { self.variants.get(id)? };
         let product = &self.products[id];
-        let uid = product.types.get("retail")?.clone().unwrap_or_else(|| id.to_ascii_lowercase());
+        let of = product.types.get(kind);
+        let (uid, launch, name) = if kind == "retail" {
+            let uid = of.and_then(|k| k.uid.clone()).unwrap_or_else(|| id.to_ascii_lowercase());
+            (uid, product.program.clone(), product.name.clone())
+        } else {
+            let of = of.filter(|of| self.flavour(kind, of))?;
+            let name = of.name.clone().unwrap_or_else(|| product.name.clone());
+            (of.uid.clone()?, of.launch.clone().unwrap_or_else(|| product.program.clone()), edition_name(kind, name))
+        };
         let code = self.installs.get(&uid)?.clone();
         if crate::product::clients_own(&uid) {
             return None;
         }
-        Some(Listed { code, uid, launch: product.program.clone(), name: product.name.clone() })
+        Some(Listed { code, uid, launch, name })
     }
 
-    /// Every game, by code, once.
+    /// Every game, by code, once: each product's retail game and each flavour of it.
     fn games(&self) -> Vec<Listed> {
-        let mut games: Vec<Listed> = self.products.keys().filter_map(|id| self.game(id)).collect();
+        let mut games: Vec<Listed> = Vec::new();
+        for (id, product) in &self.products {
+            let kinds = product.types.iter().filter(|(k, of)| self.flavour(k, of)).map(|(k, _)| k.as_str());
+            games.extend(std::iter::once("retail").chain(kinds).filter_map(|kind| self.game(id, kind)));
+        }
         games.sort_by(|a, b| a.code.cmp(&b.code));
         games.dedup_by(|a, b| a.code == b.code);
         games
@@ -303,10 +362,10 @@ impl Catalogue {
                 judge.run(first, true, &mut added);
             }
             for (id, kind, tags) in added {
-                if kind != "retail" || (free && !tags.iter().any(|t| t == "play_for_free")) {
+                if free && !tags.iter().any(|t| t == "play_for_free") {
                     continue;
                 }
-                let Some(game) = self.game(&id) else { continue };
+                let Some(game) = self.game(&id, &kind) else { continue };
                 if !owned.iter().any(|o| o.game.code == game.code) {
                     owned.push(Owned { game, free });
                 }
@@ -314,6 +373,15 @@ impl Catalogue {
         }
         owned.sort_by(|a, b| a.game.code.cmp(&b.game.code));
         owned
+    }
+}
+
+/// A flavour's name as the Dashboard lists it. The client's own string for Classic Era is "World of Warcraft Classic",
+/// which reads as the Classic of the day (Mists of Pandaria Classic) and would be taken for it by a search.
+fn edition_name(kind: &str, name: String) -> String {
+    match kind {
+        k if k.ends_with("_era") && !name.to_ascii_lowercase().contains("era") => format!("{name} Era"),
+        _ => name,
     }
 }
 
@@ -614,6 +682,77 @@ mod tests {
         assert_eq!(owned_codes(&[("battle.net-1.log", "nothing\n".to_string())], &fragments), []);
         // A log that is not the client's is not read.
         assert_eq!(owned_codes(&[("other.log", line("US-WoW-5"))], &fragments), []);
+    }
+
+    /// Flavours (#338): one program, one base product, several product types that are games of their own (a live
+    /// category), each with its own uid, install, launch product and name; the test realms and the deprecated left out.
+    #[test]
+    fn each_flavour_a_game_account_grants_is_a_game_of_its_own() {
+        let flavour =
+            |uid: &str, name: &str, launch: &str| json!({"uid": uid, "name": name, "override_product_id": launch});
+        let fragment = json!({
+            "fragment_id": "quest",
+            "products": [
+                {"id": "QST", "base": {"program_id": "QST", "name": "x#QST", "types": {
+                    "retail": {},
+                    "q_classic": flavour("q_classic", "x#QCLASSIC", "QSTC"),
+                    "q_era": flavour("q_era", "x#QCLASSIC_BASE", "QSTC"),
+                    "q_forever": flavour("q_forever", "x#QFOREVER", "QSTF"),
+                    "q_old": {"uid": "q_old", "name": "x#QOLD", "deprecated": true},
+                    "q_ptr": {"uid": "q_ptr", "name": "x#QPTR"},
+                    "q_dev": {"uid": "q_dev"}}},
+                 "variants": {"QSTNoUpgrade": {}}},
+            ],
+            "installs": {"qst": {"tact_product": "qst"}, "q_classic": {"tact_product": "q_classic"},
+                "q_era": {"tact_product": "q_classic_era"}, "q_forever": {"tact_product": "qstf"},
+                "q_old": {"tact_product": "qo"}, "q_ptr": {"tact_product": "qp"}, "q_dev": {"tact_product": "qd"}},
+            "types": {"definitions": [
+                {"id": "q_classic", "category": "cat_wow_classic_live"},
+                {"id": "q_era", "category": "cat_wow_classic_live"},
+                {"id": "q_forever", "category": "cat_wow_forever"},
+                {"id": "q_old", "category": "cat_wow_forever"},
+                {"id": "q_ptr", "category": "cat_in_development"}]},
+            "strings": {"default": {"x#QST": "Quest of Realms", "x#QCLASSIC": "Quest Classic",
+                "x#QCLASSIC_BASE": "Quest of Realms Classic", "x#QFOREVER": "Quest: Forever",
+                "x#QOLD": "Quest Old", "x#QPTR": "PTR"}},
+            "program_configuration": {"QST": {"is_game_account_level": true, "run_each_rule": [
+                {"match": {"game_account": {"program_id": "QST", "region": ["US"]}}, "actions": [
+                    {"add_product": {"product_id": {"id": "QST", "type": "q_classic"}}},
+                    {"add_product": {"product_id": {"id": "QST", "type": "q_era"}}},
+                    {"add_product": {"product_id": {"id": "QST", "type": "q_ptr"}}},
+                    {"add_product": {"product_id": {"id": "QST", "type": "q_old"}}},
+                    {"add_product": {"product_id": {"id": "QST", "type": "q_dev"}}},
+                    {"add_product": {"product_id": {"id": "QST", "type": "retail"}}}]},
+                {"match": {"game_account": {"program_id": "QST", "region": ["US"]}}, "actions": [
+                    {"add_product": {"product_id": {"id": "QSTNoUpgrade", "type": "q_forever"}}}]}]}},
+            "version": 1
+        });
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), Some(&[]), &[("quest", fragment)]);
+        std::fs::create_dir(dir.path().join("Logs")).unwrap();
+        std::fs::write(dir.path().join("Logs").join("battle.net-1.log"), line("US-QST-5")).unwrap();
+        let read = read(&dir.path().join("CachedData.db")).unwrap().unwrap();
+        let games: Vec<(&str, &str, &str, &str)> = read
+            .owned
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|o| (o.game.code.as_str(), o.game.uid.as_str(), o.game.launch.as_str(), o.game.name.as_str()))
+            .collect();
+        assert_eq!(
+            games,
+            [
+                ("q_classic", "q_classic", "QSTC", "Quest Classic"),
+                ("q_classic_era", "q_era", "QSTC", "Quest of Realms Classic Era"),
+                ("qst", "qst", "QST", "Quest of Realms"),
+                ("qstf", "q_forever", "QSTF", "Quest: Forever"),
+            ]
+        );
+        // The catalogue lists the same four: no test realm, no deprecated type, no type of no category.
+        assert_eq!(read.catalogue.len(), 4);
+        // With no game account known, none of them is owned.
+        std::fs::remove_file(dir.path().join("Logs").join("battle.net-1.log")).unwrap();
+        assert!(super::read(&dir.path().join("CachedData.db")).unwrap().unwrap().owned.unwrap().is_empty());
     }
 
     #[test]
