@@ -32,10 +32,19 @@
 //!   the client's cache for its features' targeting; 15 of its licences are named by no game's rule); that the
 //!   client's rules mean what they read as (a list is any of it; a rule with no `match` always runs, as the beta and
 //!   test types it adds for everyone suggest); that a game reached only through a **game account** is not owned
-//!   (game accounts are named only in the client's log, not read: a subscription's World of Warcraft, a trial's
-//!   Diablo III); and that a game whose rule tags it `play_for_free` may be installed by any account, though no
+//!   (game accounts are named only in the client's log: see below); and that a game whose rule tags it `play_for_free` may be installed by any account, though no
 //!   licence names it (7 there: their rule asks only for a game account, which the client makes on the first
 //!   play). Those are listed as owned, and marked free ([`Owned::free`]).
+//!
+//! **Game accounts** (#331). Some games' rules ask for no licence but for a game account of the program (World of
+//! Warcraft: `game_account {program_id: "WoW", region: [...]}`, plus a `subscription_license` the Dashboard does not
+//! check). The cache does not hold the account's game accounts; the client's log does, as lines like
+//! `Querying game level information for entity: (Game: <REGION>-<Program>-<id>)` in
+//! `%LOCALAPPDATA%\Battle.net\Logs\battle.net-*.log` (next to `CachedData.db`). The newest of the last few logs that has
+//! any such line says which programs and regions the account has a game account for, and `game_account` holds for
+//! those (the program case-blind, a rule with no `region` for any region). A game so reached is listed as owned,
+//! as the client lists it, even where the subscription has lapsed. With no log, or none with such a line, `game_account`
+//! holds for no game, as before. (The Bundle, `xbox-series-theme`, says nothing of Battle.net ownership or WoW.)
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -86,7 +95,10 @@ pub fn read(db: &Path) -> Result<Option<Read>> {
     let root = root(&connection, &cache)?;
     let catalogue = Catalogue::of(&root, &cache)?;
     let games = catalogue.games();
-    let owned = points.map(|points| catalogue.owned(&points));
+    let owned = points.map(|mut points| {
+        points.game_accounts = game_accounts(&db.with_file_name("Logs"));
+        catalogue.owned(&points)
+    });
     Ok(Some(Read { catalogue: games, owned, written: source_kit::owned::modified(db).unwrap_or(0) }))
 }
 
@@ -96,6 +108,50 @@ struct Account {
     licences: HashSet<u64>,
     region: String,
     country: String,
+    /// The `(program lower case, region)` of each game account the client's log names; None where it names none.
+    game_accounts: Option<HashSet<(String, String)>>,
+}
+
+/// How many of the newest logs are looked through for game accounts (the newest may be a short run that never got as
+/// far as querying them).
+const LOGS_LOOKED_AT: usize = 5;
+
+/// The game accounts the client's newest log (of the last few) names, as `(program lower case, region)`.
+fn game_accounts(logs: &Path) -> Option<HashSet<(String, String)>> {
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(logs)
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+            name.starts_with("battle.net-") && name.ends_with(".log")
+        })
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    files.sort_by(|a, b| b.cmp(a));
+    for (_, path) in files.into_iter().take(LOGS_LOOKED_AT) {
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let found = parse_game_accounts(&String::from_utf8_lossy(&bytes));
+        if !found.is_empty() {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The `(Game: <REGION>-<Program>-<id>)` entries of a log's text, as `(program lower case, region)`.
+fn parse_game_accounts(log: &str) -> HashSet<(String, String)> {
+    let mut found = HashSet::new();
+    for line in log.lines() {
+        let Some(at) = line.find("(Game: ") else { continue };
+        let entry = line[at + "(Game: ".len()..].split(')').next().unwrap_or_default();
+        let mut parts = entry.split('-');
+        if let (Some(region), Some(program), Some(_id)) = (parts.next(), parts.next(), parts.next()) {
+            if !region.is_empty() && !program.is_empty() {
+                found.insert((program.to_ascii_lowercase(), region.to_string()));
+            }
+        }
+    }
+    found
 }
 
 /// `features_cached_data_points`' licences, region and country; None where it has no `licenses`.
@@ -113,6 +169,7 @@ fn points(db: &Connection) -> Result<Option<Account>> {
         licences: licences.iter().filter_map(Value::as_u64).collect(),
         region: text("account_region"),
         country: text("account_country"),
+        game_accounts: None,
     }))
 }
 
@@ -261,7 +318,7 @@ impl Catalogue {
 }
 
 /// The client's rules, judged for an account: `free`, taking every game account as there (the pass that finds the
-/// games free to play).
+/// games free to play); otherwise a game account is there where the client's log named it.
 struct Judge<'a> {
     account: &'a Account,
     free: bool,
@@ -303,6 +360,19 @@ impl Judge<'_> {
         }
     }
 
+    /// Whether the account has a game account for `{program_id, region?}`: the program case-blind, no region for any.
+    fn game_account(&self, value: &Value) -> bool {
+        let Some(accounts) = &self.account.game_accounts else { return false };
+        let Some(program) = value.get("program_id").and_then(Value::as_str) else { return false };
+        let program = program.to_ascii_lowercase();
+        let regions: Vec<&str> = match value.get("region") {
+            Some(Value::Array(r)) => r.iter().filter_map(Value::as_str).collect(),
+            Some(Value::String(r)) => vec![r.as_str()],
+            _ => Vec::new(),
+        };
+        accounts.iter().any(|(p, r)| *p == program && (regions.is_empty() || regions.iter().any(|x| x == r)))
+    }
+
     fn key(&self, key: &str, value: &Value) -> bool {
         let list = |value: &Value| -> Vec<Value> {
             match value {
@@ -321,8 +391,9 @@ impl Judge<'_> {
             "account_country" => named(value, &self.account.country),
             // A PC of an internet cafe's licence: this is none.
             "igr" => value.as_bool() == Some(false),
-            // Not in the files the Dashboard reads (the client's log alone names them).
-            "game_account" => self.free,
+            // `{program_id, region?}`: the client's log names the game accounts (see the header); with none known,
+            // only the pass that finds the free games takes it as held.
+            "game_account" => self.free || self.game_account(value),
             // Anything else (`flag`, what a later client adds): not taken as held.
             _ => false,
         }
@@ -478,6 +549,71 @@ mod tests {
         write(empty.path(), Some(&[]), &fragments);
         let read = super::read(&empty.path().join("CachedData.db")).unwrap().unwrap();
         assert_eq!(read.owned.unwrap().iter().map(|o| o.game.code.as_str()).collect::<Vec<_>>(), ["cdr"]);
+    }
+
+    /// A made-up log line of the client's, for the game account `entity` (`REGION-Program-id`).
+    fn line(entity: &str) -> String {
+        format!("D 2026-01-01 00:00:00.000 [GSAccountProvider] {{Main}} Querying game level information for entity: (Game: {entity})\n")
+    }
+
+    #[test]
+    fn the_logs_game_accounts_are_parsed() {
+        let log = format!(
+            "noise\n{}{}{}D x Querying game time info for entity Id: (Game: US-Ash-9)\n(Game: broken)\n(Game: -X-1)\n",
+            line("US-Ash-1"),
+            line("GLOBAL-Fen-2"),
+            line("EU-Ash-3")
+        );
+        let found = parse_game_accounts(&log);
+        let mut found: Vec<_> = found.into_iter().collect();
+        found.sort();
+        let pair = |p: &str, r: &str| (p.to_string(), r.to_string());
+        assert_eq!(found, [pair("ash", "EU"), pair("ash", "US"), pair("fen", "GLOBAL")]);
+        assert!(parse_game_accounts("nothing here").is_empty());
+    }
+
+    #[test]
+    fn a_game_account_in_the_log_gives_the_game_and_without_one_it_is_as_before() {
+        let wow = |region: Value| {
+            fragment(
+                "WoW",
+                Some("wow"),
+                "wow",
+                "Realm Quest",
+                json!({"is_game_account_level": true, "subscription_license": 1, "run_each_rule": [
+                    {"match": {"game_account": {"program_id": "WoW", "region": region}},
+                     "actions": [{"add_product": {"product_id": {"id": "WoW", "type": "retail"}}}]}]}),
+            )
+        };
+        let owned_codes = |logs: &[(&str, String)], fragments: &[(&str, Value)]| {
+            let dir = tempfile::tempdir().unwrap();
+            write(dir.path(), Some(&[]), fragments);
+            if !logs.is_empty() {
+                std::fs::create_dir(dir.path().join("Logs")).unwrap();
+            }
+            for (name, text) in logs {
+                std::fs::write(dir.path().join("Logs").join(name), text).unwrap();
+            }
+            let read = read(&dir.path().join("CachedData.db")).unwrap().unwrap();
+            read.owned.unwrap().into_iter().map(|o| (o.game.code, o.free)).collect::<Vec<_>>()
+        };
+        let regions = json!(["US", "EU"]);
+        let fragments = [("wow", wow(regions.clone()))];
+        // A game account of the program in a listed region: owned, not free.
+        let log = ("battle.net-1.log", line("US-WoW-5"));
+        assert_eq!(owned_codes(&[log], &fragments), [("wow".to_string(), false)]);
+        // Program case-blind; a rule naming no region takes any.
+        let log2 = ("battle.net-1.log", line("XX-wow-5"));
+        assert_eq!(owned_codes(&[log2], &fragments), []);
+        assert_eq!(owned_codes(&[("battle.net-1.log", line("XX-wow-5"))], &[("wow", wow(Value::Null))]).len(), 1);
+        // Another program's, or another region's: not owned.
+        assert_eq!(owned_codes(&[("battle.net-1.log", line("US-Ash-5"))], &fragments), []);
+        assert_eq!(owned_codes(&[("battle.net-1.log", line("KR-WoW-5"))], &fragments), []);
+        // No log, or a log with no such line: as before.
+        assert_eq!(owned_codes(&[], &fragments), []);
+        assert_eq!(owned_codes(&[("battle.net-1.log", "nothing\n".to_string())], &fragments), []);
+        // A log that is not the client's is not read.
+        assert_eq!(owned_codes(&[("other.log", line("US-WoW-5"))], &fragments), []);
     }
 
     #[test]
