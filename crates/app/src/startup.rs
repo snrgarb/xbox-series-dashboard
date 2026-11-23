@@ -133,6 +133,11 @@ impl Playing {
         self.uploaded = true;
     }
 
+    /// The GPU was rebuilt: the texture is gone with the old device, and is made again for the next picture.
+    pub fn gpu_lost(&mut self) {
+        self.texture = None;
+    }
+
     /// After the frame is presented: the clock and the sound start from the first picture shown, which is said.
     pub fn after_present(&mut self) {
         if self.uploaded {

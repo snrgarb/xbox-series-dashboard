@@ -13,6 +13,20 @@ pub const BLACK_LIMIT: Duration = Duration::from_secs(60);
 /// Three crashes within five minutes fall back to the desktop.
 pub const CRASH_SPAN: Duration = Duration::from_secs(300);
 pub const CRASH_LIMIT: usize = 3;
+/// The second crash within `CRASH_SPAN` is not relaunched at once: the desktop is made usable, and the Dashboard
+/// is started again after this. A GPU that keeps failing (a driver reset) then cannot make a tight loop.
+pub const RESTART_BACKOFF: Duration = Duration::from_secs(10);
+
+/// How long to wait before starting the Dashboard again, given how many crashes (this one included) there have been
+/// within `CRASH_SPAN`: none after the first, `RESTART_BACKOFF` after the second. The `CRASH_LIMIT`th falls back
+/// instead of restarting, so it has no delay (None).
+pub fn restart_delay(crashes_in_span: usize) -> Option<Duration> {
+    match crashes_in_span {
+        0 | 1 => Some(Duration::ZERO),
+        n if n < CRASH_LIMIT => Some(RESTART_BACKOFF),
+        _ => None,
+    }
+}
 /// The fallback's line shows this long before the desktop starts.
 pub const LINE_FOR: Duration = Duration::from_secs(5);
 /// After View+Menu held, the Dashboard has this long to close before it is ended.
@@ -91,7 +105,8 @@ pub fn job_of(command_line: &str) -> String {
 /// - 0 with another Dashboard left: a handover, and the other one is watched;
 /// - 0 with nothing left: Exit to desktop. It stays down, and there is a desktop;
 /// - anything else, or any exit before the first frame of a start this process made: a crash, relaunched at once
-///   behind the black. The third within five minutes falls back: the line on the black for five seconds, then the
+///   behind the black, but the second within five minutes waits `RESTART_BACKOFF` first, with the desktop made
+///   usable. The third within five minutes falls back: the line on the black for five seconds, then the
 ///   desktop, and nothing relaunched on its own until the Guide button.
 #[derive(Debug, Default)]
 pub struct Watchdog {
@@ -103,6 +118,8 @@ pub struct Watchdog {
     fallen_back: bool,
     line_until: Option<Duration>,
     close_until: Option<Duration>,
+    /// A crashed Dashboard is started again at this time (`restart_delay`), the desktop usable meanwhile.
+    relaunch_at: Option<Duration>,
     /// A Dashboard exited 0 leaving another: if what is left turns out to be none, it was Exit to desktop.
     quit_pending: bool,
     said: Vec<String>,
@@ -174,7 +191,7 @@ impl Watchdog {
             self.lift_black("the --shell process has fallen back");
             return Orders::default();
         }
-        self.relaunch()
+        self.relaunch_after_crash(now)
     }
 
     /// The Dashboard set FirstFrame.
@@ -251,7 +268,7 @@ impl Watchdog {
         }
         self.quit_pending = false;
         if crash && !self.fallen_back {
-            return self.relaunch();
+            return self.relaunch_after_crash(now);
         }
         self.lift_black("the Dashboard is down");
         if crash {
@@ -273,6 +290,7 @@ impl Watchdog {
         self.say(format!("Guide button with no Dashboard ({why}): starting it; the crash count starts again"));
         self.crashes.clear();
         self.fallen_back = false;
+        self.relaunch_at = None;
         if self.line_until.take().is_some() {
             self.say("fallback line down: the Guide button tries again".into());
         }
@@ -295,6 +313,9 @@ impl Watchdog {
             self.close_until = Some(now + CLOSE_FOR);
         }
         self.lift_black("the View+Menu hold");
+        if self.relaunch_at.take().is_some() {
+            self.say("the wait before a restart is over: the View+Menu hold keeps it down".into());
+        }
         if self.line_until.take().is_some() {
             self.say("fallback line down: the View+Menu hold".into());
         }
@@ -312,6 +333,10 @@ impl Watchdog {
                 }
                 self.lift_black(&format!("no first frame by the {} s limit", BLACK_LIMIT.as_secs()));
             }
+        }
+        if self.relaunch_at.is_some_and(|at| now >= at) {
+            self.relaunch_at = None;
+            orders = orders.and(self.relaunch());
         }
         if self.line_until.is_some_and(|until| now >= until) {
             self.line_until = None;
@@ -333,6 +358,24 @@ impl Watchdog {
         self.say("starting the Dashboard at once, behind the black".into());
         self.black = true;
         Orders { launch: true, ..Orders::default() }
+    }
+
+    /// A crash with no fallback: started again at once, or, after repeated crashes, once the desktop is usable and
+    /// `restart_delay` has passed (the black is down meanwhile, so the desktop can be used).
+    fn relaunch_after_crash(&mut self, now: Duration) -> Orders {
+        let delay = restart_delay(self.crashes.len()).unwrap_or_default();
+        if delay.is_zero() {
+            return self.relaunch();
+        }
+        self.relaunch_at = Some(now + delay);
+        self.lift_black("a crash again: the desktop is usable until the restart");
+        self.say(format!(
+            "{} crashes in the last {} min: starting the desktop, and the Dashboard again in {} s",
+            self.crashes.len(),
+            CRASH_SPAN.as_secs() / 60,
+            delay.as_secs()
+        ));
+        Orders { start_desktop: true, ..Orders::default() }
     }
 
     fn count_crash(&mut self, now: Duration) {
@@ -587,27 +630,60 @@ mod tests {
         assert!(dog.exited(10, 0xC000_0005, s(10)).launch);
         assert!(dog.black(), "the relaunch is behind the black");
         dog.launched(11, s(10));
-        // An exit 0 before its first frame is a crash too.
-        assert!(dog.exited(11, 0, s(12)).launch);
-        dog.launched(12, s(12));
+        // An exit 0 before its first frame is a crash too. The second waits, with a desktop.
+        let orders = dog.exited(11, 0, s(12));
+        assert_eq!(orders, Orders { start_desktop: true, ..Orders::default() });
+        assert!(!dog.black());
+        assert_eq!(dog.tick(s(21)), Orders::default());
+        assert_eq!(dog.tick(s(22)), Orders { launch: true, ..Orders::default() });
+        dog.launched(12, s(22));
         dog.first_frame(s(13));
-        let orders = dog.exited(12, 101, s(20));
+        let orders = dog.exited(12, 101, s(30));
         assert!(!orders.launch, "fallen back");
         assert_eq!(dog.line(), Some(FALLBACK_LINE));
         assert!(dog.black());
-        assert_eq!(dog.tick(s(24)), Orders::default());
-        assert_eq!(dog.tick(s(25)), Orders { start_desktop: true, ..Orders::default() });
+        assert_eq!(dog.tick(s(34)), Orders::default());
+        assert_eq!(dog.tick(s(35)), Orders { start_desktop: true, ..Orders::default() });
         assert!(!dog.black() && dog.line().is_none());
         // The Guide button tries again, the count from nothing.
         assert!(dog.guide_pressed().launch);
-        dog.launched(13, s(30));
-        assert!(dog.exited(13, 1, s(31)).launch);
+        dog.launched(13, s(40));
+        assert!(dog.exited(13, 1, s(41)).launch);
+    }
+
+    #[test]
+    fn restart_delay_is_none_then_ten_seconds_then_the_fallback() {
+        assert_eq!(restart_delay(1), Some(Duration::ZERO));
+        assert_eq!(restart_delay(2), Some(RESTART_BACKOFF));
+        assert_eq!(restart_delay(CRASH_LIMIT), None);
+        assert_eq!(restart_delay(CRASH_LIMIT + 4), None);
+    }
+
+    #[test]
+    fn the_wait_before_a_restart_is_cut_short_by_the_guide_button_or_the_hold() {
+        let mut dog = Watchdog::default();
+        dog.launched(1, s(0));
+        dog.first_frame(s(1));
+        assert!(dog.exited(1, 1, s(5)).launch);
+        dog.launched(2, s(5));
+        dog.first_frame(s(6));
+        assert!(!dog.exited(2, 1, s(8)).launch);
+        assert!(dog.guide_pressed().launch, "the Guide button does not wait");
+        assert_eq!(dog.tick(s(30)), Orders::default(), "and the wait is over");
+        dog.launched(3, s(9));
+        dog.first_frame(s(10));
+        assert!(dog.exited(3, 1, s(11)).launch, "the count started again: a first crash relaunches at once");
+        dog.launched(4, s(11));
+        dog.first_frame(s(12));
+        assert!(!dog.exited(4, 1, s(13)).launch, "the second waits");
+        assert!(dog.held(s(14)).start_desktop);
+        assert_eq!(dog.tick(s(40)), Orders::default(), "the hold keeps it down");
     }
 
     #[test]
     fn crashes_further_apart_than_five_minutes_never_fall_back() {
         let mut dog = Watchdog::default();
-        for (i, at) in [0, 200, 400, 600].into_iter().enumerate() {
+        for (i, at) in [0, 400, 800, 1200].into_iter().enumerate() {
             dog.launched(i as u32, s(at));
             dog.first_frame(s(at + 1));
             assert!(dog.exited(i as u32, 1, s(at + 100)).launch, "crash {i}");
@@ -618,8 +694,9 @@ mod tests {
     fn a_launch_that_fails_counts_as_a_crash() {
         let mut dog = Watchdog::default();
         assert!(dog.launch_failed(s(0)).launch);
-        assert!(dog.launch_failed(s(1)).launch);
-        assert!(!dog.launch_failed(s(2)).launch);
+        assert!(!dog.launch_failed(s(1)).launch, "the second waits");
+        assert!(dog.tick(s(11)).launch);
+        assert!(!dog.launch_failed(s(12)).launch);
         assert_eq!(dog.line(), Some(FALLBACK_LINE));
     }
 

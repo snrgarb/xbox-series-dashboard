@@ -18,6 +18,7 @@ mod as_shell;
 mod backdrop;
 mod game_pass;
 mod games;
+mod gpu_loss;
 mod helper_programs;
 mod hub_open;
 mod media_folder;

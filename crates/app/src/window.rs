@@ -132,6 +132,8 @@ struct App {
     home_took: Duration,
     home_done: Instant,
     state: Option<State>,
+    /// Surface validation errors in a row: a run of them is a lost device wgpu has not said is lost.
+    validation: crate::gpu_loss::ValidationRun,
     proxy: EventLoopProxy<()>,
     last_frame: Instant,
     /// A frame is wanted whatever else: the first, or after a resize.
@@ -519,6 +521,7 @@ pub fn run(
         home_took: Duration::ZERO,
         home_done: Instant::now(),
         state: None,
+        validation: Default::default(),
         proxy: event_loop.create_proxy(),
         last_frame: Instant::now(),
         stale: true,
@@ -646,6 +649,92 @@ impl App {
             self.dashboard.notify(&text);
         }
         self.toasts_changed();
+    }
+
+    /// The GPU device was lost (a driver reset, a GPU removed): waits, then makes the adapter, device, queue and
+    /// surface again on the same window, and the renderer with them (its textures, glyph atlases and the art
+    /// cache's uploads: art is decoded again as the screens ask for it). The Dashboard's state, and the animated
+    /// values, carry on as they were. The Overlay and the Toast strip, with surfaces of the old device, are made
+    /// again. Waits 1 s, 2 s, then 5 s before each try; after the last has failed the Dashboard ends (exit 2, a
+    /// crash for the watchdog, which backs off). Said in the log (docs/spec/shell-mode.md, 6).
+    fn rebuild_gpu(&mut self, event_loop: &ActiveEventLoop, why: &str) {
+        let Some(old) = self.state.take() else { return };
+        let lost_at = since_start();
+        let began = Instant::now();
+        eprintln!("gpu: device lost ({why}) at {lost_at:.0} ms; rebuilding");
+        let had_overlay_or_strip = self.overlay.is_some() || self.toast_strip.is_some();
+        // Their surfaces belong to the old device, and the window's own swap chain must go before a new one is made
+        // on the same window.
+        self.overlay = None;
+        self.toast_strip = None;
+        let State { mut host, config: _, surface, gpu, ready, window } = old;
+        // Asked of the old device before it goes: whether the removal came from outside the Dashboard (a driver
+        // reset, the GPU removed) or from its own commands (INVALID_CALL, DEVICE_HUNG).
+        if let Some(reason) = gpu::removed_reason(&gpu.device) {
+            eprintln!("gpu: Direct3D 12 says the device was removed: {reason}");
+        }
+        let store = std::mem::take(&mut host.store);
+        let cost = host.cost;
+        drop(host);
+        drop(surface);
+        drop(gpu);
+        let mut state = None;
+        let mut last = String::new();
+        for attempt in 0.. {
+            let Some(wait) = crate::gpu_loss::wait_before(attempt) else { break };
+            std::thread::sleep(wait);
+            let made = (|| {
+                let instance = gpu::instance(Some(Box::new(event_loop.owned_display_handle())));
+                let surface = instance.create_surface(window.clone()).map_err(|e| format!("create surface: {e}"))?;
+                let gpu = gpu::try_init(instance, Some(&surface), false)?;
+                let config = configure(&gpu, &surface, &window)?;
+                Ok::<_, String>((gpu, surface, config))
+            })();
+            match made {
+                Ok(made) => {
+                    state = Some(made);
+                    break;
+                }
+                Err(e) => {
+                    last = e;
+                    eprintln!("gpu: rebuild try {} failed after {wait:?}: {last}", attempt + 1);
+                }
+            }
+        }
+        let Some((gpu, surface, config)) = state else {
+            eprintln!(
+                "gpu: device lost ({why}) at {lost_at:.0} ms; not rebuilt after {} tries ({last}): ending, for the \
+                 watchdog to start the Dashboard again",
+                crate::gpu_loss::RETRY_WAITS.len()
+            );
+            crate::fail("the GPU was lost and could not be rebuilt");
+        };
+        self.cpu_renderer = gpu.adapter.get_info().device_type == wgpu::DeviceType::Cpu;
+        self.hub_open.set_processor(self.cpu_renderer);
+        let proxy = self.proxy.clone();
+        let mut host = Host::new(&gpu, config.format, move || {
+            let _ = proxy.send_event(());
+        });
+        host.store = store;
+        host.cost = cost;
+        self.state = Some(State { host, config, surface, gpu, ready, window });
+        if let Some(playing) = &mut self.boot_video {
+            playing.gpu_lost();
+        }
+        if had_overlay_or_strip {
+            self.overlay_tried = false;
+            self.make_overlay();
+        }
+        self.validation = Default::default();
+        self.stale = true;
+        self.overlay_stale = true;
+        self.toasts_stale = true;
+        self.last_frame = Instant::now();
+        self.told_time = Instant::now();
+        eprintln!(
+            "gpu: device lost ({why}) at {lost_at:.0} ms; rebuilt in {:.0} ms",
+            began.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     /// The Toast on screen may have changed: whichever window shows Toasts wants a frame.
@@ -1766,6 +1855,10 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.ledger.back(Part::Updates);
+        // wgpu said the device is lost: rebuilt before anything draws on it.
+        if let Some(why) = self.state.as_ref().and_then(|state| state.gpu.lost.reason()) {
+            self.rebuild_gpu(event_loop, &why);
+        }
         // Another program asked the Dashboard to close through a window of the shell's, as taskkill does.
         if shell::close_asked() {
             event_loop.exit();
@@ -2324,8 +2417,13 @@ impl App {
                     frames[0] += 1;
                 }
 
+                if let Some(why) = state.gpu.lost.reason() {
+                    self.rebuild_gpu(event_loop, &why);
+                    return;
+                }
                 let frame = match state.surface.get_current_texture() {
                     wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                        self.validation.frame_had();
                         frame
                     }
                     wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
@@ -2343,7 +2441,19 @@ impl App {
                         self.stale = true;
                         return;
                     }
-                    wgpu::CurrentSurfaceTexture::Validation => panic!("surface validation error"),
+                    // Never a panic: a lost device gives this, before or without wgpu saying so. A few in a row are
+                    // taken for one and the GPU is rebuilt; a single one is tried again on a configured surface.
+                    wgpu::CurrentSurfaceTexture::Validation => {
+                        self.last_frame = Instant::now();
+                        if self.validation.error() {
+                            self.rebuild_gpu(event_loop, "the surface gave validation errors");
+                        } else {
+                            eprintln!("window: the surface gave a validation error: configuring it again");
+                            state.surface.configure(&state.gpu.device, &state.config);
+                            self.stale = true;
+                        }
+                        return;
+                    }
                 };
                 // The picture is of the moment the frame had its buffer, as the Overlay's is (#99): read before the
                 // wait, the clock would put a long wait (the first frame of a stretch) into the next frame's step,

@@ -165,7 +165,10 @@ What Winlogon starts. It never touches the GPU, the library or the stores (`crat
    - **The watchdog**, over every `dashboard.exe` at that path in this session, by image path:
      - exit 0 with none left: Exit to desktop. It stays down; explorer starts if there is no shell window.
      - exit 0 with another left: a handover; the other is watched.
-     - any other code, or an exit before that start's FirstFrame: a crash. Relaunched under the black. The third in
+     - any other code, or an exit before that start's FirstFrame: a crash. The first in 5 minutes is relaunched at once
+       under the black. The second is not: the black comes down, explorer starts if there is no shell window, and the
+       Dashboard is started again 10 s later (`watch::RESTART_BACKOFF`), so a GPU that keeps failing cannot make a
+       tight loop and the desktop can be used meanwhile (the Guide button does not wait). The third in
        5 minutes shows "The Dashboard closed 3 times in 5 minutes. Press the Guide button to try again." for 5 s,
        then the desktop, and nothing more is relaunched on its own.
      - `0x58440001` (a sentinel, a second Dashboard) counts for nothing, and so does any exit of one it didn't start
@@ -203,6 +206,18 @@ What Winlogon starts. It never touches the GPU, the library or the stores (`crat
   window <hwnd>: style, extended style, client size, visible, minimised, owner, parent, desktop`, then `window: trying
   once more on a new plain window; dropped: <what>` and, if that works, `window: the plain window's swap chain was
   made`. A second refusal logs `window: ERROR: again: ...` and exits 2, which the watchdog counts as a crash.
+- **A lost GPU device** (a driver reset, a GPU removed; DXGI 0x887A0005 and the like): never a panic. wgpu's
+  uncaptured errors are logged (`gpu: wgpu error: ...`, the first 20), not panicked on, and its device-lost callback
+  (or three surface validation errors in a row) starts a rebuild: `gpu: device lost (<reason>) at <ms> ms; rebuilding`,
+  then `gpu: Direct3D 12 says the device was removed: <HRESULT by name, and whether it is the Dashboard's own doing
+  (INVALID_CALL, DEVICE_HUNG) or from outside (REMOVED, RESET, DRIVER_INTERNAL_ERROR)>`. The old surfaces and device
+  are dropped, then, after 1 s, 2 s, 5 s, 5 s, 5 s (`gpu_loss::RETRY_WAITS`), each try makes the adapter (hardware
+  only: no WARP), device, queue and the window's swap chain again and the renderer with them (textures, glyph
+  atlases; the art cache starts empty and art is decoded again as screens ask for it). The Dashboard's state and
+  animated values carry on, the Boot video's texture is made again, and the Overlay and the Toast strip are made
+  again. Done: `gpu: device lost (<reason>) at <ms> ms; rebuilt in <ms> ms`. After the last try fails:
+  `gpu: ... not rebuilt after 5 tries (<why>): ending ...` and exit 2, a crash for the watchdog, which backs off as
+  above.
 - **Packaged games** (`shell:AppsFolder\<AUMID>`, the Xbox source's and Store apps) are activated with
   `IApplicationActivationManager::ActivateApplication`, which works with no shell window; `ShellExecuteW` if it fails.
 - Exit to desktop is unchanged: exit 0.
