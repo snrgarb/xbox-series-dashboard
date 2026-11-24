@@ -49,16 +49,23 @@ pub fn steer(
 }
 
 /// Starts the App with this id, as it is: no Launch screen and no Play session, whatever is running
-/// (docs/spec/apps.md). The log says `apps: started Notepad: C:\Windows\System32\notepad.exe`.
-pub fn start_app(library: &Library, app: i64, addresses: &mut dyn Addresses) {
+/// (docs/spec/apps.md). The log says `apps: started Notepad: C:\Windows\System32\notepad.exe`. The App, if it was
+/// started, for the shell to follow until its window is in front.
+pub fn start_app(library: &Library, app: i64, addresses: &mut dyn Addresses) -> Option<model::App> {
     let Some(app) = library.apps.iter().find(|found| found.id == app) else {
         eprintln!("apps: no App {app} in the library: nothing started");
-        return;
+        return None;
     };
     let start = app.start();
     match addresses.open(&start) {
-        Ok(()) => eprintln!("apps: started {}: {start}", app.name),
-        Err(why) => eprintln!("apps: nothing took {start} ({why}): {} isn't started", app.name),
+        Ok(()) => {
+            eprintln!("apps: started {}: {start}", app.name);
+            Some(app.clone())
+        }
+        Err(why) => {
+            eprintln!("apps: nothing took {start} ({why}): {} isn't started", app.name);
+            None
+        }
     }
 }
 

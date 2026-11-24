@@ -162,7 +162,8 @@ fn a_on_home_closes_the_guide_onto_home() {
     let mut guide = at_home();
     press(&mut guide, &[A]);
     assert!(!guide.guide_open());
-    assert_eq!(asked(&mut guide), [Effect::GuideClosed]);
+    // Home's window asked in front: an App may be what the Guide opened over.
+    assert_eq!(asked(&mut guide), [Effect::GuideClosed, Effect::ShowHome]);
 }
 
 #[test]

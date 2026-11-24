@@ -82,7 +82,8 @@ pub enum Effect {
     ForceQuitGame,
     /// The Guide closed: the window that had the foreground gets it back, unless one of the two below says who does.
     GuideClosed,
-    /// The Dashboard in front of the running game, which runs on behind it: Home or a page chosen in the Guide.
+    /// The Dashboard in front of whatever is in front of it: a running game, which runs on behind it, or an App.
+    /// Home or a page chosen in the Guide.
     ShowHome,
     /// The running game in front again, whatever was in front when the Guide opened.
     ShowGame,
@@ -1323,13 +1324,15 @@ impl Dashboard {
         }
     }
 
-    /// The Dashboard in front of the running game, if one is running: Home or a page was chosen in the Guide over
-    /// it. The shell says so itself when the game it was to go back to has no window.
+    /// The Dashboard in front: Home or a page was chosen in the Guide. Over a running game it runs on behind it.
+    /// Asked for with no game running too: an App started from My games & apps may be what the Guide opened over,
+    /// and it would otherwise get the foreground back. The shell says so itself when the game it was to go back to
+    /// has no window.
     pub fn show_dashboard(&mut self) {
         if self.playing.is_some() {
             self.in_front = true;
-            self.effects.push(Effect::ShowHome);
         }
+        self.effects.push(Effect::ShowHome);
     }
 
     /// Settings' Background delay. See [`Home::set_background_delay`].

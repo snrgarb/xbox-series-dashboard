@@ -239,7 +239,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     let mut home = guide_open();
     press(&mut home, &[Down, A]);
     assert!(!home.guide_open());
-    assert_eq!(asked(&mut home), [Effect::GuideClosed]);
+    assert_eq!(asked(&mut home), [Effect::GuideClosed, Effect::ShowHome]);
     assert_eq!(home.focus_line(), "MyGames: Games: Tile(0)");
     press(&mut home, &[B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
@@ -247,7 +247,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     // Settings is Profile & system's third.
     let mut home = guide_open();
     press(&mut home, &[RightBumper, Down, Down, A]);
-    assert_eq!(asked(&mut home), [Effect::GuideClosed]);
+    assert_eq!(asked(&mut home), [Effect::GuideClosed, Effect::ShowHome]);
     assert_eq!(home.focus_line(), "Settings: Rail: General");
     press(&mut home, &[B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
@@ -395,5 +395,5 @@ fn a_that_opens_a_page_sounds_and_y_and_b_are_silent() {
     press(&mut home, &[Guide, Down]);
     home.take_effects();
     press(&mut home, &[A]);
-    assert_eq!(home.take_effects(), [Effect::Sound(Sound::GuideSelect), Effect::GuideClosed]);
+    assert_eq!(home.take_effects(), [Effect::Sound(Sound::GuideSelect), Effect::GuideClosed, Effect::ShowHome]);
 }
