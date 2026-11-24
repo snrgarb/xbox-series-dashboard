@@ -907,9 +907,16 @@ impl App {
             let Some(app) = self.dashboard.library().apps.iter().find(|app| app.id == id).cloned() else {
                 return false;
             };
-            // Not running: started, and followed until its window is in front.
+            // Not running: started, and followed until its window is in front. A Store app is activated again
+            // even while it runs, which resumes it (Settings kept in the background); the Overlay hands the
+            // foreground to its window meanwhile, if it has one up.
             let window = shell::app::window(&app);
-            if window.is_null() {
+            if window.is_null() || app.is_store() {
+                if let Some(overlay) = self.overlay.as_mut().filter(|overlay| overlay.mode() == Some(Mode::Guide)) {
+                    if !window.is_null() {
+                        overlay.give_back_to(window);
+                    }
+                }
                 self.start_app(id);
                 return false;
             }
@@ -1362,12 +1369,14 @@ impl App {
                         self.dashboard.notify(&why);
                     }
                 },
-                // A on an App's tile: one that runs comes in front, not started a second time.
+                // A on an App's tile: a program that runs comes in front, not started a second time. A Store app
+                // is activated again whether it runs or not: Windows resumes one it has suspended in the
+                // background and brings it in front, which giving its window the foreground does not (Settings).
                 Effect::StartApp(id) => {
                     let app = self.dashboard.library().apps.iter().find(|app| app.id == id).cloned();
                     let window = app.as_ref().map_or(std::ptr::null_mut(), shell::app::window);
                     match app {
-                        Some(app) if !window.is_null() => {
+                        Some(app) if !window.is_null() && !app.is_store() => {
                             shell::app::show(&app, window);
                             let library = self.store.app_opened(id);
                             self.show(library);
@@ -1377,6 +1386,13 @@ impl App {
                 }
                 // An App chosen in the Guide: in front once the Guide has let go of the foreground.
                 Effect::ShowApp(app) => self.hand_back = Some(HandBack::App(app)),
+                // Its windows asked to close; the Guide's list follows at once.
+                Effect::QuitApp(id) => {
+                    if let Some(app) = self.dashboard.library().apps.iter().find(|app| app.id == id) {
+                        shell::app::quit(app);
+                    }
+                    self.apps_looked = Some(Instant::now() - APPS_EVERY + Duration::from_millis(500));
+                }
                 // The store is asked, and the Queue told: the game joins it, or its uninstall is followed.
                 // Into the folder chosen in the question, else the store's default as Settings > Storage has it.
                 Effect::Install(game) | Effect::InstallTo { game, .. } => {

@@ -534,3 +534,20 @@ fn an_app_whose_window_is_up_is_listed_running_and_the_list_follows_while_the_gu
     let kinds: Vec<Kind> = guide.guide().entries()[2..4].iter().map(|entry| entry.kind).collect();
     assert_eq!(kinds, [Kind::Running(RUNNING), Kind::RunningApp(0)]);
 }
+
+#[test]
+fn menu_on_a_running_apps_entry_offers_quit_which_asks_it_to_close_and_leaves_the_guide_open() {
+    let mut guide = with_an_app();
+    guide.set_running_apps(vec![77]);
+    press(&mut guide, &[Guide, Down, Down]);
+    assert_eq!(guide.guide().entries()[2].kind, Kind::RunningApp(0));
+    press(&mut guide, &[Menu]);
+    assert_eq!(guide.guide().dialog(), Some(DialogFocus::Menu { prompt: false, row: 0 }));
+    let asked = press(&mut guide, &[A]);
+    assert_eq!(asked.last(), Some(&Effect::QuitApp(77)));
+    assert!(guide.guide_open() && guide.guide().dialog().is_none());
+    // An App that is not running has no menu.
+    let mut guide = with_an_app();
+    press(&mut guide, &[Guide, Down, Down, Menu]);
+    assert_eq!(guide.guide().dialog(), None);
+}
