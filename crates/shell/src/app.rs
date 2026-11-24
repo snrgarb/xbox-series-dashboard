@@ -6,6 +6,9 @@
 //! window a child of it), a program's by the program's path.
 use std::time::Duration;
 
+/// How long an App asked to close has before what is left of it is ended.
+pub const QUIT_GRACE: Duration = Duration::from_secs(3);
+
 /// How long after its start an App's window is looked for.
 pub const FOLLOW_FOR: Duration = Duration::from_secs(20);
 /// How often it is looked for.
@@ -152,6 +155,22 @@ pub fn quit(app: &model::App) -> usize {
             };
         }
         eprintln!("apps: {} asked to close: {} windows", app.name, windows.len());
+        // Whatever of it is left after `QUIT_GRACE` is ended: an App that only hides its window when closed
+        // (the Xbox app keeps running in the tray) is quit for real, as the user asked (2026-11-24).
+        let (whose, name) = (Whose::of(app), app.name.clone());
+        let _ = std::thread::Builder::new().name("app quit".into()).spawn(move || {
+            std::thread::sleep(QUIT_GRACE);
+            let ended = win::end_processes(&whose);
+            if ended.is_empty() {
+                eprintln!("apps: {name} has closed");
+            } else {
+                eprintln!(
+                    "apps: {name} still running {} s after it was asked to close: ended {}",
+                    QUIT_GRACE.as_secs(),
+                    ended.join(", ")
+                );
+            }
+        });
         windows.len()
     }
     #[cfg(not(windows))]
@@ -216,6 +235,52 @@ mod win {
         if process.is_null() {
             return (String::new(), String::new());
         }
+        let what = what_process(process);
+        CloseHandle(process);
+        what
+    }
+
+    /// Ends every process that is the App's: of its package family, or of its program. Their names and pids.
+    pub fn end_processes(whose: &Whose) -> Vec<String> {
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+        };
+        use windows_sys::Win32::System::Threading::{TerminateProcess, PROCESS_TERMINATE};
+        let mut ended = Vec::new();
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return ended;
+            }
+            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            let own = std::process::id();
+            let mut more = Process32FirstW(snapshot, &mut entry) != 0;
+            while more {
+                let pid = entry.th32ProcessID;
+                if pid != own && pid != 0 {
+                    let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, 0, pid);
+                    if !process.is_null() {
+                        let (family, image) = what_process(process);
+                        // Never Windows' own shell, whatever an App was made of.
+                        let shell = image.ends_with(r"\windows\explorer.exe");
+                        if whose.is(&family, &image) && !shell && TerminateProcess(process, 1) != 0 {
+                            let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                            ended.push(format!("{} (pid {pid})", String::from_utf16_lossy(&entry.szExeFile[..len])));
+                        }
+                        CloseHandle(process);
+                    }
+                }
+                more = Process32NextW(snapshot, &mut entry) != 0;
+            }
+            CloseHandle(snapshot);
+        }
+        ended
+    }
+
+    /// A process's package family, lower case ("" for none), and its image's path, lower case.
+    unsafe fn what_process(process: windows_sys::Win32::Foundation::HANDLE) -> (String, String) {
         let mut name = [0u16; 256];
         let mut len = name.len() as u32;
         let family = if GetPackageFamilyName(process, &mut len, name.as_mut_ptr()) == 0 {
@@ -230,7 +295,6 @@ mod win {
         } else {
             String::new()
         };
-        CloseHandle(process);
         (family, image)
     }
 
