@@ -140,6 +140,9 @@ pub enum Effect {
     /// Start the App with this id in the library database (`Library::apps`): as it is, whatever is running, with no
     /// Launch screen and no Play session (docs/spec/apps.md).
     StartApp(i64),
+    /// An App chosen in the Guide, by its id: its window in front once the Guide has let go of the foreground,
+    /// started if it has none (#345).
+    ShowApp(i64),
     /// Settings' Games & apps pages added, renamed or removed a game added by hand or an App. A new snapshot
     /// follows, as for a favourite, and the pages over Home are told of it.
     ByHand(model::ByHand),
@@ -302,6 +305,8 @@ pub struct Dashboard {
     has_overlay: bool,
     /// The game being launched or running, by its place in the library.
     playing: Option<usize>,
+    /// The Apps whose window is up, by their rows in the library database, as the shell last looked (#345).
+    running_apps: Vec<i64>,
     /// The Toasts showing and waiting, and the notifications list.
     toasts: Toasts,
     /// Whether Toasts have a window of their own: if not they are drawn in Home's.
@@ -379,6 +384,7 @@ impl Dashboard {
             backdrop: Backdrop::default(),
             has_overlay: true,
             playing: None,
+            running_apps: Vec::new(),
             toasts: Toasts::default(),
             toast_strip: false,
             slow_renderer: false,
@@ -413,6 +419,19 @@ impl Dashboard {
 
     /// A newer snapshot of the library takes the old one's place. Focus stays on the game it was on and the game
     /// being played stays the one being played, wherever the snapshot has them now.
+    /// The Apps whose window is up, as the shell has looked (#345): an open Guide's list follows.
+    pub fn set_running_apps(&mut self, apps: Vec<i64>) {
+        if apps != self.running_apps {
+            self.running_apps = apps;
+            self.refresh_guide();
+        }
+    }
+
+    /// The Apps whose window is up, as the shell last said.
+    pub fn running_apps(&self) -> &[i64] {
+        &self.running_apps
+    }
+
     pub fn set_library(&mut self, mut library: Library) {
         // A snapshot read from the database has no speeds (the Queue's follower works them out): a download keeps
         // the one it had until the follower next says.
@@ -572,6 +591,7 @@ impl Dashboard {
                 audio: &self.audio,
                 notifications: self.toasts.notifications(),
                 now_playing: self.now_playing.card(self.now),
+                running_apps: &self.running_apps,
             };
             self.guide.refresh(around);
         }
@@ -907,6 +927,7 @@ impl Dashboard {
             audio: &self.audio,
             notifications: self.toasts.notifications(),
             now_playing: self.now_playing.card(self.now),
+            running_apps: &self.running_apps,
         }
     }
 
@@ -1533,6 +1554,7 @@ impl Dashboard {
             audio: &self.audio,
             notifications: self.toasts.notifications(),
             now_playing: self.now_playing.card(self.now),
+            running_apps: &self.running_apps,
         });
         self.effects.push(Effect::Sound(Sound::PromptOpen));
     }
@@ -1547,6 +1569,7 @@ impl Dashboard {
                 audio: &self.audio,
                 notifications: self.toasts.notifications(),
                 now_playing: self.now_playing.card(self.now),
+                running_apps: &self.running_apps,
             };
             let action = self.guide.press(press, around);
             if let Some(action) = action {
@@ -1921,6 +1944,12 @@ impl Dashboard {
             }
             // With a game running the Guide stays, under the question.
             GuideAction::Launch(game) => self.play(game),
+            GuideAction::App(app) => {
+                self.close_guide();
+                if let Some(app) = self.library.apps.get(app) {
+                    self.effects.push(Effect::ShowApp(app.id));
+                }
+            }
             GuideAction::Asked => {}
             // "Sign in to Discord in Settings > Account > Discord": the Guide closes onto that page.
             GuideAction::DirectSettings => self.guide_opens(Open::Settings(settings::Entry::DirectMessages)),
@@ -1991,6 +2020,7 @@ impl Dashboard {
             audio: &self.audio,
             notifications: self.toasts.notifications(),
             now_playing: self.now_playing.card(self.now),
+            running_apps: &self.running_apps,
         };
         self.guide.open_on(tab, around);
         self.guide_overlaid = self.has_overlay;
@@ -2042,6 +2072,7 @@ impl Dashboard {
                     audio: &self.audio,
                     notifications: self.toasts.notifications(),
                     now_playing: self.now_playing.card(self.now),
+                    running_apps: &self.running_apps,
                 };
                 self.guide.show_tab(guide::Tab::Discord, around);
                 if let (ToastKind::DiscordDm, Some(channel)) = (toast.kind, &toast.channel) {
@@ -2058,6 +2089,7 @@ impl Dashboard {
                     audio: &self.audio,
                     notifications: self.toasts.notifications(),
                     now_playing: self.now_playing.card(self.now),
+                    running_apps: &self.running_apps,
                 };
                 self.guide.show_tab(guide::Tab::ProfileAndSystem, around);
             }
@@ -2437,6 +2469,7 @@ impl Dashboard {
             audio: &self.audio,
             notifications: self.toasts.notifications(),
             now_playing: self.now_playing.card(self.now),
+            running_apps: &self.running_apps,
         };
         // The pad's own word on its battery, unless the shell has said otherwise. One on a cable shows its glyph.
         let battery = self.pad_battery();

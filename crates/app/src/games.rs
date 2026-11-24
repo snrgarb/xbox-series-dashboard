@@ -124,6 +124,7 @@ mod tests {
             kind,
             target: target.into(),
             icon: None,
+            last_opened: 0,
         };
         let library = Library {
             apps: vec![

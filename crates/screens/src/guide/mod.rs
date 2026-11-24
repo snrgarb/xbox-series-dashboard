@@ -91,6 +91,9 @@ pub enum GuideAction {
     /// A game played before was chosen, by its place in the library: launched, or with another game running asked
     /// about first (`Guide::ask_quit_and_start`).
     Launch(usize),
+    /// An App was chosen, by its place in the library's Apps: close, and bring it in front, started if it is not
+    /// running (#345).
+    App(usize),
     /// An Achievement unlocked notification was chosen: close, onto that game's Achievements page (its row in the
     /// library database).
     Achievements(i64),
@@ -200,6 +203,8 @@ pub struct Around<'a> {
     pub notifications: &'a [Notification],
     /// The media the Audio Flyout's Now Playing card shows, if any plays.
     pub now_playing: Option<crate::now_playing::Card<'a>>,
+    /// The Apps whose window is up, by their rows in the library database, as the shell last looked (#345).
+    pub running_apps: &'a [i64],
 }
 
 /// What the Guide shows that is not its own: the Profile signed in, the clock, the Status area's values.
@@ -1202,6 +1207,7 @@ fn select(entry: &Entry) -> Option<GuideAction> {
         Kind::Home => Some(GuideAction::Home),
         Kind::Running(_) => Some(GuideAction::Resume),
         Kind::Recent(game) => Some(GuideAction::Launch(game)),
+        Kind::App(app) | Kind::RunningApp(app) => Some(GuideAction::App(app)),
         Kind::Power => Some(GuideAction::Asked),
         Kind::MyGames => Some(GuideAction::MyGames),
         Kind::Settings => Some(GuideAction::Settings),

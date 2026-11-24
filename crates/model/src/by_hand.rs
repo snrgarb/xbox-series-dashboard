@@ -64,6 +64,10 @@ pub struct App {
     /// generic app glyph.
     #[serde(default)]
     pub icon: Option<PathBuf>,
+    /// Unix seconds: when the Dashboard last started it; 0 never. What places it among the games played in the
+    /// Guide's list (#345).
+    #[serde(default)]
+    pub last_opened: u64,
 }
 
 impl App {
@@ -148,6 +152,7 @@ mod tests {
             kind: AppKind::Program,
             target: r"C:\Windows\System32\notepad.exe".into(),
             icon: None,
+            last_opened: 0,
         };
         assert_eq!(program.start().to_string(), r"C:\Windows\System32\notepad.exe");
         assert!(!program.is_store());

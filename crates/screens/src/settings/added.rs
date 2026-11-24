@@ -395,6 +395,7 @@ mod tests {
             kind: AppKind::Program,
             target: String::new(),
             icon: None,
+            last_opened: 0,
         };
         let library = Library {
             games: vec![game(1, "Tern", MANUAL), game(2, "Steam's", "steam"), game(3, "The Anchor", MANUAL)],

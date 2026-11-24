@@ -207,7 +207,7 @@ Entries (C/ExtensionCore.cs:2554-2573, 15):
 
 1. Home
 2. My games & apps
-3. Up to 4 games: the running game first (as Running game), then games played and not hidden, most recently played first (as Recent game). The first game has a divider above it.
+3. Up to 4 games and Apps: the running game first (as Running game), then the Apps started from the Dashboard whose window is up (as Running, the last started first), then games played and not hidden and Apps started before, together, most recently played or started first (as Recent game; an App started between two games' plays goes between them, the games keeping the Recent row's order). The first has a divider above it. An App's entry shows its tile (docs/spec/apps.md, 2) where a game's shows its cover; A on it closes the Guide and brings the App's window in front once the Guide has let go of the foreground, or starts it if it has none. This is the port's (#345): the Bundle lists games only. The shell looks every 2 s for which of those Apps have a window up (`shell::app::running`).
 
 Utilities: Notifications, Audio, Search, and the port's Downloads (section 16). Focus starts on Home.
 

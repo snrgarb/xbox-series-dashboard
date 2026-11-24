@@ -31,6 +31,10 @@ pub const MIGRATION: &str = "CREATE TABLE apps (
         UNIQUE (kind, target)
     );";
 
+/// Migration 13: when each App was last started (#345).
+pub const OPENED_MIGRATION: &str = "-- Unix seconds; 0 = never started from the Dashboard.
+    ALTER TABLE apps ADD COLUMN last_opened INTEGER NOT NULL DEFAULT 0;";
+
 /// The games added by hand, as a source: it reads nothing, and starts the program a game is.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Manual;
@@ -159,9 +163,18 @@ impl Database {
         name.with_context(|| format!("no {item:?} added by hand"))
     }
 
+    /// The App was started now: it is placed by this among the games played in the Guide's list. Its name; an error
+    /// if there is no such App.
+    pub fn app_opened(&self, app: i64, now: u64) -> Result<String> {
+        let name = self.name_of(Added::App(app))?;
+        self.conn.execute("UPDATE apps SET last_opened = ?1 WHERE id = ?2", params![now as i64, app])?;
+        Ok(name)
+    }
+
     /// Every App, in the order they were added.
     pub fn apps(&self) -> Result<Vec<App>> {
-        let mut rows = self.conn.prepare("SELECT id, kind, target, name, icon FROM apps ORDER BY added, id")?;
+        let mut rows =
+            self.conn.prepare("SELECT id, kind, target, name, icon, last_opened FROM apps ORDER BY added, id")?;
         let rows = rows.query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -169,14 +182,16 @@ impl Database {
                 row.get(2)?,
                 row.get(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?,
             ))
         })?;
         let mut apps = Vec::new();
         for row in rows {
-            let (id, kind, target, name, icon) = row?;
+            let (id, kind, target, name, icon, last_opened) = row?;
             // A kind this program does not know is passed over.
             let Some(kind) = AppKind::from_key(&kind) else { continue };
-            apps.push(App { id, name, kind, target, icon: icon.map(PathBuf::from) });
+            let last_opened = last_opened.max(0) as u64;
+            apps.push(App { id, name, kind, target, icon: icon.map(PathBuf::from), last_opened });
         }
         Ok(apps)
     }
@@ -292,6 +307,20 @@ mod tests {
         assert_eq!(db.by_hand(&ByHand::Remove(Added::App(second)), NOW).unwrap(), "removed the App Calculator");
         let names: Vec<String> = db.apps().unwrap().into_iter().map(|app| app.name).collect();
         assert_eq!(names, ["Notes"]);
+    }
+
+    #[test]
+    fn an_app_started_keeps_when_and_one_never_started_has_none() {
+        let mut db = Database::in_memory().unwrap();
+        for name in ["Notepad", "Paint"] {
+            let path = format!(r"C:\Windows\{name}.exe");
+            db.by_hand(&ByHand::AddApp { path: path.into(), name: name.into(), icon: None }, NOW).unwrap();
+        }
+        let id = db.apps().unwrap()[1].id;
+        assert_eq!(db.app_opened(id, NOW + 60).unwrap(), "Paint");
+        let opened: Vec<u64> = db.snapshot().unwrap().apps.iter().map(|app| app.last_opened).collect();
+        assert_eq!(opened, [0, NOW + 60]);
+        assert!(db.app_opened(id + 100, NOW).is_err(), "no such App");
     }
 
     /// What is added by hand is in the database's file: the next Dashboard to open it has it all.

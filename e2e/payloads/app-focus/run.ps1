@@ -1,6 +1,7 @@
 # An App and the foreground (docs/spec/apps.md): an App started from My games & apps' Apps comes in front of the
 # Dashboard, and Home chosen in the Guide over it puts the Dashboard back in front, the pad Home's again, the App
-# running on behind it. A on the App's tile then brings the running App back in front.
+# running on behind it. A on the App's tile then brings the running App back in front. The App is then in the
+# Guide's list, first under the divider (#345): A on it brings it in front while it runs, and starts it once closed.
 #
 # The App is a copy of the stand-in game in the payload's own folder (a full-screen window titled "Focus App"), added
 # by typing its path in Settings' Games & apps: nothing of the machine's own is started or closed.
@@ -167,8 +168,35 @@ try {
     Start-Sleep -Milliseconds 2000
     Press Right "MyGames: Apps: Tile\(0\); `"$(Esc $app)`", 1 apps"
     Expect-Front $dashboardTitle '3. on the App tile'
+    $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Front $app '3. A on the running App'
+    if (Wait-DashboardLog '^apps: started ' 2 $mark) { $failures += '3. the running App was started a second time, not brought in front' }
+
+    # --- 4. The Guide's list (#345): the App, started after every game, is first under the divider (Entry 2). Home
+    # from the Guide, then the Guide again and A on the App's entry: the running App in front.
+    Step Guide 'Landing Entry\(0\)$'
+    Step A 'closed$'
+    Expect-Front $dashboardTitle '4. Home from the Guide again'
+    Step Guide 'Landing Entry\(0\)$'
+    Step Down 'Landing Entry\(1\)$'
+    Step Down 'Landing Entry\(2\)$'
+    $mark = Get-DashboardLogLength
+    Step A 'closed$'
+    Expect-Front $app "4. A on the App's entry in the Guide"
+    if (Wait-DashboardLog '^apps: started ' 2 $mark) { $failures += '4. the running App was started again, not brought in front' }
+
+    # --- 5. The App closed: A on its entry starts it again, and it comes in front.
+    App-Running | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
+    if ((Get-Foreground).Title -ne $dashboardTitle) { Say "note: put in front: $(Set-Foreground $dashboardTitle)" }
+    Step Guide 'Landing Entry\(0\)$'
+    Step Down 'Landing Entry\(1\)$'
+    Step Down 'Landing Entry\(2\)$'
+    $mark = Get-DashboardLogLength
+    Step A 'closed$'
+    if (-not (Wait-DashboardLog "^apps: started $(Esc $app): " 10 $mark)) { $failures += "5. A on the closed App's entry did not start it" }
+    Expect-Front $app "5. A on the closed App's entry"
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }

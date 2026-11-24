@@ -165,6 +165,7 @@ mod tests {
             kind: model::AppKind::Program,
             target: String::new(),
             icon: None,
+            last_opened: 0,
         };
         let library = Library {
             apps: vec![app(1, "Text Notes"), app(2, "Notepad"), app(3, "Calculator")],

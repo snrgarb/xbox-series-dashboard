@@ -22,6 +22,10 @@ pub enum Kind {
     Running(usize),
     /// A game played before, by its place in the library.
     Recent(usize),
+    /// An App whose window is up, by its place in the library's Apps (#345).
+    RunningApp(usize),
+    /// An App started before, by its place in the library's Apps.
+    App(usize),
     Profile,
     SwitchProfile,
     /// One of the last achievements unlocked, by its place among the library's last unlocks, newest first.
@@ -63,7 +67,7 @@ impl Entry {
     fn height(&self) -> (f32, f32) {
         match self.kind {
             Kind::Home | Kind::MyGames => (105.0, 3.0),
-            Kind::Running(_) | Kind::Recent(_) => (96.0, 12.0),
+            Kind::Running(_) | Kind::Recent(_) | Kind::RunningApp(_) | Kind::App(_) => (96.0, 12.0),
             Kind::Profile | Kind::RecentAchievement(_) => (96.0, 3.0),
             Kind::SwitchProfile | Kind::Settings | Kind::Power => (75.0, 3.0),
             Kind::Discord(item) => discord::height(item),
@@ -78,7 +82,7 @@ const TOTALS: f32 = 14.0 + 1.0 + 26.0 + 34.58 + 12.0;
 /// The tab's entries, top to bottom.
 pub fn of(tab: Tab, around: Around, discord: &Discord, direct: &Direct) -> Vec<Entry> {
     match tab {
-        Tab::Landing => landing(around.library, around.playing),
+        Tab::Landing => landing(around.library, around.playing, around.running_apps),
         Tab::Discord => discord::entries(discord, direct),
         Tab::ProfileAndSystem => profile_and_system(around),
     }
@@ -105,16 +109,41 @@ fn profile_and_system(around: Around) -> Vec<Entry> {
     entries
 }
 
-/// Home, My games & apps, then up to four games under a divider: the running game first, then the games played,
-/// most recently first.
-fn landing(library: &Library, playing: Option<usize>) -> Vec<Entry> {
+/// Home, My games & apps, then up to four games and Apps under a divider: the running game first, then the Apps
+/// whose window is up, the last started first, then the games played and the Apps started before, together, most
+/// recently first (#345; a game before an App started in the same second).
+fn landing(library: &Library, playing: Option<usize>, running_apps: &[i64]) -> Vec<Entry> {
     let mut entries = vec![Entry::new(Kind::Home, "Home"), Entry::new(Kind::MyGames, "My games & apps")];
     let running = playing.filter(|&game| game < library.games.len());
-    let played = (0..library.recent(usize::MAX).len()).filter(|&game| Some(game) != running);
-    let games = running.map(Kind::Running).into_iter().chain(played.map(Kind::Recent)).take(GAMES);
-    for (i, kind) in games.enumerate() {
-        let (Kind::Running(game) | Kind::Recent(game)) = kind else { continue };
-        let entry = Entry::new(kind, &library.games[game].name);
+    // Only an App started from the Dashboard is listed, running or not.
+    let mut apps: Vec<(usize, &model::App)> =
+        library.apps.iter().enumerate().filter(|(_, app)| app.last_opened > 0).collect();
+    apps.sort_by_key(|(_, app)| std::cmp::Reverse(app.last_opened));
+    let up = |app: &model::App| running_apps.contains(&app.id);
+    // The games in the Recent row's order, each App started before going in ahead of the first game played
+    // before it.
+    let mut opened = apps.iter().filter(|(_, app)| !up(app)).peekable();
+    let mut recent = Vec::new();
+    for game in (0..library.recent(usize::MAX).len()).filter(|&game| Some(game) != running) {
+        while let Some(&(at, _)) = opened.next_if(|(_, app)| app.last_opened > library.games[game].last_played) {
+            recent.push(Kind::App(at));
+        }
+        recent.push(Kind::Recent(game));
+    }
+    recent.extend(opened.map(|&(at, _)| Kind::App(at)));
+    let listed = running
+        .map(Kind::Running)
+        .into_iter()
+        .chain(apps.iter().filter(|(_, app)| up(app)).map(|&(at, _)| Kind::RunningApp(at)))
+        .chain(recent)
+        .take(GAMES);
+    for (i, kind) in listed.enumerate() {
+        let name = match kind {
+            Kind::Running(game) | Kind::Recent(game) => &library.games[game].name,
+            Kind::RunningApp(app) | Kind::App(app) => &library.apps[app].name,
+            _ => continue,
+        };
+        let entry = Entry::new(kind, name);
         entries.push(if i == 0 { entry.under_a_divider() } else { entry });
     }
     entries
@@ -310,6 +339,16 @@ pub fn draw(ui: &mut Ui, entry: &Entry, placed: &Placed, focused: bool, faces: &
                 detail = Some("Running".to_string());
             }
         }
+        // Its tile, as My games & apps' Apps has it, at the size of a game's cover here.
+        Kind::RunningApp(app) | Kind::App(app) => {
+            if let Some(found) = faces.library.apps.get(app) {
+                let tile = Rect::new(rect.x + 6.0, cy - 45.0, 90.0, 90.0);
+                crate::app_tile::draw(ui, tile, ("guide app", found.id), found, false);
+            }
+            if matches!(entry.kind, Kind::RunningApp(_)) {
+                detail = Some("Running".to_string());
+            }
+        }
         // Its icon on a rounded square, its name over its game's in grey.
         Kind::RecentAchievement(at) => {
             if let Some(unlock) = faces.library.achievements.recent.get(at) {
@@ -419,6 +458,7 @@ mod tests {
                 audio: &model::Audio::default(),
                 notifications: &[],
                 now_playing: None,
+                running_apps: &[],
             },
             &Discord::default(),
             &Direct::default(),
@@ -435,6 +475,59 @@ mod tests {
         assert!(placed[5].extent.1 <= viewport(Tab::Landing).1);
     }
 
+    /// The landing tab's games and Apps, by kind, after Home and My games & apps.
+    fn listed(library: &Library, playing: Option<usize>, running_apps: &[i64]) -> Vec<Kind> {
+        landing(library, playing, running_apps).into_iter().skip(2).map(|entry| entry.kind).collect()
+    }
+
+    /// The fake library, its games played at 1000, 900, ... seconds (the Recent row's order), and three Apps: one
+    /// started at 950, one at 10_000, one never.
+    fn with_apps() -> Library {
+        let mut library = crate::fake_library();
+        let played = library.recent(usize::MAX).len();
+        for (at, game) in library.games.iter_mut().take(played).enumerate() {
+            game.last_played = 1000 - 100 * at as u64;
+        }
+        let app = |id: i64, last_opened: u64| model::App {
+            id,
+            name: format!("App {id}"),
+            kind: model::AppKind::Program,
+            target: format!(r"C:\Apps\{id}.exe"),
+            icon: None,
+            last_opened,
+        };
+        library.apps = vec![app(31, 950), app(32, 10_000), app(33, 0)];
+        library
+    }
+
+    #[test]
+    fn apps_started_are_listed_with_the_games_played_most_recently_first() {
+        let library = with_apps();
+        assert!(library.recent(usize::MAX).len() >= 3, "the fake library has games played");
+        // The App started last is newest of all; the other falls between the first game and the second; the one
+        // never started is not listed.
+        assert_eq!(listed(&library, None, &[]), [Kind::App(1), Kind::Recent(0), Kind::App(0), Kind::Recent(1)]);
+        let entries = landing(&library, None, &[]);
+        assert_eq!(entries[2].title, "App 32");
+        assert!(entries[2].divider && !entries[3].divider, "the divider is over the first of them");
+    }
+
+    #[test]
+    fn a_running_app_comes_after_the_running_game_and_before_whatever_was_played() {
+        let library = with_apps();
+        // App 31's window is up: it is listed as running, ahead of App 32, started later but closed since.
+        assert_eq!(
+            listed(&library, None, &[31]),
+            [Kind::RunningApp(0), Kind::App(1), Kind::Recent(0), Kind::Recent(1)]
+        );
+        assert_eq!(
+            listed(&library, Some(1), &[31]),
+            [Kind::Running(1), Kind::RunningApp(0), Kind::App(1), Kind::Recent(0)]
+        );
+        // An App never started from the Dashboard is not listed, even with its window up.
+        assert_eq!(listed(&library, None, &[33])[0], Kind::App(1));
+    }
+
     #[test]
     fn profile_and_system_lays_out_under_its_heading() {
         let library = crate::fake_library();
@@ -447,6 +540,7 @@ mod tests {
                 audio: &model::Audio::default(),
                 notifications: &[],
                 now_playing: None,
+                running_apps: &[],
             },
             &Discord::default(),
             &Direct::default(),
@@ -466,7 +560,15 @@ mod tests {
         let mut library = crate::fake_library();
         let audio = model::Audio::default();
         fn around<'a>(library: &'a Library, audio: &'a model::Audio) -> Around<'a> {
-            Around { library, playing: None, discord: false, audio, notifications: &[], now_playing: None }
+            Around {
+                library,
+                playing: None,
+                discord: false,
+                audio,
+                notifications: &[],
+                now_playing: None,
+                running_apps: &[],
+            }
         }
         let unlock =
             |name: &str| Unlock { game: 1, achievement: Achievement { name: name.into(), ..Default::default() } };

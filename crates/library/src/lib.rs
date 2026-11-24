@@ -140,6 +140,8 @@ const MIGRATIONS: &[&str] = &[
     "ALTER TABLE games ADD COLUMN game_pass INTEGER NOT NULL DEFAULT 0;",
     // 12: the user's matches of a game to the online sources' own entries (docs/spec/match-game.md).
     matches::MIGRATION,
+    // 13: when each App was last started, for the Guide's list (#345).
+    by_hand::OPENED_MIGRATION,
 ];
 
 /// What a sync changed.
