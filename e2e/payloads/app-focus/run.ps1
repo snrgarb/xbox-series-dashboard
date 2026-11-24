@@ -168,8 +168,10 @@ try {
     Start-Sleep -Milliseconds 2000
     Press Right "MyGames: Apps: Tile\(0\); `"$(Esc $app)`", 1 apps"
     Expect-Front $dashboardTitle '3. on the App tile'
+    $mark = Get-DashboardLogLength
     Push-Button A
     Expect-Front $app '3. A on the running App'
+    if (Wait-DashboardLog '^apps: started ' 2 $mark) { $failures += '3. the running App was started a second time, not brought in front' }
 
     # --- 4. The Guide's list (#345): the App, started after every game, is first under the divider (Entry 2). Home
     # from the Guide, then the Guide again and A on the App's entry: the running App in front.

@@ -1362,7 +1362,19 @@ impl App {
                         self.dashboard.notify(&why);
                     }
                 },
-                Effect::StartApp(app) => self.start_app(app),
+                // A on an App's tile: one that runs comes in front, not started a second time.
+                Effect::StartApp(id) => {
+                    let app = self.dashboard.library().apps.iter().find(|app| app.id == id).cloned();
+                    let window = app.as_ref().map_or(std::ptr::null_mut(), shell::app::window);
+                    match app {
+                        Some(app) if !window.is_null() => {
+                            shell::app::show(&app, window);
+                            let library = self.store.app_opened(id);
+                            self.show(library);
+                        }
+                        _ => self.start_app(id),
+                    }
+                }
                 // An App chosen in the Guide: in front once the Guide has let go of the foreground.
                 Effect::ShowApp(app) => self.hand_back = Some(HandBack::App(app)),
                 // The store is asked, and the Queue told: the game joins it, or its uninstall is followed.

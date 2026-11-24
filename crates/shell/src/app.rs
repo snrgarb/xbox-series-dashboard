@@ -122,12 +122,12 @@ pub fn running(apps: &[model::App]) -> Vec<i64> {
     apps.iter().filter(|app| app.last_opened > 0 && !window(app).is_null()).map(|app| app.id).collect()
 }
 
-/// Puts the App's window in front, as A on it in the Guide asks. Whether it is in front after.
+/// Puts the App's window in front, as A on it in the Guide or on its tile asks. Whether it is in front after.
 pub fn show(app: &model::App, window: *mut std::ffi::c_void) -> bool {
     #[cfg(windows)]
     unsafe {
         let taken = win::bring_in_front(window as _);
-        eprintln!("apps: {} in front from the Guide: {taken}", app.name);
+        eprintln!("apps: {} running: put in front: {taken}", app.name);
         taken
     }
     #[cfg(not(windows))]
