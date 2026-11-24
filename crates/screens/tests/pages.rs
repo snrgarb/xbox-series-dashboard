@@ -255,7 +255,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     // Search is the third Utility, under the landing tab's six entries.
     let mut home = guide_open();
     press(&mut home, &[Down, Down, Down, Down, Down, Down, Right, Right, A]);
-    assert_eq!(asked(&mut home), [Effect::GuideClosed]);
+    assert_eq!(asked(&mut home), [Effect::GuideClosed, Effect::ShowHome]);
     assert_eq!(home.focus_line(), SEARCH);
     press(&mut home, &[B, B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));
@@ -263,7 +263,7 @@ fn the_guides_entries_open_their_pages_and_b_gives_focus_back_to_homes_rows() {
     // Downloads is the fourth, after Search: Manage Queue, as Home's Downloads tile opens it.
     let mut home = guide_open();
     press(&mut home, &[Down, Down, Down, Down, Down, Down, Right, Right, Right, A]);
-    assert_eq!(asked(&mut home), [Effect::GuideClosed]);
+    assert_eq!(asked(&mut home), [Effect::GuideClosed, Effect::ShowHome]);
     assert_eq!(home.page(), Some("ManageQueue"));
     press(&mut home, &[B]);
     assert_eq!((home.page(), home.home_focus()), (None, Focus::Recent(2)));

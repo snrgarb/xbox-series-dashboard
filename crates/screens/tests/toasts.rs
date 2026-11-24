@@ -212,10 +212,10 @@ fn queue_toasts_are_worded_as_the_bundles_and_a_tap_on_queued_opens_manage_queue
     dashboard.tell(ToastKind::Notification, HALO.1);
     assert_eq!((dashboard.toasts().waiting(), dashboard.notifications().len()), (2, 0));
 
-    // The Guide button opens Manage Queue, not the Guide; the Toast goes, the other Queued one with it, and the
-    // tap sounds as A does.
+    // The Guide button opens Manage Queue, not the Guide, in front of whatever is; the Toast goes, the other
+    // Queued one with it, and the tap sounds as A does.
     pass(&mut dashboard, 1.0);
-    assert_eq!(press(&mut dashboard, Button::Guide), [Effect::Sound(Sound::Activate)]);
+    assert_eq!(press(&mut dashboard, Button::Guide), [Effect::Sound(Sound::Activate), Effect::ShowHome]);
     assert!(!dashboard.guide_open());
     assert_eq!(dashboard.page(), Some("ManageQueue"));
     assert_eq!((showing(&dashboard), dashboard.toasts().waiting()), (None, 1));
