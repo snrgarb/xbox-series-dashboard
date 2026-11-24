@@ -491,3 +491,46 @@ fn a_game_ending_with_focus_on_its_entry_leaves_focus_at_that_place() {
     // What is there now is a game like any other: A starts it.
     assert_eq!(press(&mut guide, &[A]), [SELECT, CLOSED, Effect::Launch(0)]);
 }
+
+// ---- Apps in the list (#345).
+
+/// The fake library with an App started after every game was played, so it is first under the divider.
+fn with_an_app() -> Dashboard {
+    let mut library = screens::fake_library();
+    let newest = library.games.iter().map(|game| game.last_played).max().unwrap_or(0);
+    library.apps = vec![model::App {
+        id: 77,
+        name: "Notes".into(),
+        kind: model::AppKind::Program,
+        target: r"C:\Apps\notes.exe".into(),
+        icon: None,
+        last_opened: newest + 1,
+    }];
+    Dashboard::new(library)
+}
+
+#[test]
+fn an_app_started_last_is_first_under_the_divider_and_a_brings_it_in_front() {
+    let mut guide = with_an_app();
+    press(&mut guide, &[Guide, Down, Down]);
+    assert_eq!(guide.guide().entries()[2].kind, Kind::App(0));
+    assert_eq!(guide.guide_line(), "Landing Entry(2)");
+    assert_eq!(press(&mut guide, &[A]), [SELECT, CLOSED, Effect::ShowApp(77)]);
+    assert!(!guide.guide_open());
+}
+
+#[test]
+fn an_app_whose_window_is_up_is_listed_running_and_the_list_follows_while_the_guide_is_open() {
+    let mut guide = with_an_app();
+    press(&mut guide, &[Guide]);
+    guide.set_running_apps(vec![77]);
+    assert_eq!(guide.guide().entries()[2].kind, Kind::RunningApp(0));
+    // Over a running game it comes after the game.
+    let mut guide = with_an_app();
+    guide.launch_started(RUNNING);
+    guide.game_booted();
+    guide.set_running_apps(vec![77]);
+    press(&mut guide, &[Guide]);
+    let kinds: Vec<Kind> = guide.guide().entries()[2..4].iter().map(|entry| entry.kind).collect();
+    assert_eq!(kinds, [Kind::Running(RUNNING), Kind::RunningApp(0)]);
+}

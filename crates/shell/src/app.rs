@@ -104,6 +104,39 @@ impl Started {
     }
 }
 
+/// The App's window highest on the desktop, if one is up; null if none, and anywhere but Windows.
+pub fn window(app: &model::App) -> *mut std::ffi::c_void {
+    #[cfg(windows)]
+    {
+        win::window_of(&Whose::of(app)).unwrap_or(std::ptr::null_mut())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        std::ptr::null_mut()
+    }
+}
+
+/// The Apps started from the Dashboard whose window is up, by their ids (#345): the Guide lists them as running.
+pub fn running(apps: &[model::App]) -> Vec<i64> {
+    apps.iter().filter(|app| app.last_opened > 0 && !window(app).is_null()).map(|app| app.id).collect()
+}
+
+/// Puts the App's window in front, as A on it in the Guide asks. Whether it is in front after.
+pub fn show(app: &model::App, window: *mut std::ffi::c_void) -> bool {
+    #[cfg(windows)]
+    unsafe {
+        let taken = win::bring_in_front(window as _);
+        eprintln!("apps: {} in front from the Guide: {taken}", app.name);
+        taken
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, window);
+        false
+    }
+}
+
 /// Home's window in front of whatever is (an App), as Home chosen in the Guide with no game running asks; nothing if
 /// it is in front already. Whether it is in front after.
 pub fn home_in_front(home: *mut std::ffi::c_void) -> bool {
@@ -226,7 +259,7 @@ mod tests {
     use model::{App, AppKind};
 
     fn app(kind: AppKind, target: &str) -> App {
-        App { id: 1, name: "An app".into(), kind, target: target.into(), icon: None }
+        App { id: 1, name: "An app".into(), kind, target: target.into(), icon: None, last_opened: 0 }
     }
 
     #[test]

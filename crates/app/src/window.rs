@@ -152,6 +152,8 @@ struct App {
     launch: Option<Launch>,
     /// An App just started from My games & apps, followed until its window is in front (`shell::app`).
     app_started: Option<shell::app::Started>,
+    /// When the Apps' windows were last looked for (`APPS_EVERY`).
+    apps_looked: Option<Instant>,
     /// When Home's window is drawn while it is a game's backdrop (docs/spec/launch-screen.md).
     backdrop: crate::backdrop::Frames,
     /// Holds the running game still while the Guide is open over it, and lets it go as the Guide hands the
@@ -351,6 +353,9 @@ enum KeyPress {
     Text(String),
 }
 
+/// How often the Apps started before are looked for a window: the Guide lists those that have one as running.
+const APPS_EVERY: Duration = Duration::from_secs(2);
+
 /// Who the Guide hands the foreground to as it closes over a running game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HandBack {
@@ -358,6 +363,8 @@ enum HandBack {
     Home,
     /// The game's own window: the running game was chosen.
     Game,
+    /// An App's window, by its id, started if it has none: an App was chosen (#345).
+    App(i64),
 }
 
 /// The minute it is, counted from 1970: what the clock's next change is told by.
@@ -537,6 +544,7 @@ pub fn run(
         })),
         launch: None,
         app_started: None,
+        apps_looked: None,
         backdrop: Default::default(),
         freezer,
         hold: Hold::default(),
@@ -752,6 +760,16 @@ impl App {
         self.toast_store.wake().map(Duration::from_secs_f32)
     }
 
+    /// Starts the App with this id, follows it until its window is in front, and keeps when it was started, which
+    /// places it in the Guide's list (#345).
+    fn start_app(&mut self, app: i64) {
+        if let Some(app) = crate::games::start_app(self.dashboard.library(), app, &mut *self.addresses) {
+            self.app_started = Some(shell::app::Started::new(&app));
+            let library = self.store.app_opened(app.id);
+            self.show(library);
+        }
+    }
+
     /// Starts a game through its source, the Dashboard showing its Launch screen.
     fn launch(&mut self, game: usize) {
         if self.launch.is_some() {
@@ -884,7 +902,26 @@ impl App {
         if self.dashboard.overlay() == OverlayShows::Guide {
             return false;
         }
-        let (Some(to), Some(state)) = (self.hand_back.take(), &self.state) else { return false };
+        let (Some(to), Some(_)) = (self.hand_back.take(), &self.state) else { return false };
+        if let HandBack::App(id) = to {
+            let Some(app) = self.dashboard.library().apps.iter().find(|app| app.id == id).cloned() else {
+                return false;
+            };
+            // Not running: started, and followed until its window is in front.
+            let window = shell::app::window(&app);
+            if window.is_null() {
+                self.start_app(id);
+                return false;
+            }
+            match self.overlay.as_mut().filter(|overlay| overlay.mode() == Some(Mode::Guide)) {
+                Some(overlay) => overlay.give_back_to(window),
+                None => {
+                    shell::app::show(&app, window);
+                }
+            }
+            return false;
+        }
+        let Some(state) = &self.state else { return false };
         let overlay = self.overlay.as_mut().filter(|overlay| overlay.mode() == Some(Mode::Guide));
         let Some(launch) = &mut self.launch else {
             // No game: Home chosen in the Guide over whatever it opened over, an App started from My games & apps
@@ -924,6 +961,7 @@ impl App {
                     false
                 }
             },
+            HandBack::App(_) => false,
         }
     }
 
@@ -1324,11 +1362,9 @@ impl App {
                         self.dashboard.notify(&why);
                     }
                 },
-                Effect::StartApp(app) => {
-                    if let Some(app) = crate::games::start_app(self.dashboard.library(), app, &mut *self.addresses) {
-                        self.app_started = Some(shell::app::Started::new(&app));
-                    }
-                }
+                Effect::StartApp(app) => self.start_app(app),
+                // An App chosen in the Guide: in front once the Guide has let go of the foreground.
+                Effect::ShowApp(app) => self.hand_back = Some(HandBack::App(app)),
                 // The store is asked, and the Queue told: the game joins it, or its uninstall is followed.
                 // Into the folder chosen in the question, else the store's default as Settings > Storage has it.
                 Effect::Install(game) | Effect::InstallTo { game, .. } => {
@@ -2051,11 +2087,21 @@ impl ApplicationHandler for App {
 
         // An App just started: its window put in front once it shows. Let go as the Guide opens over it, which
         // takes the foreground, or a game starts.
-        if self.dashboard.overlay() == OverlayShows::Guide || self.launch.is_some() {
+        // Held while the Guide that started it from its list is letting go of the foreground.
+        if self.dashboard.guide_open() || self.launch.is_some() {
             self.app_started = None;
         }
-        if self.app_started.as_mut().is_some_and(|app| !app.tick()) {
+        if self.dashboard.overlay() != OverlayShows::Guide && self.app_started.as_mut().is_some_and(|app| !app.tick()) {
             self.app_started = None;
+        }
+        // Which of the Apps started before have a window up, for the Guide's list (#345).
+        if self.apps_looked.is_none_or(|looked| looked.elapsed() >= APPS_EVERY) {
+            self.apps_looked = Some(Instant::now());
+            let running = shell::app::running(&self.dashboard.library().apps);
+            if running != self.dashboard.running_apps() {
+                self.dashboard.set_running_apps(running);
+                self.overlay_stale = true;
+            }
         }
 
         // Woken from sleep: Who's playing today? asks again, if it asks on waking.

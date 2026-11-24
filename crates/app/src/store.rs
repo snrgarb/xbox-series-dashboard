@@ -536,6 +536,18 @@ impl Store {
         Ok(self.snapshot())
     }
 
+    /// An App was started: when is kept, which places it in the Guide's list (#345). The snapshot after.
+    pub fn app_opened(&mut self, app: i64) -> Option<Library> {
+        match self.database.as_ref()?.app_opened(app, library::now()) {
+            Ok(name) => eprintln!("library: {name} opened"),
+            Err(e) => {
+                eprintln!("library: {e:#}");
+                return None;
+            }
+        }
+        self.snapshot()
+    }
+
     /// The running game's window is up: its Play session starts. Asked every time the launch is looked at; only
     /// the first does anything.
     pub fn game_booted(&mut self, game: Option<&Game>) {
