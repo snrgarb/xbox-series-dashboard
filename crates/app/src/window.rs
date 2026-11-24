@@ -2367,6 +2367,11 @@ impl App {
     /// A window event, its time billed to `Part::Events`, Home's frames' to their parts.
     fn window_event_billed(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent) {
         let Some(state) = &mut self.state else { return };
+        // Another program's window in front of Home's (an App's): the pad is its, but for the Guide button. The
+        // Guide on the Overlay takes the foreground from Home's window too, and is steered all the same.
+        if let WindowEvent::Focused(focused) = event {
+            self.dashboard.set_behind(!focused);
+        }
         match event {
             WindowEvent::CloseRequested => {
                 eprintln!("window: asked to close (WM_CLOSE to Home's window) at {:.0} ms", since_start());
