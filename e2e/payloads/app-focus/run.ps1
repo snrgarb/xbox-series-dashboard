@@ -153,13 +153,20 @@ try {
     Expect-Front $dashboardTitle '2. Home from the Guide over the App'
     Save-Screen '02-home-over-the-app'
     if ((App-Running).Count -eq 0) { $failures += '2. the App is no longer running behind Home' }
+    # Home lands on the Recent row's first tile: Right moves along it.
     $before = @(Focus-Lines).Count
-    Push-Button Left
+    Push-Button Right
     Start-Sleep -Milliseconds 1500
-    if (@(Focus-Lines).Count -le $before) { $failures += "2. the pad is not Home's: Left moved nothing ($(Focus-Now))" } else { Say "2. Left at Home: $(Focus-Now)" }
+    if (@(Focus-Lines).Count -le $before) { $failures += "2. the pad is not Home's: Right moved nothing ($(Focus-Now))" } else { Say "2. Right at Home: $(Focus-Now)" }
 
-    # --- 3. Back on the App's tile, A brings the running App in front again.
-    Walk Right "MyGames: Apps: Tile\(0\); .+" 3
+    # --- 3. Back on the App's tile (Home closed the page), A brings the running App in front again.
+    Go-TopBar 'MyGames'
+    Press A 'MyGames: Games: Tile\(0\)'
+    Press Left 'MyGames: Games: Nav\(Games\)'
+    Press Down 'MyGames: \w+: Nav\(Apps\)(; .*)?'
+    Start-Sleep -Milliseconds 2000
+    Press Right "MyGames: Apps: Tile\(0\); `"$(Esc $app)`", 1 apps"
+    Expect-Front $dashboardTitle '3. on the App tile'
     Push-Button A
     Expect-Front $app '3. A on the running App'
 
