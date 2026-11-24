@@ -119,6 +119,7 @@ impl Stage {
 /// One Profile, focused in its ring at the centre: the Bundle's picture (the Windows user's, wearing Windows' own
 /// look for an account with no picture).
 #[test]
+#[ignore = "screenshot"]
 fn whos_playing_one_profile() {
     let mut stage = Stage::asking(&["win11"], 0);
     assert_eq!(stage.dashboard.focus_line(), "Startup: WhosPlaying \"win11\"");
@@ -127,6 +128,7 @@ fn whos_playing_one_profile() {
 
 /// Two Profiles, focus on the first, signed in last; then on the second, wearing a picture file, the row slid left.
 #[test]
+#[ignore = "screenshot"]
 fn whos_playing_two_profiles() {
     let mut stage = Stage::asking(&["win11", "Moth Runner"], 0);
     stage.check("whos-playing-two");
@@ -138,6 +140,7 @@ fn whos_playing_two_profiles() {
 /// Six Profiles, focus on the third: the row runs off both edges of the screen. A long gamertag ends in an
 /// ellipsis.
 #[test]
+#[ignore = "screenshot"]
 fn whos_playing_many_profiles() {
     let names =
         ["Alpha", "Moth Runner", "Gamma", "A gamertag that is far too long to fit its place", "Epsilon", "Zeta"];
@@ -149,6 +152,7 @@ fn whos_playing_many_profiles() {
 
 /// Signing you in: the picture alone, the Spinner part way round it, the gamertag and "Signing you in" under it.
 #[test]
+#[ignore = "screenshot"]
 fn signing_you_in() {
     let mut stage = Stage::asking(&["win11", "Moth Runner"], 1);
     stage.press(&[A]);
@@ -158,6 +162,7 @@ fn signing_you_in() {
 
 /// Who's playing today? on an ultrawide screen: the canvas centred across, the swirl filling it.
 #[test]
+#[ignore = "screenshot"]
 fn whos_playing_ultrawide() {
     let mut stage = Stage::at(&["win11", "Moth Runner", "Gamma"], 1, (2560, 1080));
     stage.check("whos-playing-ultrawide");

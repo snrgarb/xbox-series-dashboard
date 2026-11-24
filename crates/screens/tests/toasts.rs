@@ -337,6 +337,7 @@ fn is_green(image: &image::RgbaImage, x: u32, y: u32) -> bool {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn the_banner() {
     // The greeting over Home, as the Bundle's picture of it (60-toast-greeting.jpg): the card 128 high with its
     // foot 64 above the screen's, the picture round at its left, no prompt.

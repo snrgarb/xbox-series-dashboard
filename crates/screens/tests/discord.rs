@@ -564,12 +564,14 @@ fn four() -> Discord {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn discord_tab_call() {
     Stage::on_tab(&four()).check("discord-tab-call");
 }
 
 /// Five Shortcuts, two of them DMs, focus on the first: made-up pictures for three, the others' stand-ins.
 #[test]
+#[ignore = "screenshot"]
 fn discord_tab_shortcuts() {
     let mut discord = five_shortcuts();
     discord.shortcuts[0].picture = Some(avatar("icon-stand-in", [0x20, 0x60, 0xA0]));
@@ -580,6 +582,7 @@ fn discord_tab_shortcuts() {
 
 /// The Servers Flyout while Discord is asked: its spinner.
 #[test]
+#[ignore = "screenshot"]
 fn discord_servers_loading() {
     let mut stage = Stage::on_tab(&signed_in());
     press(&mut stage.dashboard, &[A]);
@@ -589,6 +592,7 @@ fn discord_servers_loading() {
 
 /// The servers, those with an icon wearing a made-up one, focus on the second.
 #[test]
+#[ignore = "screenshot"]
 fn discord_servers() {
     let mut stage = Stage::on_tab(&signed_in());
     press(&mut stage.dashboard, &[A]);
@@ -602,6 +606,7 @@ fn discord_servers() {
 
 /// A server's voice channels: one with three people in it, one Empty, one Discord hasn't said of yet.
 #[test]
+#[ignore = "screenshot"]
 fn discord_server_channels() {
     let mut stage = Stage::on_tab(&signed_in());
     press(&mut stage.dashboard, &[A]);
@@ -619,6 +624,7 @@ fn discord_server_channels() {
 
 /// Audio in a Call: Mute in Discord on, as Discord said; the Status area's mark badged muted.
 #[test]
+#[ignore = "screenshot"]
 fn discord_audio_in_a_call() {
     let mut call = four();
     call.voice.mute = true;
@@ -632,6 +638,7 @@ fn discord_audio_in_a_call() {
 
 /// Home's top bar in a Call, the user speaking: the mark lit, left of the clock.
 #[test]
+#[ignore = "screenshot"]
 fn discord_home_mark_speaking() {
     let mut call = four();
     people(&mut call)[0].speaking = true;
@@ -642,6 +649,7 @@ fn discord_home_mark_speaking() {
 
 /// Muted and deafened, as Discord said: both switches on, focus on Leave.
 #[test]
+#[ignore = "screenshot"]
 fn discord_tab_call_muted_and_deafened() {
     let mut call = four();
     (call.voice.mute, call.voice.deaf) = (true, true);

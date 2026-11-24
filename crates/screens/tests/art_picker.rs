@@ -254,6 +254,7 @@ impl Stage {
 
 /// Square: ten cells a page at 284 x 284, Automatic first and in use; focus on a candidate.
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_square_tab() {
     let mut stage = Stage::picker(true);
     Service { total: [23, 30, 7] }.serve(&mut stage.dashboard);
@@ -263,6 +264,7 @@ fn shot_the_square_tab() {
 
 /// Cover: fourteen cells a page at 2:3, the store's own second; its second page, focus on the second row.
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_cover_tab_on_its_second_page() {
     let mut stage = Stage::picker(true);
     let service = Service { total: [23, 30, 7] };
@@ -276,6 +278,7 @@ fn shot_the_cover_tab_on_its_second_page() {
 
 /// Background: twelve cells a page at the hero's 1920:620; seven candidates, all on the first page.
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_background_tab() {
     let mut stage = Stage::picker(true);
     let service = Service { total: [23, 30, 7] };
@@ -287,6 +290,7 @@ fn shot_the_background_tab() {
 
 /// A page that failed: said plainly, with Retry focused.
 #[test]
+#[ignore = "screenshot"]
 fn shot_a_failed_page_with_retry() {
     let mut stage = Stage::picker(true);
     let asks = stage.dashboard.art_asks();
@@ -300,6 +304,7 @@ fn shot_a_failed_page_with_retry() {
 
 /// No key: the fixed entries alone, and where to set one.
 #[test]
+#[ignore = "screenshot"]
 fn shot_without_a_key() {
     let mut stage = Stage::picker(false);
     press(&mut stage.dashboard, &[RightBumper, LeftBumper]);

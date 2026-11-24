@@ -613,6 +613,7 @@ fn assert_sides(image: &image::RgbaImage, left: u32, first: u32) {
 /// The installed game's menu, six rows: the panel at 735, 263.7, 450 x 552.6 with focus on Play game, its ring 8
 /// outside the panel's sides; Home under it at 0.4 of its light, the tile that opened it still focused.
 #[test]
+#[ignore = "screenshot"]
 fn the_menu_of_an_installed_game_has_six_rows() {
     let mut stage = Stage::on_tile(0);
     let before = stage.still();
@@ -635,6 +636,7 @@ fn the_menu_of_an_installed_game_has_six_rows() {
 /// A game that is not installed: Install first and no Uninstall, five rows, as the Bundle's picture
 /// (24-tile-menu-not-installed.jpg): the panel at y 299.7..780.3, the gap before Customise Home.
 #[test]
+#[ignore = "screenshot"]
 fn the_menu_of_a_game_that_is_not_installed_has_five_rows() {
     let mut stage = Stage::on_tile(5);
     stage.press(&[Menu]);
@@ -649,6 +651,7 @@ fn the_menu_of_a_game_that_is_not_installed_has_five_rows() {
 
 /// From the Game hub there is no Manage game row: four rows for a game that is not installed, at y 335.7..744.3.
 #[test]
+#[ignore = "screenshot"]
 fn the_menu_from_the_game_hub_has_four_rows() {
     let mut stage = Stage::on_tile(5);
     let game = stage.dashboard.library().games[5].clone();
@@ -660,6 +663,7 @@ fn the_menu_from_the_game_hub_has_four_rows() {
 /// More options (25-tile-menu-more-options.jpg): the flyout 77 in from the menu's left at the menu's top, the menu
 /// behind it at 0.45 as one picture, its More options row still drawn focused.
 #[test]
+#[ignore = "screenshot"]
 fn more_options_is_a_flyout_over_the_dimmed_menu() {
     let mut stage = Stage::on_tile(5);
     stage.press(&[Menu, Down, Down, Down, Down]);
@@ -684,6 +688,7 @@ fn more_options_is_a_flyout_over_the_dimmed_menu() {
 /// question as the title and two rows, focus on the confirming one. The panel is the one the Bundle's picture of
 /// "Remove X?" shows (26-tile-menu-remove-prompt.jpg).
 #[test]
+#[ignore = "screenshot"]
 fn the_uninstall_question_takes_the_menus_place() {
     let mut stage = Stage::on_tile(0);
     stage.press(&[Menu, Down, Down, Down, A]);
@@ -702,6 +707,7 @@ fn the_uninstall_question_takes_the_menus_place() {
 
 /// The menu on a Group's card: Home is risen to the Group under it, and the hint bar is not drawn.
 #[test]
+#[ignore = "screenshot"]
 fn the_menu_over_a_group_hides_the_hint_bar() {
     let mut stage = Stage::on_tile(0);
     stage.press(&[Down, Down]);

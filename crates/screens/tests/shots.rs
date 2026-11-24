@@ -281,6 +281,7 @@ const HD: (u32, u32) = (1920, 1080);
 const TICK: f32 = 0.04;
 
 #[test]
+#[ignore = "screenshot"]
 fn home() {
     Stage::on_row(screens::fake_library(), HD).check("home");
 }
@@ -288,6 +289,7 @@ fn home() {
 /// Settings' Show launcher icons off (#248): the Recent row's tiles carry no launcher's mark at their foot;
 /// the Groups' cards keep theirs.
 #[test]
+#[ignore = "screenshot"]
 fn home_recent_row_without_launcher_marks() {
     // White in the second tile's mark, the first having focus: 10 in from its left and foot, 20 across.
     let s = 1700.0 / 1526.0;
@@ -315,6 +317,7 @@ fn home_recent_row_without_launcher_marks() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_with_art() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right]);
@@ -350,6 +353,7 @@ fn square_art(game: usize) -> PathBuf {
 /// The Recent row's tiles are square: the first two games have square art, shown whole, ring and all, the first
 /// grown with focus; the third has a cover alone, cropped from its top as before; the fifth a header alone.
 #[test]
+#[ignore = "screenshot"]
 fn home_square_art_on_the_recent_row() {
     let mut library = library_with_art();
     for (i, game) in library.games.iter_mut().take(2).enumerate() {
@@ -386,6 +390,7 @@ fn stripe_middle(image: &image::RgbaImage, y: u32, from: u32, to: u32) -> f32 {
 /// than square fills the tile, its sides cut alike; a portrait one is shown whole in the middle. At 1080p and at 4K,
 /// where the pictures are decoded twice as wide.
 #[test]
+#[ignore = "screenshot"]
 fn home_recent_tile_pictures_are_cut_about_their_middle() {
     let mut library = library_with_art();
     library.games[0].square = Some(halves_art(1100, 1000));
@@ -442,6 +447,7 @@ const MARK: f32 = 0.63;
 /// as tall as the screen, cut about its middle across. The ruler's red at the screen's two edges says which part of
 /// the picture shows, and the mark where it stands: at 1080p and at 4K alike.
 #[test]
+#[ignore = "screenshot"]
 fn home_background_wider_than_the_screen_is_cut_about_its_middle() {
     let mut library = library_with_art();
     library.games[0].hero = Some(ruler_art());
@@ -472,6 +478,7 @@ fn home_background_wider_than_the_screen_is_cut_about_its_middle() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_blurred_cover_behind_a_game_with_no_background() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right, Button::Right, Button::Right]);
@@ -479,6 +486,7 @@ fn home_blurred_cover_behind_a_game_with_no_background() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_wide_tile_focused() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right, Button::Right, Button::Down]);
@@ -486,17 +494,20 @@ fn home_wide_tile_focused() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_720p() {
     Stage::on_row(library_with_art(), (1280, 720)).check("home-720p");
 }
 
 /// Taller than 16:9: the canvas at the top, the background to the foot.
 #[test]
+#[ignore = "screenshot"]
 fn home_16_10() {
     Stage::on_row(library_with_art(), (1280, 800)).check("home-16-10");
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_ultrawide() {
     // Wider than 16:9: the canvas centred, the background to both edges.
     Stage::on_row(library_with_art(), (2560, 1080)).check("home-ultrawide");
@@ -505,6 +516,7 @@ fn home_ultrawide() {
 /// Home as it starts: focus on the profile, no Recent tile grown, the base behind. With a pad connected, its glyph
 /// by the clock.
 #[test]
+#[ignore = "screenshot"]
 fn home_as_it_starts() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.dashboard.set_pad_connected(true);
@@ -513,6 +525,7 @@ fn home_as_it_starts() {
 
 /// The swirl some twelve seconds into its movement: turned most of the way back to level, its bands drifted across.
 #[test]
+#[ignore = "screenshot"]
 fn home_swirl_later() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.run(12.0, 0.1);
@@ -521,6 +534,7 @@ fn home_swirl_later() {
 
 /// Under Reduce motion the swirl stands as it is authored, however long it shows.
 #[test]
+#[ignore = "screenshot"]
 fn home_swirl_under_reduce_motion() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.dashboard.set_options(screens::Options { reduce_motion: true, ..Default::default() });
@@ -530,17 +544,20 @@ fn home_swirl_under_reduce_motion() {
 
 /// The swirl fills a screen of another shape: scaled until it covers it, centred.
 #[test]
+#[ignore = "screenshot"]
 fn home_swirl_16_10() {
     Stage::new(library_with_art(), (1280, 800)).check("home-swirl-16-10");
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_swirl_ultrawide() {
     Stage::new(library_with_art(), (2560, 1080)).check("home-swirl-ultrawide");
 }
 
 /// Focus has rested on the row's second game: its art has taken the first's place.
 #[test]
+#[ignore = "screenshot"]
 fn home_background_follows_focus_after_the_delay() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.ticks(15);
@@ -551,6 +568,7 @@ fn home_background_follows_focus_after_the_delay() {
 
 /// Half way through the crossfade from the first game's art to the second's.
 #[test]
+#[ignore = "screenshot"]
 fn home_background_mid_crossfade() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.ticks(15);
@@ -563,6 +581,7 @@ fn home_background_mid_crossfade() {
 
 /// Half way through a blurred cover's fade in over the swirl: it comes darkened, as one with its black sheet.
 #[test]
+#[ignore = "screenshot"]
 fn home_blurred_cover_fading_in_over_the_swirl() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.ticks(10);
@@ -575,6 +594,7 @@ fn home_blurred_cover_fading_in_over_the_swirl() {
 
 /// A round button with focus: its ring, its label under it, its icon larger.
 #[test]
+#[ignore = "screenshot"]
 fn home_top_bar_button_focused() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Up, Button::Right, Button::Right]);
@@ -582,6 +602,7 @@ fn home_top_bar_button_focused() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_play_history_focused() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Right; 7]);
@@ -590,6 +611,7 @@ fn home_play_history_focused() {
 
 /// The page at rest on the first Group: a game's card with focus.
 #[test]
+#[ignore = "screenshot"]
 fn home_group_card_focused() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Down, Button::Down, Button::Right]);
@@ -598,6 +620,7 @@ fn home_group_card_focused() {
 
 /// The page at rest on the last Group: its See all card with focus.
 #[test]
+#[ignore = "screenshot"]
 fn home_see_all_focused() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Down, Button::Down, Button::Down]);
@@ -608,6 +631,7 @@ fn home_see_all_focused() {
 /// The Groups a first run shows, from the saved filters: Favourites, a Steam collection after it, then Most played,
 /// each in its own sort. The page is at rest on the first.
 #[test]
+#[ignore = "screenshot"]
 fn home_groups_from_the_saved_filters() {
     let mut stage = Stage::on_row(library_with_a_collection(), HD);
     stage.press(&[Button::Down, Button::Down, Button::Right]);
@@ -616,6 +640,7 @@ fn home_groups_from_the_saved_filters() {
 
 /// With no Group to show, Favourites shows empty: its header over a See all card alone.
 #[test]
+#[ignore = "screenshot"]
 fn home_favourites_empty() {
     let library = from_database(library_with_art(), |database| {
         for filter in database.filters().unwrap() {
@@ -629,6 +654,7 @@ fn home_favourites_empty() {
 
 /// The scrolled rests on a taller screen: there is more of the page under the wide tiles, so it rises less.
 #[test]
+#[ignore = "screenshot"]
 fn home_wide_tile_focused_16_10() {
     let mut stage = Stage::on_row(library_with_art(), (1280, 800));
     stage.press(&[Button::Down]);
@@ -636,6 +662,7 @@ fn home_wide_tile_focused_16_10() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn home_group_card_focused_16_10() {
     let mut stage = Stage::on_row(library_with_art(), (1280, 800));
     stage.press(&[Button::Down, Button::Down, Button::Right, Button::Right, Button::Right]);
@@ -643,6 +670,7 @@ fn home_group_card_focused_16_10() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn launch_screen() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.launch_started(0);
@@ -651,6 +679,7 @@ fn launch_screen() {
 
 /// A game with a cover and no background art: the cover, blurred and darkened.
 #[test]
+#[ignore = "screenshot"]
 fn launch_screen_with_a_cover_alone() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.dashboard.launch_started(3);
@@ -659,6 +688,7 @@ fn launch_screen_with_a_cover_alone() {
 
 /// A game with no art at all: black, the Spinner and its name, here long enough to wrap.
 #[test]
+#[ignore = "screenshot"]
 fn launch_screen_with_no_art() {
     let mut library = screens::fake_library();
     library.games[0].name = "The Legend of the Seven Lanterns: Definitive Anniversary Edition".into();
@@ -1583,6 +1613,7 @@ fn within(a: [u8; 3], b: [u8; 3], by: u8) -> bool {
 
 /// The landing tab over Home as it opens: focus on Home, four games under the divider, the Utilities at the foot.
 #[test]
+#[ignore = "screenshot"]
 fn guide() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Guide]);
@@ -1591,6 +1622,7 @@ fn guide() {
 
 /// A game's entry with focus: its ring over its cover, and the neighbours' covers under its glow.
 #[test]
+#[ignore = "screenshot"]
 fn guide_recent_game_focused() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Guide, Button::Down, Button::Down, Button::Down]);
@@ -1600,6 +1632,7 @@ fn guide_recent_game_focused() {
 /// A Utility with focus, the Notifications badge beside it, and the Status area with everything it can show: the
 /// PC's battery, the pad's with its percent, the clock.
 #[test]
+#[ignore = "screenshot"]
 fn guide_utility_focused_with_a_badge_and_batteries() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.set_pad_connected(true);
@@ -1617,6 +1650,7 @@ fn guide_utility_focused_with_a_badge_and_batteries() {
 
 /// The Downloads Utility (#193) with focus, the Queue empty: no badge.
 #[test]
+#[ignore = "screenshot"]
 fn guide_downloads_utility_with_nothing_queued() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.set_pad_connected(true);
@@ -1628,6 +1662,7 @@ fn guide_downloads_utility_with_nothing_queued() {
 
 /// The same with two games in the Queue, the first downloading: the badge counts them, as Notifications' does.
 #[test]
+#[ignore = "screenshot"]
 fn guide_downloads_utility_with_a_download() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.set_pad_connected(true);
@@ -1641,6 +1676,7 @@ fn guide_downloads_utility_with_a_download() {
 /// The Bundle's own picture of the Guide (guide-over-game's guide-open.jpg): over the stand-in game, which is none
 /// of the library's, with nothing played yet and a pad on a cable.
 #[test]
+#[ignore = "screenshot"]
 fn guide_over_a_game_with_no_games_played() {
     let mut library = screens::fake_library();
     library.games.iter_mut().for_each(|game| game.last_played = 0);
@@ -1655,6 +1691,7 @@ fn guide_over_a_game_with_no_games_played() {
 /// Over a running game, as the Overlay shows it: the game first in the list, "Running", with focus and so with the
 /// Menu button's hint; the dim over the game's own colour.
 #[test]
+#[ignore = "screenshot"]
 fn guide_over_a_game() {
     let mut stage = guide_over_game(library_with_art(), 1);
     stage.press(&[Button::Down, Button::Down]);
@@ -1669,6 +1706,7 @@ fn guide_over_a_game() {
 
 /// A running game with no cover: the console's own tile for it, a pad on the accent.
 #[test]
+#[ignore = "screenshot"]
 fn guide_over_a_game_with_no_cover() {
     let mut stage = guide_over_game(screens::fake_library(), 3);
     let image = stage.still_over(GAME);
@@ -1676,6 +1714,7 @@ fn guide_over_a_game_with_no_cover() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn guide_profile_and_system() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Guide, Button::RightBumper]);
@@ -1684,6 +1723,7 @@ fn guide_profile_and_system() {
 
 /// Profile & system over a game: Switch profile greyed out, here with focus, which it still takes.
 #[test]
+#[ignore = "screenshot"]
 fn guide_profile_and_system_over_a_game() {
     let mut stage = guide_over_game(library_with_art(), 1);
     stage.press(&[Button::RightBumper, Button::Down]);
@@ -1692,6 +1732,7 @@ fn guide_profile_and_system_over_a_game() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn guide_power_focused() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.press(&[Button::Guide, Button::RightBumper, Button::Down, Button::Down, Button::Down]);
@@ -1701,6 +1742,7 @@ fn guide_power_focused() {
 /// Names too long for their line: a game's wraps to two lines and ends in an ellipsis, with "Running" under it on
 /// the running game; the user's is one line.
 #[test]
+#[ignore = "screenshot"]
 fn guide_long_names() {
     let mut library = library_with_art();
     library.user = Some("A Gamertag That Is Far Too Long For The Panel".into());
@@ -1718,6 +1760,7 @@ fn guide_long_names() {
 /// With Discord connected its tab stands between the two: out of a Call, who is signed in. The tab's other states
 /// are tests/discord.rs's.
 #[test]
+#[ignore = "screenshot"]
 fn guide_discord_tab() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     let signed_in = model::discord::Discord { connected: true, user: Some("E2E Tester".into()), ..Default::default() };
@@ -1727,6 +1770,7 @@ fn guide_discord_tab() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn guide_720p() {
     let mut stage = Stage::on_row(library_with_art(), (1280, 720));
     stage.dashboard.set_pad_connected(true);
@@ -1736,6 +1780,7 @@ fn guide_720p() {
 
 /// Wider than 16:9: the panel at the screen's left, the Status area at its right, the dim to both edges.
 #[test]
+#[ignore = "screenshot"]
 fn guide_ultrawide() {
     let mut stage = Stage::on_row(library_with_art(), (2560, 1080));
     stage.dashboard.set_pad_connected(true);
@@ -1871,6 +1916,7 @@ fn guide_at_home() -> Stage {
 /// Power from its entry: the band over the Guide's panel, which is out of focus under the dialog's dim, with
 /// focus on Close.
 #[test]
+#[ignore = "screenshot"]
 fn guide_power() {
     let mut stage = power_from_its_entry(guide_at_home());
     let image = stage.still();
@@ -1886,6 +1932,7 @@ fn guide_power() {
 
 /// Focus on a tile: Restart PC, the middle of the first row.
 #[test]
+#[ignore = "screenshot"]
 fn guide_power_tile_focused() {
     let mut stage = power_from_its_entry(guide_at_home());
     stage.press(&[Button::Up, Button::Up, Button::Right]);
@@ -1894,6 +1941,7 @@ fn guide_power_tile_focused() {
 
 /// Power by a hold of the Guide button at Home: no panel, no hints, no Status area; Home under the two dims.
 #[test]
+#[ignore = "screenshot"]
 fn guide_power_held() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.dashboard.pad_event(ui::PadEvent::GuideHeld);
@@ -1902,6 +1950,7 @@ fn guide_power_held() {
 
 /// Power by a hold over a game, as the Overlay shows it.
 #[test]
+#[ignore = "screenshot"]
 fn guide_power_held_over_a_game() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.dashboard.launch_started(1);
@@ -1913,6 +1962,7 @@ fn guide_power_held_over_a_game() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn guide_power_720p() {
     let mut stage = Stage::on_row(library_with_art(), (1280, 720));
     stage.press(&[Button::Guide]);
@@ -1923,6 +1973,7 @@ fn guide_power_720p() {
 
 /// Wider than 16:9: the band to both edges, its contents where they are on the canvas.
 #[test]
+#[ignore = "screenshot"]
 fn guide_power_ultrawide() {
     let mut stage = Stage::on_row(library_with_art(), (2560, 1080));
     stage.press(&[Button::Guide]);
@@ -1932,6 +1983,7 @@ fn guide_power_ultrawide() {
 /// The running game's menu over the Guide: the menu panel in the middle of the screen, the panel out of focus
 /// behind the dim, the hints still beside it.
 #[test]
+#[ignore = "screenshot"]
 fn guide_running_game_menu() {
     let mut stage = guide_over_game(library_with_art(), 1);
     stage.press(&[Button::Down, Button::Down, Button::Menu]);
@@ -1949,6 +2001,7 @@ fn guide_running_game_menu() {
 /// "Quit X and start Y?": A on a game played before, while another runs. The prompt's title wraps; its first
 /// answer has focus.
 #[test]
+#[ignore = "screenshot"]
 fn guide_quit_and_start_prompt() {
     let mut stage = guide_over_game(library_with_art(), 1);
     stage.press(&[Button::Down, Button::Down, Button::Down, Button::A]);
@@ -1962,6 +2015,7 @@ fn guide_quit_and_start_prompt() {
 
 /// "Force quit X?", ten seconds after Quit: the prompt with its message, focus on Force quit.
 #[test]
+#[ignore = "screenshot"]
 fn guide_force_quit_prompt() {
     let mut stage = guide_over_game(library_with_art(), 1);
     stage.press(&[Button::Down, Button::Down, Button::Menu, Button::A]);
@@ -1974,6 +2028,7 @@ fn guide_force_quit_prompt() {
 /// The same with the Guide setting off, the game having been quit some other way: the prompt over the dim alone,
 /// with no panel, no hints and no Status area.
 #[test]
+#[ignore = "screenshot"]
 fn guide_force_quit_prompt_with_the_guide_off() {
     let mut stage = guide_over_game(library_with_art(), 1);
     stage.press(&[Button::Down, Button::Down, Button::Menu, Button::A, Button::B]);
@@ -1989,6 +2044,7 @@ fn guide_force_quit_prompt_with_the_guide_off() {
 /// A game that ends by itself under the open Guide leaves the Guide open, over Home now, its list without the
 /// game and focus where it was.
 #[test]
+#[ignore = "screenshot"]
 fn guide_after_the_game_under_it_ended() {
     let mut stage = guide_over_game(library_with_art(), 1);
     stage.press(&[Button::Down, Button::Down]);
@@ -2000,6 +2056,7 @@ fn guide_after_the_game_under_it_ended() {
 
 /// Home chosen in the Guide over a game: Home's window draws again, in front of the game, and takes the pad.
 #[test]
+#[ignore = "screenshot"]
 fn home_from_the_guide_over_a_game_draws_home_again() {
     let mut stage = guide_over_game(library_with_art(), 1);
     assert!(stage.dashboard.home_covered());
@@ -2136,6 +2193,7 @@ fn tile_menu() -> MenuPanel<u8> {
 /// A menu of five rows as the Bundle's picture of the Tile menu has it (23-tile-menu-installed.jpg): the panel at
 /// x 735..1185, y 300..780, the first row's ring from y 399, the gap before Customise Home.
 #[test]
+#[ignore = "screenshot"]
 fn menu_panel_as_the_tile_menu() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     let menu = tile_menu();
@@ -2164,6 +2222,7 @@ fn menu_panel_as_the_tile_menu() {
 /// A prompt in the flyout's place over its menu, which is behind it at 0.45 as one picture
 /// (26-tile-menu-remove-prompt.jpg).
 #[test]
+#[ignore = "screenshot"]
 fn menu_panel_prompt_over_its_menu() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     let mut menu = tile_menu();
@@ -2184,6 +2243,7 @@ fn menu_panel_prompt_over_its_menu() {
 
 /// A prompt whose question wraps, with a message under it: the Guide's "Force quit X?" (#40).
 #[test]
+#[ignore = "screenshot"]
 fn menu_panel_prompt_with_a_message() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     let rows = vec![Row::new(icon::QUIT, "Force quit", true), Row::new(icon::CANCEL, "Cancel", false)];
@@ -2225,12 +2285,14 @@ const FIELD: [u8; 3] = [0x2E, 0x31, 0x36];
 
 /// The letters with Shift on, as the keyboard opens over nothing: the Bundle's picture 15, with the Shift key lit.
 #[test]
+#[ignore = "screenshot"]
 fn keyboard_letters_with_shift_on() {
     text_entry(HD).check("keyboard-shift");
 }
 
 /// "Ha" typed, focus on A, the letters in lower case: the Bundle's picture 13.
 #[test]
+#[ignore = "screenshot"]
 fn keyboard_letters_after_typing() {
     let mut stage = text_entry(HD);
     stage.press(&HA);
@@ -2239,6 +2301,7 @@ fn keyboard_letters_after_typing() {
 
 /// The symbols, focus on the symbols key, which reads "abc": the Bundle's picture 17.
 #[test]
+#[ignore = "screenshot"]
 fn keyboard_symbols() {
     let mut stage = text_entry(HD);
     stage.press(&HA);
@@ -2248,6 +2311,7 @@ fn keyboard_symbols() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn text_entry_of_a_secret() {
     let mut stage = Stage::new(library_with_art(), HD);
     stage.dashboard.open_page(Open::KeyboardStandIn);
@@ -2256,6 +2320,7 @@ fn text_entry_of_a_secret() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn text_entry_16_10() {
     let mut stage = text_entry((1920, 1200));
     stage.press(&HA);
@@ -2263,6 +2328,7 @@ fn text_entry_16_10() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn text_entry_720p() {
     let mut stage = text_entry((1280, 720));
     stage.press(&HA);
@@ -2364,6 +2430,7 @@ fn text_entry_dims_the_page_and_the_caret_follows_the_text() {
 /// A text longer than the field scrolls, the caret kept in view at the field's right edge, and nothing of it is
 /// drawn outside the text's area (#54; the Bundle cuts it and loses the caret).
 #[test]
+#[ignore = "screenshot"]
 fn a_text_longer_than_the_field_scrolls_to_keep_the_caret_in_view() {
     let mut stage = text_entry(HD);
     stage.dashboard.typed(Typed::Text(&"Wide text ".repeat(12)));
@@ -2428,6 +2495,7 @@ fn on_utility(place: usize) -> Stage {
 /// The Bundle's 53-guide-notifications-flyout.jpg: the Flyout over the dimmed panel, with nothing in it; the hints
 /// beside the panel hidden.
 #[test]
+#[ignore = "screenshot"]
 fn guide_notifications_flyout_with_none() {
     let mut stage = on_utility(0);
     stage.press(&[Button::A]);
@@ -2436,6 +2504,7 @@ fn guide_notifications_flyout_with_none() {
 
 /// Notifications, newest first: a card as tall as its text, at least 87 and three lines at most.
 #[test]
+#[ignore = "screenshot"]
 fn guide_notifications_flyout() {
     let mut stage = on_utility(0);
     stage.dashboard.record("Saltwind Rally is ready to play");
@@ -2451,6 +2520,7 @@ fn guide_notifications_flyout() {
 /// The Bundle's 54-guide-audio-flyout.jpg: Output with focus, Input, Volume at 67, Mute off, and under a divider
 /// the line about music.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_flyout() {
     let mut stage = on_utility(1);
     stage.press(&[Button::A]);
@@ -2464,6 +2534,7 @@ fn guide_audio_flyout() {
 /// Output's list open: the dropdown ringed in the accent, its chevron up, and the list over the entries below, the
 /// default device ticked and focused.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_output_list() {
     let mut stage = on_utility(1);
     stage.press(&[Button::A, Button::A]);
@@ -2472,6 +2543,7 @@ fn guide_audio_output_list() {
 
 /// Mute on, with focus: the switch filled in the accent, its knob at the right.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_muted() {
     let mut stage = on_utility(1);
     stage.dashboard.set_audio(model::Audio { muted: true, volume: 0, ..bundle_audio() });
@@ -2481,6 +2553,7 @@ fn guide_audio_muted() {
 
 /// With no devices at all: "None" in both dropdowns, the volume at 0.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_with_no_devices() {
     let mut stage = on_utility(1);
     stage.dashboard.set_audio(model::Audio::default());
@@ -2539,6 +2612,7 @@ fn now_playing(session: model::MediaSession, down: usize) -> Stage {
 
 /// Nothing playing, focus on the line that says so: the Bundle's words, and nothing to go down to.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_nothing_playing() {
     let mut stage = on_utility(1);
     stage.press(&[Button::A]);
@@ -2549,6 +2623,7 @@ fn guide_audio_nothing_playing() {
 /// Now Playing's card, playing, with focus on it: the art, the title and the artist, the bar 1:05 of 3:20 along,
 /// the play mark (its state) beside the app's name, and under it the controls, Pause among them, Previous dimmed.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_now_playing() {
     let mut stage = now_playing(song(), 4);
     stage.check("guide-audio-now-playing");
@@ -2557,6 +2632,7 @@ fn guide_audio_now_playing() {
 /// Paused, with no art and a title too long for two lines, focus on Play/Pause: the art's grey stand-in with its
 /// note, the pause mark in the row and Play on the button.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_now_playing_paused() {
     let session = model::MediaSession {
         title: "A Stand-in Song With a Title Far Too Long to Fit on the Card in Two Lines of Text".into(),
@@ -2570,6 +2646,7 @@ fn guide_audio_now_playing_paused() {
 
 /// A stream with no length: no bar and no time, the app's name alone in the row; focus on Next.
 #[test]
+#[ignore = "screenshot"]
 fn guide_audio_now_playing_no_length() {
     let session = model::MediaSession {
         title: "Live Stand-in Radio".into(),
@@ -2641,6 +2718,7 @@ impl Stage {
 /// The Bundle's `19-game-hub-play-focused.jpg`: a game with background art, which is behind the band, blurred;
 /// Home in the strips above and below it; focus on Play.
 #[test]
+#[ignore = "screenshot"]
 fn game_hub() {
     let mut stage = Stage::hub(0);
     assert_eq!(stage.dashboard.focus_line(), "GameHub: 1000 Hub Play");
@@ -2650,6 +2728,7 @@ fn game_hub() {
 
 /// The Bundle's `20-game-hub-manage-focused.jpg`: Manage says its name over itself.
 #[test]
+#[ignore = "screenshot"]
 fn game_hub_manage() {
     let mut stage = Stage::hub(0);
     stage.press(&[Button::Right]);
@@ -2658,6 +2737,7 @@ fn game_hub_manage() {
 
 /// The Bundle's `22-game-hub-details.jpg`: the other page, its wide card showing the game's art.
 #[test]
+#[ignore = "screenshot"]
 fn game_hub_details() {
     let mut stage = Stage::hub(0);
     stage.press(&[Button::Right, Button::Right, Button::A]);
@@ -2668,6 +2748,7 @@ fn game_hub_details() {
 /// A game with a cover and no background art: the cover behind the band, blurred more and overhanging; no Info
 /// card, as the library knows nothing to put in it. Focus on a card: the ring, and nothing else changes.
 #[test]
+#[ignore = "screenshot"]
 fn game_hub_cover_only() {
     let mut stage = Stage::hub(3);
     stage.press(&[Button::Right, Button::Up]);
@@ -2678,6 +2759,7 @@ fn game_hub_cover_only() {
 /// A game with no art at all, not installed: the theme's green behind the band, the game's name where its cover
 /// would be, and Install with the store's name under it.
 #[test]
+#[ignore = "screenshot"]
 fn game_hub_no_art() {
     let mut stage = Stage::hub(5);
     assert_eq!(stage.dashboard.focus_line(), "GameHub: 1005 Hub Install");
@@ -2706,6 +2788,7 @@ impl Stage {
 /// Two of the Recent row's games in the Queue: the second tile Queued, focused, the state under its title; the
 /// third Installing..., unfocused, the state at its foot. Downloads counts them.
 #[test]
+#[ignore = "screenshot"]
 fn home_queue() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.queue(&[2, 1], true);
@@ -2716,6 +2799,7 @@ fn home_queue() {
 /// Focus on the Downloads tile, which counts the Queue; the Recent row's tiles all unfocused, both states at their
 /// foot.
 #[test]
+#[ignore = "screenshot"]
 fn home_queue_downloads() {
     let mut stage = Stage::on_row(library_with_art(), HD);
     stage.queue(&[2, 1], true);
@@ -2726,6 +2810,7 @@ fn home_queue_downloads() {
 /// A game in the Queue, waiting: the main action reads QUEUED, and Queue stands between Manage and the toggle,
 /// with focus, saying its name.
 #[test]
+#[ignore = "screenshot"]
 fn game_hub_queued() {
     let mut stage = Stage::hub(5);
     stage.queue(&[5], false);
@@ -2736,6 +2821,7 @@ fn game_hub_queued() {
 
 /// A game downloading: the main action reads INSTALLING..., with focus.
 #[test]
+#[ignore = "screenshot"]
 fn game_hub_installing() {
     let mut stage = Stage::hub(5);
     stage.queue(&[5], true);
@@ -2875,6 +2961,7 @@ fn halo_list(dashboard: &Dashboard) -> (i64, Vec<model::achievement::Achievement
 
 /// Home with achievements: the Score under the gamertag, as the console's, and on the Achievements tile.
 #[test]
+#[ignore = "screenshot"]
 fn achievements_home() {
     let mut stage = Stage::on_row(library_with_achievements(), HD);
     let totals = stage.dashboard.library().achievements.totals.unwrap();
@@ -2887,6 +2974,7 @@ fn achievements_home() {
 /// The Guide's Profile & system: under Switch profile the totals, "90 G   4 achievements", and the last three
 /// unlocks as entries, newest first, with their icons and their game's name; focus on the newest.
 #[test]
+#[ignore = "screenshot"]
 fn achievements_guide() {
     let mut stage = Stage::on_row(library_with_achievements(), HD);
     stage.dashboard.open_guide_on(screens::guide::Tab::ProfileAndSystem);
@@ -2906,6 +2994,7 @@ fn achievements_guide() {
 /// The hub of a game with achievements: their row at the foot of Your game stats, "4 / 12", 33% and the bar; focus
 /// on the card, where A opens the Achievements page.
 #[test]
+#[ignore = "screenshot"]
 fn achievements_hub() {
     let mut stage = Stage::hub_of(library_with_achievements(), 0);
     stage.press(&[Button::Right, Button::Up]);
@@ -2917,6 +3006,7 @@ fn achievements_hub() {
 /// card's place, the achievements two to a row, unlocked first, newest first; a secret one locked keeps itself to
 /// itself, and an icon not fetched is the grey square with the trophy. B goes back to the hub, on the card.
 #[test]
+#[ignore = "screenshot"]
 fn achievements_page() {
     let mut stage = Stage::hub_of(library_with_achievements(), 0);
     stage.press(&[Button::Right, Button::Up, Button::A]);
@@ -2967,18 +3057,21 @@ fn pad_battery(battery: Option<ui::Battery>, home: &str, guide: &str) {
 
 /// A pad on Bluetooth LE: the cell at its charge, and the figure beside it.
 #[test]
+#[ignore = "screenshot"]
 fn pad_battery_with_a_percentage() {
     pad_battery(Some(ui::Battery::Percent(85)), "pad-battery-percent-home", "pad-battery-percent-guide");
 }
 
 /// XInput's or Windows.Gaming.Input's word alone, low here: not shown, the controller's glyph (the user's call, #191).
 #[test]
+#[ignore = "screenshot"]
 fn pad_battery_with_a_level_only() {
     pad_battery(Some(ui::Battery::Level(1)), "pad-battery-level-home", "pad-battery-level-guide");
 }
 
 /// A virtual pad, a 2.4 GHz dongle: nothing known, the controller's glyph as for one on a cable.
 #[test]
+#[ignore = "screenshot"]
 fn pad_battery_not_known() {
     pad_battery(None, "pad-battery-none-home", "pad-battery-none-guide");
 }

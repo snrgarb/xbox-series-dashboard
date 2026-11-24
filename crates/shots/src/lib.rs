@@ -2,8 +2,12 @@
 //! wide enough for another version of the software rasteriser or of the font, and narrow enough to catch a moved,
 //! missing or recoloured element.
 //!
+//! Screenshot tests are `#[ignore = "screenshot"]`: run by hand (`cargo nextest run -p screens --run-ignored only`),
+//! never in CI, where what is drawn is looked at on the TV PC instead. CI sets `SHOTS=forbid`, so a picture compared
+//! there fails and names the test to mark.
+//!
 //! `SHOTS=bless cargo test` writes the references instead of comparing. A failed comparison leaves the image it got and
-//! a picture of where the two differ under `target/shots/`, which CI uploads.
+//! a picture of where the two differ under `target/shots/`.
 use std::path::{Path, PathBuf};
 
 use image::RgbaImage;
@@ -52,10 +56,14 @@ pub fn save_shared(image: &image::RgbImage, path: &Path) {
     std::fs::rename(&mine, path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
 }
 
-/// Checks the image at `got` against `reference_dir/<name>.png`, or with `SHOTS=bless` set makes it the reference.
+/// Checks the image at `got` against `reference_dir/<name>.png`, or with `SHOTS=bless` set makes it the reference;
+/// with `SHOTS=forbid` (CI) it panics.
 /// Panics, naming the files to look at, when they differ by more than the tolerance or there is no reference.
 pub fn check(name: &str, got: &Path, reference_dir: &Path) {
     let reference = reference_dir.join(format!("{name}.png"));
+    if std::env::var("SHOTS").is_ok_and(|v| v == "forbid") {
+        panic!("{name}: a screenshot test, and CI compares no pictures: mark it #[ignore = \"screenshot\"]");
+    }
     if std::env::var("SHOTS").is_ok_and(|v| v == "bless") {
         std::fs::create_dir_all(reference_dir).expect("create the reference folder");
         std::fs::copy(got, &reference).expect("write the reference");

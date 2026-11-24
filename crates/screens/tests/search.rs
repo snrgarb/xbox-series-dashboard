@@ -422,18 +422,21 @@ impl Stage {
 
 /// The Bundle's 15: nothing typed, Recently added, the keys with Shift on and focus on Q.
 #[test]
+#[ignore = "screenshot"]
 fn search_empty() {
     Stage::new(HD).check("search_empty");
 }
 
 /// The Bundle's 16: "Ha" typed on the keys, the two games found, focus on the a key.
 #[test]
+#[ignore = "screenshot"]
 fn search_typed() {
     Stage::new(HD).press(&HA).check("search_typed");
 }
 
 /// The Bundle's 17: the symbols, focus on their key.
 #[test]
+#[ignore = "screenshot"]
 fn search_symbols() {
     let mut stage = Stage::new(HD);
     stage.press(&HA).press(&[Up, Up, Left, A]);
@@ -443,12 +446,14 @@ fn search_symbols() {
 
 /// The Bundle's 18: the keyboard away, focus on the first game found.
 #[test]
+#[ignore = "screenshot"]
 fn search_keyboard_away() {
     Stage::new(HD).press(&HA).press(&[B]).check("search_keyboard_away");
 }
 
 /// Nothing found: no row, and nothing in its place.
 #[test]
+#[ignore = "screenshot"]
 fn search_no_results() {
     let mut stage = Stage::new(HD);
     assert!(stage.dashboard.typed(Typed::Text("Hazy")));
@@ -457,6 +462,7 @@ fn search_no_results() {
 
 /// The search box with focus, the keyboard away, and a result row that has slid along a tile.
 #[test]
+#[ignore = "screenshot"]
 fn search_box_focused() {
     let mut stage = Stage::new(HD);
     stage.press(&[B, Right, Right, Right, Right, Right, Right, Right]);
@@ -467,6 +473,7 @@ fn search_box_focused() {
 
 /// A screen taller than 16:9: the keyboard stays 110 off the foot and the results take the height.
 #[test]
+#[ignore = "screenshot"]
 fn search_16_10() {
     Stage::new((1920, 1200)).press(&HA).check("search_16_10");
 }

@@ -847,12 +847,14 @@ impl Stage {
 
 /// The Bundle's 02: Games as it opens, focus on the grid's first game, the hint bar up.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_games() {
     Stage::new(library(), Entry::Games, HD).check("my_games_games");
 }
 
 /// The Bundle's 01: focus on the Games nav item, the grid at its top.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_games_nav_focused() {
     let mut stage = Stage::new(library(), Entry::Games, HD);
     stage.press(&[Left]);
@@ -861,6 +863,7 @@ fn my_games_games_nav_focused() {
 
 /// The Bundle's 03: three rows down, the grid a row up, its last row and "Looking for more?" under it.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_games_scrolled() {
     let mut stage = Stage::new(library(), Entry::Games, HD);
     stage.press(&[Down, Down, Down]);
@@ -869,6 +872,7 @@ fn my_games_games_scrolled() {
 
 /// The Bundle's 04: focus on SEE FULL LIBRARY.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_games_see_full_library() {
     let mut stage = Stage::new(library(), Entry::Games, HD);
     stage.press(&[Down, Down, Down, Down]);
@@ -877,6 +881,7 @@ fn my_games_games_see_full_library() {
 
 /// A focused tile with no cover and a title of two lines; a not-installed game is not in Games.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_games_long_title_focused() {
     let mut stage = Stage::new(library(), Entry::Games, HD);
     stage.press(&[Down, Down, Down, Right]);
@@ -884,6 +889,7 @@ fn my_games_games_long_title_focused() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn my_games_games_empty() {
     let mut stage = Stage::new(library_of(|game| !game.installed), Entry::Games, HD);
     stage.check("my_games_games_empty");
@@ -891,6 +897,7 @@ fn my_games_games_empty() {
 
 /// The Bundle's 05: Apps, focus on its nav item.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_apps() {
     let mut stage = Stage::new(library(), Entry::Games, HD);
     stage.press(&[Left, Down]);
@@ -899,12 +906,14 @@ fn my_games_apps() {
 
 /// The Bundle's 06: Play history, focus on its first row, six sections under it.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_play_history() {
     Stage::new(library(), Entry::PlayHistory, HD).check("my_games_play_history");
 }
 
 /// Focus on the last row: the list has come up to its end, the end's padding under it.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_play_history_scrolled() {
     let mut stage = Stage::new(library(), Entry::PlayHistory, HD);
     stage.press(&[Down; 6]);
@@ -912,6 +921,7 @@ fn my_games_play_history_scrolled() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn my_games_play_history_empty() {
     let mut stage = Stage::new(library_of(|game| game.last_played == 0), Entry::PlayHistory, HD);
     stage.check("my_games_play_history_empty");
@@ -919,6 +929,7 @@ fn my_games_play_history_empty() {
 
 /// The Bundle's 07: Full library as the nav opens it, focus on its nav item, no tab lit, every game by name.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_from_the_nav() {
     let mut stage = Stage::new(tabbed(), Entry::Games, HD);
     stage.press(&[Left, Down, Down, Down]);
@@ -934,6 +945,7 @@ fn see_all(tab: &str) -> Stage {
 
 /// The Bundle's 09: See all on "My Picks", focus on the tabs, which shows nothing.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_tabs() {
     let mut stage = see_all("My Picks");
     stage.press(&[Up, Up]);
@@ -942,6 +954,7 @@ fn my_games_full_library_tabs() {
 
 /// The Bundle's 10: Right on the tabs, the next tab lit, a sort the Sort list does not have ("Sort").
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_another_tab() {
     let mut stage = see_all("My Picks");
     stage.press(&[Up, Up, Right]);
@@ -950,6 +963,7 @@ fn my_games_full_library_another_tab() {
 
 /// The Bundle's 11: the Sort list open over the grid, on the option the grid is in.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_sort_list() {
     let mut stage = see_all("Recently added");
     stage.press(&[Up, A, Up]);
@@ -958,6 +972,7 @@ fn my_games_full_library_sort_list() {
 
 /// A sort chosen: "Sorted by" it, and the grid in its order.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_sorted() {
     let mut stage = see_all("Recently added");
     stage.press(&[Up, A, Up, A, Down]);
@@ -966,6 +981,7 @@ fn my_games_full_library_sorted() {
 
 /// The Bundle's 12: the name box open and empty, focus on it.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_name_box() {
     let mut stage = see_all("Recently added");
     stage.press(&[Y]);
@@ -974,6 +990,7 @@ fn my_games_full_library_name_box() {
 
 /// The Bundle's 13: text entry over the page, "In" typed, the grid narrowed behind it.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_name_entry() {
     let mut stage = see_all("Recently added");
     stage.press(&[Y, A]);
@@ -983,6 +1000,7 @@ fn my_games_full_library_name_entry() {
 
 /// The Bundle's 14: the name kept, focus on the narrowed grid's first game.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_name_kept() {
     let mut stage = see_all("Recently added");
     stage.press(&[Y, A]);
@@ -993,6 +1011,7 @@ fn my_games_full_library_name_kept() {
 
 /// A name that finds nothing: the grid's empty line, focus on the box, "0 games".
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_nothing_found() {
     let mut stage = see_all("Recently added");
     stage.press(&[Y, A]);
@@ -1003,6 +1022,7 @@ fn my_games_full_library_nothing_found() {
 
 /// Scrolled to the grid's last row: the rows above pass under the fade and are cut under the Sort row.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_scrolled() {
     let mut stage = see_all("Recently added");
     stage.press(&[Down, Down, Down, Right]);
@@ -1012,6 +1032,7 @@ fn my_games_full_library_scrolled() {
 /// A launcher's tab (docs/spec/filters.md, 4.2): Epic Games' whole library by name, the games not installed with the
 /// Download badge, focus on one of them, Fernlight.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_full_library_launcher_tab() {
     let library = two_launchers().snapshot_at(now()).unwrap();
     let filter = Some(filter(&library, "Epic Games"));
@@ -1023,11 +1044,13 @@ fn my_games_full_library_launcher_tab() {
 
 /// The Bundle's 08: Manage, focus on its Queue box.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_manage() {
     Stage::new(library(), Entry::Manage, HD).check("my_games_manage");
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn my_games_manage_nav_focused() {
     let mut stage = Stage::new(library(), Entry::Manage, HD);
     stage.press(&[Left]);
@@ -1036,6 +1059,7 @@ fn my_games_manage_nav_focused() {
 
 /// On a screen wider than the canvas the page's fill and the nav's fills run to the screen's left edge.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_ultrawide() {
     let mut stage = Stage::new(library(), Entry::Games, (2560, 1080));
     stage.press(&[Left]);

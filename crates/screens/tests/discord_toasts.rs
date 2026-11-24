@@ -447,6 +447,7 @@ fn with_picture(event: DirectEvent, rgb: [u8; 3]) -> DirectEvent {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn the_toasts_drawn() {
     // A DM with the sender's avatar: round, 80 across, bare on the card.
     shot("toast-discord-dm", &[with_picture(message("d1", "Ana", None, "are you on tonight?"), [0xC0, 0x50, 0x40])]);

@@ -58,7 +58,7 @@ Then do these steps:
    ```sh
    cargo build --release --target x86_64-pc-windows-gnullvm
    ```
-3. Get the fonts for the screenshot tests. Do this one time only:
+3. Get the fonts the tests draw with. Do this one time only:
    ```sh
    tools/test-fonts.sh
    ```
@@ -66,6 +66,8 @@ Then do these steps:
    ```sh
    cargo test --workspace
    ```
+   The screenshot tests, which compare a screen with a reference picture, are skipped. Run them by hand with
+   `cargo nextest run -p screens --run-ignored only`.
 
 To see one screen without a window, use `cargo run -p app -- --screenshot out.png`.
 
