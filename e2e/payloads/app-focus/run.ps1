@@ -103,7 +103,9 @@ try {
     if (Test-Path $folder) { Remove-Item $folder -Recurse -Force }
     New-Item -ItemType Directory $folder -Force | Out-Null
     Copy-Item (Join-Path $PSScriptRoot 'standin.exe') $program
-    Set-Content (Join-Path $folder 'game-args.txt') "--title`r`n$app`r`n" -Encoding ASCII
+    # --ignore-close: it stays up when its window is asked to close, as the Xbox app does (it hides in the tray), so
+# Quit must end it.
+Set-Content (Join-Path $folder 'game-args.txt') "--title`r`n$app`r`n--ignore-close`r`n" -Encoding ASCII
     if (Test-Path $data) { Remove-Item $data -Recurse -Force }
     $script:dashboard = Start-Dashboard @('--log-focus', '--data-dir', $data)
     if (-not (Wait-DashboardLog 'first frame presented' 60)) { throw 'The Dashboard never presented a frame' }
@@ -209,6 +211,8 @@ try {
     Start-Sleep -Milliseconds 1000
     Push-Button A
     if (-not (Wait-DashboardLog "^apps: $(Esc $app) asked to close: [1-9]" 5 $mark)) { $failures += '6. Quit did not ask the App to close' }
+    $ended = Wait-DashboardLog "^apps: $(Esc $app) still running \d+ s after it was asked to close: ended game\.exe" 10 $mark
+    if ($ended) { Say "6. $ended" } else { $failures += '6. the App that ignored the close was not ended' }
     if (-not (Wait-Until { (App-Running).Count -eq 0 } 10)) { $failures += '6. the App was still running after Quit' } else { Say '6. Quit: the App has gone' }
     Step B 'closed$'
     Expect-Front $dashboardTitle '6. the Guide closed after Quit'
