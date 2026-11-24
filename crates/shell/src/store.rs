@@ -199,32 +199,7 @@ pub struct SystemAddresses;
 impl Addresses for SystemAddresses {
     #[cfg(windows)]
     fn open(&mut self, start: &Start) -> Result<(), String> {
-        // What opens (a game, a store's own window, an app) is the user's to see: Home's window is no longer kept
-        // in front of it (#245).
-        crate::front::let_go(&format!("{start} opens"));
-        // Steam is asked without its windows coming forward (`crate::steam`).
-        if crate::steam::is_steam(start).is_some() {
-            return crate::steam::ask(start);
-        }
-        // A packaged app (the Xbox source's games, Store apps) is activated as Windows activates it, which works
-        // with no shell window, as under shell mode before explorer is up (docs/research/shell.md, 5); the
-        // address is opened as any other if that fails.
-        if let Start::Address(address) = start {
-            if let Some(aumid) = apps_folder(address) {
-                match activate(aumid) {
-                    Ok(pid) => {
-                        eprintln!("store: activated {aumid}, pid {pid}");
-                        return Ok(());
-                    }
-                    Err(why) => eprintln!("store: couldn't activate {aumid} ({why}); opening {address}"),
-                }
-            }
-        }
-        // Home has the foreground, and with it the right to let the store's window take it.
-        match crate::shell_open(start) {
-            result if result > 32 => Ok(()),
-            result => Err(result.to_string()),
-        }
+        open(start).map(|_| ())
     }
 
     #[cfg(not(windows))]
@@ -232,8 +207,50 @@ impl Addresses for SystemAddresses {
         Err("only Windows opens anything".into())
     }
 
+    /// Opened as any address, and followed: its window, once up, maximised and given the foreground
+    /// (`crate::app_front`).
+    #[cfg(windows)]
+    fn open_app(&mut self, start: &Start, name: &str) -> Result<(), String> {
+        let before = crate::app_front::shown_now();
+        let pid = open(start)?;
+        crate::app_front::follow(name.to_string(), before, pid);
+        Ok(())
+    }
+
     fn detached(&self) -> Option<Box<dyn Opener + Send>> {
         Some(Box::new(Home { addresses: SystemAddresses, home: front_window() }))
+    }
+}
+
+/// Opens `start` as Windows does ([`SystemAddresses`]); the process a packaged app's activation gave, where it
+/// was activated.
+#[cfg(windows)]
+fn open(start: &Start) -> Result<Option<u32>, String> {
+    // What opens (a game, a store's own window, an app) is the user's to see: Home's window is no longer kept
+    // in front of it (#245).
+    crate::front::let_go(&format!("{start} opens"));
+    // Steam is asked without its windows coming forward (`crate::steam`).
+    if crate::steam::is_steam(start).is_some() {
+        return crate::steam::ask(start).map(|()| None);
+    }
+    // A packaged app (the Xbox source's games, Store apps) is activated as Windows activates it, which works
+    // with no shell window, as under shell mode before explorer is up (docs/research/shell.md, 5); the
+    // address is opened as any other if that fails.
+    if let Start::Address(address) = start {
+        if let Some(aumid) = apps_folder(address) {
+            match activate(aumid) {
+                Ok(pid) => {
+                    eprintln!("store: activated {aumid}, pid {pid}");
+                    return Ok(Some(pid));
+                }
+                Err(why) => eprintln!("store: couldn't activate {aumid} ({why}); opening {address}"),
+            }
+        }
+    }
+    // Home has the foreground, and with it the right to let the store's window take it.
+    match crate::shell_open(start) {
+        result if result > 32 => Ok(None),
+        result => Err(result.to_string()),
     }
 }
 
@@ -323,6 +340,10 @@ impl Opener for Asking {
         self.addresses.open(start)
     }
 
+    fn open_app(&mut self, start: &Start, name: &str) -> Result<(), String> {
+        self.addresses.open_app(start, name)
+    }
+
     fn detached(&self) -> Option<Box<dyn Opener + Send>> {
         let addresses = self.addresses.detached()?;
         Some(Box::new(Telling { addresses, words: self.words.clone(), wake: self.wake.clone() }))
@@ -392,6 +413,10 @@ fn activate(aumid: &str) -> Result<u32, String> {
         CoCreateInstance, CoInitializeEx, CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager, AO_NONE};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, ASFW_ANY};
+    // Home has the foreground, and with it the right to let the app take it: the activation manager is another
+    // process, which hands it on to the app.
+    unsafe { AllowSetForegroundWindow(ASFW_ANY) };
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let manager: IApplicationActivationManager =
@@ -430,6 +455,10 @@ impl ProgramAddresses {
 impl Addresses for ProgramAddresses {
     fn open(&mut self, start: &Start) -> Result<(), String> {
         SystemAddresses.open(&self.through(start))
+    }
+
+    fn open_app(&mut self, start: &Start, name: &str) -> Result<(), String> {
+        SystemAddresses.open_app(&self.through(start), name)
     }
 
     fn detached(&self) -> Option<Box<dyn Opener + Send>> {
