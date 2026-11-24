@@ -46,7 +46,7 @@ Each is my recommended default. Any of them can be reopened in its ticket.
 4. **Our own small UI layer** on that stack, not a general toolkit. The Dashboard is a fixed set of 10-foot screens driven by a pad: it needs focus navigation, lists that scroll, and animation, and nothing a desktop toolkit is built around.
 5. **Shell mode is the route** (#154): the Dashboard is the user's shell, set and unset from Settings > System, with a watchdog that starts it again; the Guide button stays ours. The packaged home app for Xbox mode is not built (#183, the user's decision of 2026-11-17).
 6. **The Playnite Bundle keeps shipping** until the port reaches parity. Its glossary (`CONTEXT.md`) is the specification for behaviour; the port copies it and maintains its own from M1.
-7. **Tests look at pixels.** Every screen has an offscreen screenshot test that runs on Linux in CI. End-to-end tests run on the TV PC in safe mode (`e2e/htpc/run.sh`, since 2026-11-17); the win11-e2e VM is kept only for what needs a clean Windows.
+7. **Tests look at pixels.** Every screen has an offscreen screenshot test, run by hand on Linux, not in CI: since #343 CI checks behaviour and the TV PC checks what a screen looks like. End-to-end tests run on the TV PC in safe mode (`e2e/htpc/run.sh`, since 2026-11-17); the win11-e2e VM is kept only for what needs a clean Windows.
 
 ## Architecture
 

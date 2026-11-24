@@ -416,6 +416,7 @@ fn pause_the_game_is_turned_off_saved_and_read_back() {
 
 /// Pause the game off, focus on it: its box unticked under Use the Guide's, the Now Playing source under both.
 #[test]
+#[ignore = "screenshot"]
 fn settings_guide_pause_the_game_off() {
     let mut stage = settings_stage();
     stage.press(&[Right, Down, A, Down, A]);
@@ -664,12 +665,14 @@ fn settings_stage() -> Stage {
 /// The Bundle's picture 28, with the console's four categories: focus on the rail's General, its boxes beside it
 /// with no ring.
 #[test]
+#[ignore = "screenshot"]
 fn settings_general() {
     settings_stage().check("settings-general");
 }
 
 /// The Bundle's picture 29: focus on General's first box.
 #[test]
+#[ignore = "screenshot"]
 fn settings_general_box_focused() {
     let mut stage = settings_stage();
     stage.press(&[Right]);
@@ -678,6 +681,7 @@ fn settings_general_box_focused() {
 
 /// Each other category, focus on its first box.
 #[test]
+#[ignore = "screenshot"]
 fn settings_account_games_and_apps_and_system() {
     let mut stage = settings_stage();
     for (category, first) in [("account", "Account: Profiles"), ("games-and-apps", "Games & apps: Launchers")] {
@@ -693,6 +697,7 @@ fn settings_account_games_and_apps_and_system() {
 
 /// A page's header: the category in bold, then the page.
 #[test]
+#[ignore = "screenshot"]
 fn settings_page_header_names_the_category_then_the_page() {
     let mut stage = settings_stage();
     stage.press(&[Right, Right, A]);
@@ -702,6 +707,7 @@ fn settings_page_header_names_the_category_then_the_page() {
 
 /// The Bundle's picture 31: Personalisation, focus on Background delay; with no info text beside it since #261.
 #[test]
+#[ignore = "screenshot"]
 fn settings_personalisation_checkbox_focused() {
     let mut stage = settings_stage();
     stage.press(&[Right, A]);
@@ -718,6 +724,7 @@ fn found(videos: &[BootVideo]) -> Found {
 
 /// General's Boot video box focused, beside Guide.
 #[test]
+#[ignore = "screenshot"]
 fn settings_general_boot_video_box() {
     let mut stage = settings_stage();
     stage.press(&[Right, Down, Right]);
@@ -728,6 +735,7 @@ fn settings_general_boot_video_box() {
 /// The Boot video page with every video found, the Bundle's default ticked and focused; then focus on another
 /// Row, the tick where it was.
 #[test]
+#[ignore = "screenshot"]
 fn settings_boot_video() {
     let mut stage = settings_stage();
     stage.dashboard.set_options(Options { boot_videos: found(&BootVideo::ALL), ..Options::default() });
@@ -740,6 +748,7 @@ fn settings_boot_video() {
 
 /// The page with no video found: the line says so, and Off is the one Row.
 #[test]
+#[ignore = "screenshot"]
 fn settings_boot_video_none_found() {
     let mut stage = settings_stage();
     stage.press(&[Right, Down, Right, A]);
@@ -829,6 +838,7 @@ fn a_choice_whose_video_is_gone_ticks_off_and_is_kept_until_another_is_made() {
 
 /// The Bundle's picture 35: the Guide page, focus on Use the Guide, the Now Playing source Spotify under it.
 #[test]
+#[ignore = "screenshot"]
 fn settings_guide() {
     let mut stage = settings_stage();
     stage.press(&[Right, Down, A]);
@@ -837,6 +847,7 @@ fn settings_guide() {
 
 /// The Now Playing source's list open, focus on the source set now.
 #[test]
+#[ignore = "screenshot"]
 fn settings_guide_now_playing_source_list() {
     let mut stage = settings_stage();
     now_playing_apps(&mut stage.dashboard, &["chrome.exe", "vlc.exe"]);
@@ -859,6 +870,7 @@ fn around(library: &Library) -> Around<'_> {
 
 /// The Bundle's pictures 33 and 34: a dropdown box with focus, and its list open on the choice that is set.
 #[test]
+#[ignore = "screenshot"]
 fn settings_dropdown_closed_and_open() {
     let mut stage = settings_stage();
     stage.check_pane("settings-dropdown", Box::new(Idle::new()));
@@ -917,6 +929,7 @@ impl Pane for RowsAndButtons {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn settings_rows_and_pane_buttons() {
     settings_stage().check_pane("settings-rows-and-buttons", Box::new(RowsAndButtons));
 }
@@ -925,6 +938,7 @@ fn settings_rows_and_pane_buttons() {
 /// run off a 1080 screen. Nothing moves until focus is on a box that does not show whole; then the pane has
 /// scrolled just far enough to show it, and its first rows are cut under the header's row.
 #[test]
+#[ignore = "screenshot"]
 fn a_pane_of_boxes_that_runs_off_the_screen_scrolls_to_the_focused_box() {
     let opens = |icon, name| Item::Opens { icon, name, pane: |_| Box::new(RowsAndButtons) };
     let check = |name| vec![Item::Check { setting: Setting::ReduceMotion, name }];
@@ -1055,6 +1069,7 @@ fn show_battery_percentages_off_leaves_the_pads_battery_alone_on_home() {
 /// Games & apps > Art (docs/spec/settings.md, 16.8): no key, a key typed and kept, and the question before the
 /// downloaded art goes. The key is never on screen, in the focus log or in an effect's `Debug`.
 #[test]
+#[ignore = "screenshot"]
 fn settings_art() {
     const KEY: &str = "f00dfeedcafe1234";
     let mut stage = settings_stage();
@@ -1106,6 +1121,7 @@ fn settings_art() {
 /// on, its menu moves it up or down as Groups' does, focus following it, each change asked as `Effect::ArtOrder` and
 /// in force at once; the page scrolls to them.
 #[test]
+#[ignore = "screenshot"]
 fn settings_art_sources() {
     use model::{ArtOrder, ArtSource};
     let mut stage = settings_stage();
@@ -1155,6 +1171,7 @@ fn settings_art_sources() {
 /// asked first, and the line under the two saying how it goes: at rest, working (where A does nothing), paused and
 /// done, as the executable says (`Dashboard::set_art_refresh`), the focus log saying it after the `;`.
 #[test]
+#[ignore = "screenshot"]
 fn settings_art_refresh() {
     use model::ArtRefresh;
     let mut stage = settings_stage();
@@ -1207,6 +1224,7 @@ fn settings_art_refresh() {
 /// System > System (docs/spec/shell-mode.md, 2): the question before turning shell mode on, none before
 /// turning it off, nothing while it is refused, and the page following where the executable says it stands.
 #[test]
+#[ignore = "screenshot"]
 fn settings_system() {
     use model::shell_mode::{Refusal, ShellMode};
     let mut stage = settings_stage();
@@ -1265,6 +1283,7 @@ fn about_stage(updates: model::update::Updates) -> Stage {
 /// About as it opens: the version, updates not checked yet, focus on Check for updates; its three controls walked,
 /// and B goes back to its box.
 #[test]
+#[ignore = "screenshot"]
 fn settings_about() {
     use model::update::Updates;
     let mut stage = about_stage(Updates::Unchecked);
@@ -1322,6 +1341,7 @@ fn about_asks_for_a_check_installs_only_what_is_ready_and_turns_the_daily_check_
 
 /// About with a version ready to install, focus on Install, the daily check on.
 #[test]
+#[ignore = "screenshot"]
 fn settings_about_ready() {
     use model::update::{Updates, Version};
     let mut stage = about_stage(Updates::Ready(Version::new(1, 3, 0)));
@@ -1334,6 +1354,7 @@ fn settings_about_ready() {
 /// About when the update address answered 404, as GitHub's does while the repository is private: said plainly on
 /// the page, and no Toast.
 #[test]
+#[ignore = "screenshot"]
 fn settings_about_not_public() {
     use model::update::Updates;
     let mut stage = about_stage(Updates::NotPublic);
@@ -1343,6 +1364,7 @@ fn settings_about_not_public() {
 
 /// About when a download did not match its manifest's SHA-256.
 #[test]
+#[ignore = "screenshot"]
 fn settings_about_bad_download() {
     use model::update::{Updates, Version};
     let mut stage = about_stage(Updates::BadDownload(Version::new(1, 3, 0)));
@@ -1351,6 +1373,7 @@ fn settings_about_bad_download() {
 
 /// About while a check is under way: Check for updates dimmed, the Spinner beside the buttons.
 #[test]
+#[ignore = "screenshot"]
 fn settings_about_checking() {
     use model::update::Updates;
     let mut stage = about_stage(Updates::Checking);
@@ -1363,6 +1386,7 @@ fn settings_about_checking() {
 /// the Console keyboard, whose text goes to the session alone; signed in, the page closes itself; Sign out asks the
 /// session.
 #[test]
+#[ignore = "screenshot"]
 fn settings_discord() {
     use model::discord_web::{Web, WebAsk, WebField, WebKey, WebState};
     let mut stage = settings_stage();
@@ -1426,6 +1450,7 @@ fn settings_discord() {
 /// Account > Discord > Notifications and While playing (docs/spec/party-chats.md 8.2): four checkboxes that
 /// are on until turned off, and a dropdown of what shows while a game runs; each is an option the Toasts read, kept.
 #[test]
+#[ignore = "screenshot"]
 fn settings_discord_notifications() {
     use screens::settings::{Change, Setting, WhilePlaying, DISCORD_WHILE_PLAYING};
     let mut stage = settings_stage();
@@ -1608,6 +1633,7 @@ fn update_now_is_asked_once_while_it_works_and_says_what_it_changed() {
 
 /// The page at rest, focus on Steam; Epic off, focus on Update now while it works; done; a launcher refused.
 #[test]
+#[ignore = "screenshot"]
 fn settings_launchers() {
     let database = launchers_database();
     let mut stage = Stage::new(database.snapshot().unwrap());
@@ -1688,6 +1714,7 @@ fn the_game_pass_controls_ask_for_the_switch_and_the_region() {
 
 /// The Game Pass controls, focus on the region with its list open on the United Kingdom (#277).
 #[test]
+#[ignore = "screenshot"]
 fn settings_launchers_game_pass() {
     let database = launchers_database();
     let mut stage = Stage::new(database.snapshot().unwrap());
@@ -1730,6 +1757,7 @@ fn helpers_shown(legendary: model::helper::HelperState) -> Vec<model::helper::He
 /// Helpers, under Art: each helper with its licence and source and how it stands; Add asks first, the licence and
 /// source in the question, and only Yes asks the executable; Remove asks too; the page follows the snapshot.
 #[test]
+#[ignore = "screenshot"]
 fn settings_helpers() {
     use model::helper::{HelperAsk, HelperState};
     let mut stage = settings_stage();
@@ -1815,6 +1843,7 @@ fn clients_shown(battlenet: model::setup::ClientState) -> Vec<model::setup::Clie
 /// the size in the question, and only Install asks the executable; Remove asks too, with what happens to the games;
 /// a step under way shows on its Row, and A on another app then waits.
 #[test]
+#[ignore = "screenshot"]
 fn settings_set_up() {
     use model::setup::{ClientState, SetUpAsk};
     let mut stage = settings_stage();

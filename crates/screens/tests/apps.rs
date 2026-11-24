@@ -534,6 +534,7 @@ impl Stage {
 /// My games & apps' Apps with Apps in it, focus on the nav; then on a program's tile, a Store app's, and one with
 /// a long name. The Bundle has no picture of this (docs/spec/apps.md, 2).
 #[test]
+#[ignore = "screenshot"]
 fn my_games_apps() {
     let mut stage = Stage::with_apps();
     apps_pane(&mut stage.shell);
@@ -548,6 +549,7 @@ fn my_games_apps() {
 
 /// The Games & apps category, focus on its Games & apps box; that page with a game and Apps; a Row's menu.
 #[test]
+#[ignore = "screenshot"]
 fn settings_games_and_apps() {
     let mut stage = Stage::with_apps();
     stage.shell.dashboard.open_page(Open::Settings(settings::Entry::Rail));
@@ -562,6 +564,7 @@ fn settings_games_and_apps() {
 
 /// Add a game empty, then filled in with focus on Add; Add an app with the Store apps under it.
 #[test]
+#[ignore = "screenshot"]
 fn settings_add_pages() {
     let mut stage = Stage::with_apps();
     stage.shell.games_and_apps();

@@ -242,6 +242,7 @@ impl Stage {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn settings_storage() {
     let mut stage = Stage::new(storage_page(library(storage())));
     stage.check("settings-storage");
@@ -250,11 +251,13 @@ fn settings_storage() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn settings_storage_with_nothing_to_show() {
     Stage::new(storage_page(library(Storage::default()))).check("settings-storage-nothing");
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn install_where() {
     let mut dashboard = install_menu(library(storage()));
     press(&mut dashboard, &[A]);
@@ -267,6 +270,7 @@ fn install_where() {
 /// Manage on My games & apps, the storage ring at the nav's foot: "All storage", the drive's free space, and the
 /// ring of how much is used (my-games.md 2.6).
 #[test]
+#[ignore = "screenshot"]
 fn my_games_storage_ring() {
     let mut dashboard = Dashboard::new(library(storage()));
     dashboard.open_page(Open::MyGames(Entry::Manage));

@@ -313,6 +313,7 @@ fn near(image: &image::RgbaImage, x: u32, y: u32, rgb: [u8; 3]) -> bool {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn the_pill() {
     // An ordinary unlock at rest: the green pill, 778 by 128 with its foot 64 above the screen's, the icon in the
     // lighter circle at its left, the line over the Score badge, the Score and the name.

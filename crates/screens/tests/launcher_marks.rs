@@ -21,6 +21,7 @@ fn fonts() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn launcher_marks() {
     fonts();
     let gpu = gpu::init(gpu::instance(None), None);

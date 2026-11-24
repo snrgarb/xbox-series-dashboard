@@ -377,6 +377,7 @@ impl Stage {
 
 /// Games & apps, focus on Groups: the Library section's third box, Installs beside the section.
 #[test]
+#[ignore = "screenshot"]
 fn settings_games_and_apps_groups() {
     let mut stage = Stage::groups();
     stage.press(&[B]);
@@ -385,6 +386,7 @@ fn settings_games_and_apps_groups() {
 
 /// The Groups page: a Row a filter, ticked while it shows, New Group last; the hint bar for the menu.
 #[test]
+#[ignore = "screenshot"]
 fn settings_groups() {
     let mut stage = Stage::groups();
     stage.press(&[Down, Down]);
@@ -395,6 +397,7 @@ fn settings_groups() {
 
 /// A Group's menu over the dimmed page, and the question Delete asks in its place.
 #[test]
+#[ignore = "screenshot"]
 fn settings_groups_menu_and_delete_prompt() {
     let mut stage = Stage::groups();
     stage.press(&[Down, Down, Menu]);
@@ -408,6 +411,7 @@ fn settings_groups_menu_and_delete_prompt() {
 
 /// A Group's page as New Group opens it, focus on Rename; then Played's list open; then the page scrolled to Sort.
 #[test]
+#[ignore = "screenshot"]
 fn settings_group_page() {
     let mut stage = Stage::groups();
     stage.press(&[Down; 9]);

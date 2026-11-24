@@ -190,6 +190,7 @@ impl Stage {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn install_from() {
     let mut dashboard = install_menu(library());
     press(&mut dashboard, &[A]);

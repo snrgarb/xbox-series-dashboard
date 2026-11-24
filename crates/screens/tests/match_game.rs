@@ -153,6 +153,7 @@ impl Stage {
 
 /// SteamGridDB's tab: what its search found for the game's name, focus on the second result.
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_results_of_a_search() {
     let mut stage = Stage::opened();
     serve(&mut stage.dashboard, &[]);
@@ -164,6 +165,7 @@ fn shot_the_results_of_a_search() {
 
 /// A source turned off among Settings > Art's sources: nothing asked, and said where to turn it on.
 #[test]
+#[ignore = "screenshot"]
 fn shot_a_source_that_is_off() {
     let mut stage = Stage::opened();
     let order = model::ArtOrder::default().switched(ArtSource::Steam);

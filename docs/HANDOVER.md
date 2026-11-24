@@ -47,7 +47,7 @@ What only the TV PC can still settle, and the steps for each, is in **For the TV
   `TMPDIR` pointed at that worktree's `target/tmp` (the sandbox's `/tmp` is small).
 - **Screenshots without a display:** `cargo run -p app -- --screenshot out.png [--press ...]` renders one frame
   offscreen through lavapipe. Look at every screen you build, beside the Bundle's picture of the same state
-  (`docs/spec/pictures.md` lists them). Screenshot tests need `tools/test-fonts.sh` once.
+  (`docs/spec/pictures.md` lists them). Tests that draw need `tools/test-fonts.sh` once.
 - **On Windows `dashboard.exe` is a GUI program** (no console window however it is started). Run from a terminal it
   prints there, but the prompt doesn't wait for it: `start /wait dashboard.exe --screenshot out.png` in cmd,
   `Start-Process -Wait -NoNewWindow` in PowerShell.
@@ -61,8 +61,10 @@ What only the TV PC can still settle, and the steps for each, is in **For the TV
 
 ## Testing
 
-- **On Linux, in CI:** parsers, the library, and an offscreen screenshot test for every screen
-  (`crates/screens/tests/`, pictures in `crates/screens/tests/reference/`).
+- **On Linux, in CI:** parsers, the library, and each screen's behaviour (`crates/screens/tests/`). The screenshot
+  tests (pictures in `crates/screens/tests/reference/`) are `#[ignore = "screenshot"]` and never run in CI (#343):
+  what a screen looks like is checked on the TV PC. Run them by hand with
+  `cargo nextest run -p screens --run-ignored only`.
 - **On the TV PC** (`ssh htpc-win`: the user's own machine, in daily use, real GPU at 3840x2160 and 120 Hz, real
   Steam): the end-to-end payloads in `e2e/payloads/` run there in **safe mode** through `e2e/htpc/run.sh <test>`
   (`--exe`, `--standin` for CI's build; `--keep` keeps the test's folder). Safe mode writes nothing to the registry,

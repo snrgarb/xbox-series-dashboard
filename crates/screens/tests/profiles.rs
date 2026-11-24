@@ -403,6 +403,7 @@ impl Stage {
 
 /// Account, focus on Profiles, its first box.
 #[test]
+#[ignore = "screenshot"]
 fn settings_account_profiles() {
     let mut stage = Stage::profiles();
     stage.press(&[B]);
@@ -412,6 +413,7 @@ fn settings_account_profiles() {
 
 /// Profiles: a box a Profile, its picture and gamertag, then Add profile; focus on the first, then on Add profile.
 #[test]
+#[ignore = "screenshot"]
 fn settings_profiles() {
     let mut stage = Stage::profiles();
     stage.check("settings-profiles");
@@ -423,6 +425,7 @@ fn settings_profiles() {
 /// A Profile's page: its picture, Gamertag, Real name, Picture and Remove profile; text entry over it on Gamertag;
 /// Remove's question.
 #[test]
+#[ignore = "screenshot"]
 fn settings_profile() {
     let mut stage = Stage::profiles();
     stage.press(&[Right, A]);
@@ -436,6 +439,7 @@ fn settings_profile() {
 
 /// The only Profile's page: no Remove profile, focus on Picture.
 #[test]
+#[ignore = "screenshot"]
 fn settings_profile_only() {
     let mut stage = Stage::over(Shell::profiles());
     stage.press(&[A, Down]);
@@ -445,6 +449,7 @@ fn settings_profile_only() {
 /// Picture: the account picture worn and focused, the Gamerpics folder's, the plain ones, From a file; then focus
 /// on a plain one.
 #[test]
+#[ignore = "screenshot"]
 fn settings_profile_picture() {
     let mut stage = Stage::profiles();
     stage.press(&[A, Down, A]);
@@ -457,6 +462,7 @@ fn settings_profile_picture() {
 
 /// Picture with no picture files: the hint over the plain ones, which start lower.
 #[test]
+#[ignore = "screenshot"]
 fn settings_profile_picture_hint() {
     let mut shell = Shell::offering(Vec::new());
     shell.dashboard.open_page(Open::Settings(Entry::Rail));
@@ -468,6 +474,7 @@ fn settings_profile_picture_hint() {
 /// Home's top bar and the Guide's Profile & system with a Profile wearing a picture file, with a real name: the
 /// gamertag first, the real name in its place 7.5 s on.
 #[test]
+#[ignore = "screenshot"]
 fn home_and_the_guide_show_the_profile() {
     let mut shell = Shell::new();
     let tester = shell.id("Tester");

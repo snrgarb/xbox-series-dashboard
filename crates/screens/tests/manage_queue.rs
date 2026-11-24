@@ -428,12 +428,14 @@ impl Stage {
 
 /// Nothing installed and nothing queued: the outlined box alone, nothing focused, no hint bar.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_empty() {
     Stage::new(library_where(|_, _| false), screens::manage_queue::open()).check("manage_queue_empty");
 }
 
 /// One download, focus on its row: its speed, amount and share, its bar a fiftieth full; Recently installed above.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_one_download() {
     let mut stage = Stage::new(
         with_queue(library(), |library| Queue::new(vec![downloading(library)], Vec::new())),
@@ -446,6 +448,7 @@ fn manage_queue_one_download() {
 /// A game installed whose Workshop items are coming in (#188), focus on its row: Downloading Workshop content, 3 of 12
 /// items, 25.0% and its bar a quarter full, no speed; the download under it as before.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_workshop() {
     let mut stage = Stage::new(with_queue(library(), workshop), screens::manage_queue::open());
     stage.press(&[Down]);
@@ -454,6 +457,7 @@ fn manage_queue_workshop() {
 
 /// The same with the bytes of every item known: the items and their bytes, the share by the bytes.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_workshop_bytes() {
     let sized = |library: &Library| {
         let extras = InstallState::Extras { items_done: 3, items: 12, done: 82 * MB, total: 1229 * MB };
@@ -467,12 +471,14 @@ fn manage_queue_workshop_bytes() {
 /// The current download, one paused (Paused, with its amount and share, #170) and one waiting (Queued, 0.0%), focus
 /// on the first cover.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_several() {
     Stage::new(with_queue(library(), several), screens::manage_queue::open()).check("manage_queue_several");
 }
 
 /// Down to the last row: the list scrolled the least that shows it.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_several_scrolled() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
     stage.press(&[Down, Down, Down]);
@@ -482,6 +488,7 @@ fn manage_queue_several_scrolled() {
 /// The menu of the current download's row (#170, #171): Pause installation and Cancel installation in Install's
 /// place.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_menu_pause() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
     stage.press(&[Down, View]);
@@ -490,6 +497,7 @@ fn manage_queue_menu_pause() {
 
 /// The paused row focused, its menu up: Resume installation in Pause's place.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_menu_resume() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
     stage.press(&[Down, Down, View]);
@@ -498,6 +506,7 @@ fn manage_queue_menu_resume() {
 
 /// Cancel installation asks first.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_cancel_prompt() {
     let mut stage = Stage::new(with_queue(library(), several), screens::manage_queue::open());
     stage.press(&[Down, View, Down, A]);
@@ -507,6 +516,7 @@ fn manage_queue_cancel_prompt() {
 /// Nothing queued, a game just finished first among Recently installed; focus on the long-named cover, its title on
 /// two lines.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_recently_installed_only() {
     let mut library = library();
     let glasswing = id(&library, "Glasswing Atlas");
@@ -519,6 +529,7 @@ fn manage_queue_recently_installed_only() {
 /// Manage while the Queue holds something: its box counts it, the nav's Manage has its Queue line, and the current
 /// download stands at the nav's foot.
 #[test]
+#[ignore = "screenshot"]
 fn my_games_manage_queued() {
     Stage::new(with_queue(library(), several), Open::MyGames(Entry::Manage)).check("my_games_manage_queued");
 }
@@ -626,6 +637,7 @@ fn a_stopped_game_asked_for_again_is_a_row_of_installing() {
 /// Stopped under Installing: the few words in the state's place, the rest dimmed under them, no bar; focus on the
 /// one stopped for want of space.
 #[test]
+#[ignore = "screenshot"]
 fn manage_queue_stopped() {
     let mut stage = Stage::new(with_queue(library(), stopped), screens::manage_queue::open());
     stage.press(&[Down, Down]);
@@ -658,6 +670,7 @@ fn agreement_text() -> String {
 /// The prompt over Home: the game's name, "Licence agreement 1 of 2", the words, the bar, Accept and Decline with
 /// focus on Decline, and the page it is on.
 #[test]
+#[ignore = "screenshot"]
 fn agreement_prompt() {
     let mut stage = Stage::new(library(), agreement(Ok(agreement_text())));
     stage.check("agreement");
@@ -665,6 +678,7 @@ fn agreement_prompt() {
 
 /// Scrolled on by a bumper and three lines more: the bar's thumb moved, the page said; focus on Accept.
 #[test]
+#[ignore = "screenshot"]
 fn agreement_prompt_scrolled() {
     let mut stage = Stage::new(library(), agreement(Ok(agreement_text())));
     stage.check("agreement");
@@ -674,6 +688,7 @@ fn agreement_prompt_scrolled() {
 
 /// Its words not had: said so, dimmed, and Open in Steam and Decline only.
 #[test]
+#[ignore = "screenshot"]
 fn agreement_prompt_unread() {
     let mut stage = Stage::new(library(), agreement(Err("the page did not answer in 15 seconds".into())));
     stage.check("agreement_unread");

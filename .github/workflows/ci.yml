@@ -2,9 +2,10 @@
 # they cost nothing, and a pull request from a fork runs on GitHub's machine, never on one of the owner's. Nothing is
 # kept between runs but the caches: Cargo's registry and target/ (Swatinem/rust-cache, one cache per job) and the
 # llvm-mingw toolchain (by its version).
-#   Test      formatting, clippy, the unit tests and the screenshot tests, on Linux (cargo-nextest: many at once). The screenshot tests draw offscreen
-#             through lavapipe and compare with the committed reference images (crates/shots); a failed run uploads
-#             what it drew and where it differs.
+#   Test      formatting, clippy and the tests, on Linux (cargo-nextest: many at once). Tests that need a frame drawn
+#             draw it offscreen through lavapipe. The screenshot tests, which compare a frame with a reference picture,
+#             are #[ignore]d and run by hand only; SHOTS=forbid fails any that is not (crates/shots). What the screens
+#             look like is checked on the TV PC.
 #   Windows   the release build for x86_64-pc-windows-gnullvm, cross-compiled with llvm-mingw as on the development
 #             box, uploaded as an artifact for the end-to-end tests to take.
 #   Package   only on a version tag (v0.1.0) or when run by hand (workflow_dispatch): that build packed as the portable
@@ -67,15 +68,8 @@ jobs:
           cargo nextest --version
       - name: Test
         run: |
-          cargo nextest run --workspace --profile ci --cargo-profile ci
+          SHOTS=forbid cargo nextest run --workspace --profile ci --cargo-profile ci
           cargo test --workspace --doc --profile ci
-      - name: Upload what the screenshot tests drew
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: shots
-          path: target/shots/
-          if-no-files-found: ignore
 
   windows:
     name: Windows

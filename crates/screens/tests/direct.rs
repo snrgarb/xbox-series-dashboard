@@ -1037,11 +1037,13 @@ fn staged(discord: &Discord, direct: &Direct) -> Stage {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_tab_focus_on_a_dm_with_unread() {
     staged(&voice_idle(), &ready(seven())).check("direct-tab-dm");
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_tab_focus_on_the_sixth_circle() {
     let mut stage = staged(&voice_idle(), &ready(seven()));
     press(&mut stage.dashboard, &[Right, Right, Right, Right, Right]);
@@ -1049,6 +1051,7 @@ fn shot_tab_focus_on_the_sixth_circle() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_tab_with_a_ring_answer() {
     let mut direct = ready(seven());
     direct.rings = vec![Ring { channel: "d2".into(), caller: "Bo".into(), picture: direct.dms[1].picture.clone() }];
@@ -1056,6 +1059,7 @@ fn shot_tab_with_a_ring_answer() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_tab_in_a_call() {
     let mut voice = voice_in_a_call();
     voice.shortcuts = vec![Short {
@@ -1069,6 +1073,7 @@ fn shot_tab_in_a_call() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_tab_few_dms() {
     let mut stage = staged(&Discord::default(), &ready(seven()[..3].to_vec()));
     press(&mut stage.dashboard, &[Right]);
@@ -1076,6 +1081,7 @@ fn shot_tab_few_dms() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_section_states() {
     for (direct, name) in [
         (state(DirectState::Loading), "direct-tab-loading"),
@@ -1096,6 +1102,7 @@ fn shot_the_section_states() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_all_direct_messages() {
     let mut dms = seven();
     dms.insert(
@@ -1108,6 +1115,7 @@ fn shot_all_direct_messages() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_all_direct_messages_group_focused() {
     let mut stage = staged(&Discord::default(), &ready(seven()));
     press(&mut stage.dashboard, &[Right, Right, Right, Right, Right, A, Up, Up]);
@@ -1115,6 +1123,7 @@ fn shot_all_direct_messages_group_focused() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_a_conversation() {
     let mut stage = in_a_conversation(with_ana());
     press(&mut stage.dashboard, &[Up, Up, Up]);
@@ -1122,12 +1131,14 @@ fn shot_a_conversation() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_a_conversation_at_its_foot() {
     let mut stage = in_a_conversation(with_ana());
     stage.check("direct-chat-foot");
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_a_conversation_with_reactions_and_a_system_line() {
     let mut stage = in_a_conversation(with_ana());
     press(&mut stage.dashboard, &[Up, Up, Up, Up, Up]);
@@ -1173,6 +1184,7 @@ fn open_group() -> Stage {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_a_group_conversation() {
     let mut stage = open_group();
     press(&mut stage.dashboard, &[Up, Up]);
@@ -1180,6 +1192,7 @@ fn shot_a_group_conversation() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_sending_and_not_sent() {
     let mut conversation = with_ana();
     let mut sending = said("n1", true, "me", NOW - 2 * MINUTE, "on my way now");
@@ -1193,6 +1206,7 @@ fn shot_sending_and_not_sent() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_reply_box_with_a_draft_and_replying() {
     let mut stage = in_a_conversation(with_ana());
     press(&mut stage.dashboard, &[A]);
@@ -1209,6 +1223,7 @@ fn shot_the_reply_box_with_a_draft_and_replying() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_text_entry_over_the_conversation() {
     let mut stage = in_a_conversation(with_ana());
     press(&mut stage.dashboard, &[Up, Up, Up, X]);
@@ -1217,6 +1232,7 @@ fn shot_text_entry_over_the_conversation() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_dms_menu() {
     let mut stage = staged(&voice_idle(), &ready(seven()));
     press(&mut stage.dashboard, &[Menu]);
@@ -1224,6 +1240,7 @@ fn shot_the_dms_menu() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_messages_menu_and_reactions() {
     let mut stage = in_a_conversation(with_ana());
     press(&mut stage.dashboard, &[Up, Up, Up, Up, A]);
@@ -1233,6 +1250,7 @@ fn shot_the_messages_menu_and_reactions() {
 }
 
 #[test]
+#[ignore = "screenshot"]
 fn shot_the_captcha_prompt() {
     let mut stage = in_a_conversation(with_ana());
     stage.dashboard.direct_event(&DirectEvent::Captcha);

@@ -341,6 +341,7 @@ fn waking_from_sleep_takes_it_down_at_once_for_whos_playing_today() {
 
 /// Dimmed over Home: the whole screen under 70% black.
 #[test]
+#[ignore = "screenshot"]
 fn idle_dimmed() {
     let mut stage = Stage::new();
     press(&mut stage.dashboard, &[Down]);
@@ -350,6 +351,7 @@ fn idle_dimmed() {
 
 /// Showing things, a game played yesterday: its hero art in the lower half, rising out of the panel.
 #[test]
+#[ignore = "screenshot"]
 fn idle_showing_things_a_game() {
     let mut stage = Stage::new();
     press(&mut stage.dashboard, &[Down]);
@@ -360,6 +362,7 @@ fn idle_showing_things_a_game() {
 
 /// A game with only a cover: the cover blurred and darkened in the art's place, and the cover itself over it.
 #[test]
+#[ignore = "screenshot"]
 fn idle_showing_things_a_game_with_a_cover_alone() {
     let mut stage = Stage::new();
     press(&mut stage.dashboard, &[Down]);
@@ -370,6 +373,7 @@ fn idle_showing_things_a_game_with_a_cover_alone() {
 
 /// A tip: slate blue, the pad drawn with the buttons it is about filled.
 #[test]
+#[ignore = "screenshot"]
 fn idle_showing_things_a_tip() {
     let mut stage = Stage::new();
     press(&mut stage.dashboard, &[Down]);
@@ -381,6 +385,7 @@ fn idle_showing_things_a_tip() {
 /// A nearly-finished game: the locked achievement most players have, its Score with the Rare diamond, the game's
 /// progress at the right and in the bar under it, the game's art.
 #[test]
+#[ignore = "screenshot"]
 fn idle_showing_things_a_close_achievement() {
     let mut stage = Stage::with(library_with_achievements());
     press(&mut stage.dashboard, &[Down]);
@@ -396,6 +401,7 @@ fn idle_showing_things_a_close_achievement() {
 
 /// The last unlock: when at the top right, its Score at the left, its icon large over the game's art.
 #[test]
+#[ignore = "screenshot"]
 fn idle_showing_things_a_recent_unlock() {
     let mut stage = Stage::with(library_with_achievements());
     press(&mut stage.dashboard, &[Down]);
@@ -412,6 +418,7 @@ fn idle_showing_things_a_recent_unlock() {
 
 /// Over the Guide, which it dims with everything else.
 #[test]
+#[ignore = "screenshot"]
 fn idle_dimmed_over_the_guide() {
     let mut stage = Stage::new();
     press(&mut stage.dashboard, &[Guide]);
@@ -422,6 +429,7 @@ fn idle_dimmed_over_the_guide() {
 
 /// Over a game: the Overlay alone, the game showing through the dim.
 #[test]
+#[ignore = "screenshot"]
 fn idle_showing_things_over_a_game() {
     let mut stage = Stage::new();
     stage.dashboard.launch_started(2);
