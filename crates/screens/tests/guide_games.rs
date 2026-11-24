@@ -358,6 +358,18 @@ fn home_from_the_guide_over_a_game_brings_the_dashboard_in_front_of_it() {
 }
 
 #[test]
+fn home_from_the_guide_with_no_game_running_still_asks_for_the_dashboard_in_front() {
+    // An App started from My games & apps may be in front of the Dashboard: the Guide over it hands the foreground
+    // back to whatever it opened over unless Home is asked for (the TV PC, 2026-11-23: Settings kept it).
+    let mut guide = Dashboard::new(screens::fake_library());
+    assert_eq!(press(&mut guide, &[Guide, A])[1..], [SELECT, CLOSED, Effect::ShowHome]);
+    assert!(!guide.guide_open());
+    assert_eq!(guide.playing(), None);
+    // Home has the pad.
+    assert_eq!(press(&mut guide, &[Down]), [Effect::Sound(Sound::Move)]);
+}
+
+#[test]
 fn downloads_from_the_guide_over_a_game_opens_manage_queue_in_front_of_it() {
     let mut guide = in_game();
     // The landing tab over the game: Home, My games & apps, the game and three played before it; then the

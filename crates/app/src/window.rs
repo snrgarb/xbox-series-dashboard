@@ -150,6 +150,8 @@ struct App {
     /// What says the machine has woken from sleep: Who's playing today? asks again (docs/spec/start-up.md, 8).
     wakes: Box<dyn Wakes>,
     launch: Option<Launch>,
+    /// An App just started from My games & apps, followed until its window is in front (`shell::app`).
+    app_started: Option<shell::app::Started>,
     /// When Home's window is drawn while it is a game's backdrop (docs/spec/launch-screen.md).
     backdrop: crate::backdrop::Frames,
     /// Holds the running game still while the Guide is open over it, and lets it go as the Guide hands the
@@ -534,6 +536,7 @@ pub fn run(
             }
         })),
         launch: None,
+        app_started: None,
         backdrop: Default::default(),
         freezer,
         hold: Hold::default(),
@@ -882,8 +885,21 @@ impl App {
             return false;
         }
         let (Some(to), Some(state)) = (self.hand_back.take(), &self.state) else { return false };
-        let Some(launch) = &mut self.launch else { return false };
         let overlay = self.overlay.as_mut().filter(|overlay| overlay.mode() == Some(Mode::Guide));
+        let Some(launch) = &mut self.launch else {
+            // No game: Home chosen in the Guide over whatever it opened over, an App started from My games & apps
+            // perhaps, which would otherwise get the foreground back.
+            if to == HandBack::Home {
+                let home = window_handle(&state.window);
+                match overlay {
+                    Some(overlay) => overlay.give_back_to(home),
+                    None => {
+                        shell::app::home_in_front(home);
+                    }
+                }
+            }
+            return false;
+        };
         match to {
             HandBack::Home => {
                 launch.show_home(overlay.is_none());
@@ -1308,7 +1324,11 @@ impl App {
                         self.dashboard.notify(&why);
                     }
                 },
-                Effect::StartApp(app) => crate::games::start_app(self.dashboard.library(), app, &mut *self.addresses),
+                Effect::StartApp(app) => {
+                    if let Some(app) = crate::games::start_app(self.dashboard.library(), app, &mut *self.addresses) {
+                        self.app_started = Some(shell::app::Started::new(&app));
+                    }
+                }
                 // The store is asked, and the Queue told: the game joins it, or its uninstall is followed.
                 // Into the folder chosen in the question, else the store's default as Settings > Storage has it.
                 Effect::Install(game) | Effect::InstallTo { game, .. } => {
@@ -2029,6 +2049,15 @@ impl ApplicationHandler for App {
             }
         }
 
+        // An App just started: its window put in front once it shows. Let go as the Guide opens over it, which
+        // takes the foreground, or a game starts.
+        if self.dashboard.overlay() == OverlayShows::Guide || self.launch.is_some() {
+            self.app_started = None;
+        }
+        if self.app_started.as_mut().is_some_and(|app| !app.tick()) {
+            self.app_started = None;
+        }
+
         // Woken from sleep: Who's playing today? asks again, if it asks on waking.
         if self.wakes.woke() {
             let asked = self.dashboard.woke_from_sleep();
@@ -2226,6 +2255,7 @@ impl ApplicationHandler for App {
         // Woken sooner by the pad's thread, the art cache and the windows' messages. During a launch, in time for
         // its next look at the desktop.
         let launch = self.launch.as_ref().map(|launch| launch.wait());
+        let app = self.app_started.as_ref().map(|_| shell::app::LOOK_EVERY);
         // And in time for the Toasts' next change: one goes, the next shows.
         let toasts = queue;
         let timer = self.dashboard.timer().map(Duration::from_secs_f32);
@@ -2234,6 +2264,7 @@ impl ApplicationHandler for App {
         let wants = [
             Some(IDLE),
             launch,
+            app,
             overlay_wants,
             toasts_want,
             toasts,

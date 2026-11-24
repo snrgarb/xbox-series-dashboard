@@ -201,9 +201,13 @@ fn a_on_its_notification_opens_the_games_achievements_page_and_b_goes_home() {
     // On a notification of anything else, A does nothing, in silence.
     assert_eq!(press(&mut dashboard, Button::A), []);
     assert!(dashboard.guide_open());
-    // Down to the achievement's: the Guide closes onto its page, A sounding as the Guide's select.
+    // Down to the achievement's: the Guide closes onto its page, A sounding as the Guide's select, the Dashboard
+    // asked in front of whatever the Guide opened over (an App, with no game running).
     press(&mut dashboard, Button::Down);
-    assert_eq!(press(&mut dashboard, Button::A), [Effect::Sound(Sound::GuideSelect), Effect::GuideClosed]);
+    assert_eq!(
+        press(&mut dashboard, Button::A),
+        [Effect::Sound(Sound::GuideSelect), Effect::GuideClosed, Effect::ShowHome]
+    );
     assert!(!dashboard.guide_open());
     assert_eq!(dashboard.page(), Some("Achievements"));
     assert_eq!(dashboard.achievements_wanted(), Some(GAME));

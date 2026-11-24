@@ -207,7 +207,7 @@ fn changing_tab_is_the_move_sound_and_a_bumper_at_the_last_tab_is_silent() {
 fn a_in_the_guide_is_the_select_sound_then_what_the_entry_does() {
     let mut home = dashboard();
     press(&mut home, Button::Guide);
-    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed], "Home");
+    assert_eq!(press(&mut home, Button::A), [GUIDE_SELECT, Effect::GuideClosed, Effect::ShowHome], "Home");
     press(&mut home, Button::Guide);
     for _ in 0..3 {
         press(&mut home, Button::Down);

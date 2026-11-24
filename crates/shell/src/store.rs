@@ -396,6 +396,12 @@ fn activate(aumid: &str) -> Result<u32, String> {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let manager: IApplicationActivationManager =
             CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER).map_err(|e| e.message())?;
+        // The app may take the foreground from Home, as Microsoft's activation sample lets it: both the activation
+        // manager's server and whatever it starts. Without it a Store app came up behind Home's window on the TV PC.
+        windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+            windows_sys::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+        );
+        let _ = windows::Win32::System::Com::CoAllowSetForegroundWindow(&manager, None);
         manager.ActivateApplication(&HSTRING::from(aumid), None, AO_NONE).map_err(|e| e.message())
     }
 }
