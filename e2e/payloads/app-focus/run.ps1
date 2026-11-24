@@ -205,7 +205,7 @@ try {
     Step Down 'Landing Entry\(1\)$'
     Step Down 'Landing Entry\(2\)$'
     $mark = Get-DashboardLogLength
-    Push-Button Menu
+    Push-Button Start  # the Menu button: Start on the virtual Xbox 360 pad
     Start-Sleep -Milliseconds 1000
     Push-Button A
     if (-not (Wait-DashboardLog "^apps: $(Esc $app) asked to close: [1-9]" 5 $mark)) { $failures += '6. Quit did not ask the App to close' }
