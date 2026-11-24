@@ -1,8 +1,9 @@
 # An App and the foreground (docs/spec/apps.md): an App started from My games & apps' Apps comes in front of the
 # Dashboard, and Home chosen in the Guide over it puts the Dashboard back in front, the pad Home's again, the App
-# running on behind it. A on the App's tile then brings the running App back in front. The App is then in the
-# Guide's list, first under the divider (#345): A on it brings it in front while it runs, and starts it once closed;
-# Quit in its menu there closes it.
+# running on behind it. While the App is in front the pad does nothing in the Dashboard but the Guide button's. A on
+# the App's tile then brings the running App back in front. The App is then in the Guide's list, first under the
+# divider (#345): A on it brings it in front while it runs, and starts it once closed; Quit in its menu there closes
+# it.
 #
 # The App is a copy of the stand-in game in the payload's own folder (a full-screen window titled "Focus App"), added
 # by typing its path in Settings' Games & apps: nothing of the machine's own is started or closed.
@@ -150,6 +151,18 @@ Set-Content (Join-Path $folder 'game-args.txt') "--title`r`n$app`r`n--ignore-clo
     if (-not (Wait-Until { (App-Running).Count -gt 0 } 15)) { throw 'The App never ran' }
     Expect-Front $app '1. the App started'
     Save-Screen '01-app-started'
+
+    # --- 1b. The pad is the App's while it is in front: Right, Down and A do nothing in the Dashboard behind it (no
+    # focus moves, nothing started), and the App stays in front. Only the Guide button is the Dashboard's (2).
+    Start-Sleep -Seconds 2
+    $before = @(Focus-Lines).Count
+    $mark = Get-DashboardLogLength
+    foreach ($button in 'Right', 'Down', 'A') { Push-Button $button; Start-Sleep -Milliseconds 800 }
+    Start-Sleep -Milliseconds 1500
+    $moved = @(Focus-Lines | Select-Object -Skip $before)
+    if ($moved.Count) { $failures += "1b. the pad steered the Dashboard behind the App: $($moved -join ' | ')" } else { Say '1b. Right, Down, A behind the App: nothing moved' }
+    if (Wait-DashboardLog '^apps: started ' 1 $mark) { $failures += '1b. A behind the App started something' }
+    Expect-Front $app '1b. after Right, Down, A'
 
     # --- 2. The Guide over it, then Home: the Dashboard in front, the App running behind, the pad Home's.
     Step Guide 'Landing Entry\(0\)$'

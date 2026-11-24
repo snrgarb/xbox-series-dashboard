@@ -319,6 +319,10 @@ pub struct Dashboard {
     /// Whether the Dashboard is in front of the running game: Home or a page was chosen in the Guide over it. The
     /// game runs on behind, first in the Guide's list, where A on it brings it back.
     in_front: bool,
+    /// Whether another program's window has the foreground over Home's, with no game running: an App started from
+    /// My games & apps, in a window of its own. The pad is that window's then, and only the Guide button is the
+    /// Dashboard's, to open the Guide over it.
+    behind: bool,
     /// The quit of the running game that is under way.
     quit: Option<Quit>,
     /// The seconds until the Guide closes by itself: the game quit from it has stopped.
@@ -392,6 +396,7 @@ impl Dashboard {
             toast_strip: false,
             slow_renderer: false,
             in_front: false,
+            behind: false,
             quit: None,
             close_in: None,
             timed: false,
@@ -1034,6 +1039,7 @@ impl Dashboard {
             && !self.guide.is_open()
             && !self.launch.up()
             && self.playing.is_none()
+            && !self.behind
             && !self.pages.is_empty()
     }
 
@@ -1258,6 +1264,13 @@ impl Dashboard {
         self.quit.is_some()
     }
 
+    /// Whether another program's window has the foreground over Home's (Home's window lost it, and has not had it
+    /// back): with no game running, the pad then does nothing but the Guide button's, and with the Guide open
+    /// everything as ever.
+    pub fn set_behind(&mut self, behind: bool) {
+        self.behind = behind;
+    }
+
     /// Whether the Dashboard is in front of the running game.
     pub fn in_front_of_game(&self) -> bool {
         self.playing.is_some() && self.in_front
@@ -1356,6 +1369,8 @@ impl Dashboard {
         if self.playing.is_some() {
             self.in_front = true;
         }
+        // Home's window is brought in front of an App's: the pad is Home's from now, before Windows says so.
+        self.behind = false;
         self.effects.push(Effect::ShowHome);
     }
 
@@ -1603,8 +1618,8 @@ impl Dashboard {
             }
             return false;
         }
-        // Behind a running game there is nothing to steer.
-        if self.playing.is_some() && !self.in_front {
+        // Behind a running game there is nothing to steer, nor behind another program's window: an App's.
+        if self.playing.is_some() && !self.in_front || self.playing.is_none() && self.behind {
             return false;
         }
         if self.pages.dialog().is_some() {
@@ -2933,6 +2948,25 @@ mod tests {
         for &button in buttons {
             dashboard.press(Press { button, repeat: false });
         }
+    }
+
+    #[test]
+    fn behind_an_apps_window_the_pad_only_opens_the_guide() {
+        let mut dashboard = Dashboard::new(fake_library());
+        let start = dashboard.home_focus();
+        dashboard.take_effects();
+        dashboard.set_behind(true);
+        press(&mut dashboard, &[Button::Down, Button::Right, Button::A]);
+        assert_eq!(dashboard.home_focus(), start, "Home is not steered behind the App");
+        assert!(dashboard.take_effects().is_empty(), "nothing asked of the shell behind the App, nor a sound");
+
+        // The Guide over the App takes the pad, and Home chosen in it has it back.
+        press(&mut dashboard, &[Button::Guide]);
+        assert!(dashboard.guide_open());
+        dashboard.guide_action(GuideAction::Home);
+        assert!(!dashboard.guide_open());
+        press(&mut dashboard, &[Button::Down]);
+        assert_ne!(dashboard.home_focus(), start, "Home steered once it is in front again");
     }
 
     #[test]
