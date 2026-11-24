@@ -51,11 +51,20 @@ pub struct Started {
     since: std::time::Instant,
     #[cfg_attr(not(windows), allow(dead_code))]
     in_front_since: Option<std::time::Instant>,
+    /// How many times its window has been put in front: the log says the first and every tenth.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    tries: u32,
 }
 
 impl Started {
     pub fn new(app: &model::App) -> Self {
-        Self { name: app.name.clone(), whose: Whose::of(app), since: std::time::Instant::now(), in_front_since: None }
+        Self {
+            name: app.name.clone(),
+            whose: Whose::of(app),
+            since: std::time::Instant::now(),
+            in_front_since: None,
+            tries: 0,
+        }
     }
 
     /// One look: its window put in front if it has shown and is not. False once it is no longer followed.
@@ -94,11 +103,16 @@ impl Started {
         }
         self.in_front_since = None;
         let taken = unsafe { win::bring_in_front(window) };
+        self.tries += 1;
+        if self.tries % 10 != 1 {
+            return true;
+        }
         eprintln!(
-            "apps: {}'s window up at {} ms, not in front ({} is): put in front: {taken}",
+            "apps: {}'s window up at {} ms, not in front ({} is): put in front: {taken} (try {})",
             self.name,
             self.since.elapsed().as_millis(),
-            unsafe { crate::describe(front) }
+            unsafe { crate::describe(front) },
+            self.tries
         );
         true
     }
@@ -120,6 +134,31 @@ pub fn window(app: &model::App) -> *mut std::ffi::c_void {
 /// The Apps started from the Dashboard whose window is up, by their ids (#345): the Guide lists them as running.
 pub fn running(apps: &[model::App]) -> Vec<i64> {
     apps.iter().filter(|app| app.last_opened > 0 && !window(app).is_null()).map(|app| app.id).collect()
+}
+
+/// Asks the App's windows to close, as their close button does (Quit in its menu in the Guide). How many were asked.
+pub fn quit(app: &model::App) -> usize {
+    #[cfg(windows)]
+    {
+        let windows = win::windows_of(&Whose::of(app));
+        for &window in &windows {
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(
+                    window,
+                    windows_sys::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                    0,
+                    0,
+                )
+            };
+        }
+        eprintln!("apps: {} asked to close: {} windows", app.name, windows.len());
+        windows.len()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        0
+    }
 }
 
 /// Puts the App's window in front, as A on it in the Guide or on its tile asks. Whether it is in front after.
@@ -198,6 +237,8 @@ mod win {
     struct Search<'a> {
         whose: &'a Whose,
         found: HWND,
+        /// Every one found, for `windows_of`; the search stops at the first otherwise.
+        all: Option<Vec<HWND>>,
         /// For a child: whether it is the App's.
         child: bool,
     }
@@ -231,6 +272,10 @@ mod win {
         };
         if mine {
             search.found = window;
+            if let Some(all) = &mut search.all {
+                all.push(window);
+                return 1;
+            }
             return 0;
         }
         1
@@ -238,9 +283,16 @@ mod win {
 
     /// The App's window highest on the desktop, if one has shown.
     pub fn window_of(whose: &Whose) -> Option<HWND> {
-        let mut search = Search { whose, found: std::ptr::null_mut(), child: false };
+        let mut search = Search { whose, found: std::ptr::null_mut(), all: None, child: false };
         unsafe { EnumWindows(Some(each_window), &mut search as *mut Search as LPARAM) };
         (!search.found.is_null()).then_some(search.found)
+    }
+
+    /// Every window of the App's that is up.
+    pub fn windows_of(whose: &Whose) -> Vec<HWND> {
+        let mut search = Search { whose, found: std::ptr::null_mut(), all: Some(Vec::new()), child: false };
+        unsafe { EnumWindows(Some(each_window), &mut search as *mut Search as LPARAM) };
+        search.all.unwrap_or_default()
     }
 
     /// Puts the window in front: restored if it was minimised, then given the foreground. Whether it has it.

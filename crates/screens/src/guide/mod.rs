@@ -94,6 +94,8 @@ pub enum GuideAction {
     /// An App was chosen, by its place in the library's Apps: close, and bring it in front, started if it is not
     /// running (#345).
     App(usize),
+    /// Quit in a running App's menu, by its place in the library's Apps: its window asked to close; the Guide stays.
+    QuitApp(usize),
     /// An Achievement unlocked notification was chosen: close, onto that game's Achievements page (its row in the
     /// library database).
     Achievements(i64),
@@ -136,6 +138,8 @@ pub enum PowerChoice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuChoice {
     QuitGame,
+    /// A running App's Quit, with its place in the library's Apps.
+    QuitApp(usize),
     /// "Quit and start", with the game to start.
     QuitAndStart(usize),
     ForceQuit,
@@ -809,6 +813,10 @@ impl Guide {
                     let rows = vec![Row::new(crate::theme::glyph::DELETE, REMOVE_SHORTCUT, MenuChoice::RemoveShortcut)];
                     self.ask(MenuPanel::menu(&self.entries[at].title, rows));
                     self.shortcut_menu = self.discord.shortcuts.get(shortcut).map(|s| s.id.clone());
+                } else if let Kind::RunningApp(app) = self.entries[at].kind {
+                    // A running App's menu: its name, and Quit (#345).
+                    let rows = vec![Row::new(menu_panel::icon::QUIT, "Quit", MenuChoice::QuitApp(app))];
+                    self.ask(MenuPanel::menu(&self.entries[at].title, rows));
                 } else {
                     // The running game's menu: its name, and Quit.
                     let rows = vec![Row::new(menu_panel::icon::QUIT, "Quit", MenuChoice::QuitGame)];
@@ -837,6 +845,7 @@ impl Guide {
             },
             Dialog::Menu(menu) => match menu.press(press) {
                 Answer::Chose(MenuChoice::QuitGame) => Some(GuideAction::QuitGame),
+                Answer::Chose(MenuChoice::QuitApp(app)) => Some(GuideAction::QuitApp(app)),
                 Answer::Chose(MenuChoice::QuitAndStart(game)) => Some(GuideAction::QuitAndStart(game)),
                 Answer::Chose(MenuChoice::ForceQuit) => Some(GuideAction::ForceQuit),
                 Answer::Chose(MenuChoice::RemoveShortcut) => {

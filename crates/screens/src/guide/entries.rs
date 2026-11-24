@@ -58,9 +58,13 @@ impl Entry {
         Self { divider: true, ..self }
     }
 
-    /// Whether the Menu button opens a menu on it: the running game's, and a Shortcut's (Remove shortcut).
+    /// Whether the Menu button opens a menu on it: the running game's and a running App's (Quit), and a
+    /// Shortcut's (Remove shortcut).
     pub fn has_menu(&self) -> bool {
-        matches!(self.kind, Kind::Running(_) | Kind::Discord(discord::Item::Shortcut(_) | discord::Item::DM(_)))
+        matches!(
+            self.kind,
+            Kind::Running(_) | Kind::RunningApp(_) | Kind::Discord(discord::Item::Shortcut(_) | discord::Item::DM(_))
+        )
     }
 
     /// The box's height, and the room under it.

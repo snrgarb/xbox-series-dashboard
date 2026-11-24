@@ -1,7 +1,8 @@
 # An App and the foreground (docs/spec/apps.md): an App started from My games & apps' Apps comes in front of the
 # Dashboard, and Home chosen in the Guide over it puts the Dashboard back in front, the pad Home's again, the App
 # running on behind it. A on the App's tile then brings the running App back in front. The App is then in the
-# Guide's list, first under the divider (#345): A on it brings it in front while it runs, and starts it once closed.
+# Guide's list, first under the divider (#345): A on it brings it in front while it runs, and starts it once closed;
+# Quit in its menu there closes it.
 #
 # The App is a copy of the stand-in game in the payload's own folder (a full-screen window titled "Focus App"), added
 # by typing its path in Settings' Games & apps: nothing of the machine's own is started or closed.
@@ -197,6 +198,20 @@ try {
     Step A 'closed$'
     if (-not (Wait-DashboardLog "^apps: started $(Esc $app): " 10 $mark)) { $failures += "5. A on the closed App's entry did not start it" }
     Expect-Front $app "5. A on the closed App's entry"
+
+    # --- 6. Quit in the running App's menu in the Guide: it is asked to close, and goes; the Guide stays open.
+    Start-Sleep -Seconds 3
+    Step Guide 'Landing Entry\(0\)$'
+    Step Down 'Landing Entry\(1\)$'
+    Step Down 'Landing Entry\(2\)$'
+    $mark = Get-DashboardLogLength
+    Push-Button Start  # the Menu button: Start on the virtual Xbox 360 pad
+    Start-Sleep -Milliseconds 1000
+    Push-Button A
+    if (-not (Wait-DashboardLog "^apps: $(Esc $app) asked to close: [1-9]" 5 $mark)) { $failures += '6. Quit did not ask the App to close' }
+    if (-not (Wait-Until { (App-Running).Count -eq 0 } 10)) { $failures += '6. the App was still running after Quit' } else { Say '6. Quit: the App has gone' }
+    Step B 'closed$'
+    Expect-Front $dashboardTitle '6. the Guide closed after Quit'
 
     if ($dashboard.HasExited) { throw "The Dashboard exited with $($dashboard.ExitCode)" }
     if ($failures.Count -eq 0) { $result = 'PASS' }

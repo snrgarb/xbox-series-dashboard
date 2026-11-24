@@ -143,6 +143,9 @@ pub enum Effect {
     /// An App chosen in the Guide, by its id: its window in front once the Guide has let go of the foreground,
     /// started if it has none (#345).
     ShowApp(i64),
+    /// Quit chosen in a running App's menu in the Guide, by its id: its windows asked to close, as their close
+    /// button would.
+    QuitApp(i64),
     /// Settings' Games & apps pages added, renamed or removed a game added by hand or an App. A new snapshot
     /// follows, as for a favourite, and the pages over Home are told of it.
     ByHand(model::ByHand),
@@ -1923,6 +1926,11 @@ impl Dashboard {
             GuideAction::Achievements(game) => self.open_achievements(game),
             // The Guide stays open over a game being quit, and closes a moment after the game has stopped.
             GuideAction::QuitGame => self.quit_game(),
+            GuideAction::QuitApp(app) => {
+                if let Some(app) = self.library.apps.get(app) {
+                    self.effects.push(Effect::QuitApp(app.id));
+                }
+            }
             // The game that was running is quit, and the one chosen starts when it has stopped.
             GuideAction::QuitAndStart(game) => {
                 self.quit_game();
